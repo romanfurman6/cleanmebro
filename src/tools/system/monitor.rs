@@ -1,7 +1,8 @@
 //! Live Mac health readings for the menu panel. A background thread refreshes a
 //! shared snapshot; slow sources (system_profiler, folder sizes) run less often.
 
-use crate::mechanics as m;
+use crate::kit::fs::dir_size;
+use crate::kit::mechanics as m;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -221,12 +222,12 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
                 tx_total += data.total_transmitted();
             }
         }
-        let (total, free) = statvfs("/");
+        let (total, free) = crate::kit::fs::volume_space("/");
         let vm = vm_stat();
         let (swap_used, swap_total) = swap();
         // kernel pressure level (SystemResourcesMonitor sub_9504): 1 normal, 2 warning, else critical
         let pressure_level = sysctl_u32("kern.memorystatus_vm_pressure_level").unwrap_or(1);
-        let thermal = crate::native::thermal_state();
+        let thermal = crate::kit::native::thermal_state();
         let uptime = sysinfo::System::uptime();
 
         let slow_battery = tick.is_multiple_of(5);
@@ -331,18 +332,6 @@ fn disk_info() -> (String, String) {
         }
     }
     (name, smart)
-}
-
-fn statvfs(path: &str) -> (u64, u64) {
-    let c = std::ffi::CString::new(path).unwrap();
-    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } == 0 {
-        let total = st.f_blocks as u64 * st.f_frsize as u64;
-        let free = st.f_bavail as u64 * st.f_frsize as u64;
-        (total, free)
-    } else {
-        (0, 0)
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -587,34 +576,6 @@ fn wifi() -> Wifi {
         w.name = if w.security.is_empty() { "Network".into() } else { "Wi-Fi".into() };
     }
     w
-}
-
-/// How deep `dir_size` walks; deeper content is not counted.
-const DIR_SIZE_MAX_DEPTH: usize = 64;
-
-/// Allocated size of a file or folder, not following links or leaving its volume.
-pub fn dir_size(path: &Path) -> u64 {
-    use std::os::unix::fs::MetadataExt;
-    fn walk(p: &Path, depth: usize, max: usize, dev: u64) -> u64 {
-        let Ok(rd) = std::fs::read_dir(p) else { return 0 };
-        let mut total = 0;
-        for e in rd.flatten() {
-            let Ok(md) = e.path().symlink_metadata() else { continue };
-            if md.dev() != dev {
-                continue;
-            }
-            total += md.blocks() * 512;
-            if md.is_dir() && depth < max {
-                total += walk(&e.path(), depth + 1, max, dev);
-            }
-        }
-        total
-    }
-    match path.symlink_metadata() {
-        Ok(md) if md.is_dir() => walk(path, 0, DIR_SIZE_MAX_DEPTH, md.dev()),
-        Ok(md) => md.blocks() * 512,
-        Err(_) => 0,
-    }
 }
 
 // ---------------------------------------------------------------- speed test
@@ -878,16 +839,5 @@ Anonymous pages:                           1100.\n";
         assert_eq!(good_for(1000.0).len(), m::GOOD_FOR.len());
     }
 
-    #[test]
-    fn dir_size_counts_nested_files() {
-        let dir = std::env::temp_dir().join(format!("cmb-dirsize-{}", std::process::id()));
-        let deep = dir.join("a/b/c/d/e/f/g/h");
-        std::fs::create_dir_all(&deep).unwrap();
-        std::fs::write(deep.join("big.bin"), vec![1u8; 200_000]).unwrap();
-        let size = dir_size(&dir);
-        std::fs::remove_dir_all(&dir).unwrap();
-        // the file sits 8 levels down and must be counted
-        assert!(size >= 200_000, "size {size}");
-        assert_eq!(dir_size(Path::new("/definitely/not/here")), 0);
-    }
+
 }

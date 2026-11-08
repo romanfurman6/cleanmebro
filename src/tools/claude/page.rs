@@ -1,15 +1,16 @@
 //! The Claude page in the full window: limits, local activity and the Claude
 //! Code projects on this Mac (which ones count as "in use" and are protected).
 
-use crate::app::{App, Page};
-use crate::claude;
-use crate::glass::*;
+use super::backend as claude;
+use super::ui::CLEANUP;
+use crate::core::tool::Cx;
+use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
 
-pub fn page(app: &mut App, ui: &mut Ui, r: Rect) {
+pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let left = Rect::from_min_size(r.min, Vec2::new(430.0, r.height()));
-    crate::ui_panel::claude_detail(app, ui, left);
-    let cl = app.claude.lock().unwrap().clone();
+    super::ui::detail(info, ui, left, cx);
+    let cl = info.lock().unwrap().clone();
     let p = ui.painter().clone();
     let rr = Rect::from_min_max(Pos2::new(left.right() + 18.0, r.top()), r.max);
     glass_card(&p, rr, 20.0, 0.0, false);
@@ -27,7 +28,7 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect) {
     child.set_clip_rect(list);
     ScrollArea::vertical().id_salt("claude-projects").auto_shrink([false, false]).show(&mut child, |ui| {
         if cl.projects.is_empty() {
-            ui.label(egui::RichText::new(if app.demo { "Projects appear here." } else { "Looking for Claude Code projects…" }).color(TEXT_DIM));
+            ui.label(egui::RichText::new(if demo { "Projects appear here." } else { "Looking for Claude Code projects…" }).color(TEXT_DIM));
         }
         for pr in &cl.projects {
             let (row, _) = ui.allocate_exact_size(Vec2::new(list.width() - 6.0, 52.0), Sense::hover());
@@ -53,12 +54,11 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect) {
     });
     let br = Rect::from_min_size(Pos2::new(rr.right() - 230.0, rr.bottom() - 50.0), Vec2::new(210.0, 34.0));
     if pill_button(ui, br, "Clean old Claude data", 1, true).clicked() {
-        app.clean_group = Some(crate::cleanup::Group::Claude);
-        app.page = Page::Cleanup;
+        cx.open_page(CLEANUP, "claude");
     }
     let rf = Rect::from_min_size(Pos2::new(rr.left() + 20.0, rr.bottom() - 50.0), Vec2::new(150.0, 34.0));
     if pill_button(ui, rf, "Refresh limits", 0, true).clicked() {
         claude::request_refresh();
-        app.toast = Some(("Asking Claude for your limits…".into(), std::time::Instant::now()));
+        cx.toast("Asking Claude for your limits…");
     }
 }

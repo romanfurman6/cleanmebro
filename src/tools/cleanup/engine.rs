@@ -2,9 +2,10 @@
 //! caches, AI Clutter), then let Claude judge each PATH (never contents) as
 //! safe / ask / keep. Anything not clearly safe waits for the person's OK.
 
-use crate::claude;
-use crate::mechanics as m;
-use crate::monitor::dir_size;
+use crate::kit::claude_code;
+use crate::kit::fs::{home, is_protected, move_to_trash};
+use crate::kit::mechanics as m;
+use crate::kit::fs::dir_size;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -71,8 +72,8 @@ impl Group {
             Group::Trash => (C::from_rgb(170, 170, 178), C::from_rgb(90, 90, 98)),
         }
     }
-    pub fn icon(self) -> crate::glass::Icon {
-        use crate::glass::Icon;
+    pub fn icon(self) -> crate::kit::glass::Icon {
+        use crate::kit::glass::Icon;
         match self {
             Group::UserCache => Icon::Folder,
             Group::Logs => Icon::Chart,
@@ -182,36 +183,6 @@ impl State {
 }
 
 pub type Shared = Arc<Mutex<State>>;
-
-// ---------------------------------------------------------------- protection
-
-fn home() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
-}
-
-/// Paths that are never offered for removal, whatever the rules or the AI say.
-pub fn is_protected(p: &Path) -> Option<&'static str> {
-    let h = home();
-    let personal = ["Documents", "Desktop", "Pictures", "Movies", "Music", "Projects", "Developer", "Dropbox", "Library/Mobile Documents", "Library/Keychains", "Library/Messages", ".ssh", ".gnupg"];
-    for d in personal {
-        if p.starts_with(h.join(d)) {
-            return Some("Personal files and settings are never removed");
-        }
-    }
-    if p.starts_with(h.join("Library/Mail")) {
-        return Some("Mail data is never removed");
-    }
-    let claude_keep = ["settings.json", "settings.local.json", "CLAUDE.md", "skills", "plugins/marketplaces", "plugins/repos", "agents", "commands", "history.jsonl", "scheduled-tasks", "sessions"];
-    for d in claude_keep {
-        if p.starts_with(h.join(".claude").join(d)) {
-            return Some("Your Claude settings, skills and history are kept");
-        }
-    }
-    if p.join(".git").exists() {
-        return Some("Looks like a code project (has .git)");
-    }
-    None
-}
 
 // ---------------------------------------------------------------- scanning
 
@@ -332,7 +303,7 @@ pub fn pretty(name: &str) -> String {
 }
 
 fn running_apps() -> (HashSet<String>, HashSet<String>) {
-    let (ids, names) = crate::native::running_apps();
+    let (ids, names) = crate::kit::native::running_apps();
     let ids: HashSet<String> = ids.into_iter().map(|s| s.to_lowercase()).collect();
     let names: HashSet<String> = names.into_iter().map(|s| s.to_lowercase()).collect();
     (ids, names)
@@ -450,7 +421,7 @@ fn scan_claude(c: &mut Ctx) {
     c.add(Group::Claude, "Claude Desktop VM image", desk.join("vm_bundles"), "Downloads", Verdict::Ask, "Sandbox VM image for agent mode; downloaded again if removed");
     c.add(Group::Claude, "Claude Desktop Code VM", desk.join("claude-code-vm"), "Downloads", Verdict::Ask, "Runtime for Claude Code inside the desktop app; re-downloaded if removed");
     // projects: the ones you use are kept, old ones are offered for review
-    for p in claude::scan_projects() {
+    for p in claude_code::scan_projects() {
         let idle = p.days_idle();
         let name = p.display_name();
         if p.in_use() {
@@ -711,7 +682,7 @@ fn scan_trash(c: &mut Ctx) {
 // ---------------------------------------------------------------- AI judge
 
 fn judge(shared: &Shared, ctx: &egui::Context) {
-    let Some(bin) = claude::claude_bin() else {
+    let Some(bin) = claude_code::claude_bin() else {
         let mut g = shared.lock().unwrap();
         g.ai_error = Some("Claude Code isn't installed, so only the built-in rules were used.".into());
         return;
@@ -737,7 +708,7 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
                     format!(
                         "{k} | {} | {} | modified {} days ago | group: {} | rule says {} ({}){}\n",
                         it.path.display().to_string().replacen(&h, "~", 1),
-                        crate::glass::human_bytes(it.bytes),
+                        crate::kit::glass::human_bytes(it.bytes),
                         it.age_days as u64,
                         it.group.title(),
                         it.verdict.word().to_lowercase(),
@@ -873,7 +844,7 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
                 Ok(()) => {
                     g.cleaned_bytes += it.bytes;
                     g.cleaned_count += 1;
-                    g.log.push(format!("Removed {} ({})", it.path.display(), crate::glass::human_bytes(it.bytes)));
+                    g.log.push(format!("Removed {} ({})", it.path.display(), crate::kit::glass::human_bytes(it.bytes)));
                     g.items.retain(|x| x.path != it.path);
                 }
                 Err(e) => {
@@ -906,12 +877,6 @@ fn empty_folder(p: &Path) -> Result<(), String> {
         }
     }
     err.map_or(Ok(()), Err)
-}
-
-/// Move to the Trash (so it can be put back). Never falls back to a permanent
-/// delete: an item that can't be trashed is reported as failed.
-pub fn move_to_trash(p: &Path) -> Result<(), String> {
-    crate::native::trash_item(p)
 }
 
 #[cfg(test)]
@@ -967,29 +932,6 @@ mod tests {
         // "keep" is never relaxed
         assert_eq!(merge_verdict(Keep, Safe, false), Keep);
         assert_eq!(merge_verdict(Keep, Ask, false), Keep);
-    }
-
-    #[test]
-    fn personal_folders_are_protected() {
-        let h = home();
-        assert!(is_protected(&h.join("Documents/report.pdf")).is_some());
-        assert!(is_protected(&h.join(".ssh")).is_some());
-        assert!(is_protected(&h.join("Library/Mail/V10")).is_some());
-        assert!(is_protected(&h.join(".claude/settings.json")).is_some());
-        assert!(is_protected(&h.join(".claude/skills/x")).is_some());
-        assert!(is_protected(&h.join(".claude/debug")).is_none());
-        assert!(is_protected(&h.join("Library/Caches/com.example.app")).is_none());
-        // "Documents" must match a whole folder name, not a prefix
-        assert!(is_protected(&h.join("DocumentsOld")).is_none());
-    }
-
-    #[test]
-    fn git_folders_are_protected() {
-        let dir = std::env::temp_dir().join(format!("cmb-git-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join(".git")).unwrap();
-        let r = is_protected(&dir);
-        std::fs::remove_dir_all(&dir).unwrap();
-        assert!(r.is_some());
     }
 
     #[test]
