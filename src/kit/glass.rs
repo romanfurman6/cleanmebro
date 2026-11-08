@@ -497,6 +497,159 @@ pub fn sheet_header(ui: &mut Ui, rect: Rect, glyph: Icon, color: Color32, title:
     round_button(ui, cr, Icon::Close, "Close").clicked()
 }
 
+// ---------------------------------------------------------------- panel widgets
+
+/// A quarter-width quick-action tile: tint chip, label, one line under it.
+/// Planned tiles are dashed and don't react.
+pub fn quick_tile(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, label: &str, sub: &str, live: bool) -> Response {
+    let resp = ui.interact(rect, id, if live { Sense::click() } else { Sense::hover() });
+    let h = ui.ctx().animate_bool(id.with("h"), resp.hovered() && live);
+    let p = ui.painter();
+    let chip_r = Rect::from_min_size(rect.min + Vec2::new(8.0, 10.0), Vec2::splat(28.0));
+    if live {
+        p.rect_filled(rect, R_CARD, lerp_color(RAISED, Color32::from_rgb(0x32, 0x32, 0x37), h));
+        p.rect_stroke(rect, R_CARD, Stroke::new(1.0, white(20)), StrokeKind::Inside);
+        p.rect_filled(chip_r, 8.0, color);
+        icon(p, glyph, Rect::from_center_size(chip_r.center(), Vec2::splat(17.0)), Color32::WHITE);
+    } else {
+        dashed_rect(p, rect, R_CARD, white(56));
+        p.rect_filled(chip_r, 8.0, white(15));
+        icon(p, glyph, Rect::from_center_size(chip_r.center(), Vec2::splat(17.0)), TEXT_DIM);
+    }
+    text_fit(p, Pos2::new(rect.left() + 8.0, chip_r.bottom() + 6.0), Align2::LEFT_TOP, label, bold(12.0), TEXT, rect.width() - 14.0);
+    text_fit(p, Pos2::new(rect.left() + 8.0, chip_r.bottom() + 23.0), Align2::LEFT_TOP, sub, font(11.0), TEXT_DIM, rect.width() - 14.0);
+    if live && resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if !live {
+        return resp.on_hover_text("Planned: not built yet");
+    }
+    resp
+}
+
+/// Height of a [`quick_tile`].
+pub const QUICK_TILE_H: f32 = 84.0;
+/// Height of a [`metric_row`] with a bar / without one.
+pub const METRIC_ROW_H: f32 = 44.0;
+pub const METRIC_ROW_H_FLAT: f32 = 34.0;
+
+/// A compact metric row for a group card: icon, label, value on the right,
+/// an optional thin bar under them and a chevron. Hover/selected tint the row.
+pub fn metric_row(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, label: &str, value: &str, value_col: Color32, bar_frac: Option<(f32, Color32)>, selected: bool) -> Response {
+    let resp = ui.interact(rect, id, Sense::click());
+    let h = ui.ctx().animate_bool(id.with("h"), resp.hovered());
+    let p = ui.painter();
+    if selected {
+        p.rect_filled(rect.shrink2(Vec2::new(4.0, 0.0)), R_BUTTON, with_alpha(BLUE, 0.22));
+    } else if h > 0.0 {
+        p.rect_filled(rect.shrink2(Vec2::new(4.0, 0.0)), R_BUTTON, white((10.0 * h) as u8));
+    }
+    let cy = if bar_frac.is_some() { rect.top() + 15.0 } else { rect.center().y };
+    icon(p, glyph, Rect::from_center_size(Pos2::new(rect.left() + 20.5, rect.center().y), Vec2::splat(17.0)), TEXT_DIM);
+    let chev = Rect::from_center_size(Pos2::new(rect.right() - 19.0, rect.center().y), Vec2::splat(13.0));
+    icon(p, Icon::Forward, chev, TEXT_MUTED);
+    let x0 = rect.left() + 39.0;
+    let x1 = chev.left() - 8.0;
+    let vr = text_fit(p, Pos2::new(x1, cy), Align2::RIGHT_CENTER, value, font(12.0), value_col, (x1 - x0) * 0.62);
+    text_fit(p, Pos2::new(x0, cy), Align2::LEFT_CENTER, label, font(13.0), TEXT, vr.left() - x0 - 8.0);
+    if let Some((f, c)) = bar_frac {
+        bar(p, Rect::from_min_max(Pos2::new(x0, cy + 11.0), Pos2::new(x1, cy + 15.0)), f, c);
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
+}
+
+/// The blue recommendation banner at the bottom of the panel. Returns its response.
+pub fn banner(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, title: &str, sub: &str, action: &str) -> Response {
+    let resp = ui.interact(rect, id, Sense::click());
+    let h = ui.ctx().animate_bool(id.with("h"), resp.hovered());
+    let p = ui.painter();
+    p.rect_filled(rect, R_CARD, with_alpha(BLUE, 0.16 + 0.06 * h));
+    p.rect_stroke(rect, R_CARD, Stroke::new(1.0, with_alpha(ACCENT, 0.30)), StrokeKind::Inside);
+    icon(p, glyph, Rect::from_center_size(Pos2::new(rect.left() + 21.0, rect.center().y), Vec2::splat(18.0)), ACCENT);
+    let ar = p.text(Pos2::new(rect.right() - 12.0, rect.center().y), Align2::RIGHT_CENTER, action, bold(12.0), ACCENT);
+    let x0 = rect.left() + 40.0;
+    let tw = ar.left() - x0 - 10.0;
+    text_fit(p, Pos2::new(x0, rect.top() + 10.0), Align2::LEFT_TOP, title, bold(13.0), TEXT, tw);
+    text_fit(p, Pos2::new(x0, rect.top() + 29.0), Align2::LEFT_TOP, sub, font(12.0), TEXT_DIM, tw);
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
+}
+
+/// Height of a [`banner`].
+pub const BANNER_H: f32 = 56.0;
+
+/// A sheet's big number: "1.44 TB free of 2 TB". Returns the height used.
+pub fn hero_number(p: &Painter, pos: Pos2, big: &str, unit: &str, caption: &str) -> f32 {
+    let g = p.layout_no_wrap(big.to_owned(), bold(34.0), TEXT);
+    let (w, h) = (g.size().x, g.size().y);
+    let base = pos.y + h * 0.80;
+    p.galley(pos, g, TEXT);
+    let u = p.text(Pos2::new(pos.x + w + 6.0, base), Align2::LEFT_BOTTOM, unit, bold(15.0), TEXT_SOFT);
+    p.text(Pos2::new(u.right() + if unit.is_empty() { 0.0 } else { 8.0 }, base), Align2::LEFT_BOTTOM, caption, font(13.0), TEXT_DIM);
+    h
+}
+
+/// A window sidebar row: tint chip (or dashed chip when `planned`), label and
+/// a small right-aligned `meta` text. Selected rows get the blue fill.
+pub fn sidebar_item(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, label: &str, meta: &str, selected: bool, planned: bool) -> Response {
+    let resp = ui.interact(rect, id, if planned { Sense::hover() } else { Sense::click() });
+    let h = ui.ctx().animate_bool(id.with("h"), resp.hovered() && !planned);
+    let p = ui.painter();
+    if selected {
+        p.rect_filled(rect, R_SMALL, with_alpha(BLUE, 0.85));
+    } else if h > 0.0 {
+        p.rect_filled(rect, R_SMALL, white((12.0 * h) as u8));
+    }
+    let chip_r = Rect::from_min_size(Pos2::new(rect.left() + 8.0, rect.center().y - 11.0), Vec2::splat(22.0));
+    if planned {
+        planned_chip(p, chip_r, glyph);
+    } else {
+        tool_chip(p, chip_r, glyph, color);
+    }
+    let mut right = rect.right() - 8.0;
+    if !meta.is_empty() {
+        right = p.text(Pos2::new(right, rect.center().y), Align2::RIGHT_CENTER, meta, font(11.0), if selected { white(210) } else { TEXT_FAINT }).left() - 6.0;
+    }
+    text_fit(p, Pos2::new(chip_r.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, label, font(13.0), if planned { TEXT_FAINT } else { TEXT }, right - chip_r.right() - 8.0);
+    if planned {
+        return resp.on_hover_text("Planned: not built yet");
+    }
+    resp
+}
+
+/// Height of a [`sidebar_item`] row.
+pub const SIDEBAR_ROW_H: f32 = 32.0;
+/// Width of the window sidebar.
+pub const SIDEBAR_W: f32 = 220.0;
+
+/// Height of a window page header ([`page_header`]).
+pub const PAGE_HEADER_H: f32 = 68.0;
+/// Height of a window page footer ([`page_footer`]).
+pub const PAGE_FOOTER_H: f32 = 60.0;
+
+/// A window page's header: 20 pt title, one line of status under it and a
+/// hairline. Returns the rect for buttons on the right (vertically centred).
+pub fn page_header(p: &Painter, r: Rect, title: &str, sub: &str, sub_col: Color32) -> Rect {
+    p.text(r.min + Vec2::new(24.0, 16.0), Align2::LEFT_TOP, title, bold(20.0), TEXT);
+    text_fit(p, r.min + Vec2::new(24.0, 43.0), Align2::LEFT_TOP, sub, font(13.0), sub_col, r.width() - 220.0);
+    hairline(p, Pos2::new(r.left(), r.top() + PAGE_HEADER_H), Pos2::new(r.right(), r.top() + PAGE_HEADER_H));
+    Rect::from_min_max(Pos2::new(r.right() - 24.0, r.top() + 20.0), Pos2::new(r.right() - 24.0, r.top() + 48.0))
+}
+
+/// A window page's footer strip (darker, with a top hairline). Returns its rect.
+pub fn page_footer(p: &Painter, r: Rect, window_radius: f32) -> Rect {
+    let f = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - PAGE_FOOTER_H), r.max);
+    let rr = window_radius.round().clamp(0.0, 255.0) as u8;
+    p.rect_filled(f, CornerRadius { nw: 0, ne: 0, sw: 0, se: rr }, FOOTER);
+    p.line_segment([f.left_top(), f.right_top()], Stroke::new(1.0, white(20)));
+    f
+}
+
 /// Height of [`sheet_header`].
 pub const SHEET_HEADER_H: f32 = 58.0;
 

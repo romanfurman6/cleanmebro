@@ -135,6 +135,10 @@ pub trait Tool {
     fn section(&self) -> &'static str {
         "Tools"
     }
+    /// Short status beside the tool in the window sidebar ("18.3 GB", "19%").
+    fn sidebar_meta(&self) -> String {
+        String::new()
+    }
 
     // ---- panel widgets
     fn widgets(&self) -> Vec<WidgetSpec> {
