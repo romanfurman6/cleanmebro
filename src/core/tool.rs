@@ -151,9 +151,7 @@ pub trait Tool {
     fn widget_ui(&mut self, _widget: &str, _ui: &mut Ui, _rect: Rect, _cx: &mut Cx) {}
 
     // ---- detail sheets beside the panel
-    fn detail_title(&self, _detail: &str) -> String {
-        self.name().to_string()
-    }
+    /// Draws the whole sheet, header included (see `glass::sheet_header`).
     fn detail_ui(&mut self, _detail: &str, _ui: &mut Ui, _rect: Rect, _cx: &mut Cx) {}
 
     // ---- full-window page

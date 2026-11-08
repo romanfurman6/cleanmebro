@@ -268,26 +268,11 @@ fn square_button(ui: &mut Ui, r: Rect, ic: Icon, tip: &str) -> egui::Response {
     resp.on_hover_text(tip)
 }
 
-/// The sheet beside the panel: a title and close button from the shell, the
-/// body from the tool.
+/// The sheet beside the panel; the tool draws all of it, header included.
 pub fn detail(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let Some((i, d)) = app.detail.clone() else { return };
-    let inner = rect.shrink(PAD);
-    let p = ui.painter().clone();
-    let title = app.tools[i].detail_title(&d);
-    text_fit(&p, inner.min + Vec2::new(4.0, 6.0), Align2::LEFT_TOP, &title, bold(25.0), TEXT, inner.width() - 50.0);
-    let cr = Rect::from_center_size(Pos2::new(inner.right() - 10.0, inner.top() + 20.0), Vec2::splat(26.0));
-    let resp = ui.interact(cr, ui.scope_id().with("detail-close"), Sense::click());
-    p.circle_filled(cr.center(), 12.0, white(if resp.hovered() { 50 } else { 24 }));
-    p.line_segment([cr.center() + Vec2::new(-4.0, -4.0), cr.center() + Vec2::new(4.0, 4.0)], Stroke::new(1.5, TEXT));
-    p.line_segment([cr.center() + Vec2::new(-4.0, 4.0), cr.center() + Vec2::new(4.0, -4.0)], Stroke::new(1.5, TEXT));
-    if resp.clicked() {
-        cx.close_detail();
-        return;
-    }
-    let body = Rect::from_min_max(inner.min + Vec2::new(0.0, 56.0), inner.max);
-    let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt(("detail", app.tools[i].id(), &d)));
-    app.tools[i].detail_ui(&d, &mut child, body, cx);
+    let mut child = ui.new_child(UiBuilder::new().max_rect(rect).id_salt(("detail", app.tools[i].id(), &d)));
+    app.tools[i].detail_ui(&d, &mut child, rect, cx);
 }
 
 #[cfg(test)]

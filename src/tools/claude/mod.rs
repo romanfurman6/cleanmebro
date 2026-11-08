@@ -45,21 +45,18 @@ impl Tool for Claude {
         vec![WidgetSpec { id: LIMITS, title: "Claude limits", span: 4, default_on: true }]
     }
     fn widget_height(&self, _widget: &str, _width: f32) -> f32 {
-        104.0
+        ui::CARD_H
     }
     fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         if widget != LIMITS {
             return;
         }
-        let resp = crate::kit::glass::card(ui, rect, ui.scope_id().with("c-claude"), crate::kit::mechanics::CARD_RADIUS, cx.is_detail_open(ID, LIMITS));
+        let resp = crate::kit::glass::card(ui, rect, ui.scope_id().with("c-claude"), crate::kit::glass::R_CARD, cx.is_detail_open(ID, LIMITS));
         let cl = self.info.lock().unwrap().clone();
         ui::card(ui.painter(), rect, &cl, ui.ctx().input(|i| i.time));
         if resp.clicked() {
             cx.toggle_detail(ID, LIMITS);
         }
-    }
-    fn detail_title(&self, _detail: &str) -> String {
-        self.info.lock().unwrap().plan_title()
     }
     fn detail_ui(&mut self, _detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::detail(&self.info, ui, rect, cx);

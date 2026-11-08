@@ -5,16 +5,21 @@ use super::backend;
 use super::ID;
 use crate::core::tool::Cx;
 use crate::kit::glass::*;
-use crate::kit::mechanics as m;
 use egui::{Align2, Color32, Pos2, Rect, Ui, Vec2};
 
 /// The Cleanup tool, linked to by id only.
 pub const CLEANUP: &str = "cleanup";
 const GAP: f32 = 12.0;
 
+/// Height of the panel card.
+pub const CARD_H: f32 = 92.0;
+
+/// The panel card: plan, tokens today, then Session and Week bars.
 pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
-    tile_icon(p, Rect::from_min_size(r.min + Vec2::new(16.0, 15.0), Vec2::splat(30.0)), Icon::Sparkle, Color32::from_rgb(255, 180, 140), Color32::from_rgb(210, 96, 66));
-    p.text(r.min + Vec2::new(58.0, 15.0), Align2::LEFT_TOP, cl.plan_title(), bold(17.0), TEXT);
+    let x0 = r.left() + 12.0;
+    let x1 = r.right() - 12.0;
+    let hy = r.top() + 19.0;
+    icon(p, Icon::Sparkle, Rect::from_center_size(Pos2::new(x0 + 8.0, hy), Vec2::splat(16.0)), CLAUDE);
     let status = if cl.loading && cl.limits.is_empty() {
         "Checking…".to_string()
     } else if !cl.installed && !cl.loading {
@@ -24,26 +29,21 @@ pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
     } else {
         format!("{} tokens today", backend::human_tokens(cl.local.tokens_today))
     };
-    let st_col = if cl.limits.is_empty() { TEXT_FAINT } else { TEXT_DIM };
-    if !cl.limits.is_empty() {
-        p.circle_filled(r.right_top() + Vec2::new(-16.0 - p.layout_no_wrap(status.clone(), font(13.0), st_col).size().x - 10.0, 25.0), 3.5, GREEN);
-    }
-    text_fit(p, r.right_top() + Vec2::new(-16.0, 18.0), Align2::RIGHT_TOP, &status, font(13.0), st_col, 180.0);
+    let sw = text_fit(p, Pos2::new(x1, hy), Align2::RIGHT_CENTER, &status, font(12.0), TEXT_DIM, 170.0).width();
+    text_fit(p, Pos2::new(x0 + 24.0, hy), Align2::LEFT_CENTER, &cl.plan_title(), bold(13.0), TEXT, (x1 - sw - 12.0) - (x0 + 24.0));
     if cl.limits.is_empty() && cl.loading {
-        spinner(p, r.right_top() + Vec2::new(-24.0, 60.0), 9.0, t, TEXT_DIM);
+        spinner(p, Pos2::new(x1 - 8.0, r.top() + 56.0), 7.0, t, TEXT_DIM);
     }
-    let rows = [cl.session().cloned(), cl.weekly().cloned()];
-    for (k, l) in rows.iter().enumerate() {
-        let yy = r.top() + 58.0 + k as f32 * 24.0;
-        let label = if k == 0 { "Session" } else { "Week" };
-        p.text(Pos2::new(r.left() + 18.0, yy), Align2::LEFT_CENTER, label, font(13.5), TEXT_DIM);
-        let bar_r = Rect::from_min_size(Pos2::new(r.left() + 82.0, yy - 3.5), Vec2::new(r.width() - 250.0, 7.0));
+    let rows = [("Session", cl.session().cloned()), ("Week", cl.weekly().cloned())];
+    for (k, (label, l)) in rows.iter().enumerate() {
+        let yy = r.top() + 46.0 + k as f32 * 24.0;
+        p.text(Pos2::new(x0, yy), Align2::LEFT_CENTER, *label, font(12.0), TEXT_DIM);
+        let bar_r = Rect::from_min_max(Pos2::new(x0 + 64.0, yy - 2.0), Pos2::new(x1 - 92.0 - 36.0 - 16.0, yy + 2.0));
         match l {
             Some(l) => {
-                let c = if l.pct >= 90.0 { RED } else if l.pct >= 70.0 { AMBER } else { BLUE };
-                bar(p, bar_r, l.pct / 100.0, c);
-                p.text(Pos2::new(bar_r.right() + 10.0, yy), Align2::LEFT_CENTER, format!("{:.0}%", l.pct), bold(13.5), TEXT);
-                text_fit(p, Pos2::new(r.right() - 16.0, yy), Align2::RIGHT_CENTER, &short_reset(&l.resets), font(12.5), TEXT_FAINT, 110.0);
+                bar(p, bar_r, (l.pct / 100.0).max(0.01), super::page::usage_color(l.pct));
+                p.text(Pos2::new(x1 - 92.0 - 8.0, yy), Align2::RIGHT_CENTER, format!("{:.0}%", l.pct), font(12.0), TEXT);
+                text_fit(p, Pos2::new(x1, yy), Align2::RIGHT_CENTER, &short_reset(&l.resets), font(12.0), TEXT_FAINT, 92.0);
             }
             None => bar(p, bar_r, 0.0, TEXT_DIM),
         }
@@ -58,86 +58,110 @@ pub fn short_reset(s: &str) -> String {
     format!("resets {}", s)
 }
 
-pub fn detail(info: &backend::Shared, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+/// The Claude sheet beside the panel: limits, local tokens, what uses the
+/// limits, and links to the page and to Cleanup.
+pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let cl = info.lock().unwrap().clone();
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time);
-    let mut y = r.top();
-    // limits
-    let lim_h = 52.0 + cl.limits.len().max(2) as f32 * 62.0;
-    let lr = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), lim_h));
-    glass_card(&p, lr, m::CARD_RADIUS, 0.0, false);
-    p.text(lr.min + Vec2::new(16.0, 14.0), Align2::LEFT_TOP, "Plan limits", bold(16.0), TEXT);
-    let upd = match (&cl.fetched, cl.loading) {
-        (_, true) => "Updating…".to_string(),
-        (Some(f), _) => format!("Updated {}", f.format("%H:%M")),
+    let sub = match (&cl.fetched, cl.loading) {
+        (_, true) => "Updating limits…".to_string(),
+        (Some(f), _) => format!("Limits updated {}", f.format("%H:%M")),
         _ => String::new(),
     };
-    p.text(lr.right_top() + Vec2::new(-16.0, 16.0), Align2::RIGHT_TOP, upd, font(12.5), TEXT_FAINT);
-    if cl.loading {
-        spinner(&p, lr.right_top() + Vec2::new(-110.0, 23.0), 6.0, t, TEXT_DIM);
-        ctx.request_repaint();
+    if sheet_header(ui, rect, Icon::Sparkle, tint::CLAUDE, &cl.plan_title(), &sub) {
+        cx.close_detail();
     }
-    if cl.limits.is_empty() {
+    let rb = Rect::from_center_size(Pos2::new(rect.right() - 27.0 - 34.0, rect.top() + 29.0), Vec2::splat(26.0));
+    if cl.loading {
+        spinner(&p, rb.center(), 6.0, t, TEXT_DIM);
+        ctx.request_repaint();
+    } else if round_button(ui, rb, Icon::Refresh, "Refresh limits").clicked() {
+        backend::request_refresh();
+        cx.toast("Asking Claude for your limits…");
+    }
+    let x0 = rect.left() + 16.0;
+    let w = rect.width() - 32.0;
+    let mut y = rect.top() + SHEET_HEADER_H + 16.0;
+
+    // limits
+    let n = cl.limits.len();
+    let lim_h = if n == 0 { 64.0 } else { n as f32 * 58.0 + 13.0 };
+    let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, lim_h));
+    glass_card(&p, lr, R_CARD, 0.0, false);
+    if n == 0 {
         let msg = cl.error.clone().unwrap_or_else(|| "Asking Claude Code for your limits…".into());
-        paragraph(&p, lr.min + Vec2::new(16.0, 48.0), &msg, font(14.0), TEXT_DIM, lr.width() - 32.0);
+        paragraph(&p, lr.min + Vec2::new(12.0, 12.0), &msg, font(13.0), TEXT_DIM, w - 24.0);
     }
     for (i, l) in cl.limits.iter().enumerate() {
-        let yy = lr.top() + 48.0 + i as f32 * 62.0;
-        p.text(Pos2::new(lr.left() + 16.0, yy), Align2::LEFT_TOP, backend::short_label(&l.label), font(14.0), TEXT);
-        p.text(Pos2::new(lr.right() - 16.0, yy), Align2::RIGHT_TOP, format!("{:.0}%", l.pct), bold(14.0), TEXT);
-        let c = if l.pct >= 90.0 { RED } else if l.pct >= 70.0 { AMBER } else { BLUE };
-        bar(&p, Rect::from_min_size(Pos2::new(lr.left() + 16.0, yy + 22.0), Vec2::new(lr.width() - 32.0, 7.0)), l.pct / 100.0, c);
+        let yy = lr.top() + 12.0 + i as f32 * 58.0;
+        p.text(Pos2::new(lr.left() + 12.0, yy), Align2::LEFT_TOP, backend::short_label(&l.label), font(13.0), TEXT);
+        p.text(Pos2::new(lr.right() - 12.0, yy), Align2::RIGHT_TOP, format!("{:.0}%", l.pct), bold(13.0), TEXT);
+        bar(&p, Rect::from_min_size(Pos2::new(lr.left() + 12.0, yy + 20.0), Vec2::new(w - 24.0, 6.0)), (l.pct / 100.0).max(0.01), super::page::usage_color(l.pct));
         if !l.resets.is_empty() {
-            text_fit(&p, Pos2::new(lr.left() + 16.0, yy + 36.0), Align2::LEFT_TOP, &format!("Resets {}", l.resets), font(12.0), TEXT_FAINT, lr.width() - 32.0);
+            text_fit(&p, Pos2::new(lr.left() + 12.0, yy + 32.0), Align2::LEFT_TOP, &format!("Resets {}", l.resets), font(12.0), TEXT_FAINT, w - 24.0);
         }
     }
     y = lr.bottom() + GAP;
-    // local activity
-    let ar = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), 150.0));
-    glass_card(&p, ar, m::CARD_RADIUS, 0.0, false);
-    p.text(ar.min + Vec2::new(16.0, 14.0), Align2::LEFT_TOP, "On this Mac", bold(16.0), TEXT);
-    let stats = [("Last 5 hours", cl.local.tokens_5h), ("Today", cl.local.tokens_today), ("7 days", cl.local.tokens_7d)];
+
+    // on this Mac
+    let ar = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 150.0));
+    glass_card(&p, ar, R_CARD, 0.0, false);
+    p.text(ar.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "On this Mac", bold(13.0), TEXT);
+    let stats = [("last 5 hours", cl.local.tokens_5h), ("today", cl.local.tokens_today), ("7 days", cl.local.tokens_7d)];
     for (i, (k, v)) in stats.iter().enumerate() {
-        let x = ar.left() + 16.0 + i as f32 * ((ar.width() - 32.0) / 3.0);
-        p.text(Pos2::new(x, ar.top() + 44.0), Align2::LEFT_TOP, backend::human_tokens(*v), bold(20.0), TEXT);
-        p.text(Pos2::new(x, ar.top() + 70.0), Align2::LEFT_TOP, format!("tokens · {k}"), font(12.0), TEXT_FAINT);
+        let x = ar.left() + 12.0 + i as f32 * ((w - 24.0) / 3.0);
+        p.text(Pos2::new(x, ar.top() + 36.0), Align2::LEFT_TOP, backend::human_tokens(*v), bold(18.0), TEXT);
+        p.text(Pos2::new(x, ar.top() + 60.0), Align2::LEFT_TOP, *k, font(11.0), TEXT_FAINT);
     }
-    let maxd = cl.local.daily.iter().copied().max().unwrap_or(1).max(1) as f32;
-    let bw = (ar.width() - 32.0) / 7.0;
-    for (i, v) in cl.local.daily.iter().enumerate() {
-        let h = 34.0 * (*v as f32 / maxd);
-        let br = Rect::from_min_max(Pos2::new(ar.left() + 16.0 + i as f32 * bw + 3.0, ar.bottom() - 12.0 - h.max(2.0)), Pos2::new(ar.left() + 16.0 + (i + 1) as f32 * bw - 3.0, ar.bottom() - 12.0));
-        gradient_rect(&p, br, 3.0, Color32::from_rgb(255, 180, 140), Color32::from_rgb(210, 96, 66));
-    }
+    super::page::day_bars(&p, Rect::from_min_size(Pos2::new(ar.left() + 12.0, ar.top() + 82.0), Vec2::new(w - 24.0, 40.0)), &cl.local.daily, 6.0);
+    p.text(Pos2::new(ar.left() + 12.0, ar.bottom() - 10.0), Align2::LEFT_BOTTOM, "7 days ago", font(11.0), TEXT_FAINT);
+    p.text(Pos2::new(ar.right() - 12.0, ar.bottom() - 10.0), Align2::RIGHT_BOTTOM, "Today", font(11.0), TEXT_FAINT);
     y = ar.bottom() + GAP;
-    // what's driving usage
-    let rest = Rect::from_min_max(Pos2::new(r.left(), y), r.max);
-    glass_card(&p, rest, m::CARD_RADIUS, 0.0, false);
-    p.text(rest.min + Vec2::new(16.0, 14.0), Align2::LEFT_TOP, "What uses your limits", bold(16.0), TEXT);
-    let mut yy = rest.top() + 42.0;
-    if let Some(c) = cl.contrib.first() {
-        p.text(Pos2::new(rest.left() + 16.0, yy), Align2::LEFT_TOP, &c.title, font(13.0), TEXT_FAINT);
-        yy += 22.0;
-        for line in &c.lines {
-            if yy > rest.bottom() - 60.0 {
-                break;
+
+    // what uses your limits
+    let by = rect.bottom() - 16.0 - 30.0;
+    let ur_max = by - GAP;
+    let mut lines: Vec<(String, Color32, f32)> = Vec::new();
+    match cl.contrib.first() {
+        Some(c) => {
+            lines.push((c.title.clone(), TEXT_FAINT, 12.0));
+            for l in &c.lines {
+                lines.push((l.clone(), TEXT_SOFT, 13.0));
             }
-            p.circle_filled(Pos2::new(rest.left() + 20.0, yy + 8.0), 2.5, Color32::from_rgb(255, 170, 130));
-            yy += paragraph(&p, Pos2::new(rest.left() + 30.0, yy), line, font(13.0), TEXT_DIM, rest.width() - 46.0) + 6.0;
         }
-    } else {
-        paragraph(&p, Pos2::new(rest.left() + 16.0, yy), "Claude Code reports this once you've used it on this Mac.", font(13.0), TEXT_DIM, rest.width() - 32.0);
+        None => lines.push(("Claude Code reports this once you've used it on this Mac.".into(), TEXT_DIM, 13.0)),
     }
-    let label = "Clean Claude caches";
-    let bw = p.layout_no_wrap(label.to_string(), bold(14.0), TEXT).size().x + 36.0;
-    let br = Rect::from_min_size(Pos2::new(rest.right() - 16.0 - bw, rest.bottom() - 46.0), Vec2::new(bw, 32.0));
-    if pill_button(ui, br, label, 1, true).clicked() {
+    let heights: Vec<f32> = lines.iter().map(|(l, c, s)| p.layout(l.clone(), font(*s), *c, w - 24.0).size().y).collect();
+    let mut h = 12.0 + 18.0 + 6.0;
+    let mut shown = 0;
+    for hh in &heights {
+        if y + h + hh + 6.0 + 12.0 > ur_max {
+            break;
+        }
+        h += hh + 6.0;
+        shown += 1;
+    }
+    let ur = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h + 6.0));
+    glass_card(&p, ur, R_CARD, 0.0, false);
+    p.text(ur.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "What uses your limits", bold(13.0), TEXT);
+    let mut ly = ur.top() + 36.0;
+    for ((l, c, s), hh) in lines.iter().zip(&heights).take(shown) {
+        paragraph(&p, Pos2::new(ur.left() + 12.0, ly), l, font(*s), *c, w - 24.0);
+        ly += hh + 6.0;
+    }
+
+    // buttons, bottom right
+    let primary = "Clean Claude caches";
+    let pw = button_width(&p, primary, BTN_PRIMARY);
+    let pr = Rect::from_min_size(Pos2::new(rect.right() - 16.0 - pw, by), Vec2::new(pw, 30.0));
+    if pill_button(ui, pr, primary, BTN_PRIMARY, true).clicked() {
         cx.open_page(CLEANUP, "claude");
     }
-    let br2 = Rect::from_min_size(Pos2::new(rest.left() + 16.0, rest.bottom() - 46.0), Vec2::new(110.0, 32.0));
-    if pill_button(ui, br2, "Details", 0, true).clicked() {
+    let sw = button_width(&p, "Open page", BTN_SECONDARY);
+    let sr = Rect::from_min_size(Pos2::new(pr.left() - 8.0 - sw, by), Vec2::new(sw, 30.0));
+    if pill_button(ui, sr, "Open page", BTN_SECONDARY, true).clicked() {
         cx.open_page(ID, "");
     }
 }

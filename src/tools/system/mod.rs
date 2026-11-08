@@ -2,6 +2,7 @@
 //! Bluetooth devices, shown as panel widgets with a detail sheet each.
 
 pub mod monitor;
+mod sheets;
 mod ui;
 
 use crate::core::tool::{Action, Badge, Cx, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
@@ -55,9 +56,6 @@ impl Tool for System {
     }
     fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(&self.mon, widget, ui, rect, cx);
-    }
-    fn detail_title(&self, detail: &str) -> String {
-        ui::detail_title(&self.mon.lock().unwrap(), detail)
     }
     fn detail_ui(&mut self, detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::detail(&self.mon, detail, ui, rect, cx);
