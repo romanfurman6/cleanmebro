@@ -27,6 +27,23 @@ cargo run --release            # menu bar app
 cargo test                     # unit tests
 ```
 
+### Build the app
+
+```bash
+scripts/bundle-mac.sh              # target/bundle/CleanMeBro.app + .zip
+UNIVERSAL=1 scripts/bundle-mac.sh  # Apple silicon + Intel
+```
+
+CI (`.github/workflows/macos.yml`) runs the tests and builds a universal
+`CleanMeBro.app` on every push and PR; download it from the run's
+**Artifacts**. Pushing a `v*` tag also attaches the zip to a GitHub Release.
+
+The app is ad-hoc signed, not notarized. On first launch, right-click it and
+choose **Open**, or run `xattr -dr com.apple.quarantine CleanMeBro.app`.
+
+The icon source is `assets/icon/AppIcon.svg`; regenerate `assets/AppIcon.icns`
+with `python3 scripts/make-icon.py` (needs `pip install cairosvg pillow`).
+
 ### Test and preview modes
 
 ```bash
@@ -99,6 +116,13 @@ entry. Nothing in `src/core/` changes.
 ├── docs/
 │   ├── MECHANICS.md     rules, thresholds and where each came from
 │   └── mechanics.json   same data, machine-readable
+├── assets/
+│   ├── AppIcon.icns     app icon, all sizes (generated)
+│   └── icon/AppIcon.svg icon source
+├── scripts/
+│   ├── bundle-mac.sh    build CleanMeBro.app + zip
+│   └── make-icon.py     SVG → AppIcon.icns
+└── .github/workflows/macos.yml   CI: test, build, upload the app
 ```
 
 Screenshots are not kept in git. Render any view locally with

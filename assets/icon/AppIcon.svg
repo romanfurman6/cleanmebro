@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- cleanmebro app icon, design A: dark material, one blue accent.
+       Body follows the macOS icon grid (824 pt squircle on a 1024 canvas).
+       The drop shadow is added by scripts/make-icon.py. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2E2E33"/>
+      <stop offset="1" stop-color="#161618"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.06"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3D95FF"/>
+      <stop offset="1" stop-color="#0B6BD8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="512" cy="512" r="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B6BD8" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#0B6BD8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- body -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="url(#rim)" stroke-width="4"/>
+  <circle cx="512" cy="512" r="300" fill="url(#glow)"/>
+
+  <!-- gauge: track + blue arc (300° sweep, gap at upper left) -->
+  <circle cx="512" cy="512" r="230" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="64"/>
+  <path d="M512,282 A230,230 0 1 1 312.8,397" fill="none" stroke="url(#accent)" stroke-width="64" stroke-linecap="round"/>
+
+  <!-- sparkle: clean -->
+  <path d="M512,382 Q532,492 642,512 Q532,532 512,642 Q492,532 382,512 Q492,492 512,382 Z" fill="#F5F5F7"/>
+  <!-- small glint in the gauge gap -->
+  <path d="M397,265 Q405,305 445,313 Q405,321 397,361 Q389,321 349,313 Q389,305 397,265 Z" fill="#F5F5F7" fill-opacity="0.9"/>
+</svg>
