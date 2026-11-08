@@ -49,8 +49,10 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
         let t = &app.tools[i];
         let (label, badge, meta, id) = (t.name(), t.badge(), t.sidebar_meta(), t.id());
         let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, SIDEBAR_ROW_H));
-        if sidebar_item(ui, r, ui.scope_id().with(("nav", id)), badge.icon, badge.color, label, &meta, app.page == i, false).clicked() {
+        if sidebar_item(ui, r, ui.scope_id().with(("nav", id)), badge.icon, badge.color, label, &meta, app.page == i && !app.settings_open, false).clicked() {
             app.page = i;
+            app.settings_open = false;
+            app.drag = None;
         }
         y += SIDEBAR_ROW_H + 2.0;
     }
@@ -65,6 +67,11 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
             y += SIDEBAR_ROW_H + 2.0;
         }
     }
+    // settings: widgets and tools
+    let r = Rect::from_min_size(Pos2::new(x, full.bottom() - 12.0 - 30.0 - 6.0 - SIDEBAR_ROW_H), Vec2::new(w, SIDEBAR_ROW_H));
+    if sidebar_item(ui, r, ui.scope_id().with("nav-settings"), Icon::Gear, tint::NEUTRAL, "Settings", "", app.settings_open, false).clicked() {
+        app.settings_open = true;
+    }
     // back to the menu bar panel
     let r = Rect::from_min_size(Pos2::new(x, full.bottom() - 12.0 - 30.0), Vec2::new(w, 30.0));
     let resp = ui.interact(r, ui.scope_id().with("to-panel"), Sense::click());
@@ -78,6 +85,11 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
         app.open_panel(&ctx);
     }
     let content = Rect::from_min_max(Pos2::new(side.right() + 1.0, full.top()), full.max);
+    if app.settings_open {
+        let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt("settings"));
+        super::editor::settings_page(app, &mut child, content);
+        return;
+    }
     let Some(tool) = app.tools.get_mut(app.page).filter(|t| t.has_page()) else {
         p.text(content.center(), Align2::CENTER_CENTER, "No tools with a page are installed", font(15.0), TEXT_DIM);
         return;

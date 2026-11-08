@@ -35,6 +35,9 @@ impl Tool for Claude {
     fn name(&self) -> &'static str {
         "Claude"
     }
+    fn about(&self) -> &'static str {
+        "Plan limits and local token use"
+    }
     fn badge(&self) -> Badge {
         badge()
     }

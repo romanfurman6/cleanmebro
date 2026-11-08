@@ -59,6 +59,9 @@ impl Tool for Lens {
     fn name(&self) -> &'static str {
         "Disk Map"
     }
+    fn about(&self) -> &'static str {
+        "Find what takes space, remove by hand"
+    }
     fn badge(&self) -> Badge {
         Badge { icon: Icon::Map, color: tint::DISK_MAP }
     }

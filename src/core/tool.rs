@@ -35,7 +35,7 @@ pub struct Badge {
 #[derive(Clone, Copy, Debug)]
 pub struct WidgetSpec {
     pub id: &'static str,
-    /// Name shown in "Customize widgets".
+    /// Name shown in the widget gallery (Settings › Widgets).
     pub title: &'static str,
     /// Width in grid columns out of [`GRID_COLUMNS`]: 1 quarter, 2 half, 4 full.
     pub span: u8,
@@ -140,6 +140,10 @@ pub trait Tool {
     /// Sidebar group, e.g. "Clean" or "Monitor".
     fn section(&self) -> &'static str {
         "Tools"
+    }
+    /// One line on what the tool does, for Settings › Tools.
+    fn about(&self) -> &'static str {
+        ""
     }
     /// Short status beside the tool in the window sidebar ("18.3 GB", "19%").
     fn sidebar_meta(&self) -> String {

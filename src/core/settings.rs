@@ -1,9 +1,12 @@
-//! Which panel widgets the user shows, in which order. Saved between launches
-//! through eframe's storage under [`STORAGE_KEY`].
+//! Which panel widgets the user shows, in which order, and which tools are
+//! turned off. Saved between launches through eframe's storage under
+//! [`STORAGE_KEY`] and [`TOOLS_KEY`].
 
 use serde::{Deserialize, Serialize};
 
 pub const STORAGE_KEY: &str = "widgets";
+/// Ids of the tools the user turned off (`Vec<String>`).
+pub const TOOLS_KEY: &str = "tools_off";
 
 /// `tool/widget`, the settings key of a widget.
 pub fn widget_key(tool: &str, widget: &str) -> String {
@@ -53,11 +56,20 @@ impl WidgetPrefs {
     }
 }
 
-/// Move entry `i` by `delta` places, staying in bounds.
-pub fn move_entry(entries: &mut [Entry], i: usize, delta: isize) {
-    let j = i as isize + delta;
-    if i < entries.len() && j >= 0 && (j as usize) < entries.len() {
-        entries.swap(i, j as usize);
+/// Show the widget `key` and move it just before `before` (or to the end).
+/// Unknown keys are ignored.
+pub fn place_entry(entries: &mut Vec<Entry>, key: &str, before: Option<&str>) {
+    let Some(i) = entries.iter().position(|e| e.key == key) else { return };
+    let mut e = entries.remove(i);
+    e.on = true;
+    let at = before.and_then(|b| entries.iter().position(|x| x.key == b)).unwrap_or(entries.len());
+    entries.insert(at, e);
+}
+
+/// Hide the widget `key`; it keeps its place for when it comes back.
+pub fn hide_entry(entries: &mut [Entry], key: &str) {
+    if let Some(e) = entries.iter_mut().find(|e| e.key == key) {
+        e.on = false;
     }
 }
 
@@ -89,15 +101,28 @@ mod tests {
     #[test]
     fn round_trip_and_reorder() {
         let mut e = WidgetPrefs::default().resolve(&avail(&[("a/x", true), ("b/y", true), ("c/z", true)]));
-        e[1].on = false;
-        move_entry(&mut e, 2, -1);
-        move_entry(&mut e, 0, -1); // out of bounds: no change
-        move_entry(&mut e, 2, 1); // out of bounds: no change
+        hide_entry(&mut e, "b/y");
+        place_entry(&mut e, "c/z", Some("b/y"));
+        place_entry(&mut e, "nope", None); // unknown: no change
         let prefs = WidgetPrefs::from_entries(&e);
         assert_eq!(prefs.order, vec!["a/x", "c/z", "b/y"]);
         assert_eq!(prefs.hidden, vec!["b/y"]);
         assert_eq!(prefs.resolve(&avail(&[("a/x", true), ("b/y", true), ("c/z", true)])), e);
         let json = serde_json::to_string(&prefs).unwrap();
         assert_eq!(serde_json::from_str::<WidgetPrefs>(&json).unwrap(), prefs);
+    }
+
+    #[test]
+    fn place_shows_and_moves() {
+        let mut e = WidgetPrefs::default().resolve(&avail(&[("a/x", true), ("b/y", false), ("c/z", true)]));
+        place_entry(&mut e, "b/y", Some("a/x"));
+        let keys: Vec<&str> = e.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, vec!["b/y", "a/x", "c/z"]);
+        assert!(e[0].on);
+        place_entry(&mut e, "b/y", None);
+        let keys: Vec<&str> = e.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, vec!["a/x", "c/z", "b/y"]);
+        place_entry(&mut e, "a/x", Some("a/x")); // before itself: goes to the end
+        assert_eq!(e[2].key, "a/x");
     }
 }

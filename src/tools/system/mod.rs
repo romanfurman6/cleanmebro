@@ -42,6 +42,9 @@ impl Tool for System {
     fn name(&self) -> &'static str {
         "Mac Health"
     }
+    fn about(&self) -> &'static str {
+        "Disk, memory, CPU, battery, network, devices"
+    }
     fn badge(&self) -> Badge {
         Badge { icon: Icon::Pulse, color: tint::HEALTH }
     }

@@ -38,8 +38,9 @@ cargo run --release -- --scan-report --ai     # also ask Claude to judge
 cargo run --release -- --screenshot out.png --view panel
 ```
 
-`--view` values: `panel`, `customize`, `storage`, `memory`, `battery`, `cpu`,
-`network`, `devices`, `claude-detail`, `cleanup`, `results`, `lens`, `claude`.
+`--view` values: `panel`, `customize` (Settings › Widgets), `settings-tools`,
+`storage`, `memory`, `battery`, `cpu`, `network`, `devices`, `claude-detail`,
+`cleanup`, `results`, `lens`, `lens-live`, `claude`.
 
 ## Architecture
 
@@ -63,8 +64,9 @@ menu-bar title.
    (`id`, `name`, `badge` are required; everything else is optional).
 2. Add one line to `all()` in `src/tools/mod.rs`.
 
-Its widgets appear in **Customize widgets…** and, if it has a page, it gets a
-sidebar entry and a footer button. Nothing in `src/core/` changes.
+Its widgets appear in the gallery of **Settings › Widgets**, it gets an
+on/off switch in **Settings › Tools**, and if it has a page it gets a sidebar
+entry. Nothing in `src/core/` changes.
 
 ## Project layout
 
@@ -76,10 +78,11 @@ sidebar entry and a footer button. Nothing in `src/core/` changes.
 │   ├── core/                the shell; knows tools only through the trait
 │   │   ├── tool.rs          Tool trait, widget specs, actions, Cx
 │   │   ├── shell.rs         tray icon, panel ⇄ full window, actions, screenshots
-│   │   ├── panel.rs         widget grid, recommendation, footer, gear menu, customize, detail sheet
-│   │   ├── window.rs        full window: sidebar of tool pages
+│   │   ├── panel.rs         widget grid, recommendation, footer, gear menu, detail sheet
+│   │   ├── editor.rs        Settings: drag-and-drop widget editor, tools on/off
+│   │   ├── window.rs        full window: sidebar of tool pages and Settings
 │   │   ├── layout.rs        4-column widget packing
-│   │   └── settings.rs      saved widget order and visibility
+│   │   └── settings.rs      saved widget order, visibility and tools turned off
 │   ├── kit/                 shared by all tools
 │   │   ├── glass.rs         drawing kit: glass cards, gradients, glows, vector icons
 │   │   ├── controls.rs      shared page controls (round action button)

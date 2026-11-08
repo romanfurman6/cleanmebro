@@ -49,6 +49,9 @@ impl Tool for Cleanup {
     fn name(&self) -> &'static str {
         "Cleanup"
     }
+    fn about(&self) -> &'static str {
+        "AI-checked junk removal"
+    }
     fn badge(&self) -> Badge {
         badge()
     }
