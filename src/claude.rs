@@ -102,6 +102,11 @@ impl ClaudeInfo {
 
 pub type Shared = Arc<Mutex<ClaudeInfo>>;
 
+/// One assistant reply: (unix time, counted tokens, output tokens).
+type UsageEntry = (i64, u64, u64);
+/// Parsed log files by path, with the modification time and length they were read at.
+type UsageCache = HashMap<PathBuf, (SystemTime, u64, Vec<UsageEntry>)>;
+
 /// Find the claude executable even when the app is started from Finder (no shell PATH).
 pub fn claude_bin() -> Option<PathBuf> {
     let home = dirs::home_dir().unwrap_or_default();
@@ -139,20 +144,23 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
     std::thread::Builder::new()
         .name("claude".into())
         .spawn(move || {
-            let mut cache: HashMap<PathBuf, (SystemTime, u64, Vec<(i64, u64, u64)>)> = HashMap::new();
-            let mut last_limits = Instant::now() - Duration::from_secs(3600);
+            let mut cache: UsageCache = HashMap::new();
+            // None = fetch now. (Subtracting from Instant::now() would panic
+            // shortly after boot, when the monotonic clock is still small.)
+            let mut last_limits: Option<Instant> = None;
             loop {
-                let want_limits = last_limits.elapsed().as_secs() >= m::CLAUDE_LIMITS_REFRESH_SECS
-                    || s.lock().unwrap().limits.is_empty() && last_limits.elapsed().as_secs() > 60;
+                let since = last_limits.map(|t| t.elapsed().as_secs());
+                let want_limits = since.is_none_or(|s| s >= m::CLAUDE_LIMITS_REFRESH_SECS)
+                    || s.lock().unwrap().limits.is_empty() && since.is_some_and(|s| s > 60);
                 if want_limits {
                     s.lock().unwrap().loading = true;
                     ctx.request_repaint();
                     fetch_cli(&s);
-                    last_limits = Instant::now();
+                    last_limits = Some(Instant::now());
                 }
                 let projects = scan_projects();
                 let local = local_usage(&mut cache);
-                let data = crate::monitor::dir_size(&dirs::home_dir().unwrap_or_default().join(".claude"), 8);
+                let data = crate::monitor::dir_size(&dirs::home_dir().unwrap_or_default().join(".claude"));
                 {
                     let mut g = s.lock().unwrap();
                     g.projects = projects;
@@ -165,7 +173,7 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                 for _ in 0..(m::CLAUDE_LOCAL_REFRESH_SECS * 2) {
                     std::thread::sleep(Duration::from_millis(500));
                     if REFRESH.swap(false, std::sync::atomic::Ordering::SeqCst) {
-                        last_limits = Instant::now() - Duration::from_secs(3600 * 24);
+                        last_limits = None;
                         break;
                     }
                 }
@@ -295,7 +303,7 @@ pub fn scan_projects() -> Vec<Project> {
                 .filter(|f| f.path().extension().map(|x| x == "jsonl").unwrap_or(false))
                 .filter_map(|f| f.metadata().ok().and_then(|m| m.modified().ok()).map(|t| (t, f.path())))
                 .collect();
-            jsonls.sort_by(|a, b| b.0.cmp(&a.0));
+            jsonls.sort_by_key(|x| std::cmp::Reverse(x.0));
             last = jsonls.first().map(|x| x.0);
             for (_, p) in jsonls.iter().take(3) {
                 if let Some(c) = first_cwd(p) {
@@ -310,16 +318,17 @@ pub fn scan_projects() -> Vec<Project> {
         // the folder name is the project path with every non-alphanumeric
         // character turned into '-'; find the real folder it stands for
         let enc = folder.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        // (a session's logged cwd may be a subfolder; trust it when it exists)
         if let Some(real) = resolve_encoded(&enc) {
             cwd = Some(real);
-        } else if cwd.as_ref().map(|c| encode(&c.display().to_string()) != enc).unwrap_or(false) {
+        } else if cwd.as_ref().is_none_or(|c| !c.exists()) {
             cwd = Some(PathBuf::from(enc.replace('-', "/")));
         }
         let cwd_exists = cwd.as_ref().map(|c| c.exists()).unwrap_or(false);
-        let bytes = crate::monitor::dir_size(&folder, 4);
+        let bytes = crate::monitor::dir_size(&folder);
         out.push(Project { folder, cwd, cwd_exists, last_used: last, bytes });
     }
-    out.sort_by(|a, b| b.last_used.cmp(&a.last_used));
+    out.sort_by_key(|p| std::cmp::Reverse(p.last_used));
     out
 }
 
@@ -372,7 +381,7 @@ fn first_cwd(p: &Path) -> Option<PathBuf> {
 }
 
 /// Token counts from the last 7 days of local sessions (counts only, no content kept).
-fn local_usage(cache: &mut HashMap<PathBuf, (SystemTime, u64, Vec<(i64, u64, u64)>)>) -> Local7 {
+fn local_usage(cache: &mut UsageCache) -> Local7 {
     let now = Utc::now().timestamp();
     let week = now - 7 * 86_400;
     let mut seen = std::collections::HashSet::new();
@@ -425,7 +434,7 @@ fn local_usage(cache: &mut HashMap<PathBuf, (SystemTime, u64, Vec<(i64, u64, u64
 }
 
 /// (timestamp, input+output+cache-write tokens, output tokens) for each assistant reply.
-fn read_usage(p: &Path) -> Vec<(i64, u64, u64)> {
+fn read_usage(p: &Path) -> Vec<UsageEntry> {
     use std::io::{BufRead, BufReader};
     let mut out = Vec::new();
     let Ok(f) = std::fs::File::open(p) else { return out };
@@ -509,5 +518,75 @@ fn demo_info() -> ClaudeInfo {
         local: Local7 { tokens_5h: 1_250_000, tokens_today: 3_400_000, tokens_7d: 21_000_000, output_7d: 900_000, requests_today: 637, daily: vec![2_100_000, 3_900_000, 1_200_000, 4_400_000, 2_800_000, 3_200_000, 3_400_000] },
         projects: vec![],
         data_bytes: 5_400_000_000,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_text() {
+        let info = demo_info();
+        assert_eq!(info.limits.len(), 3);
+        let s = info.session().unwrap();
+        assert_eq!(s.pct, 19.0);
+        assert_eq!(s.resets, "9:10pm");
+        assert_eq!(info.weekly().unwrap().label, "Current week (all models)");
+        assert_eq!(info.contrib.len(), 1);
+        assert_eq!(info.contrib[0].lines.len(), 2);
+        assert!(info.note.starts_with("You are currently"));
+        assert_eq!(info.plan_title(), "Claude Max");
+        assert_eq!(ClaudeInfo::default().plan_title(), "Claude");
+        let (l, c, n) = parse_usage("");
+        assert!(l.is_empty() && c.is_empty() && n.is_empty());
+    }
+
+    #[test]
+    fn limit_labels() {
+        assert_eq!(short_label("Current session"), "Current session (5h)");
+        assert_eq!(short_label("Current week (all models)"), "This week · all models");
+        assert_eq!(short_label("Current week (Opus)"), "This week · Opus");
+        assert_eq!(short_label("Something else"), "Something else");
+    }
+
+    #[test]
+    fn project_folder_names() {
+        assert_eq!(encode("/Users/me/my.app"), "-Users-me-my-app");
+        assert_eq!(encode("/Users/me/проект"), "-Users-me-------");
+    }
+
+    #[test]
+    fn token_formatting() {
+        assert_eq!(human_tokens(999), "999");
+        assert_eq!(human_tokens(12_345), "12K");
+        assert_eq!(human_tokens(3_400_000), "3.4M");
+        assert_eq!(human_tokens(2_000_000_000), "2.0B");
+    }
+
+    #[test]
+    fn balanced_object() {
+        assert_eq!(balanced(b"{\"a\":{\"b\":1}},\"x\":2}"), b"{\"a\":{\"b\":1}}");
+        assert_eq!(balanced(b"{open"), b"{open");
+    }
+
+    #[test]
+    fn usage_lines_counted_once_per_message() {
+        let dir = std::env::temp_dir().join(format!("cmb-usage-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("s.jsonl");
+        let line = |id: &str| format!(
+            "{{\"cwd\":\"/tmp/proj\",\"timestamp\":\"2026-11-08T10:00:00Z\",\"message\":{{\"id\":\"{id}\",\"usage\":{{\"input_tokens\":10,\"output_tokens\":5,\"cache_creation_input_tokens\":100,\"cache_read_input_tokens\":9999}}}}}}\n"
+        );
+        let body = line("msg_1") + &line("msg_1") + &line("msg_2") + "{\"type\":\"user\"}\n";
+        std::fs::write(&f, body).unwrap();
+        let entries = read_usage(&f);
+        let cwd = first_cwd(&f);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(entries.len(), 2);
+        // cache reads are not counted
+        assert_eq!(entries[0].1, 115);
+        assert_eq!(entries[0].2, 5);
+        assert_eq!(cwd, Some(PathBuf::from("/tmp/proj")));
     }
 }

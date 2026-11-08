@@ -740,3 +740,28 @@ pub fn tile_icon(p: &Painter, rect: Rect, glyph: Icon, top: Color32, bottom: Col
     rim(p, rect, r, 0.9);
     icon(p, glyph, rect.shrink(rect.width() * 0.22), Color32::WHITE);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_sizes() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(999), "999 B");
+        assert_eq!(human_bytes(1_500), "1.50 KB");
+        assert_eq!(human_bytes(46_100_000), "46.1 MB");
+        assert_eq!(human_bytes(2_000_000_000_000), "2.00 TB");
+        assert_eq!(human_bytes(u64::MAX), format!("{:.0} TB", u64::MAX as f64 / 1e12));
+    }
+
+    #[test]
+    fn middle_ellipsis_keeps_ends() {
+        assert_eq!(middle_ellipsis("short", 20), "short");
+        let s = middle_ellipsis("/Users/me/Library/Caches/com.example.app/Cache", 20);
+        assert_eq!(s.chars().count(), 20);
+        assert!(s.starts_with("/Users/m") && s.ends_with("app/Cache") && s.contains('…'));
+        // multi-byte text is cut on characters
+        assert_eq!(middle_ellipsis("ааааааааааббббббббб", 10).chars().count(), 10);
+    }
+}

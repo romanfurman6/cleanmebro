@@ -118,7 +118,7 @@ fn walk(p: &Path, dev: u64, s: &Scan, ctx: &egui::Context, last: &mut std::time:
             }
         }
     }
-    node.children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    node.children.sort_by_key(|c| std::cmp::Reverse(c.bytes));
     // keep memory bounded deep down: fold tiny folders away
     if depth > 3 {
         let mut kept = Vec::new();
@@ -175,7 +175,7 @@ pub fn pack(sizes: &[u64], rect: egui::Rect, max: usize) -> Vec<(usize, egui::Po
     let mut scale = rect.width().min(rect.height()) * 0.30 / weights[0];
     let center = rect.center();
     let margin = 10.0;
-    for _attempt in 0..8 {
+    for attempt in 0..8 {
         let radii: Vec<f32> = weights.iter().map(|w| (w * scale).max(30.0)).collect();
         let mut placed: Vec<(usize, egui::Pos2, f32)> = vec![(0, center, radii[0])];
         for (i, &r) in radii.iter().enumerate().skip(1) {
@@ -205,9 +205,67 @@ pub fn pack(sizes: &[u64], rect: egui::Rect, max: usize) -> Vec<(usize, egui::Po
             return placed;
         }
         scale *= 0.88;
-        if _attempt == 7 {
+        if attempt == 7 {
             return placed;
         }
     }
     vec![]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(path: &str, bytes: u64, children: Vec<Node>) -> Node {
+        Node { name: path.rsplit('/').next().unwrap().into(), path: PathBuf::from(path), bytes, is_dir: !children.is_empty(), children, ..Default::default() }
+    }
+
+    fn tree() -> Node {
+        node("/r", 100, vec![node("/r/a", 60, vec![node("/r/a/x", 50, vec![]), node("/r/a/y", 10, vec![])]), node("/r/ab", 40, vec![])])
+    }
+
+    #[test]
+    fn find_by_path() {
+        let t = tree();
+        assert_eq!(find(&t, Path::new("/r/a/y")).unwrap().bytes, 10);
+        assert_eq!(find(&t, Path::new("/r/ab")).unwrap().bytes, 40);
+        assert!(find(&t, Path::new("/r/zz")).is_none());
+    }
+
+    #[test]
+    fn prune_fixes_sizes_up_the_tree() {
+        let mut t = tree();
+        let freed = prune(&mut t, &[PathBuf::from("/r/a/x"), PathBuf::from("/r/ab")]);
+        assert_eq!(freed, 90);
+        assert_eq!(t.bytes, 10);
+        assert_eq!(find(&t, Path::new("/r/a")).unwrap().bytes, 10);
+        assert!(find(&t, Path::new("/r/a/x")).is_none());
+    }
+
+    #[test]
+    fn essential_paths() {
+        assert!(is_essential(Path::new("/System/Library")));
+        assert!(is_essential(Path::new("/Applications")));
+        assert!(!is_essential(Path::new("/Applications/Foo.app")));
+        let h = dirs::home_dir().unwrap();
+        assert!(is_essential(&h));
+        assert!(is_essential(&h.join("Library")));
+        assert!(!is_essential(&h.join("Downloads/big.iso")));
+    }
+
+    #[test]
+    fn bubbles_stay_inside_and_never_overlap() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let sizes: Vec<u64> = (0..30).map(|i| 1_000_000_000 / (i + 1)).collect();
+        let placed = pack(&sizes, rect, 20);
+        assert!(!placed.is_empty() && placed.len() <= 20);
+        assert_eq!(placed[0].0, 0);
+        for (k, &(_, c, r)) in placed.iter().enumerate() {
+            assert!(c.x - r >= rect.left() - 0.01 && c.x + r <= rect.right() + 0.01 && c.y - r >= rect.top() - 0.01 && c.y + r <= rect.bottom() + 0.01);
+            for &(_, q, qr) in &placed[k + 1..] {
+                assert!((c - q).length() >= r + qr - 0.5);
+            }
+        }
+        assert!(pack(&[], rect, 10).is_empty());
+    }
 }

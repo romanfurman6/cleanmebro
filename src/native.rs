@@ -187,6 +187,16 @@ mod mac {
         }
         (ids, names)
     }
+
+    /// Move a file or folder to the Trash the way Finder does: it lands in the
+    /// Trash of its own volume (so external drives work) and can be put back.
+    pub fn trash_item(p: &std::path::Path) -> Result<(), String> {
+        use objc2_foundation::{NSFileManager, NSString, NSURL};
+        let url = NSURL::fileURLWithPath(&NSString::from_str(&p.to_string_lossy()));
+        NSFileManager::defaultManager()
+            .trashItemAtURL_resultingItemURL_error(&url, None)
+            .map_err(|e| e.localizedDescription().to_string())
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -200,69 +210,6 @@ mod other {
     }
     pub fn set_dock_icon(_v: bool) {}
     pub fn activate() {}
-    /// Render an SF Symbol (Apple's own icon set) to straight RGBA pixels, white
-    /// with alpha, `px` pixels tall. None when the name doesn't exist.
-    pub fn render_symbol(name: &str, px: f64, weight: f64) -> Option<(usize, usize, Vec<u8>)> {
-        use objc2::AllocAnyThread;
-        use objc2_app_kit::{NSBitmapImageRep, NSCompositingOperation, NSDeviceRGBColorSpace, NSGraphicsContext, NSImage, NSImageSymbolConfiguration};
-        use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
-        MainThreadMarker::new()?;
-        let img = NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None)?;
-        let cfg = NSImageSymbolConfiguration::configurationWithPointSize_weight(px, weight);
-        let img = img.imageWithSymbolConfiguration(&cfg)?;
-        let size = img.size();
-        if size.width <= 0.0 || size.height <= 0.0 {
-            return None;
-        }
-        let w = (size.width.ceil() as isize) + 2;
-        let h = (size.height.ceil() as isize) + 2;
-        let rep = unsafe {
-            NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
-                NSBitmapImageRep::alloc(),
-                std::ptr::null_mut(),
-                w,
-                h,
-                8,
-                4,
-                true,
-                false,
-                NSDeviceRGBColorSpace,
-                w * 4,
-                32,
-            )
-        }?;
-        let ctx = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
-        let previous = NSGraphicsContext::currentContext();
-        NSGraphicsContext::setCurrentContext(Some(&ctx));
-        img.drawInRect_fromRect_operation_fraction(
-            NSRect::new(NSPoint::new(1.0, 1.0), NSSize::new(size.width, size.height)),
-            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
-            NSCompositingOperation::SourceOver,
-            1.0,
-        );
-        ctx.flushGraphics();
-        NSGraphicsContext::setCurrentContext(previous.as_deref());
-        let data = rep.bitmapData();
-        if data.is_null() {
-            return None;
-        }
-        let bytes = unsafe { std::slice::from_raw_parts(data, (w * h * 4) as usize) };
-        // keep only the coverage; colour is applied when drawing
-        let mut out = vec![0u8; bytes.len()];
-        for i in 0..(w * h) as usize {
-            let a = bytes[i * 4 + 3];
-            out[i * 4] = 255;
-            out[i * 4 + 1] = 255;
-            out[i * 4 + 2] = 255;
-            out[i * 4 + 3] = a;
-        }
-        Some((w as usize, h as usize, out))
-    }
-
-    pub fn weight_semibold() -> f64 {
-        unsafe { objc2_app_kit::NSFontWeightSemibold }
-    }
-
     pub fn thermal_state() -> u8 {
         0
     }
@@ -274,6 +221,20 @@ mod other {
     }
     pub fn running_apps() -> (Vec<String>, Vec<String>) {
         (vec![], vec![])
+    }
+    /// Move into ~/.Trash. Refuses (instead of deleting) when the item is on
+    /// another volume, so "Move to Trash" never turns into a permanent delete.
+    pub fn trash_item(p: &std::path::Path) -> Result<(), String> {
+        let trash = dirs::home_dir().ok_or("No home folder")?.join(".Trash");
+        std::fs::create_dir_all(&trash).map_err(|e| e.to_string())?;
+        let base = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut dest = trash.join(&base);
+        let mut k = 1;
+        while dest.symlink_metadata().is_ok() {
+            dest = trash.join(format!("{base} {k}"));
+            k += 1;
+        }
+        std::fs::rename(p, &dest).map_err(|e| e.to_string())
     }
 }
 

@@ -24,6 +24,7 @@ Every rule and threshold, with its source, is in [docs/MECHANICS.md](docs/MECHAN
 
 ```bash
 cargo run --release            # menu bar app
+cargo test                     # unit tests
 ```
 
 ### Test and preview modes

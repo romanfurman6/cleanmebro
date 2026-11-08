@@ -124,3 +124,40 @@ pub const AI_MODEL: &str = "sonnet";
 pub const MIN_ITEM_BYTES: u64 = 64 * 1024;
 /// Shell snapshots younger than this may belong to a running session.
 pub const SHELL_SNAPSHOT_MIN_AGE_DAYS: f64 = 2.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disk_threshold_picks_nearest_preset() {
+        assert_eq!(disk_alert_threshold(0), DISK_THRESHOLD_FALLBACK);
+        // 10% of 256 GB = 25.6 GB → 30 GB is nearer than 20 GB
+        assert_eq!(disk_alert_threshold(256_000_000_000), 30_000_000_000);
+        // 10% of 1 TB = 100 GB
+        assert_eq!(disk_alert_threshold(1_000_000_000_000), 100_000_000_000);
+        // 10% of 8 TB is above every preset → the largest
+        assert_eq!(disk_alert_threshold(8_000_000_000_000), 100_000_000_000);
+        // tiny disk → the smallest
+        assert_eq!(disk_alert_threshold(1_000_000_000), 2_000_000_000);
+    }
+
+    #[test]
+    fn memory_pressure() {
+        assert_eq!(memory_pressure_pct(1, 1, 0), 0.0);
+        assert!((memory_pressure_pct(25, 25, 100) - 50.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn battery_health_words() {
+        use BatteryHealthState::*;
+        assert_eq!(battery_health_state("Good", false), Good);
+        assert_eq!(battery_health_state(" normal ", false), Good);
+        assert_eq!(battery_health_state("Fair", false), Fair);
+        assert_eq!(battery_health_state("Poor", false), Poor);
+        assert_eq!(battery_health_state("Service Recommended", false), Service);
+        assert_eq!(battery_health_state("Check Battery", false), Service);
+        assert_eq!(battery_health_state("Good", true), Service);
+        assert_eq!(battery_health_state("", false), Unknown);
+    }
+}
