@@ -1,21 +1,22 @@
 //! Space Lens screens: pick a place → "Visualizing your storage space…" →
 //! list + bubble map with back/forward → review and move to Trash.
 
-use crate::app::App;
-use crate::glass::*;
-use crate::spacelens::{self, Node};
-use crate::ui_cleanup::round_button;
+use super::scan::{self as spacelens, Node};
+use super::Lens as App;
+use crate::core::tool::Cx;
+use crate::kit::controls::round_button;
+use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-pub fn page(app: &mut App, ui: &mut Ui, r: Rect) {
+pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let running = app.lens.running.load(Ordering::SeqCst);
     let has = app.lens.result.lock().unwrap().is_some();
     if running {
         scanning(app, ui, r);
     } else if has {
-        results(app, ui, r);
+        results(app, ui, r, cx);
     } else {
         intro(app, ui, r);
     }
@@ -73,7 +74,7 @@ fn scanning(app: &mut App, ui: &mut Ui, r: Rect) {
     ctx.request_repaint();
 }
 
-fn results(app: &mut App, ui: &mut Ui, r: Rect) {
+fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let root = app.lens.result.lock().unwrap().clone().unwrap();
@@ -205,12 +206,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     }
 
     // bottom: disk bar, selection and Review
-    let s = app.mon.lock().unwrap().clone();
+    let (volume, disk_total, disk_free) = app.disk();
     let by = r.bottom() - 30.0;
-    p.text(Pos2::new(r.left() + 4.0, by - 10.0), Align2::LEFT_CENTER, if s.volume_name.is_empty() { "Macintosh HD" } else { &s.volume_name }, bold(16.0), TEXT);
-    let used = s.disk_total.saturating_sub(s.disk_free);
-    p.text(Pos2::new(lr.right(), by - 10.0), Align2::RIGHT_CENTER, format!("{} of {} used", human_bytes(used), human_bytes(s.disk_total)), font(14.0), TEXT_DIM);
-    bar(&p, Rect::from_min_size(Pos2::new(r.left(), by + 12.0), Vec2::new(lr.width(), 6.0)), used as f32 / s.disk_total.max(1) as f32, Color32::from_rgb(220, 220, 255));
+    p.text(Pos2::new(r.left() + 4.0, by - 10.0), Align2::LEFT_CENTER, &volume, bold(16.0), TEXT);
+    let used = disk_total.saturating_sub(disk_free);
+    p.text(Pos2::new(lr.right(), by - 10.0), Align2::RIGHT_CENTER, format!("{} of {} used", human_bytes(used), human_bytes(disk_total)), font(14.0), TEXT_DIM);
+    bar(&p, Rect::from_min_size(Pos2::new(r.left(), by + 12.0), Vec2::new(lr.width(), 6.0)), used as f32 / disk_total.max(1) as f32, Color32::from_rgb(220, 220, 255));
     let sel_bytes: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     icon(&p, Icon::Info, Rect::from_center_size(Pos2::new(br.left() + 120.0, by), Vec2::splat(20.0)), TEXT_DIM);
     let txt = if app.lens_selected.is_empty() { "No Items selected".to_string() } else { format!("{} items selected", app.lens_selected.len()) };
@@ -220,7 +221,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         app.lens_review = true;
     }
     if app.lens_review {
-        review(app, ui, r);
+        review(app, ui, r, cx);
     }
 }
 
@@ -236,7 +237,7 @@ fn bubble(p: &egui::Painter, c: Pos2, r: f32, hover: f32, selected: bool) {
     }
 }
 
-fn review(app: &mut App, ui: &mut Ui, r: Rect) {
+fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
     p.rect_filled(r.expand(30.0), 0.0, Color32::from_black_alpha(120));
     let m = Rect::from_center_size(r.center(), Vec2::new(560.0, 420.0));
@@ -276,11 +277,11 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect) {
         let mut failed = 0;
         let mut freed = 0;
         for (path, b) in app.lens_selected.drain(..) {
-            if spacelens::is_essential(&path) || crate::cleanup::is_protected(&path).is_some() && path.join(".git").exists() {
+            if spacelens::is_essential(&path) || crate::kit::fs::is_protected(&path).is_some() && path.join(".git").exists() {
                 failed += 1;
                 continue;
             }
-            match crate::cleanup::move_to_trash(&path) {
+            match crate::kit::fs::move_to_trash(&path) {
                 Ok(()) => {
                     freed += b;
                     removed.push(path)
@@ -293,7 +294,7 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect) {
         }
         app.lens_review = false;
         let msg = if failed == 0 { format!("Moved {} to the Trash", human_bytes(freed)) } else { format!("Moved {} to the Trash · {failed} items couldn't be removed", human_bytes(freed)) };
-        app.toast = Some((msg, std::time::Instant::now()));
+        cx.toast(msg);
     }
 }
 

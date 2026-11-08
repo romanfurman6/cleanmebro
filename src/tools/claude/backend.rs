@@ -2,12 +2,12 @@
 //! (`claude auth status`, `claude -p /usage`, which spends no tokens), local
 //! activity comes from counting usage fields in ~/.claude/projects logs.
 
-use crate::mechanics as m;
+use crate::kit::claude_code::{claude_bin, claude_cmd, projects_dir, scan_projects, Project};
+use crate::kit::mechanics as m;
 use chrono::{DateTime, Local, Utc};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -22,34 +22,6 @@ pub struct Limit {
 pub struct Contrib {
     pub title: String,
     pub lines: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Project {
-    pub folder: PathBuf, // the ~/.claude/projects/<x> folder
-    pub cwd: Option<PathBuf>,
-    pub cwd_exists: bool,
-    pub last_used: Option<SystemTime>,
-    pub bytes: u64,
-}
-
-impl Project {
-    pub fn display_name(&self) -> String {
-        match &self.cwd {
-            Some(c) => c.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| c.display().to_string()),
-            None => self.folder.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
-        }
-    }
-    pub fn days_idle(&self) -> f64 {
-        self.last_used
-            .and_then(|t| SystemTime::now().duration_since(t).ok())
-            .map(|d| d.as_secs_f64() / 86_400.0)
-            .unwrap_or(9999.0)
-    }
-    /// A project the person still works on: its folder exists and it was used recently.
-    pub fn in_use(&self) -> bool {
-        self.cwd_exists && self.days_idle() <= m::CLAUDE_PROJECT_ACTIVE_DAYS as f64
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -107,33 +79,6 @@ type UsageEntry = (i64, u64, u64);
 /// Parsed log files by path, with the modification time and length they were read at.
 type UsageCache = HashMap<PathBuf, (SystemTime, u64, Vec<UsageEntry>)>;
 
-/// Find the claude executable even when the app is started from Finder (no shell PATH).
-pub fn claude_bin() -> Option<PathBuf> {
-    let home = dirs::home_dir().unwrap_or_default();
-    let mut cands = vec![
-        home.join(".local/bin/claude"),
-        PathBuf::from("/opt/homebrew/bin/claude"),
-        PathBuf::from("/usr/local/bin/claude"),
-        home.join(".claude/local/claude"),
-        home.join(".npm-global/bin/claude"),
-    ];
-    if let Ok(path) = std::env::var("PATH") {
-        for d in path.split(':') {
-            cands.push(Path::new(d).join("claude"));
-        }
-    }
-    cands.into_iter().find(|p| p.is_file())
-}
-
-fn claude_cmd(bin: &Path) -> Command {
-    let mut c = Command::new(bin);
-    // a neutral working folder so no project settings or CLAUDE.md get involved
-    c.current_dir(std::env::temp_dir());
-    let path = std::env::var("PATH").unwrap_or_default();
-    c.env("PATH", format!("/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{path}"));
-    c
-}
-
 pub fn start(ctx: egui::Context, demo: bool) -> Shared {
     let shared: Shared = Arc::new(Mutex::new(ClaudeInfo { loading: true, ..Default::default() }));
     if demo {
@@ -160,7 +105,7 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                 }
                 let projects = scan_projects();
                 let local = local_usage(&mut cache);
-                let data = crate::monitor::dir_size(&dirs::home_dir().unwrap_or_default().join(".claude"));
+                let data = crate::kit::fs::dir_size(&dirs::home_dir().unwrap_or_default().join(".claude"));
                 {
                     let mut g = s.lock().unwrap();
                     g.projects = projects;
@@ -282,103 +227,6 @@ pub fn short_label(l: &str) -> String {
 }
 
 // ---------------------------------------------------------------- local data
-
-pub fn projects_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".claude/projects")
-}
-
-pub fn scan_projects() -> Vec<Project> {
-    let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(projects_dir()) else { return out };
-    for e in rd.flatten() {
-        let folder = e.path();
-        if !folder.is_dir() {
-            continue;
-        }
-        let mut last: Option<SystemTime> = None;
-        let mut cwd: Option<PathBuf> = None;
-        if let Ok(files) = std::fs::read_dir(&folder) {
-            let mut jsonls: Vec<(SystemTime, PathBuf)> = files
-                .flatten()
-                .filter(|f| f.path().extension().map(|x| x == "jsonl").unwrap_or(false))
-                .filter_map(|f| f.metadata().ok().and_then(|m| m.modified().ok()).map(|t| (t, f.path())))
-                .collect();
-            jsonls.sort_by_key(|x| std::cmp::Reverse(x.0));
-            last = jsonls.first().map(|x| x.0);
-            for (_, p) in jsonls.iter().take(3) {
-                if let Some(c) = first_cwd(p) {
-                    cwd = Some(c);
-                    break;
-                }
-            }
-        }
-        if last.is_none() {
-            last = folder.metadata().ok().and_then(|m| m.modified().ok());
-        }
-        // the folder name is the project path with every non-alphanumeric
-        // character turned into '-'; find the real folder it stands for
-        let enc = folder.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        // (a session's logged cwd may be a subfolder; trust it when it exists)
-        if let Some(real) = resolve_encoded(&enc) {
-            cwd = Some(real);
-        } else if cwd.as_ref().is_none_or(|c| !c.exists()) {
-            cwd = Some(PathBuf::from(enc.replace('-', "/")));
-        }
-        let cwd_exists = cwd.as_ref().map(|c| c.exists()).unwrap_or(false);
-        let bytes = crate::monitor::dir_size(&folder);
-        out.push(Project { folder, cwd, cwd_exists, last_used: last, bytes });
-    }
-    out.sort_by_key(|p| std::cmp::Reverse(p.last_used));
-    out
-}
-
-/// How Claude Code names a project folder: non-alphanumerics become '-'.
-pub fn encode(path: &str) -> String {
-    path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
-}
-
-/// Walk the disk to find the folder whose encoded path equals `enc`.
-fn resolve_encoded(enc: &str) -> Option<PathBuf> {
-    fn go(dir: &Path, rest: &str, depth: usize) -> Option<PathBuf> {
-        if depth > 14 {
-            return None;
-        }
-        for e in std::fs::read_dir(dir).ok()?.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let en = encode(&name);
-            if en.is_empty() || !rest.starts_with(&en) {
-                continue;
-            }
-            let p = e.path();
-            if rest.len() == en.len() {
-                if p.is_dir() {
-                    return Some(p);
-                }
-            } else if rest.as_bytes()[en.len()] == b'-' && p.is_dir() {
-                if let Some(found) = go(&p, &rest[en.len() + 1..], depth + 1) {
-                    return Some(found);
-                }
-            }
-        }
-        None
-    }
-    let rest = enc.strip_prefix('-')?;
-    go(Path::new("/"), rest, 0)
-}
-
-fn first_cwd(p: &Path) -> Option<PathBuf> {
-    use std::io::{BufRead, BufReader};
-    let f = std::fs::File::open(p).ok()?;
-    for line in BufReader::new(f).lines().take(60).map_while(Result::ok) {
-        if let Some(i) = line.find("\"cwd\":\"") {
-            let rest = &line[i + 7..];
-            if let Some(end) = rest.find('"') {
-                return Some(PathBuf::from(rest[..end].replace("\\/", "/")));
-            }
-        }
-    }
-    None
-}
 
 /// Token counts from the last 7 days of local sessions (counts only, no content kept).
 fn local_usage(cache: &mut UsageCache) -> Local7 {
@@ -551,12 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn project_folder_names() {
-        assert_eq!(encode("/Users/me/my.app"), "-Users-me-my-app");
-        assert_eq!(encode("/Users/me/проект"), "-Users-me-------");
-    }
-
-    #[test]
     fn token_formatting() {
         assert_eq!(human_tokens(999), "999");
         assert_eq!(human_tokens(12_345), "12K");
@@ -581,7 +423,7 @@ mod tests {
         let body = line("msg_1") + &line("msg_1") + &line("msg_2") + "{\"type\":\"user\"}\n";
         std::fs::write(&f, body).unwrap();
         let entries = read_usage(&f);
-        let cwd = first_cwd(&f);
+        let cwd = crate::kit::claude_code::first_cwd(&f);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(entries.len(), 2);
         // cache reads are not counted

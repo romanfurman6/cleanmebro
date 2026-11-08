@@ -7,7 +7,7 @@ Mac health panel, Claude plan limits, an AI-judged Cleanup and Space Lens.
 
 | Area | What it does |
 |---|---|
-| **Menu bar panel** | Tray icon (title = Claude session %) opens a 440 pt glass panel: Mac Health verdict, Claude card, tiles for disk, memory, battery, CPU, network, connected devices, plus "Today's Recommendation". Clicking a tile opens a detail sheet beside the panel. |
+| **Menu bar panel** | Tray icon (title = Claude session %) opens a 440 pt glass panel of widgets: Mac Health verdict, Claude card, tiles for disk, memory, battery, CPU, network, connected devices, plus "Today's Recommendation". Clicking a tile opens a detail sheet beside the panel. Gear → **Customize widgets…** turns widgets on/off and reorders them; the choice is saved. |
 | **Claude** | Plan and limits from the Claude CLI (`claude auth status`, `claude -p /usage`, which spends no tokens). Local token activity is counted from `~/.claude/projects` logs (counts only). |
 | **Cleanup** | Finds junk by rule (System Junk, Xcode, app and developer caches, AI clutter). Claude judges each **path** (never file contents) as safe / ask / keep. Anything unclear waits for your OK. Items go to the Trash by default. |
 | **Space Lens** | Measures a folder tree, then shows it as a sorted list and a bubble map. Selected items go to the Trash after review. |
@@ -38,8 +38,33 @@ cargo run --release -- --scan-report --ai     # also ask Claude to judge
 cargo run --release -- --screenshot out.png --view panel
 ```
 
-`--view` values: `panel`, `storage`, `memory`, `battery`, `cpu`, `network`,
-`devices`, `claude-detail`, `cleanup`, `results`, `lens`, `claude`.
+`--view` values: `panel`, `customize`, `storage`, `memory`, `battery`, `cpu`,
+`network`, `devices`, `claude-detail`, `cleanup`, `results`, `lens`, `claude`.
+
+## Architecture
+
+The app is a small **core** (the shell) plus independent **tools**. Each tool
+is one folder under `src/tools/` and implements the `Tool` trait
+(`src/core/tool.rs`). A tool can offer any of: panel widgets, detail sheets,
+a page in the full window, recommendations, gear-menu entries and the
+menu-bar title.
+
+- Tools never import each other (a test enforces it). To link to another tool
+  they ask the core by id, e.g. `cx.open_page("cleanup", "claude")`; if that
+  tool isn't installed, nothing happens.
+- Shared code that several tools need lives in `src/kit/` and knows no tool.
+- The panel lays widgets out on a 4-column grid: each widget spans 1, 2 or 4
+  columns and reports its own height. The panel grows with its widgets and
+  scrolls past the screen height.
+
+### Adding a tool
+
+1. Create `src/tools/<name>/mod.rs` with a struct implementing `Tool`
+   (`id`, `name`, `badge` are required; everything else is optional).
+2. Add one line to `all()` in `src/tools/mod.rs`.
+
+Its widgets appear in **Customize widgets…** and, if it has a page, it gets a
+sidebar entry and a footer button. Nothing in `src/core/` changes.
 
 ## Project layout
 
@@ -47,19 +72,27 @@ cargo run --release -- --screenshot out.png --view panel
 .
 ├── Cargo.toml / Cargo.lock
 ├── src/
-│   ├── main.rs          entry point, CLI flags, --scan-report
-│   ├── app.rs           app shell: tray icon, panel ⇄ full window switching
-│   ├── native.rs        macOS: NSVisualEffectView glass, menu-bar app, thermal state
-│   ├── glass.rs         drawing kit: glass cards, gradients, glows, vector icons
-│   ├── mechanics.rs     numbers/thresholds from docs/MECHANICS.md
-│   ├── monitor.rs       live health readings (background thread)
-│   ├── claude.rs        Claude plan, limits, local token counts
-│   ├── cleanup.rs       junk rules, AI judge, removal
-│   ├── spacelens.rs     folder-tree measuring
-│   ├── ui_panel.rs      drop-down panel + detail sheets
-│   ├── ui_cleanup.rs    Cleanup screens
-│   ├── ui_lens.rs       Space Lens screens
-│   └── ui_claude.rs     Claude page
+│   ├── main.rs              entry point, CLI flags
+│   ├── core/                the shell; knows tools only through the trait
+│   │   ├── tool.rs          Tool trait, widget specs, actions, Cx
+│   │   ├── shell.rs         tray icon, panel ⇄ full window, actions, screenshots
+│   │   ├── panel.rs         widget grid, recommendation, footer, gear menu, customize, detail sheet
+│   │   ├── window.rs        full window: sidebar of tool pages
+│   │   ├── layout.rs        4-column widget packing
+│   │   └── settings.rs      saved widget order and visibility
+│   ├── kit/                 shared by all tools
+│   │   ├── glass.rs         drawing kit: glass cards, gradients, glows, vector icons
+│   │   ├── controls.rs      shared page controls (round action button)
+│   │   ├── native.rs        macOS: glass material, menu-bar app, thermal state, Trash
+│   │   ├── fs.rs            folder sizes, protected paths, move to Trash, disk space
+│   │   ├── claude_code.rs   Claude Code CLI and project discovery
+│   │   └── mechanics.rs     numbers/thresholds from docs/MECHANICS.md
+│   └── tools/
+│       ├── mod.rs           the tool list (the only place that names tools)
+│       ├── system/          Mac health: readings, widgets, detail sheets
+│       ├── claude/          Claude limits: card, sheet, page, tray title
+│       ├── cleanup/         junk rules, AI judge, removal, Cleanup page, --scan-report
+│       └── lens/            Space Lens: folder measuring and page
 ├── docs/
 │   ├── MECHANICS.md     rules, thresholds and where each came from
 │   └── mechanics.json   same data, machine-readable

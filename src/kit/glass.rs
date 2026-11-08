@@ -428,7 +428,7 @@ pub fn symbol(p: &Painter, name: &str, rect: Rect, color: Color32) -> bool {
     let entry = match entry {
         Some(e) => e,
         None => {
-            let made = crate::native::render_symbol(name, px as f64, crate::native::weight_semibold()).map(|(w, h, rgba)| {
+            let made = crate::kit::native::render_symbol(name, px as f64, crate::kit::native::weight_semibold()).map(|(w, h, rgba)| {
                 let img = egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba);
                 let tex = p.ctx().load_texture(format!("sf:{name}:{px}"), img, egui::TextureOptions::LINEAR);
                 (tex, Vec2::new(w as f32 / ppp, h as f32 / ppp))
