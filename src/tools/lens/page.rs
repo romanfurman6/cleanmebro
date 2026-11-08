@@ -4,7 +4,7 @@
 use super::scan::{self as spacelens, Node};
 use super::Lens as App;
 use crate::core::tool::Cx;
-use crate::kit::controls::round_button;
+use crate::kit::controls::action_button;
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
 use std::path::{Path, PathBuf};
@@ -47,7 +47,7 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect) {
     if let Some(msg) = &app.lens_msg {
         p.text(Pos2::new(r.center().x, r.top() + 552.0), Align2::CENTER_CENTER, msg, font(13.5), GREEN);
     }
-    if round_button(ui, Pos2::new(r.center().x, r.bottom() - 54.0), "Scan", None, true) {
+    if action_button(ui, Pos2::new(r.center().x, r.bottom() - 54.0), "Scan", None, true) {
         app.lens_path = app.lens_root.clone();
         app.lens_back.clear();
         app.lens_fwd.clear();
@@ -68,7 +68,7 @@ fn scanning(app: &mut App, ui: &mut Ui, r: Rect) {
     let files = app.lens.files.load(Ordering::Relaxed);
     let bytes = app.lens.bytes.load(Ordering::Relaxed);
     p.text(Pos2::new(r.center().x, r.top() + 552.0), Align2::CENTER_CENTER, format!("{} files · {}", files, human_bytes(bytes)), font(14.0), TEXT_FAINT);
-    if round_button(ui, Pos2::new(r.center().x, r.bottom() - 54.0), "Stop", None, true) {
+    if action_button(ui, Pos2::new(r.center().x, r.bottom() - 54.0), "Stop", None, true) {
         app.lens.stop.store(true, Ordering::SeqCst);
     }
     ctx.request_repaint();
