@@ -1,5 +1,5 @@
 //! The contract between the shell and a tool. A tool is a self-contained
-//! module (Mac health, Claude limits, Cleanup, Space Lens, …) that offers any
+//! module (Mac health, Claude limits, Cleanup, Disk Map, …) that offers any
 //! of: widgets for the menu-bar panel, detail sheets beside the panel, a page
 //! in the full window, recommendations, menu entries and a tray title.
 //!
@@ -23,24 +23,34 @@ pub struct ToolEnv {
     pub demo: bool,
 }
 
-/// The tool's colored icon tile (sidebar, footer, widget settings).
+/// The tool's icon and its one tint (sidebar chip, widget settings,
+/// recommendation banner).
 #[derive(Clone, Copy)]
 pub struct Badge {
     pub icon: Icon,
-    pub top: Color32,
-    pub bottom: Color32,
+    pub color: Color32,
 }
 
 /// A widget a tool offers for the panel.
 #[derive(Clone, Copy, Debug)]
 pub struct WidgetSpec {
     pub id: &'static str,
-    /// Name shown in "Customize widgets".
+    /// Name shown in the widget gallery (Settings › Widgets).
     pub title: &'static str,
     /// Width in grid columns out of [`GRID_COLUMNS`]: 1 quarter, 2 half, 4 full.
     pub span: u8,
     /// Shown until the user changes the panel.
     pub default_on: bool,
+    /// Widgets of the same group that sit next to each other share one card
+    /// (full-width rows such as the Mac metrics).
+    pub group: Option<&'static str>,
+}
+
+/// The panel's title line: the first tool that returns one wins.
+pub struct PanelHeader {
+    pub title: String,
+    pub status: String,
+    pub dot: Color32,
 }
 
 /// A suggestion for the panel's "Today's Recommendation". The highest
@@ -72,6 +82,8 @@ pub enum Action {
     /// request for the open sheet closes it.
     ShowDetail { tool: String, detail: String, toggle: bool },
     CloseDetail,
+    /// Hide the menu-bar panel (e.g. before a screenshot of the screen).
+    HidePanel,
     Toast(String),
     Quit,
 }
@@ -99,10 +111,6 @@ impl Cx {
     /// Open or close (if already open) a detail sheet.
     pub fn toggle_detail(&mut self, tool: &str, detail: &str) {
         self.actions.push(Action::ShowDetail { tool: tool.into(), detail: detail.into(), toggle: true });
-    }
-    /// Open a detail sheet, keeping it open if it already is.
-    pub fn show_detail(&mut self, tool: &str, detail: &str) {
-        self.actions.push(Action::ShowDetail { tool: tool.into(), detail: detail.into(), toggle: false });
     }
     pub fn close_detail(&mut self) {
         self.actions.push(Action::CloseDetail);
@@ -135,8 +143,19 @@ pub trait Tool {
     fn section(&self) -> &'static str {
         "Tools"
     }
+    /// One line on what the tool does, for Settings › Tools.
+    fn about(&self) -> &'static str {
+        ""
+    }
+    /// Short status beside the tool in the window sidebar ("18.3 GB", "19%").
+    fn sidebar_meta(&self) -> String {
+        String::new()
+    }
 
     // ---- panel widgets
+    fn panel_header(&self) -> Option<PanelHeader> {
+        None
+    }
     fn widgets(&self) -> Vec<WidgetSpec> {
         Vec::new()
     }
@@ -147,9 +166,7 @@ pub trait Tool {
     fn widget_ui(&mut self, _widget: &str, _ui: &mut Ui, _rect: Rect, _cx: &mut Cx) {}
 
     // ---- detail sheets beside the panel
-    fn detail_title(&self, _detail: &str) -> String {
-        self.name().to_string()
-    }
+    /// Draws the whole sheet, header included (see `glass::sheet_header`).
     fn detail_ui(&mut self, _detail: &str, _ui: &mut Ui, _rect: Rect, _cx: &mut Cx) {}
 
     // ---- full-window page
@@ -173,6 +190,22 @@ pub trait Tool {
         Vec::new()
     }
     fn menu_action(&mut self, _item: &str, _cx: &mut Cx) {}
+
+    // ---- background
+    /// Called on every frame, and also while every shell window is hidden
+    /// (then without a ui pass): poll background work, global shortcuts and
+    /// so on. Return true while the tool needs frames with a ui pass even
+    /// though nothing of the shell is showing, e.g. for its own windows.
+    fn tick(&mut self, _ctx: &egui::Context) -> bool {
+        false
+    }
+    /// The user turned the tool on or off in Settings (also called at launch
+    /// for tools left off). Off, `tick` and `windows` aren't called; release
+    /// anything system-wide, such as global shortcuts.
+    fn set_on(&mut self, _on: bool) {}
+    /// Called on every frame with a ui pass: show the tool's own extra
+    /// windows (`ctx.show_viewport_immediate`), whatever the shell shows.
+    fn windows(&mut self, _ctx: &egui::Context, _cx: &mut Cx) {}
     /// Handle a `--view` name for screenshots: load sample data and say what to show.
     fn demo_view(&mut self, _view: &str) -> Option<View> {
         None

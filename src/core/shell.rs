@@ -16,6 +16,8 @@ use std::time::Instant;
 pub const CORE: &str = "core";
 /// "Today's Recommendation", fed by every tool.
 pub const RECOMMENDATION: &str = "recommendation";
+/// Shell widget: dashed tiles for the tools that are planned but not built.
+pub const PLANNED: &str = "planned";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -38,7 +40,15 @@ pub struct App {
     pub demo: bool,
     /// The panel's widgets in order, with on/off.
     pub widgets: Vec<Entry>,
-    pub customizing: bool,
+    /// Ids of the tools the user turned off: their widgets, pages, menu
+    /// entries and suggestions are hidden.
+    pub tools_off: Vec<String>,
+    /// The window shows Settings (the widget editor) instead of a tool page.
+    pub settings_open: bool,
+    /// Settings tab: 0 widgets, 1 tools.
+    pub settings_tab: usize,
+    /// A widget being dragged in the editor.
+    pub drag: Option<super::editor::Drag>,
     // window/tray state
     tray: Option<tray_icon::TrayIcon>,
     tray_rx: Receiver<tray_icon::TrayIconEvent>,
@@ -84,6 +94,7 @@ impl App {
 
         // screenshots always use the default widgets
         let prefs: WidgetPrefs = if demo { None } else { cc.storage.and_then(|s| eframe::get_value(s, super::settings::STORAGE_KEY)) }.unwrap_or_default();
+        let tools_off: Vec<String> = if demo { None } else { cc.storage.and_then(|s| eframe::get_value(s, super::settings::TOOLS_KEY)) }.unwrap_or_default();
         let page = tools.iter().position(|t| t.has_page()).unwrap_or(0);
         let mut app = App {
             tools,
@@ -92,7 +103,10 @@ impl App {
             page,
             demo,
             widgets: Vec::new(),
-            customizing: false,
+            tools_off,
+            settings_open: false,
+            settings_tab: 0,
+            drag: None,
             tray,
             tray_rx,
             tray_title: String::new(),
@@ -109,19 +123,25 @@ impl App {
             toast: None,
         };
         app.widgets = prefs.resolve(&app.available_widgets());
+        for i in 0..app.tools.len() {
+            if !app.tool_on(i) {
+                app.tools[i].set_on(false);
+            }
+        }
         app.apply_view(&opts.view);
         crate::kit::native::set_dock_icon(app.mode == Mode::Window || demo);
         app
     }
 
     /// Every widget any tool (or the shell) offers, as (key, shown by default).
-    fn available_widgets(&self) -> Vec<(String, bool)> {
+    pub fn available_widgets(&self) -> Vec<(String, bool)> {
         let mut v: Vec<(String, bool)> = Vec::new();
         for t in &self.tools {
             for w in t.widgets() {
                 v.push((widget_key(t.id(), w.id), w.default_on));
             }
         }
+        v.push((widget_key(CORE, PLANNED), true));
         v.push((widget_key(CORE, RECOMMENDATION), true));
         // the registry's preferred order first, the rest as the tools list them
         let rank = |k: &str| crate::tools::DEFAULT_WIDGET_ORDER.iter().position(|o| *o == k).unwrap_or(usize::MAX);
@@ -133,7 +153,10 @@ impl App {
     pub fn widget_spec(&self, key: &str) -> Option<(Option<usize>, WidgetSpec)> {
         let (tool, id) = key.split_once('/')?;
         if tool == CORE && id == RECOMMENDATION {
-            return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", span: 4, default_on: true }));
+            return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", span: 4, default_on: true, group: None }));
+        }
+        if tool == CORE && id == PLANNED {
+            return Some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span: 2, default_on: true, group: None }));
         }
         let i = self.tools.iter().position(|t| t.id() == tool)?;
         let spec = self.tools[i].widgets().into_iter().find(|w| w.id == id)?;
@@ -143,15 +166,48 @@ impl App {
     pub fn save_widgets(&self, storage: &mut dyn eframe::Storage) {
         if !self.demo {
             eframe::set_value(storage, super::settings::STORAGE_KEY, &WidgetPrefs::from_entries(&self.widgets));
+            eframe::set_value(storage, super::settings::TOOLS_KEY, &self.tools_off);
         }
+    }
+
+    /// Back to the default widgets in the default order.
+    pub fn reset_widgets(&mut self) {
+        self.widgets = WidgetPrefs::default().resolve(&self.available_widgets());
+    }
+
+    /// Whether the user left tool `i` on.
+    pub fn tool_on(&self, i: usize) -> bool {
+        self.tools.get(i).is_some_and(|t| !self.tools_off.iter().any(|id| id == t.id()))
+    }
+
+    pub fn set_tool_on(&mut self, i: usize, on: bool) {
+        let id = self.tools[i].id().to_string();
+        self.tools_off.retain(|x| *x != id);
+        self.tools[i].set_on(on);
+        if !on {
+            self.tools_off.push(id);
+            if self.detail.as_ref().is_some_and(|(d, _)| *d == i) {
+                self.detail = None;
+            }
+        }
+    }
+
+    /// Open the window on Settings (`tools`: on the Tools tab).
+    pub fn open_settings(&mut self, ctx: &egui::Context, tools: bool) {
+        let page = self.page;
+        self.open_window(ctx, page);
+        self.settings_open = true;
+        self.settings_tab = if tools { 1 } else { 0 };
     }
 
     /// `--view`: "panel", or whatever a tool recognizes.
     fn apply_view(&mut self, view: &str) {
         match view {
             "panel" => return,
-            "customize" => {
-                self.customizing = true;
+            "customize" | "settings-tools" => {
+                self.mode = Mode::Window;
+                self.settings_open = true;
+                self.settings_tab = if view == "customize" { 0 } else { 1 };
                 return;
             }
             _ => {}
@@ -178,7 +234,7 @@ impl App {
     }
 
     pub fn page_tools(&self) -> Vec<usize> {
-        (0..self.tools.len()).filter(|&i| self.tools[i].has_page()).collect()
+        (0..self.tools.len()).filter(|&i| self.tools[i].has_page() && self.tool_on(i)).collect()
     }
 
     /// A fresh per-frame context for tools.
@@ -207,6 +263,11 @@ impl App {
                     self.detail = None;
                     self.reshape(ctx);
                 }
+                Action::HidePanel => {
+                    if self.mode == Mode::Panel && self.visible && self.screenshot.is_none() {
+                        self.hide(ctx);
+                    }
+                }
                 Action::Toast(msg) => self.toast = Some((msg, Instant::now())),
                 Action::Quit => self.quit(ctx),
             }
@@ -216,7 +277,7 @@ impl App {
     /// The panel's height for its current widgets, before the screen limit.
     fn panel_height(&self) -> f32 {
         let content = super::panel::content_height(self);
-        let h = super::panel::PAD + content + super::panel::FOOTER;
+        let h = super::panel::HEADER + content + super::panel::FOOTER;
         if self.detail.is_some() {
             h.max(m::PANEL_HEIGHT)
         } else {
@@ -276,7 +337,6 @@ impl App {
     pub fn hide(&mut self, ctx: &egui::Context) {
         self.visible = false;
         self.gear_open = false;
-        self.customizing = false;
         self.last_hide = Instant::now();
         ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Visible(false));
     }
@@ -285,6 +345,7 @@ impl App {
     /// panel steps aside.
     pub fn open_window(&mut self, ctx: &egui::Context, page: usize) {
         self.page = page;
+        self.settings_open = false;
         self.gear_open = false;
         if self.screenshot.is_some() {
             return;
@@ -322,7 +383,7 @@ impl App {
 
     fn update_tray_title(&mut self) {
         let Some(tray) = &self.tray else { return };
-        let title = self.tools.iter().find_map(|t| t.tray_title()).unwrap_or_default();
+        let title = self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).find_map(|(_, t)| t.tray_title()).unwrap_or_default();
         if title != self.tray_title {
             tray.set_title(if title.is_empty() { None } else { Some(&title) });
             self.tray_title = title;
@@ -332,7 +393,14 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.app_open && !self.visible {
+        // tools poll their background work; some need frames while hidden
+        let mut tools_need_frames = false;
+        for i in 0..self.tools.len() {
+            if self.tool_on(i) {
+                tools_need_frames |= self.tools[i].tick(ctx);
+            }
+        }
+        if (self.app_open || tools_need_frames) && !self.visible {
             ctx.send_viewport_cmd(ViewportCommand::RequestPaintWhileHidden);
         }
         self.handle_tray(ctx);
@@ -398,7 +466,7 @@ impl eframe::App for App {
         match self.mode {
             Mode::Panel => {
                 // one glass sheet; the detail opens on its left behind a hairline
-                glass::backdrop(ui.painter(), full, m::CARD_RADIUS + 6.0, opaque, t);
+                glass::backdrop(ui.painter(), full, m::CARD_RADIUS + 2.0, opaque, t);
                 let panel = Rect::from_min_size(Pos2::new(full.right() - m::PANEL_WIDTH, full.top()), Vec2::new(m::PANEL_WIDTH, full.height()));
                 if self.detail.is_some() {
                     let sheet = Rect::from_min_size(full.left_top(), Vec2::new(m::DETAIL_WIDTH, full.height()));
@@ -417,7 +485,18 @@ impl eframe::App for App {
             }
             Mode::Window => {
                 glass::backdrop(ui.painter(), full, 14.0, opaque, t);
+                let before = (self.widgets.clone(), self.tools_off.clone());
                 super::window::window_ui(self, ui, full, opaque, &mut cx);
+                if (&self.widgets, &self.tools_off) != (&before.0, &before.1) {
+                    if let Some(s) = frame.storage_mut() {
+                        self.save_widgets(s);
+                    }
+                }
+            }
+        }
+        for i in 0..self.tools.len() {
+            if self.tool_on(i) {
+                self.tools[i].windows(&ctx, &mut cx);
             }
         }
         self.run_actions(&ctx, &mut cx);

@@ -6,76 +6,94 @@ use super::tool::Cx;
 use crate::kit::glass::{self, *};
 use egui::{Align2, Color32, Pos2, Rect, Sense, Ui, UiBuilder, Vec2, ViewportCommand};
 
-const SIDEBAR: f32 = 88.0;
+/// Tools that are planned but not built yet: shown dashed and disabled so
+/// it's clear where they will live. An installed tool with the same name hides
+/// its placeholder.
+const PLANNED: [(Icon, &str); 4] = [(Icon::Crop, "Capture"), (Icon::Clipboard, "Clipboard"), (Icon::Fan, "Fan Control"), (Icon::Cup, "Keep Awake")];
 
 /// `draw_lights`: paint traffic lights ourselves (screenshots; the real
 /// window has native ones).
 pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: &mut Cx) {
     let ctx = ui.ctx().clone();
-    let side = Rect::from_min_size(full.min, Vec2::new(SIDEBAR, full.height()));
-    // drag the window from the top strip
-    let drag = Rect::from_min_size(full.min + Vec2::new(SIDEBAR, 0.0), Vec2::new(full.width() - SIDEBAR, 44.0));
+    let side = Rect::from_min_size(full.min, Vec2::new(SIDEBAR_W, full.height()));
+    // drag the window from the top strip of the page
+    let drag = Rect::from_min_size(full.min + Vec2::new(SIDEBAR_W, 0.0), Vec2::new(full.width() - SIDEBAR_W, 16.0));
     let dr = ui.interact(drag, ui.scope_id().with("drag"), Sense::click_and_drag());
     if dr.drag_started() {
         ctx.send_viewport_cmd(ViewportCommand::StartDrag);
     }
-    // sidebar glass strip
     let p = ui.painter().clone();
-    gradient_rect_dir(&p, side, 14.0, white(10), white(4), Vec2::new(1.0, 0.0));
-    p.line_segment([side.right_top() + Vec2::new(0.0, 12.0), side.right_bottom() - Vec2::new(0.0, 12.0)], egui::Stroke::new(1.0, white(22)));
+    p.rect_filled(side, egui::CornerRadius { nw: 12, sw: 12, ne: 0, se: 0 }, glass::SIDEBAR);
+    hairline(&p, side.right_top(), side.right_bottom());
     if draw_lights {
         traffic_lights(ui, &p, full);
     }
-    // one entry per tool page
+    // one entry per tool page, grouped by section
     let pages = app.page_tools();
     if !pages.contains(&app.page) {
         if let Some(&first) = pages.first() {
             app.page = first;
         }
     }
-    let mut y = full.top() + 52.0;
+    let x = side.left() + 10.0;
+    let w = side.width() - 20.0;
+    let mut y = full.top() + 40.0;
     let mut section = "";
     for &i in &pages {
-        let (label, badge) = (app.tools[i].name(), app.tools[i].badge());
-        // a small header whenever the group changes
         if app.tools[i].section() != section {
             section = app.tools[i].section();
-            p.text(Pos2::new(side.center().x, y + 8.0), Align2::CENTER_CENTER, section.to_uppercase(), bold(9.0), TEXT_FAINT);
-            y += 18.0;
+            y += 12.0;
+            section_header(&p, Pos2::new(x + 8.0, y), Align2::LEFT_TOP, section);
+            y += 20.0;
         }
-        let r = Rect::from_center_size(Pos2::new(side.center().x, y + 32.0), Vec2::new(70.0, 70.0));
-        let id = ui.scope_id().with(("nav", app.tools[i].id()));
-        let resp = ui.interact(r, id, Sense::click());
-        let hov = ctx.animate_bool(id, resp.hovered());
-        let selected = app.page == i;
-        if selected {
-            glass_card(&p, r, 18.0, 0.6, false);
-        } else if hov > 0.0 {
-            p.rect_filled(r, 18.0, white((14.0 * hov) as u8));
-        }
-        let ir = Rect::from_center_size(r.center() - Vec2::new(0.0, 8.0), Vec2::splat(34.0));
-        glass::tile_icon(&p, ir, badge.icon, badge.top, badge.bottom);
-        p.text(Pos2::new(r.center().x, r.bottom() - 9.0), Align2::CENTER_CENTER, label, font(10.5), if selected { TEXT } else { TEXT_DIM });
-        if resp.clicked() {
+        let t = &app.tools[i];
+        let (label, badge, meta, id) = (t.name(), t.badge(), t.sidebar_meta(), t.id());
+        let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, SIDEBAR_ROW_H));
+        if sidebar_item(ui, r, ui.scope_id().with(("nav", id)), badge.icon, badge.color, label, &meta, app.page == i && !app.settings_open, false).clicked() {
             app.page = i;
+            app.settings_open = false;
+            app.drag = None;
         }
-        y += 84.0;
+        y += SIDEBAR_ROW_H + 2.0;
     }
-    // back to the menu panel
-    let r = Rect::from_center_size(Pos2::new(side.center().x, full.bottom() - 46.0), Vec2::splat(52.0));
+    let planned: Vec<_> = PLANNED.iter().filter(|(_, n)| !app.tools.iter().any(|t| t.name() == *n)).collect();
+    if !planned.is_empty() {
+        y += 12.0;
+        section_header(&p, Pos2::new(x + 8.0, y), Align2::LEFT_TOP, "Planned tools");
+        y += 20.0;
+        for (ic, label) in planned {
+            let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, SIDEBAR_ROW_H));
+            sidebar_item(ui, r, ui.scope_id().with(("planned", *label)), *ic, Color32::TRANSPARENT, label, "", false, true);
+            y += SIDEBAR_ROW_H + 2.0;
+        }
+    }
+    // settings: widgets and tools
+    let r = Rect::from_min_size(Pos2::new(x, full.bottom() - 12.0 - 30.0 - 6.0 - SIDEBAR_ROW_H), Vec2::new(w, SIDEBAR_ROW_H));
+    if sidebar_item(ui, r, ui.scope_id().with("nav-settings"), Icon::Gear, tint::NEUTRAL, "Settings", "", app.settings_open, false).clicked() {
+        app.settings_open = true;
+    }
+    // back to the menu bar panel
+    let r = Rect::from_min_size(Pos2::new(x, full.bottom() - 12.0 - 30.0), Vec2::new(w, 30.0));
     let resp = ui.interact(r, ui.scope_id().with("to-panel"), Sense::click());
     let hov = ctx.animate_bool(ui.scope_id().with("to-panel-h"), resp.hovered());
-    p.rect_filled(r, 14.0, white((10.0 + 14.0 * hov) as u8));
-    icon(&p, Icon::Monitor, r.shrink(14.0), TEXT_DIM);
+    if hov > 0.0 {
+        p.rect_filled(r, R_SMALL, white((12.0 * hov) as u8));
+    }
+    icon(&p, Icon::Monitor, Rect::from_min_size(Pos2::new(r.left() + 10.0, r.center().y - 8.0), Vec2::splat(16.0)), TEXT_DIM);
+    p.text(Pos2::new(r.left() + 34.0, r.center().y), Align2::LEFT_CENTER, "Menu bar panel", font(13.0), TEXT_DIM);
     if resp.on_hover_text("Show the menu bar panel").clicked() {
         app.open_panel(&ctx);
     }
+    let content = Rect::from_min_max(Pos2::new(side.right() + 1.0, full.top()), full.max);
+    if app.settings_open {
+        let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt("settings"));
+        super::editor::settings_page(app, &mut child, content);
+        return;
+    }
     let Some(tool) = app.tools.get_mut(app.page).filter(|t| t.has_page()) else {
-        p.text(full.center(), Align2::CENTER_CENTER, "No tools with a page are installed", font(15.0), TEXT_DIM);
+        p.text(content.center(), Align2::CENTER_CENTER, "No tools with a page are installed", font(15.0), TEXT_DIM);
         return;
     };
-    p.text(Pos2::new(full.center().x + SIDEBAR / 2.0, full.top() + 20.0), Align2::CENTER_CENTER, tool.name(), bold(14.0), TEXT_DIM);
-    let content = Rect::from_min_max(Pos2::new(side.right() + 20.0, full.top() + 44.0), full.max - Vec2::new(20.0, 18.0));
     let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt(("page", tool.id())));
     tool.page_ui(&mut child, content, cx);
 }

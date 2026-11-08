@@ -1,6 +1,7 @@
 //! The shell. It owns the tray icon, the panel, the full window and the
 //! settings, and talks to tools only through the [`tool::Tool`] trait.
 
+pub mod editor;
 pub mod layout;
 pub mod panel;
 pub mod settings;

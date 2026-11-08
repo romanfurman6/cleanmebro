@@ -7,8 +7,8 @@ mod page;
 mod ui;
 
 use crate::core::tool::{Action, Badge, Cx, MenuItem, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
-use crate::kit::glass::Icon;
-use egui::{Color32, Rect, Ui};
+use crate::kit::glass::{tint, Icon};
+use egui::{Rect, Ui};
 
 pub const ID: ToolId = "claude";
 const LIMITS: &str = "limits";
@@ -25,7 +25,7 @@ impl Claude {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Sparkle, top: Color32::from_rgb(255, 180, 140), bottom: Color32::from_rgb(214, 100, 70) }
+    Badge { icon: Icon::Sparkle, color: tint::CLAUDE }
 }
 
 impl Tool for Claude {
@@ -35,6 +35,9 @@ impl Tool for Claude {
     fn name(&self) -> &'static str {
         "Claude"
     }
+    fn about(&self) -> &'static str {
+        "Plan limits and local token use"
+    }
     fn badge(&self) -> Badge {
         badge()
     }
@@ -42,30 +45,30 @@ impl Tool for Claude {
         "Monitor"
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: LIMITS, title: "Claude limits", span: 4, default_on: true }]
+        vec![WidgetSpec { id: LIMITS, title: "Claude limits", span: 4, default_on: true, group: None }]
     }
     fn widget_height(&self, _widget: &str, _width: f32) -> f32 {
-        104.0
+        ui::CARD_H
     }
     fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         if widget != LIMITS {
             return;
         }
-        let resp = crate::kit::glass::card(ui, rect, ui.scope_id().with("c-claude"), crate::kit::mechanics::CARD_RADIUS, cx.is_detail_open(ID, LIMITS));
+        let resp = crate::kit::glass::card(ui, rect, ui.scope_id().with("c-claude"), crate::kit::glass::R_CARD, cx.is_detail_open(ID, LIMITS));
         let cl = self.info.lock().unwrap().clone();
         ui::card(ui.painter(), rect, &cl, ui.ctx().input(|i| i.time));
         if resp.clicked() {
             cx.toggle_detail(ID, LIMITS);
         }
     }
-    fn detail_title(&self, _detail: &str) -> String {
-        self.info.lock().unwrap().plan_title()
-    }
     fn detail_ui(&mut self, _detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::detail(&self.info, ui, rect, cx);
     }
     fn has_page(&self) -> bool {
         true
+    }
+    fn sidebar_meta(&self) -> String {
+        self.info.lock().unwrap().session().map(|l| format!("{:.0}%", l.pct)).unwrap_or_default()
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         page::page(&self.info, self.demo, ui, rect, cx);

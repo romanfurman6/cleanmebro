@@ -2,12 +2,13 @@
 //! Bluetooth devices, shown as panel widgets with a detail sheet each.
 
 pub mod monitor;
+mod sheets;
 mod ui;
 
-use crate::core::tool::{Action, Badge, Cx, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
-use crate::kit::glass::{human_bytes, Icon};
+use crate::core::tool::{Action, Badge, Cx, PanelHeader, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::kit::glass::{human_bytes, tint, Icon, BLUE};
 use crate::kit::mechanics as m;
-use egui::{Color32, Rect, Ui};
+use egui::{Rect, Ui};
 use monitor::Level;
 use std::sync::{Arc, Mutex};
 
@@ -24,14 +25,14 @@ impl System {
     }
 }
 
-const WIDGETS: [WidgetSpec; 7] = [
-    WidgetSpec { id: "health", title: "Health summary", span: 4, default_on: true },
-    WidgetSpec { id: "storage", title: "Storage", span: 2, default_on: true },
-    WidgetSpec { id: "memory", title: "Memory", span: 2, default_on: true },
-    WidgetSpec { id: "battery", title: "Battery", span: 2, default_on: true },
-    WidgetSpec { id: "cpu", title: "CPU", span: 2, default_on: true },
-    WidgetSpec { id: "network", title: "Network", span: 2, default_on: true },
-    WidgetSpec { id: "devices", title: "Connected Devices", span: 2, default_on: true },
+const METRICS: Option<&str> = Some("metrics");
+const WIDGETS: [WidgetSpec; 6] = [
+    WidgetSpec { id: "storage", title: "Storage", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "memory", title: "Memory", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "cpu", title: "CPU", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "battery", title: "Battery", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "network", title: "Network", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "devices", title: "Connected Devices", span: 4, default_on: true, group: METRICS },
 ];
 
 impl Tool for System {
@@ -41,11 +42,17 @@ impl Tool for System {
     fn name(&self) -> &'static str {
         "Mac Health"
     }
+    fn about(&self) -> &'static str {
+        "Disk, memory, CPU, battery, network, devices"
+    }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::Laptop, top: Color32::from_rgb(110, 230, 255), bottom: Color32::from_rgb(20, 140, 220) }
+        Badge { icon: Icon::Pulse, color: tint::HEALTH }
     }
     fn section(&self) -> &'static str {
         "Monitor"
+    }
+    fn panel_header(&self) -> Option<PanelHeader> {
+        Some(ui::header(&self.mon.lock().unwrap()))
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
         WIDGETS.to_vec()
@@ -56,9 +63,6 @@ impl Tool for System {
     fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(&self.mon, widget, ui, rect, cx);
     }
-    fn detail_title(&self, detail: &str) -> String {
-        ui::detail_title(&self.mon.lock().unwrap(), detail)
-    }
     fn detail_ui(&mut self, detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::detail(&self.mon, detail, ui, rect, cx);
     }
@@ -68,7 +72,7 @@ impl Tool for System {
     /// overfill 5); memory and restart are slotted in by us.
     fn recommendations(&self) -> Vec<Recommendation> {
         let s = self.mon.lock().unwrap().clone();
-        let blue = |icon| Badge { icon, top: Color32::from_rgb(100, 170, 255), bottom: Color32::from_rgb(10, 110, 235) };
+        let blue = |icon| Badge { icon, color: BLUE };
         let detail = |d: &str| Action::ShowDetail { tool: ID.into(), detail: d.into(), toggle: true };
         let page = |t: &str| Action::OpenPage { tool: t.into(), route: String::new() };
         let mut v = Vec::new();
@@ -79,7 +83,7 @@ impl Tool for System {
             v.push(Recommendation { priority: m::PRIORITY_BATTERY_HEALTH, badge: blue(Icon::Battery(s.battery.percent)), title: "Battery health is critical".into(), body: "Your battery is in bad condition and should be replaced soon.".into(), action: "Show Battery".into(), go: detail("battery") });
         }
         if s.disk_level() != Level::Good {
-            v.push(Recommendation { priority: m::PRIORITY_OUT_OF_DISK, badge: blue(Icon::Lens), title: "Low disk space".into(), body: format!("Less than {} is free. See what takes the most space.", human_bytes(m::disk_alert_threshold(s.disk_total))), action: "Open Space Lens".into(), go: page("lens") });
+            v.push(Recommendation { priority: m::PRIORITY_OUT_OF_DISK, badge: blue(Icon::Map), title: "Low disk space".into(), body: format!("Less than {} is free. See what takes the most space.", human_bytes(m::disk_alert_threshold(s.disk_total))), action: "Open Disk Map".into(), go: page("lens") });
         }
         if s.mem_level() != Level::Good {
             v.push(Recommendation { priority: 15, badge: blue(Icon::Memory), title: "Memory is under pressure".into(), body: "Quitting a few unused apps will give your Mac room to breathe.".into(), action: "Show Memory".into(), go: detail("memory") });
@@ -94,6 +98,6 @@ impl Tool for System {
     }
 
     fn demo_view(&mut self, view: &str) -> Option<View> {
-        WIDGETS.iter().find(|w| w.id == view && w.id != "health").map(|w| View::Detail(w.id))
+        WIDGETS.iter().find(|w| w.id == view).map(|w| View::Detail(w.id))
     }
 }

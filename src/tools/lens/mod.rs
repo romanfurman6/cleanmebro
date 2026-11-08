@@ -1,13 +1,13 @@
-//! Space Lens tool: measures a folder tree and shows it as a list and a
-//! bubble map; selected items go to the Trash after review. Lives in the full
+//! Disk Map tool: measures a folder tree and shows it as a drill-down
+//! treemap; selected items go to the Trash after review. Lives in the full
 //! window.
 
 mod page;
 pub mod scan;
 
 use crate::core::tool::{Badge, Cx, MenuItem, Tool, ToolEnv, ToolId, View};
-use crate::kit::glass::Icon;
-use egui::{Color32, Rect, Ui};
+use crate::kit::glass::{tint, Icon};
+use egui::{Rect, Ui};
 use std::path::PathBuf;
 
 pub const ID: ToolId = "lens";
@@ -16,37 +16,39 @@ pub struct Lens {
     pub(crate) lens: scan::Shared,
     pub(crate) lens_root: PathBuf,
     pub(crate) lens_path: PathBuf,
-    pub(crate) lens_back: Vec<PathBuf>,
-    pub(crate) lens_fwd: Vec<PathBuf>,
+    /// Zoom animation: (clicked block when zooming in, folder left when
+    /// zooming out, start time).
+    pub(crate) lens_morph: Option<(Option<egui::Rect>, PathBuf, f64)>,
     pub(crate) lens_selected: Vec<(PathBuf, u64)>,
     pub(crate) lens_review: bool,
     pub(crate) lens_msg: Option<String>,
-    demo: bool,
+    /// The map while mapping, refreshed a few times a second: (when, map,
+    /// folders still being measured).
+    pub(crate) lens_live: Option<(f64, scan::Node, Vec<PathBuf>)>,
+    /// Top-level folders in the order they got their colour, so a folder
+    /// keeps its colour while the map grows.
+    pub(crate) lens_hues: Vec<PathBuf>,
+    /// Where each block was drawn last frame, so blocks glide to new sizes.
+    pub(crate) lens_anim: std::collections::HashMap<PathBuf, egui::Rect>,
+    pub(crate) lens_anim_area: egui::Rect,
 }
 
 impl Lens {
-    pub fn new(env: &ToolEnv) -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    pub fn new(_env: &ToolEnv) -> Self {
+        let root = PathBuf::from("/");
         Lens {
             lens: Default::default(),
-            lens_root: home.clone(),
-            lens_path: home,
-            lens_back: vec![],
-            lens_fwd: vec![],
+            lens_root: root.clone(),
+            lens_path: root,
+            lens_morph: None,
             lens_selected: vec![],
             lens_review: false,
             lens_msg: None,
-            demo: env.demo,
+            lens_live: None,
+            lens_hues: vec![],
+            lens_anim: Default::default(),
+            lens_anim_area: egui::Rect::NOTHING,
         }
-    }
-
-    /// (volume name, total, available) of the startup disk.
-    pub(crate) fn disk(&self) -> (String, u64, u64) {
-        if self.demo {
-            return ("Macintosh HD".into(), 2_000_000_000_000, 1_440_000_000_000);
-        }
-        let (total, free) = crate::kit::fs::volume_space("/");
-        (crate::kit::fs::root_volume_name(), total, free)
     }
 }
 
@@ -55,10 +57,13 @@ impl Tool for Lens {
         ID
     }
     fn name(&self) -> &'static str {
-        "Space Lens"
+        "Disk Map"
+    }
+    fn about(&self) -> &'static str {
+        "Find what takes space, remove by hand"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::Lens, top: Color32::from_rgb(100, 170, 255), bottom: Color32::from_rgb(10, 110, 235) }
+        Badge { icon: Icon::Map, color: tint::DISK_MAP }
     }
     fn section(&self) -> &'static str {
         "Clean"
@@ -70,7 +75,7 @@ impl Tool for Lens {
         page::page(self, ui, rect, cx);
     }
     fn menu_items(&self) -> Vec<MenuItem> {
-        vec![MenuItem { id: "open", label: "Space Lens".into() }]
+        vec![MenuItem { id: "open", label: "Disk Map".into() }]
     }
     fn menu_action(&mut self, item: &str, cx: &mut Cx) {
         if item == "open" {
@@ -80,6 +85,9 @@ impl Tool for Lens {
     fn demo_view(&mut self, view: &str) -> Option<View> {
         if view == "lens" {
             page::demo_tree(self);
+            Some(View::Page)
+        } else if view == "lens-live" {
+            page::demo_live(self);
             Some(View::Page)
         } else {
             None

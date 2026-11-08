@@ -48,16 +48,6 @@ pub fn volume_space(path: &str) -> (u64, u64) {
     }
 }
 
-/// The startup volume's name ("Macintosh HD" unless renamed), read once.
-pub fn root_volume_name() -> String {
-    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    NAME.get_or_init(|| {
-        let out = std::process::Command::new("diskutil").args(["info", "/"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
-        out.lines().find_map(|l| l.trim().strip_prefix("Volume Name:").map(|v| v.trim().to_string())).filter(|v| !v.is_empty()).unwrap_or_else(|| "Macintosh HD".into())
-    })
-    .clone()
-}
-
 /// Paths that are never offered for removal, whatever the rules or the AI say.
 pub fn is_protected(p: &Path) -> Option<&'static str> {
     let h = home();
