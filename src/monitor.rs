@@ -229,9 +229,9 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
         let thermal = crate::native::thermal_state();
         let uptime = sysinfo::System::uptime();
 
-        let slow_battery = tick % 5 == 0;
-        let slow_profile = tick % 30 == 0;
-        let slow_sizes = tick % 300 == 0;
+        let slow_battery = tick.is_multiple_of(5);
+        let slow_profile = tick.is_multiple_of(30);
+        let slow_sizes = tick.is_multiple_of(300);
         let battery = if slow_battery { Some(battery()) } else { None };
         let (devices, wifi) = if slow_profile { (Some(bluetooth()), Some(wifi())) } else { (None, None) };
 
@@ -282,12 +282,12 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
             // folder sizes for the storage chart (can take a few seconds)
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
             let cats = vec![
-                ("Applications".to_string(), dir_size(Path::new("/Applications"), 6)),
-                ("Documents".to_string(), dir_size(&home.join("Documents"), 6)),
-                ("Downloads".to_string(), dir_size(&home.join("Downloads"), 6)),
-                ("Desktop".to_string(), dir_size(&home.join("Desktop"), 6)),
+                ("Applications".to_string(), dir_size(Path::new("/Applications"))),
+                ("Documents".to_string(), dir_size(&home.join("Documents"))),
+                ("Downloads".to_string(), dir_size(&home.join("Downloads"))),
+                ("Desktop".to_string(), dir_size(&home.join("Desktop"))),
             ];
-            let trash = std::fs::read_dir(home.join(".Trash")).ok().map(|_| dir_size(&home.join(".Trash"), 6));
+            let trash = std::fs::read_dir(home.join(".Trash")).ok().map(|_| dir_size(&home.join(".Trash")));
             let mut s = shared.lock().unwrap();
             s.categories = cats;
             s.trash_bytes = trash;
@@ -345,6 +345,7 @@ fn statvfs(path: &str) -> (u64, u64) {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub fn sysctl_u32(name: &str) -> Option<u32> {
     let c = std::ffi::CString::new(name).ok()?;
     let mut v: u32 = 0;
@@ -353,6 +354,7 @@ pub fn sysctl_u32(name: &str) -> Option<u32> {
     (r == 0).then_some(v)
 }
 
+#[cfg(target_os = "macos")]
 fn swap() -> (u64, u64) {
     #[repr(C)]
     struct XswUsage {
@@ -377,7 +379,10 @@ fn swap() -> (u64, u64) {
 /// RAMService computes them (SystemResourcesMonitor sub_90b8):
 /// app memory = anonymous (internal) − purgeable pages.
 fn vm_stat() -> Option<(u64, u64, u64)> {
-    let out = run_cmd("vm_stat", &[]);
+    parse_vm_stat(&run_cmd("vm_stat", &[]))
+}
+
+fn parse_vm_stat(out: &str) -> Option<(u64, u64, u64)> {
     let mut page = 16384u64;
     let (mut internal, mut purgeable, mut wired, mut comp) = (0u64, 0u64, 0u64, 0u64);
     for line in out.lines() {
@@ -398,6 +403,7 @@ fn vm_stat() -> Option<(u64, u64, u64)> {
     (wired > 0).then_some((internal.saturating_sub(purgeable) * page, wired * page, comp * page))
 }
 
+#[cfg(target_os = "macos")]
 fn cpu_ticks() -> [u64; 4] {
     unsafe {
         let mut info: libc::host_cpu_load_info = std::mem::zeroed();
@@ -413,6 +419,20 @@ fn cpu_ticks() -> [u64; 4] {
     }
 }
 
+// Other platforms build (so the tests run anywhere) but read nothing.
+#[cfg(not(target_os = "macos"))]
+pub fn sysctl_u32(_name: &str) -> Option<u32> {
+    None
+}
+#[cfg(not(target_os = "macos"))]
+fn swap() -> (u64, u64) {
+    (0, 0)
+}
+#[cfg(not(target_os = "macos"))]
+fn cpu_ticks() -> [u64; 4] {
+    [0; 4]
+}
+
 fn cpu_split(a: [u64; 4], b: [u64; 4]) -> (f32, f32, f32) {
     let d: Vec<f64> = (0..4).map(|i| b[i].saturating_sub(a[i]) as f64).collect();
     let total = d.iter().sum::<f64>();
@@ -425,7 +445,15 @@ fn cpu_split(a: [u64; 4], b: [u64; 4]) -> (f32, f32, f32) {
 }
 
 fn battery() -> Battery {
-    let out = run_cmd("ioreg", &["-rn", "AppleSmartBattery"]);
+    let mut b = parse_battery(&run_cmd("ioreg", &["-rn", "AppleSmartBattery"]));
+    if b.present {
+        b.health_text = power_health_text();
+    }
+    b
+}
+
+/// Battery readings from `ioreg -rn AppleSmartBattery`.
+fn parse_battery(out: &str) -> Battery {
     let mut b = Battery::default();
     if out.trim().is_empty() {
         return b;
@@ -434,8 +462,9 @@ fn battery() -> Battery {
     let mut design = 0f32;
     let mut nominal = 0f32;
     let mut raw_max = 0f32;
+    let (mut to_empty, mut to_full) = (None, None);
     for line in out.lines() {
-        let l = line.trim_start_matches(|c: char| c == ' ' || c == '|').trim();
+        let l = line.trim_start_matches([' ', '|']).trim();
         let Some((k, v)) = l.split_once(" = ") else { continue };
         let k = k.trim_matches('"');
         let v = v.trim();
@@ -445,15 +474,8 @@ fn battery() -> Battery {
             "IsCharging" => b.charging = v == "Yes",
             "ExternalConnected" => b.plugged = v == "Yes",
             "FullyCharged" => b.full = v == "Yes",
-            // BatteryMonitor sub_1bc8: AvgTimeToEmpty / AvgTimeToFull, 65535 = unknown
-            "AvgTimeToEmpty" if !b.charging => {
-                let t = n().unwrap_or(65535.0);
-                b.minutes_left = (t > 0.0 && t < m::BATTERY_TIME_UNKNOWN).then_some(t as u32);
-            }
-            "AvgTimeToFull" if b.charging => {
-                let t = n().unwrap_or(65535.0);
-                b.minutes_left = (t > 0.0 && t < m::BATTERY_TIME_UNKNOWN).then_some(t as u32);
-            }
+            "AvgTimeToEmpty" => to_empty = n(),
+            "AvgTimeToFull" => to_full = n(),
             "PermanentFailureStatus" => b.permanent_failure = n().unwrap_or(0.0) != 0.0,
             "CycleCount" => b.cycles = n().unwrap_or(0.0) as u32,
             "DesignCycleCount9C" => b.design_cycles = n().unwrap_or(0.0) as u32,
@@ -464,9 +486,12 @@ fn battery() -> Battery {
             _ => {}
         }
     }
-    // Apple Silicon reports health from AppleRawMaxCapacity (sub_1bc8)
+    // AvgTimeToEmpty / AvgTimeToFull, 65535 = unknown. Picked after the loop:
+    // ioreg lists keys alphabetically, so "IsCharging" comes after both.
+    let t = if b.charging { to_full } else { to_empty };
+    b.minutes_left = t.filter(|&t| t > 0.0 && t < m::BATTERY_TIME_UNKNOWN).map(|t| t as u32);
+    // Apple Silicon reports health from AppleRawMaxCapacity
     let max = if raw_max > 0.0 { raw_max } else { nominal };
-    b.health_text = power_health_text();
     if design > 0.0 && max > 0.0 {
         b.health_pct = Some((max / design * 100.0).min(100.0));
     }
@@ -564,8 +589,11 @@ fn wifi() -> Wifi {
     w
 }
 
-/// Allocated size of a folder, not following links, bounded in depth.
-pub fn dir_size(path: &Path, max_depth: usize) -> u64 {
+/// How deep `dir_size` walks; deeper content is not counted.
+const DIR_SIZE_MAX_DEPTH: usize = 64;
+
+/// Allocated size of a file or folder, not following links or leaving its volume.
+pub fn dir_size(path: &Path) -> u64 {
     use std::os::unix::fs::MetadataExt;
     fn walk(p: &Path, depth: usize, max: usize, dev: u64) -> u64 {
         let Ok(rd) = std::fs::read_dir(p) else { return 0 };
@@ -583,7 +611,7 @@ pub fn dir_size(path: &Path, max_depth: usize) -> u64 {
         total
     }
     match path.symlink_metadata() {
-        Ok(md) if md.is_dir() => walk(path, 0, max_depth.max(64), md.dev()),
+        Ok(md) if md.is_dir() => walk(path, 0, DIR_SIZE_MAX_DEPTH, md.dev()),
         Ok(md) => md.blocks() * 512,
         Err(_) => 0,
     }
@@ -632,7 +660,7 @@ pub fn start_speed_test(shared: Shared, ctx: egui::Context) {
             let mut got = 0u64;
             loop {
                 use std::io::Read;
-                let n = reader.read(&mut buf).map_err(|e| ureq::Error::Io(e))?;
+                let n = reader.read(&mut buf).map_err(ureq::Error::Io)?;
                 if n == 0 {
                     break;
                 }
@@ -662,8 +690,9 @@ pub fn start_speed_test(shared: Shared, ctx: egui::Context) {
         let up = agent.post(m::SPEED_TEST_UP_URL).send(&payload[..]);
         let secs = t0.elapsed().as_secs_f64();
         set(&|s| {
-            if up.is_ok() {
-                s.up_mbps = Some(payload.len() as f64 * 8.0 / secs / 1e6);
+            match &up {
+                Ok(_) => s.up_mbps = Some(payload.len() as f64 * 8.0 / secs / 1e6),
+                Err(e) => s.error = Some(format!("Upload test failed: {e}")),
             }
             s.progress = 1.0;
             s.running = false;
@@ -739,5 +768,126 @@ pub fn demo_snapshot() -> Snapshot {
             Device { name: "Magic Keyboard".into(), kind: "Keyboard".into(), battery: Some(82) },
         ],
         speed: SpeedTest::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IOREG: &str = r#"+-o AppleSmartBattery  <class AppleSmartBattery>
+    {
+      "AppleRawMaxCapacity" = 4500
+      "AvgTimeToEmpty" = 65535
+      "AvgTimeToFull" = 95
+      "CurrentCapacity" = 62
+      "CycleCount" = 13
+      "DesignCapacity" = 5000
+      "DesignCycleCount9C" = 1000
+      "ExternalConnected" = Yes
+      "FullyCharged" = No
+      "IsCharging" = Yes
+      "NominalChargeCapacity" = 4400
+      "PermanentFailureStatus" = 0
+      "Temperature" = 3030
+    }
+"#;
+
+    #[test]
+    fn battery_time_left_follows_charging_state() {
+        // IsCharging comes after the time keys; charging must still pick AvgTimeToFull
+        let b = parse_battery(IOREG);
+        assert!(b.present && b.charging && b.plugged && !b.full);
+        assert_eq!(b.percent, 62);
+        assert_eq!(b.minutes_left, Some(95));
+        assert_eq!(b.cycles, 13);
+        assert_eq!(b.design_cycles, 1000);
+        assert_eq!(b.health_pct, Some(90.0));
+        assert_eq!(b.temp_c, Some(30.3));
+        assert!(!b.permanent_failure);
+
+        let on_battery = IOREG.replace("\"IsCharging\" = Yes", "\"IsCharging\" = No").replace("\"AvgTimeToEmpty\" = 65535", "\"AvgTimeToEmpty\" = 240");
+        let b = parse_battery(&on_battery);
+        assert!(!b.charging);
+        assert_eq!(b.minutes_left, Some(240));
+
+        // 65535 means unknown
+        let unknown = IOREG.replace("\"IsCharging\" = Yes", "\"IsCharging\" = No");
+        assert_eq!(parse_battery(&unknown).minutes_left, None);
+    }
+
+    #[test]
+    fn no_battery() {
+        let b = parse_battery("  \n");
+        assert!(!b.present);
+    }
+
+    #[test]
+    fn vm_stat_parsing() {
+        let out = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n\
+Pages free:                               12345.\n\
+Pages purgeable:                            100.\n\
+Pages wired down:                          2000.\n\
+Pages occupied by compressor:               300.\n\
+Anonymous pages:                           1100.\n";
+        let (app, wired, comp) = parse_vm_stat(out).unwrap();
+        assert_eq!(app, 1000 * 16384);
+        assert_eq!(wired, 2000 * 16384);
+        assert_eq!(comp, 300 * 16384);
+        assert_eq!(parse_vm_stat(""), None);
+    }
+
+    #[test]
+    fn cpu_split_shares() {
+        let (load, user, sys) = cpu_split([0, 0, 0, 0], [30, 10, 50, 10]);
+        assert!((user - 40.0).abs() < 1e-4); // user + nice
+        assert!((sys - 10.0).abs() < 1e-4);
+        assert!((load - 50.0).abs() < 1e-4);
+        assert_eq!(cpu_split([5; 4], [5; 4]), (0.0, 0.0, 0.0));
+        // counters going backwards never underflow
+        assert_eq!(cpu_split([9; 4], [1; 4]), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn levels() {
+        assert_eq!(Level::Good.worst(Level::Fair), Level::Fair);
+        assert_eq!(Level::Critical.worst(Level::Good), Level::Critical);
+        let mut s = demo_snapshot();
+        assert_eq!(s.health(), Level::Good);
+        // 2 TB disk → threshold 100 GB
+        s.disk_free = 80_000_000_000;
+        assert_eq!(s.disk_level(), Level::Fair);
+        s.disk_free = 40_000_000_000;
+        assert_eq!(s.disk_level(), Level::Critical);
+        assert_eq!(s.health(), Level::Critical);
+        s.mem_pressure_level = 2;
+        assert_eq!(s.mem_level(), Level::Fair);
+        s.mem_pressure_level = 4;
+        assert_eq!(s.mem_level(), Level::Critical);
+        s.thermal = 9;
+        assert_eq!(s.thermal_word(), "Critical");
+        s.uptime_secs = 8 * 86_400;
+        assert!(s.uptime_warning());
+        assert_eq!(s.uptime_days(), 8);
+    }
+
+    #[test]
+    fn good_for_by_speed() {
+        assert!(good_for(0.1).is_empty());
+        assert_eq!(good_for(4.0), vec!["Messaging", "Audio calls", "Music streaming", "Video calls"]);
+        assert_eq!(good_for(1000.0).len(), m::GOOD_FOR.len());
+    }
+
+    #[test]
+    fn dir_size_counts_nested_files() {
+        let dir = std::env::temp_dir().join(format!("cmb-dirsize-{}", std::process::id()));
+        let deep = dir.join("a/b/c/d/e/f/g/h");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("big.bin"), vec![1u8; 200_000]).unwrap();
+        let size = dir_size(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        // the file sits 8 levels down and must be counted
+        assert!(size >= 200_000, "size {size}");
+        assert_eq!(dir_size(Path::new("/definitely/not/here")), 0);
     }
 }

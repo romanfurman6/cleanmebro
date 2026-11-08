@@ -215,6 +215,8 @@ pub fn is_protected(p: &Path) -> Option<&'static str> {
 
 // ---------------------------------------------------------------- scanning
 
+type ScanStep = (&'static str, fn(&mut Ctx));
+
 struct Ctx {
     items: Vec<Item>,
     running_ids: HashSet<String>,
@@ -239,7 +241,7 @@ impl Ctx {
             return;
         }
         self.status(&path.display().to_string(), -1.0);
-        let bytes = dir_size(&path, 64);
+        let bytes = dir_size(&path);
         if bytes < m::MIN_ITEM_BYTES {
             return;
         }
@@ -322,11 +324,9 @@ pub fn pretty(name: &str) -> String {
         if generic.contains(&last.to_lowercase().as_str()) && parts.len() >= 3 {
             last = parts[parts.len() - 2];
         }
-        let mut s = last.replace(['-', '_'], " ");
-        if let Some(f) = s.get_mut(0..1) {
-            f.make_ascii_uppercase();
-        }
-        return s;
+        let s = last.replace(['-', '_'], " ");
+        let mut chars = s.chars();
+        return chars.next().map(|f| f.to_uppercase().chain(chars).collect()).unwrap_or_default();
     }
     name.to_string()
 }
@@ -358,7 +358,7 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
     std::thread::spawn(move || {
         let (running_ids, running_names) = running_apps();
         let mut c = Ctx { items: Vec::new(), running_ids, running_names, shared: shared.clone(), egui: ctx.clone() };
-        let steps: [(&str, fn(&mut Ctx)); 8] = [
+        let steps: [ScanStep; 8] = [
             ("Claude", scan_claude),
             ("AI tools", scan_ai_tools),
             ("User caches", scan_user_caches),
@@ -486,8 +486,8 @@ fn scan_claude(c: &mut Ctx) {
 }
 
 fn short_id(s: &str) -> String {
-    if s.len() > 14 {
-        format!("{}…", &s[..12])
+    if s.chars().count() > 14 {
+        format!("{}…", s.chars().take(12).collect::<String>())
     } else {
         s.to_string()
     }
@@ -657,7 +657,7 @@ fn scan_xcode(c: &mut Ctx) {
     c.add(Group::Xcode, "Simulator caches", x.join("CoreSimulator/Caches"), "Caches", Verdict::Safe, "Simulator dyld caches; rebuilt on boot");
     for os in ["iOS DeviceSupport", "watchOS DeviceSupport", "macOS DeviceSupport", "tvOS DeviceSupport", "visionOS DeviceSupport"] {
         let mut vers = children(&x.join("Xcode").join(os));
-        vers.sort_by(|a, b| version_key(&fname(a)).cmp(&version_key(&fname(b))));
+        vers.sort_by_key(|v| version_key(&fname(v)));
         let newest = vers.last().cloned();
         for v in vers {
             let latest = Some(&v) == newest.as_ref();
@@ -758,6 +758,12 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
             .args(["-p", &lines, "--system-prompt", SYSTEM, "--output-format", "json", "--no-session-persistence", "--model", m::AI_MODEL, "--tools", "", "--strict-mcp-config"])
             .output();
         let text = match out {
+            Ok(o) if !o.status.success() => {
+                let err = String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("").to_string();
+                let mut g = shared.lock().unwrap();
+                g.ai_error = Some(if err.is_empty() { "Claude couldn't review the paths; the built-in rules were used.".into() } else { format!("Claude couldn't review the paths ({err}); the built-in rules were used.") });
+                return;
+            }
             Ok(o) => serde_json::from_slice::<serde_json::Value>(&o.stdout).ok().and_then(|v| v["result"].as_str().map(|s| s.to_string())).unwrap_or_default(),
             Err(e) => {
                 shared.lock().unwrap().ai_error = Some(format!("Couldn't run Claude: {e}"));
@@ -767,28 +773,35 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
         let verdicts = parse_verdicts(&text);
         let mut g = shared.lock().unwrap();
         if verdicts.is_empty() {
-            g.ai_error = Some("Claude didn't answer in time; the built-in rules were used for some items.".into());
+            g.ai_error = Some("Claude's answer couldn't be read; the built-in rules were used for some items.".into());
             continue;
         }
         g.ai_used = true;
         for (k, v, r) in verdicts {
             let Some(&i) = batch.get(k) else { continue };
             let it = &mut g.items[i];
-            // merge: the AI may always be more careful; it may relax a rule's
-            // "ask" to "safe", except for items the person must confirm (app open)
-            let new = match (it.verdict, v) {
-                (_, v) if v.rank() > it.verdict.rank() => v,
-                (Verdict::Ask, Verdict::Safe) if !it.app_running => Verdict::Safe,
-                (cur, _) => cur,
-            };
+            let new = merge_verdict(it.verdict, v, it.app_running);
             if new != it.verdict || !r.is_empty() {
                 it.by = Who::Ai;
-                it.reason = r;
+                if !r.is_empty() {
+                    it.reason = r;
+                }
             }
             it.verdict = new;
         }
         drop(g);
         ctx.request_repaint();
+    }
+}
+
+/// Combine a rule's verdict with the AI's: the AI may always be more careful;
+/// it may relax a rule's "ask" to "safe", except for items the person must
+/// confirm (app open). It never relaxes "keep".
+fn merge_verdict(rule: Verdict, ai: Verdict, app_running: bool) -> Verdict {
+    match (rule, ai) {
+        (_, ai) if ai.rank() > rule.rank() => ai,
+        (Verdict::Ask, Verdict::Safe) if !app_running => Verdict::Safe,
+        (cur, _) => cur,
     }
 }
 
@@ -842,7 +855,10 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
             }
             ctx.request_repaint();
             // last safety net
-            if is_protected(&it.path).is_some() && it.group != Group::Trash {
+            if let Some(why) = is_protected(&it.path).filter(|_| it.group != Group::Trash) {
+                let mut g = shared.lock().unwrap();
+                g.failed.push((it.title.clone(), why.to_string()));
+                g.log.push(format!("Skipped {}: {why}", it.path.display()));
                 continue;
             }
             let res = if it.group == Group::Trash {
@@ -892,19 +908,121 @@ fn empty_folder(p: &Path) -> Result<(), String> {
     err.map_or(Ok(()), Err)
 }
 
-/// Move to the Trash (so it can be put back), with a unique name.
+/// Move to the Trash (so it can be put back). Never falls back to a permanent
+/// delete: an item that can't be trashed is reported as failed.
 pub fn move_to_trash(p: &Path) -> Result<(), String> {
-    let trash = home().join(".Trash");
-    let base = fname(p);
-    let mut dest = trash.join(&base);
-    let mut k = 1;
-    while dest.exists() {
-        dest = trash.join(format!("{base} {k}"));
-        k += 1;
+    crate::native::trash_item(p)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_id_is_utf8_safe() {
+        assert_eq!(short_id("abc"), "abc");
+        assert_eq!(short_id("0123456789abcdef"), "0123456789ab…");
+        // multi-byte names used to panic on a byte slice
+        assert_eq!(short_id("знімок-екрана-2026"), "знімок-екран…");
     }
-    match std::fs::rename(p, &dest) {
-        Ok(()) => Ok(()),
-        Err(e) if e.raw_os_error() == Some(libc::EXDEV) => remove(p),
-        Err(e) => Err(e.to_string()),
+
+    #[test]
+    fn pretty_names() {
+        assert_eq!(pretty("com.spotify.client"), "Spotify");
+        assert_eq!(pretty("COM.GOOGLE.CHROME"), "Google Chrome");
+        assert_eq!(pretty("com.example.my-tool"), "My tool");
+        assert_eq!(pretty("com.example.Foo.helper"), "Foo");
+        assert_eq!(pretty("Homebrew"), "Homebrew");
+        assert_eq!(pretty("com.example.ёлка"), "Ёлка");
+    }
+
+    #[test]
+    fn version_sorting() {
+        let mut v = vec!["17.10 (21A)", "17.2 (21C)", "9.3"];
+        v.sort_by_key(|s| version_key(s));
+        assert_eq!(v, vec!["9.3", "17.2 (21C)", "17.10 (21A)"]);
+    }
+
+    #[test]
+    fn verdicts_from_ai_text() {
+        let text = "Sure:\n[{\"i\":0,\"v\":\"safe\",\"r\":\"cache\"},{\"i\":1,\"v\":\"keep\"},{\"i\":2,\"v\":\"maybe\",\"r\":\"?\"},{\"v\":\"safe\"}]\nDone.";
+        let v = parse_verdicts(text);
+        assert_eq!(v.len(), 3);
+        assert_eq!(v[0], (0, Verdict::Safe, "cache".to_string()));
+        assert_eq!(v[1], (1, Verdict::Keep, String::new()));
+        // anything unknown is treated as "ask"
+        assert_eq!(v[2].1, Verdict::Ask);
+        assert!(parse_verdicts("no json here").is_empty());
+        assert!(parse_verdicts("[not json]").is_empty());
+    }
+
+    #[test]
+    fn ai_can_only_be_more_careful_except_ask_to_safe() {
+        use Verdict::*;
+        assert_eq!(merge_verdict(Safe, Ask, false), Ask);
+        assert_eq!(merge_verdict(Safe, Keep, false), Keep);
+        assert_eq!(merge_verdict(Ask, Safe, false), Safe);
+        // an open app must still be confirmed
+        assert_eq!(merge_verdict(Ask, Safe, true), Ask);
+        // "keep" is never relaxed
+        assert_eq!(merge_verdict(Keep, Safe, false), Keep);
+        assert_eq!(merge_verdict(Keep, Ask, false), Keep);
+    }
+
+    #[test]
+    fn personal_folders_are_protected() {
+        let h = home();
+        assert!(is_protected(&h.join("Documents/report.pdf")).is_some());
+        assert!(is_protected(&h.join(".ssh")).is_some());
+        assert!(is_protected(&h.join("Library/Mail/V10")).is_some());
+        assert!(is_protected(&h.join(".claude/settings.json")).is_some());
+        assert!(is_protected(&h.join(".claude/skills/x")).is_some());
+        assert!(is_protected(&h.join(".claude/debug")).is_none());
+        assert!(is_protected(&h.join("Library/Caches/com.example.app")).is_none());
+        // "Documents" must match a whole folder name, not a prefix
+        assert!(is_protected(&h.join("DocumentsOld")).is_none());
+    }
+
+    #[test]
+    fn git_folders_are_protected() {
+        let dir = std::env::temp_dir().join(format!("cmb-git-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        let r = is_protected(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(r.is_some());
+    }
+
+    #[test]
+    fn state_totals() {
+        let item = |group, bytes, verdict, selected| Item {
+            group,
+            title: String::new(),
+            path: PathBuf::from(format!("/x/{bytes}")),
+            bytes,
+            age_days: 0.0,
+            kind: "Caches",
+            verdict,
+            reason: String::new(),
+            rule_reason: String::new(),
+            by: Who::Rule,
+            selected,
+            hard_keep: false,
+            permanent: false,
+            app_running: false,
+        };
+        let s = State {
+            items: vec![
+                item(Group::Claude, 10, Verdict::Safe, true),
+                item(Group::Claude, 20, Verdict::Ask, false),
+                item(Group::Logs, 40, Verdict::Keep, false),
+                item(Group::Logs, 80, Verdict::Safe, true),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(s.total(), 110);
+        assert_eq!(s.selected_bytes(), 90);
+        assert_eq!(s.pending_questions(), 1);
+        assert_eq!(s.group_bytes(Group::Logs), 80);
+        assert_eq!(s.claude_safe_bytes(), 10);
     }
 }
