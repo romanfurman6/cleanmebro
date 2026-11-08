@@ -3,7 +3,6 @@
 //! Nothing here knows about any tool.
 
 pub mod claude_code;
-pub mod controls;
 pub mod fs;
 pub mod glass;
 pub mod mechanics;

@@ -1,283 +1,518 @@
-//! Space Lens screens: pick a place → "Visualizing your storage space…" →
-//! list + bubble map with back/forward → review and move to Trash.
+//! Disk Map screens: choose what to map (with live progress while it runs)
+//! → drill-down treemap with a "To remove" list → review and move to Trash.
 
-use super::scan::{self as spacelens, Node};
+use super::scan::{self, Node};
 use super::Lens as App;
 use crate::core::tool::Cx;
-use crate::kit::controls::action_button;
 use crate::kit::glass::*;
-use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
+use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
+
+/// Block colours, one per top-level folder (biggest first); the rest share
+/// the last, neutral one.
+const HUES: [Color32; 9] = [
+    Color32::from_rgb(0x2E, 0x9E, 0x8F),
+    Color32::from_rgb(0x2F, 0x6F, 0xD0),
+    Color32::from_rgb(0xC7, 0x78, 0x2A),
+    Color32::from_rgb(0x81, 0x59, 0xC9),
+    Color32::from_rgb(0xB8, 0x4C, 0x80),
+    Color32::from_rgb(0x4C, 0x8A, 0x3F),
+    Color32::from_rgb(0xA8, 0x82, 0x3A),
+    Color32::from_rgb(0x5A, 0x5A, 0x60),
+    Color32::from_rgb(0x48, 0x48, 0x4C),
+];
+const OTHER_HUE: Color32 = Color32::from_rgb(0x48, 0x48, 0x4C);
+/// Zoom animation length, seconds.
+const MORPH_SECS: f64 = 0.35;
+const HEADER_H: f32 = 57.0;
+const FOOTER_H: f32 = 42.0;
+const ASIDE_W: f32 = 260.0;
 
 pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let running = app.lens.running.load(Ordering::SeqCst);
     let has = app.lens.result.lock().unwrap().is_some();
-    if running {
-        scanning(app, ui, r);
-    } else if has {
+    if has && !running {
         results(app, ui, r, cx);
     } else {
-        intro(app, ui, r);
+        start(app, ui, r, running);
     }
 }
 
-fn intro(app: &mut App, ui: &mut Ui, r: Rect) {
+fn home() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+}
+
+fn tilde(p: &Path) -> String {
+    let h = home().display().to_string();
+    let s = p.display().to_string();
+    if s == h {
+        "~".into()
+    } else {
+        s.replacen(&(h + "/"), "~/", 1)
+    }
+}
+
+// ---------------------------------------------------------------- start
+
+fn start(app: &mut App, ui: &mut Ui, r: Rect, running: bool) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
-    let t = ctx.input(|i| i.time);
-    orb(&p, Pos2::new(r.center().x, r.top() + 190.0), 140.0, BLUE, Icon::Lens, t);
-    p.text(Pos2::new(r.center().x, r.top() + 380.0), Align2::CENTER_CENTER, "Space Lens", bold(44.0), TEXT);
-    p.text(Pos2::new(r.center().x, r.top() + 424.0), Align2::CENTER_CENTER, "Visualize what's taking up the most disk space and clean up your storage quickly.", font(17.0), TEXT_DIM);
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    let places = [("Home folder", home.clone()), ("Macintosh HD", PathBuf::from("/")), ("Applications", PathBuf::from("/Applications")), ("Library", home.join("Library")), ("Downloads", home.join("Downloads"))];
-    let total_w: f32 = places.len() as f32 * 138.0 - 10.0;
-    let mut x = r.center().x - total_w / 2.0;
-    for (label, path) in places {
-        let br = Rect::from_min_size(Pos2::new(x, r.top() + 470.0), Vec2::new(128.0, 34.0));
-        let sel = app.lens_root == path;
-        if pill_button(ui, br, label, if sel { 1 } else { 0 }, true).clicked() {
+    page_header(&p, r, "Disk Map", "See what takes space and remove it by hand", TEXT_DIM);
+    let top = r.top() + PAGE_HEADER_H + 28.0;
+    let col_w = (r.width() - 48.0 - 24.0) / 2.0;
+    let lx = r.left() + 24.0;
+    let rx = lx + col_w + 24.0;
+
+    // left: choose what to map
+    section_header(&p, Pos2::new(lx, top), Align2::LEFT_TOP, "START · CHOOSE WHAT TO MAP");
+    let h = home();
+    let places = [
+        (Icon::Home, "Home folder", h.clone()),
+        (Icon::Disk, "Macintosh HD", PathBuf::from("/")),
+        (Icon::Map, "Applications", PathBuf::from("/Applications")),
+        (Icon::Folder, "Library", h.join("Library")),
+        (Icon::Down, "Downloads", h.join("Downloads")),
+    ];
+    let row_h = 46.0;
+    let card = Rect::from_min_size(Pos2::new(lx, top + 22.0), Vec2::new(col_w, places.len() as f32 * row_h + 8.0));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    let mut label = "Home folder";
+    for (k, (glyph, name, path)) in places.iter().enumerate() {
+        let rr = Rect::from_min_size(Pos2::new(card.left() + 4.0, card.top() + 4.0 + k as f32 * row_h), Vec2::new(card.width() - 8.0, row_h));
+        let on = app.lens_root == *path;
+        if on {
+            label = name;
+        }
+        let resp = ui.interact(rr, ui.scope_id().with(("place", k)), if running { Sense::hover() } else { Sense::click() });
+        if on {
+            p.rect_filled(rr, R_BUTTON, with_alpha(BLUE, 0.16));
+        } else if resp.hovered() && !running {
+            p.rect_filled(rr, R_BUTTON, white(10));
+        }
+        let rc = Pos2::new(rr.left() + 20.0, rr.center().y);
+        if on {
+            p.circle_filled(rc, 8.0, BLUE);
+            p.circle_filled(rc, 3.0, Color32::WHITE);
+        } else {
+            p.circle_stroke(rc, 7.25, Stroke::new(1.5, white(76)));
+        }
+        icon(&p, *glyph, Rect::from_center_size(Pos2::new(rr.left() + 48.0, rr.center().y), Vec2::splat(17.0)), ACCENT);
+        p.text(Pos2::new(rr.left() + 68.0, rr.top() + 7.0), Align2::LEFT_TOP, *name, font(13.0), TEXT);
+        p.text(Pos2::new(rr.left() + 68.0, rr.top() + 25.0), Align2::LEFT_TOP, tilde(path), mono(11.0), TEXT_FAINT);
+        if resp.clicked() && !running {
             app.lens_root = path.clone();
         }
-        x += 138.0;
     }
-    if app.lens_root == Path::new("/") {
-        p.text(Pos2::new(r.center().x, r.top() + 528.0), Align2::CENTER_CENTER, "Scanning the whole disk takes a few minutes. Grant Full Disk Access in System Settings for complete results.", font(13.0), TEXT_FAINT);
-    }
-    if let Some(msg) = &app.lens_msg {
-        p.text(Pos2::new(r.center().x, r.top() + 552.0), Align2::CENTER_CENTER, msg, font(13.5), GREEN);
-    }
-    if action_button(ui, Pos2::new(r.center().x, r.bottom() - 54.0), "Scan", None, true) {
+    let mut y = card.bottom() + 12.0;
+    let note = if app.lens_root == Path::new("/") {
+        "Mapping the whole disk takes a few minutes. Give CleanMeBro Full Disk Access in System Settings for complete results."
+    } else {
+        "Folders the system needs can be browsed but not selected."
+    };
+    y += paragraph(&p, Pos2::new(lx, y), note, font(12.0), TEXT_FAINT, col_w) + 14.0;
+    let bl = format!("Map {}", label);
+    let bw = button_width(&p, &bl, BTN_PRIMARY).max(140.0);
+    if pill_button(ui, Rect::from_min_size(Pos2::new(lx, y), Vec2::new(bw, 34.0)), &bl, BTN_PRIMARY, !running).clicked() {
         app.lens_path = app.lens_root.clone();
-        app.lens_back.clear();
-        app.lens_fwd.clear();
         app.lens_selected.clear();
         app.lens_msg = None;
-        spacelens::start(app.lens.clone(), app.lens_root.clone(), ctx);
+        app.lens_morph = None;
+        scan::start(app.lens.clone(), app.lens_root.clone(), ctx.clone());
+    }
+    if let Some(msg) = &app.lens_msg {
+        text_fit(&p, Pos2::new(lx, y + 48.0), Align2::LEFT_TOP, msg, font(12.0), GREEN, col_w);
+    }
+
+    // right: progress while mapping
+    section_header(&p, Pos2::new(rx, top), Align2::LEFT_TOP, "WHILE MAPPING");
+    let pr = Rect::from_min_size(Pos2::new(rx, top + 22.0), Vec2::new(col_w, if running { 150.0 } else { 86.0 }));
+    glass_card(&p, pr, R_CARD, 0.0, false);
+    if running {
+        let bytes = app.lens.bytes.load(Ordering::Relaxed);
+        let files = app.lens.files.load(Ordering::Relaxed);
+        let g = p.layout_no_wrap(human_bytes(bytes), bold(26.0), TEXT);
+        let gw = g.size().x;
+        p.galley(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), g, TEXT);
+        p.text(Pos2::new(pr.left() + 24.0 + gw, pr.top() + 33.0), Align2::LEFT_CENTER, format!("measured · {} files", group_digits(files)), font(13.0), TEXT_DIM);
+        // indeterminate bar: a segment sliding across the track
+        let track = Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.top() + 62.0), Vec2::new(pr.width() - 32.0, 6.0));
+        p.rect_filled(track, 3.0, white(20));
+        let t = ctx.input(|i| i.time);
+        let f = ((t * 0.6).fract() as f32) * 1.35 - 0.35;
+        let seg = Rect::from_min_max(Pos2::new(track.left() + track.width() * f.max(0.0), track.top()), Pos2::new(track.left() + track.width() * (f + 0.35).min(1.0), track.bottom()));
+        p.with_clip_rect(track).rect_filled(seg, 3.0, tint::DISK_MAP);
+        let cur = app.lens.current.lock().unwrap().clone();
+        text_fit(&p, Pos2::new(pr.left() + 16.0, pr.top() + 80.0), Align2::LEFT_TOP, &tilde(Path::new(&cur)), mono(11.0), TEXT_FAINT, pr.width() - 32.0);
+        let sw = button_width(&p, "Stop", BTN_SECONDARY);
+        if pill_button(ui, Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 44.0), Vec2::new(sw, 28.0)), "Stop", BTN_SECONDARY, true).clicked() {
+            app.lens.stop.store(true, Ordering::SeqCst);
+        }
+        ctx.request_repaint();
+    } else {
+        p.text(Pos2::new(pr.left() + 16.0, pr.top() + 16.0), Align2::LEFT_TOP, "Not started", bold(13.0), TEXT_DIM);
+        paragraph(&p, Pos2::new(pr.left() + 16.0, pr.top() + 38.0), "The map shows every folder as a block sized by what it holds. Click a folder to zoom in, tick a corner to pick it for removal.", font(12.0), TEXT_FAINT, pr.width() - 32.0);
     }
 }
 
-fn scanning(app: &mut App, ui: &mut Ui, r: Rect) {
-    let ctx = ui.ctx().clone();
-    let p = ui.painter().clone();
-    let t = ctx.input(|i| i.time);
-    orb(&p, Pos2::new(r.center().x, r.top() + 230.0), 170.0, BLUE, Icon::Lens, t);
-    p.text(Pos2::new(r.center().x, r.top() + 470.0), Align2::CENTER_CENTER, "Visualizing your storage space...", font(40.0), TEXT);
-    let cur = app.lens.current.lock().unwrap().clone();
-    text_fit(&p, Pos2::new(r.center().x, r.top() + 520.0), Align2::CENTER_CENTER, &middle_ellipsis(&cur, 80), font(18.0), TEXT_DIM, r.width() - 80.0);
-    let files = app.lens.files.load(Ordering::Relaxed);
-    let bytes = app.lens.bytes.load(Ordering::Relaxed);
-    p.text(Pos2::new(r.center().x, r.top() + 552.0), Align2::CENTER_CENTER, format!("{} files · {}", files, human_bytes(bytes)), font(14.0), TEXT_FAINT);
-    if action_button(ui, Pos2::new(r.center().x, r.bottom() - 54.0), "Stop", None, true) {
-        app.lens.stop.store(true, Ordering::SeqCst);
+fn group_digits(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
     }
-    ctx.request_repaint();
+    out
+}
+
+// ---------------------------------------------------------------- results
+
+/// Colour of the top-level folder that holds `path`.
+fn hue_of(root: &Node, path: &Path) -> Color32 {
+    match root.children.iter().position(|c| path.starts_with(&c.path)) {
+        Some(i) => HUES[i.min(HUES.len() - 1)],
+        None => OTHER_HUE,
+    }
+}
+
+fn pct(part: u64, whole: u64) -> u64 {
+    if whole == 0 {
+        0
+    } else {
+        ((part as f64 / whole as f64) * 100.0).round() as u64
+    }
+}
+
+/// Map a rect laid out in `area` so that `from` lands on `to`.
+fn affine(b: Rect, from: Rect, to: Rect) -> Rect {
+    let sx = to.width() / from.width().max(1.0);
+    let sy = to.height() / from.height().max(1.0);
+    Rect::from_min_max(
+        Pos2::new(to.left() + (b.left() - from.left()) * sx, to.top() + (b.top() - from.top()) * sy),
+        Pos2::new(to.left() + (b.right() - from.left()) * sx, to.top() + (b.bottom() - from.top()) * sy),
+    )
+}
+
+fn lerp_rect(a: Rect, b: Rect, t: f32) -> Rect {
+    Rect::from_min_max(a.min + (b.min - a.min) * t, a.max + (b.max - a.max) * t)
 }
 
 fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let root = app.lens.result.lock().unwrap().clone().unwrap();
-    let node = spacelens::find(&root, &app.lens_path).cloned().unwrap_or_else(|| root.clone());
-    // top bar with back/forward and the place name
-    let bar_r = Rect::from_min_size(r.min, Vec2::new(r.width(), 52.0));
-    glass_card(&p, bar_r, 16.0, 0.0, false);
-    let back = Rect::from_min_size(bar_r.min + Vec2::new(12.0, 10.0), Vec2::splat(32.0));
-    let fwd = back.translate(Vec2::new(38.0, 0.0));
-    for (k, (br, ic, enabled)) in [(back, Icon::Back, !app.lens_back.is_empty()), (fwd, Icon::Forward, !app.lens_fwd.is_empty())].into_iter().enumerate() {
-        let resp = ui.interact(br, ui.id().with(("nav", k)), if enabled { Sense::click() } else { Sense::hover() });
-        p.rect_filled(br, 8.0, white(if resp.hovered() && enabled { 40 } else { 18 }));
-        icon(&p, ic, br.shrink(8.0), if enabled { TEXT } else { TEXT_FAINT });
-        if resp.clicked() {
-            if k == 0 {
-                if let Some(prev) = app.lens_back.pop() {
-                    app.lens_fwd.push(app.lens_path.clone());
-                    app.lens_path = prev;
-                }
-            } else if let Some(next) = app.lens_fwd.pop() {
-                app.lens_back.push(app.lens_path.clone());
-                app.lens_path = next;
-            }
+    if scan::find(&root, &app.lens_path).is_none() {
+        app.lens_path = root.path.clone();
+    }
+    let node = scan::find(&root, &app.lens_path).cloned().unwrap_or_else(|| root.clone());
+    let mut go_to: Option<PathBuf> = None;
+
+    // header: up, breadcrumbs, size, hint, new map
+    let hr = Rect::from_min_size(r.min, Vec2::new(r.width(), HEADER_H));
+    hairline(&p, hr.left_bottom(), hr.right_bottom());
+    let up = Rect::from_min_size(Pos2::new(hr.left() + 20.0, hr.center().y - 14.0), Vec2::splat(28.0));
+    let can_up = node.path != root.path;
+    let ur = ui.interact(up, ui.scope_id().with("map-up"), if can_up { Sense::click() } else { Sense::hover() });
+    p.rect_filled(up, R_SMALL, white(if !can_up { 8 } else if ur.hovered() { 32 } else { 20 }));
+    icon(&p, Icon::Back, up.shrink(7.0), if can_up { TEXT_SOFT } else { TEXT_MUTED });
+    if ur.on_hover_text("Up one level").clicked() && can_up {
+        go_to = node.path.parent().map(Path::to_path_buf);
+    }
+    let mut crumbs: Vec<(String, PathBuf)> = vec![(if root.path == home() { "Home".into() } else { root.name.clone() }, root.path.clone())];
+    if let Ok(rel) = node.path.strip_prefix(&root.path) {
+        let mut acc = root.path.clone();
+        for c in rel.components() {
+            acc.push(c);
+            crumbs.push((c.as_os_str().to_string_lossy().into_owned(), acc.clone()));
         }
     }
-    icon(&p, Icon::Folder, Rect::from_center_size(Pos2::new(bar_r.center().x - 90.0, bar_r.center().y), Vec2::splat(20.0)), Color32::from_rgb(90, 175, 255));
-    text_fit(&p, Pos2::new(bar_r.center().x - 74.0, bar_r.center().y), Align2::LEFT_CENTER, &node.name, bold(16.0), TEXT, 400.0);
-    let so = Rect::from_min_size(Pos2::new(bar_r.right() - 140.0, bar_r.top() + 10.0), Vec2::new(128.0, 32.0));
-    if pill_button(ui, so, "Start Over", 0, true).clicked() {
+    let nb = button_width(&p, "New map", BTN_SECONDARY);
+    let new_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
+    let hint = p.text(Pos2::new(new_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, "Click a folder to zoom in · tick a corner to select", font(12.0), TEXT_FAINT);
+    let mut x = up.right() + 8.0;
+    let n_crumbs = crumbs.len();
+    for (k, (label, path)) in crumbs.iter().enumerate() {
+        let last = k + 1 == n_crumbs;
+        let g = p.layout_no_wrap(label.clone(), if last { bold(13.0) } else { font(13.0) }, TEXT);
+        let br = Rect::from_min_size(Pos2::new(x, hr.center().y - 12.0), Vec2::new(g.size().x + 16.0, 24.0));
+        if br.right() > hint.left() - 80.0 {
+            break;
+        }
+        let resp = ui.interact(br, ui.scope_id().with(("crumb", k)), Sense::click());
+        if last {
+            p.rect_filled(br, 6.0, white(20));
+        } else if resp.hovered() {
+            p.rect_filled(br, 6.0, white(10));
+        }
+        p.galley(Pos2::new(br.left() + 8.0, br.center().y - g.size().y / 2.0), g, if last { TEXT } else { TEXT_DIM });
+        if resp.clicked() && !last {
+            go_to = Some(path.clone());
+        }
+        x = br.right() + 2.0;
+        if !last {
+            p.text(Pos2::new(x + 4.0, hr.center().y), Align2::CENTER_CENTER, "›", font(13.0), TEXT_MUTED);
+            x += 10.0;
+        }
+    }
+    p.text(Pos2::new(x + 8.0, hr.center().y), Align2::LEFT_CENTER, human_bytes(node.bytes), font(13.0), TEXT_FAINT);
+    if pill_button(ui, new_r, "New map", BTN_SECONDARY, true).clicked() {
         *app.lens.result.lock().unwrap() = None;
         app.lens_selected.clear();
+        app.lens_morph = None;
         return;
     }
 
-    // left list
-    let lr = Rect::from_min_max(Pos2::new(r.left(), bar_r.bottom() + 16.0), Pos2::new(r.left() + 400.0, r.bottom() - 62.0));
-    glass_card(&p, lr, 20.0, 0.0, false);
-    gradient_rect(&p, Rect::from_min_size(lr.min + Vec2::new(18.0, 18.0), Vec2::new(34.0, 42.0)), 5.0, Color32::from_rgb(235, 235, 245), Color32::from_rgb(170, 170, 190));
-    text_fit(&p, lr.min + Vec2::new(66.0, 16.0), Align2::LEFT_TOP, &node.name, bold(19.0), TEXT, lr.width() - 90.0);
-    p.text(lr.min + Vec2::new(66.0, 44.0), Align2::LEFT_TOP, format!("{}  |  {} items", human_bytes(node.bytes), human_count(node.items)), font(14.0), TEXT_DIM);
-    let nsel = app.lens_selected.len();
-    p.text(lr.min + Vec2::new(18.0, 78.0), Align2::LEFT_TOP, "Select:", bold(14.0), TEXT);
-    p.text(lr.min + Vec2::new(72.0, 78.0), Align2::LEFT_TOP, if nsel == 0 { "None".to_string() } else { format!("{nsel} items") }, font(14.0), TEXT_DIM);
-    let list = Rect::from_min_max(lr.min + Vec2::new(8.0, 106.0), lr.max - Vec2::new(8.0, 10.0));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(list).layout(egui::Layout::top_down(egui::Align::Min)));
-    child.set_clip_rect(list);
-    let mut go_into: Option<PathBuf> = None;
-    let mut toggle: Option<(PathBuf, u64)> = None;
-    ScrollArea::vertical().id_salt(("lens", node.path.display().to_string())).auto_shrink([false, false]).show(&mut child, |ui| {
-        for c in node.children.iter().take(300) {
-            let (rr, resp) = ui.allocate_exact_size(Vec2::new(list.width() - 6.0, 44.0), Sense::click());
-            let pp = ui.painter();
-            if resp.hovered() {
-                pp.rect_filled(rr, 10.0, white(12));
-            }
-            let essential = spacelens::is_essential(&c.path);
-            let on = app.lens_selected.iter().any(|(p, _)| p == &c.path);
-            let cb = Rect::from_min_size(rr.min + Vec2::new(8.0, 13.0), Vec2::splat(17.0));
-            let cr = checkbox(ui, cb, ui.id().with(("ls", &c.path)), on, !essential);
-            if essential {
-                cr.on_hover_text("This is an essential system item and it cannot be deleted.");
-            } else if cr.clicked() {
-                toggle = Some((c.path.clone(), c.bytes));
-            }
-            let pp = ui.painter();
-            let ic_r = Rect::from_min_size(rr.min + Vec2::new(36.0, 9.0), Vec2::new(30.0, 26.0));
-            if c.is_dir {
-                icon(pp, Icon::Folder, ic_r, Color32::from_rgb(90, 175, 255));
-            } else {
-                gradient_rect(pp, ic_r.shrink2(Vec2::new(5.0, 0.0)), 3.0, Color32::from_rgb(235, 235, 245), Color32::from_rgb(180, 180, 200));
-            }
-            text_fit(pp, rr.min + Vec2::new(78.0, 22.0), Align2::LEFT_CENTER, &c.name, font(15.5), TEXT, rr.width() - 180.0);
-            pp.text(Pos2::new(rr.right() - 12.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(c.bytes), bold(14.0), TEXT_DIM);
-            if resp.clicked() && c.is_dir && !c.children.is_empty() {
-                go_into = Some(c.path.clone());
-            }
+    // treemap
+    let fr = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - FOOTER_H), r.max);
+    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, fr.top() - 12.0));
+    let area = Rect::from_min_max(body.min, Pos2::new(body.right() - ASIDE_W - 16.0, body.bottom()));
+    let mut vals: Vec<f64> = node.children.iter().map(|c| c.bytes as f64).collect();
+    if node.other > 0 {
+        vals.push(node.other as f64);
+    }
+    let rects = scan::squarify(&vals, area);
+    let now = ctx.input(|i| i.time);
+    let morph = app.lens_morph.clone().and_then(|(into, focus, start)| {
+        let t = ((now - start) / MORPH_SECS).clamp(0.0, 1.0) as f32;
+        if t >= 1.0 {
+            return None;
         }
-        if node.other > 0 {
-            let (rr, _) = ui.allocate_exact_size(Vec2::new(list.width() - 6.0, 40.0), Sense::hover());
-            let pp = ui.painter();
-            pp.circle_filled(rr.min + Vec2::new(51.0, 20.0), 9.0, white(60));
-            pp.text(rr.min + Vec2::new(78.0, 20.0), Align2::LEFT_CENTER, "Other items", font(15.0), TEXT_DIM);
-            pp.text(Pos2::new(rr.right() - 12.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(node.other), bold(14.0), TEXT_FAINT);
-        }
+        let ease = 1.0 - (1.0 - t).powi(3);
+        let (from, to) = match into {
+            Some(clicked) => (area, clicked),
+            None => {
+                let k = node.children.iter().position(|c| focus.starts_with(&c.path))?;
+                (rects[k], area)
+            }
+        };
+        Some((from, to, ease))
     });
+    if morph.is_some() {
+        ctx.request_repaint();
+    } else {
+        app.lens_morph = None;
+    }
+    let mp = p.with_clip_rect(area.expand(1.0));
+    let depth = node.path.strip_prefix(&root.path).map(|x| x.components().count()).unwrap_or(0);
+    let n = vals.len();
+    let mut hovered: Option<(String, Color32, u64, Option<usize>)> = None;
+    let mut toggle: Option<(PathBuf, u64)> = None;
+    for k in 0..n {
+        let base = rects[k];
+        let shown = match morph {
+            Some((from, to, e)) => lerp_rect(affine(base, from, to), base, e),
+            None => base,
+        };
+        let br = shown.shrink(2.0);
+        if br.width() < 1.0 || br.height() < 1.0 {
+            continue;
+        }
+        let child = node.children.get(k);
+        let (name, bytes, path) = match child {
+            Some(c) => (c.name.clone(), c.bytes, Some(c.path.clone())),
+            None => ("Other items".to_string(), node.other, None),
+        };
+        let hue = match &path {
+            Some(pa) if depth == 0 => HUES[k.min(HUES.len() - 1)],
+            Some(pa) => hue_of(&root, pa),
+            None => OTHER_HUE,
+        };
+        let shade = if depth == 0 { 0.75 } else { 0.45 + 0.4 * (1.0 - k as f32 / (n.max(2) - 1) as f32) };
+        let id = ui.scope_id().with(("blk", &name, k));
+        let resp = ui.interact(br, id, if path.is_some() && morph.is_none() { Sense::click() } else { Sense::hover() });
+        let hov = resp.hovered();
+        let mut fill = lerp_color(BG, hue, shade);
+        if hov {
+            fill = lerp_color(fill, Color32::WHITE, 0.14);
+        }
+        mp.rect_filled(br, 8.0, fill);
+        let selectable = path.as_ref().is_some_and(|pa| !scan::is_essential(pa));
+        let on = path.as_ref().is_some_and(|pa| app.lens_selected.iter().any(|(q, _)| q == pa));
+        if on {
+            mp.rect_stroke(br, 8.0, Stroke::new(3.0, Color32::WHITE), StrokeKind::Inside);
+        }
+        let kids = child.map(|c| c.children.len()).unwrap_or(0);
+        if br.width() > 64.0 && br.height() > 46.0 {
+            let fs = if br.width() > 220.0 && br.height() > 120.0 { 16.0 } else { 12.0 };
+            let tw = br.width() - 20.0 - if selectable { 22.0 } else { 0.0 };
+            let mut ty = br.top() + 10.0;
+            ty += text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &name, bold(fs), Color32::WHITE, tw).height() + 3.0;
+            ty += text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &format!("{} · {}%", human_bytes(bytes), pct(bytes, node.bytes)), font(12.0), white(217), br.width() - 20.0).height() + 3.0;
+            if kids > 0 && ty + 14.0 < br.bottom() {
+                text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &format!("{kids} items · click to open"), font(11.0), white(166), br.width() - 20.0);
+            }
+        }
+        // selection box in the corner
+        let mut box_clicked = false;
+        if selectable && morph.is_none() && br.width() > 30.0 && br.height() > 30.0 {
+            let bx = Rect::from_min_size(Pos2::new(br.right() - 24.0, br.top() + 6.0), Vec2::splat(18.0));
+            let bresp = ui.interact(bx, id.with("box"), Sense::click());
+            if on {
+                mp.rect_filled(bx, 5.0, BLUE);
+                mp.rect_stroke(bx, 5.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Inside);
+                icon(&mp, Icon::Check, bx.shrink(4.0), Color32::WHITE);
+            } else {
+                mp.rect_filled(bx, 5.0, Color32::from_black_alpha(64));
+                mp.rect_stroke(bx, 5.0, Stroke::new(1.5, white(if hov || bresp.hovered() { 230 } else { 115 })), StrokeKind::Inside);
+            }
+            box_clicked = bresp.on_hover_text(if on { "Remove from the list" } else { "Add to the list" }).clicked();
+        }
+        if hov || (morph.is_none() && ui.rect_contains_pointer(br)) {
+            hovered = Some((path.as_ref().map(|pa| tilde(pa)).unwrap_or_else(|| format!("{} · small files", tilde(&node.path))), hue, bytes, (kids > 0).then_some(kids)));
+        }
+        if let Some(pa) = &path {
+            if box_clicked {
+                toggle = Some((pa.clone(), bytes));
+            } else if resp.clicked() {
+                if kids > 0 {
+                    app.lens_morph = Some((Some(base), PathBuf::new(), now));
+                    go_to = Some(pa.clone());
+                } else if selectable {
+                    toggle = Some((pa.clone(), bytes));
+                }
+            }
+            if hov && kids > 0 {
+                ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
+            } else if hov && selectable {
+                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if hov && !selectable {
+                resp.on_hover_text("Your Mac needs this folder, so it can't be removed.");
+            }
+        }
+    }
     if let Some((path, b)) = toggle {
-        if let Some(i) = app.lens_selected.iter().position(|(p, _)| p == &path) {
+        if let Some(i) = app.lens_selected.iter().position(|(q, _)| q == &path) {
             app.lens_selected.remove(i);
         } else {
-            app.lens_selected.retain(|(p, _)| !p.starts_with(&path));
-            app.lens_selected.push((path, b));
+            // a folder replaces anything picked inside it
+            app.lens_selected.retain(|(q, _)| !q.starts_with(&path));
+            if !app.lens_selected.iter().any(|(q, _)| path.starts_with(q)) {
+                app.lens_selected.push((path, b));
+            }
         }
+    }
+    if let Some(target) = go_to {
+        if app.lens_morph.as_ref().is_none_or(|m| m.0.is_none()) {
+            // going up: zoom out from the folder we were in
+            app.lens_morph = Some((None, app.lens_path.clone(), now));
+        }
+        app.lens_path = target;
+        ctx.request_repaint();
     }
 
-    // bubbles
-    let br = Rect::from_min_max(Pos2::new(lr.right() + 20.0, lr.top()), Pos2::new(r.right(), lr.bottom()));
-    let sizes: Vec<u64> = node.children.iter().map(|c| c.bytes).collect();
-    let packed = spacelens::pack(&sizes, br.shrink(10.0), 11);
-    for (i, c, rad) in packed {
-        let ch = &node.children[i];
-        let id = ui.id().with(("bubble", &ch.path));
-        let resp = ui.interact(Rect::from_center_size(c, Vec2::splat(rad * 1.6)), id, Sense::click());
-        let hv = ctx.animate_bool(id, resp.hovered());
-        let rr = rad + 3.0 * hv;
-        bubble(&p, c, rr, hv, app.lens_selected.iter().any(|(p, _)| p == &ch.path));
-        let isz = (rr * 0.55).min(110.0);
-        if ch.is_dir {
-            icon(&p, Icon::Folder, Rect::from_center_size(c - Vec2::new(0.0, if rr > 40.0 { rr * 0.2 } else { 0.0 }), Vec2::new(isz, isz * 0.85)), Color32::from_rgb(90, 175, 255));
-        } else {
-            gradient_rect(&p, Rect::from_center_size(c - Vec2::new(0.0, rr * 0.2), Vec2::new(isz * 0.6, isz * 0.8)), 4.0, Color32::from_rgb(235, 235, 245), Color32::from_rgb(180, 180, 200));
-        }
-        if rr > 40.0 {
-            let fs = (rr * 0.16).clamp(11.5, 26.0);
-            text_fit(&p, c + Vec2::new(0.0, rr * 0.36), Align2::CENTER_CENTER, &ch.name, bold(fs), TEXT, rr * 1.6);
-            p.text(c + Vec2::new(0.0, rr * 0.36 + fs + 2.0), Align2::CENTER_CENTER, human_bytes(ch.bytes), bold((fs * 0.92).max(11.0)), TEXT);
-        }
-        if resp.hovered() {
-            let tip = format!("{}\nSize: {}{}", ch.name, human_bytes(ch.bytes), ch.modified.map(|m| format!("\nModified: {}", chrono::DateTime::<chrono::Local>::from(m).format("%b %e, %Y"))).unwrap_or_default());
-            resp.clone().on_hover_text(tip);
-        }
-        if resp.clicked() && ch.is_dir && !ch.children.is_empty() {
-            go_into = Some(ch.path.clone());
+    // aside: the list to remove
+    let ar = Rect::from_min_max(Pos2::new(area.right() + 16.0, body.top()), body.max);
+    section_header(&p, ar.min, Align2::LEFT_TOP, "TO REMOVE");
+    let total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
+    let list_top = ar.top() + 24.0;
+    let list_bottom = ar.bottom() - 34.0 - 12.0 - 34.0;
+    if app.lens_selected.is_empty() {
+        paragraph(&p, Pos2::new(ar.left(), list_top), "Nothing yet. Tick the corner of a block to add it here.", font(12.0), TEXT_FAINT, ar.width());
+    }
+    let mut drop: Option<usize> = None;
+    let rel = |pa: &Path| -> String {
+        pa.strip_prefix(&root.path).map(|x| x.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join(" › ")).unwrap_or_else(|_| tilde(pa))
+    };
+    let max_rows = ((list_bottom - list_top) / 32.0).floor().max(0.0) as usize;
+    for (i, (pa, b)) in app.lens_selected.iter().enumerate().take(max_rows) {
+        let rr = Rect::from_min_size(Pos2::new(ar.left(), list_top + i as f32 * 32.0), Vec2::new(ar.width(), 30.0));
+        p.rect_filled(rr, R_SMALL, white(13));
+        p.rect_filled(Rect::from_center_size(Pos2::new(rr.left() + 12.0, rr.center().y), Vec2::splat(8.0)), 2.0, hue_of(&root, pa));
+        let xr = Rect::from_center_size(Pos2::new(rr.right() - 14.0, rr.center().y), Vec2::splat(18.0));
+        let sr = p.text(Pos2::new(xr.left() - 6.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(*b), font(13.0), TEXT_SOFT);
+        text_fit(&p, Pos2::new(rr.left() + 24.0, rr.center().y), Align2::LEFT_CENTER, &rel(pa), font(13.0), TEXT, sr.left() - rr.left() - 32.0);
+        let xresp = ui.interact(xr, ui.scope_id().with(("unpick", i)), Sense::click());
+        p.text(xr.center(), Align2::CENTER_CENTER, "×", font(15.0), if xresp.hovered() { TEXT } else { TEXT_FAINT });
+        if xresp.on_hover_text("Remove from the list").clicked() {
+            drop = Some(i);
         }
     }
-    if let Some(path) = go_into {
-        app.lens_back.push(app.lens_path.clone());
-        app.lens_fwd.clear();
-        app.lens_path = path;
+    if app.lens_selected.len() > max_rows {
+        p.text(Pos2::new(ar.left(), list_top + max_rows as f32 * 32.0 + 4.0), Align2::LEFT_TOP, format!("and {} more", app.lens_selected.len() - max_rows), font(12.0), TEXT_FAINT);
     }
-
-    // bottom: disk bar, selection and Review
-    let (volume, disk_total, disk_free) = app.disk();
-    let by = r.bottom() - 30.0;
-    p.text(Pos2::new(r.left() + 4.0, by - 10.0), Align2::LEFT_CENTER, &volume, bold(16.0), TEXT);
-    let used = disk_total.saturating_sub(disk_free);
-    p.text(Pos2::new(lr.right(), by - 10.0), Align2::RIGHT_CENTER, format!("{} of {} used", human_bytes(used), human_bytes(disk_total)), font(14.0), TEXT_DIM);
-    bar(&p, Rect::from_min_size(Pos2::new(r.left(), by + 12.0), Vec2::new(lr.width(), 6.0)), used as f32 / disk_total.max(1) as f32, Color32::from_rgb(220, 220, 255));
-    let sel_bytes: u64 = app.lens_selected.iter().map(|x| x.1).sum();
-    icon(&p, Icon::Info, Rect::from_center_size(Pos2::new(br.left() + 120.0, by), Vec2::splat(20.0)), TEXT_DIM);
-    let txt = if app.lens_selected.is_empty() { "No Items selected".to_string() } else { format!("{} items selected", app.lens_selected.len()) };
-    p.text(Pos2::new(br.left() + 140.0, by), Align2::LEFT_CENTER, format!("{txt}   |   {}", human_bytes(sel_bytes)), bold(15.0), TEXT);
-    let rb = Rect::from_min_size(Pos2::new(r.right() - 200.0, by - 20.0), Vec2::new(200.0, 40.0));
-    if pill_button(ui, rb, "Review and Remove", 1, !app.lens_selected.is_empty()).clicked() {
+    if let Some(i) = drop {
+        app.lens_selected.remove(i);
+    }
+    let g = p.layout_no_wrap(human_bytes(total), bold(22.0), TEXT);
+    let gw = g.size().x;
+    let ty = ar.bottom() - 34.0 - 12.0 - g.size().y;
+    p.galley(Pos2::new(ar.left(), ty), g, TEXT);
+    p.text(Pos2::new(ar.left() + gw + 6.0, ty + 22.0 * 0.82), Align2::LEFT_BOTTOM, "selected", font(13.0), TEXT_FAINT);
+    let rb = Rect::from_min_max(Pos2::new(ar.left(), ar.bottom() - 34.0), ar.max);
+    if pill_button(ui, rb, "Review and remove", BTN_PRIMARY, !app.lens_selected.is_empty()).clicked() {
         app.lens_review = true;
     }
+
+    // footer: what's under the pointer
+    p.rect_filled(fr, CornerRadius { se: 12, ..Default::default() }, FOOTER);
+    hairline(&p, fr.left_top(), fr.right_top());
+    match hovered {
+        Some((path, hue, bytes, kids)) => {
+            p.rect_filled(Rect::from_center_size(Pos2::new(fr.left() + 25.0, fr.center().y), Vec2::splat(10.0)), 3.0, hue);
+            let parent = if depth == 0 { "Home".to_string() } else { node.name.clone() };
+            let info = format!("{} · {}% of {}{}", human_bytes(bytes), pct(bytes, node.bytes), parent, kids.map(|k| format!(" · {k} items")).unwrap_or_default());
+            let ir = p.text(Pos2::new(fr.right() - 20.0, fr.center().y), Align2::RIGHT_CENTER, info, font(13.0), TEXT_DIM);
+            text_fit(&p, Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, &path, mono(12.0), TEXT_SOFT, ir.left() - fr.left() - 56.0);
+        }
+        None => {
+            p.text(Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, "Hover a block to see details", mono(12.0), TEXT_FAINT);
+        }
+    }
+
     if app.lens_review {
         review(app, ui, r, cx);
     }
 }
 
-fn bubble(p: &egui::Painter, c: Pos2, r: f32, hover: f32, selected: bool) {
-    // a clear glass bubble
-    let rect = Rect::from_center_size(c, Vec2::splat(r * 2.0));
-    let shadow = egui::epaint::Shadow { offset: [0, 6], blur: 20, spread: 0, color: Color32::from_black_alpha(50) };
-    p.add(shadow.as_shape(rect, egui::CornerRadius::same(r.min(255.0) as u8)));
-    gradient_rect_dir(p, rect, r, white((30.0 + 18.0 * hover) as u8), white((8.0 + 10.0 * hover) as u8), Vec2::new(0.3, 1.0));
-    rim(p, rect, r, 0.9 + 0.1 * hover);
-    if selected {
-        p.circle_stroke(c, r + 2.0, Stroke::new(2.5, BLUE));
-    }
-}
-
 fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
-    p.rect_filled(r.expand(30.0), 0.0, Color32::from_black_alpha(120));
-    let m = Rect::from_center_size(r.center(), Vec2::new(560.0, 420.0));
-    glass_card(&p, m, 22.0, 0.3, false);
-    p.rect_filled(m, 22.0, Color32::from_rgba_unmultiplied(28, 28, 32, 225));
-    p.text(m.min + Vec2::new(24.0, 22.0), Align2::LEFT_TOP, "Review Items Before Removal", bold(20.0), TEXT);
-    p.text(m.min + Vec2::new(24.0, 52.0), Align2::LEFT_TOP, "They'll be moved to the Trash, so you can put them back.", font(14.0), TEXT_DIM);
-    let list = Rect::from_min_max(m.min + Vec2::new(16.0, 84.0), m.max - Vec2::new(16.0, 72.0));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(list).layout(egui::Layout::top_down(egui::Align::Min)));
-    child.set_clip_rect(list);
+    // swallow clicks behind the dialog
+    let _ = ui.interact(r, ui.scope_id().with("review-scrim"), Sense::click());
+    p.rect_filled(r, CornerRadius { ne: 12, se: 12, ..Default::default() }, Color32::from_black_alpha(115));
+    let n = app.lens_selected.len();
+    let rows = n.min(8);
+    let h = 22.0 + 46.0 + 14.0 + rows as f32 * 34.0 + 8.0 + 18.0 + 30.0 + 22.0;
+    let m = Rect::from_center_size(r.center(), Vec2::new(520.0, h));
+    p.rect_filled(m.translate(Vec2::new(0.0, 10.0)).expand(6.0), 18.0, Color32::from_black_alpha(70));
+    p.rect_filled(m, 14.0, RAISED);
+    p.rect_stroke(m, 14.0, Stroke::new(1.0, white(31)), StrokeKind::Inside);
+    let total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
+    let title = format!("Move {} item{} ({}) to the Trash?", n, if n == 1 { "" } else { "s" }, human_bytes(total));
+    text_fit(&p, m.min + Vec2::new(22.0, 22.0), Align2::LEFT_TOP, &title, bold(17.0), TEXT, m.width() - 44.0);
+    text_fit(&p, m.min + Vec2::new(22.0, 48.0), Align2::LEFT_TOP, "You can put them back from the Trash. System folders and code projects are skipped.", font(13.0), TEXT_DIM, m.width() - 44.0);
+    let list = Rect::from_min_size(m.min + Vec2::new(22.0, 82.0), Vec2::new(m.width() - 44.0, rows as f32 * 34.0 + 8.0));
+    p.rect_filled(list, 10.0, Color32::from_black_alpha(46));
     let mut drop: Option<usize> = None;
-    let home = dirs::home_dir().unwrap_or_default().display().to_string();
-    ScrollArea::vertical().id_salt("review").auto_shrink([false, false]).show(&mut child, |ui| {
-        for (i, (path, b)) in app.lens_selected.iter().enumerate() {
-            let (rr, _) = ui.allocate_exact_size(Vec2::new(list.width() - 6.0, 34.0), Sense::hover());
-            let pp = ui.painter();
-            text_fit(pp, rr.min + Vec2::new(8.0, 17.0), Align2::LEFT_CENTER, &middle_ellipsis(&path.display().to_string().replacen(&home, "~", 1), 60), font(14.0), TEXT, rr.width() - 160.0);
-            pp.text(Pos2::new(rr.right() - 40.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(*b), bold(14.0), TEXT_DIM);
-            let xr = Rect::from_center_size(Pos2::new(rr.right() - 16.0, rr.center().y), Vec2::splat(20.0));
-            let resp = ui.interact(xr, ui.id().with(("rm", i)), Sense::click());
-            ui.painter().text(xr.center(), Align2::CENTER_CENTER, "×", font(18.0), if resp.hovered() { TEXT } else { TEXT_FAINT });
-            if resp.clicked() {
-                drop = Some(i);
-            }
+    for (i, (path, b)) in app.lens_selected.iter().enumerate().take(rows) {
+        let rr = Rect::from_min_size(Pos2::new(list.left(), list.top() + 4.0 + i as f32 * 34.0), Vec2::new(list.width(), 34.0));
+        icon(&p, Icon::Folder, Rect::from_center_size(Pos2::new(rr.left() + 20.0, rr.center().y), Vec2::splat(16.0)), ACCENT);
+        let xr = Rect::from_center_size(Pos2::new(rr.right() - 20.0, rr.center().y), Vec2::splat(22.0));
+        let sr = p.text(Pos2::new(xr.left() - 8.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(*b), font(13.0), TEXT_SOFT);
+        text_fit(&p, Pos2::new(rr.left() + 38.0, rr.center().y), Align2::LEFT_CENTER, &tilde(path), mono(12.0), TEXT, sr.left() - rr.left() - 48.0);
+        if round_button(ui, xr, Icon::Close, "Remove from the list").clicked() {
+            drop = Some(i);
         }
-    });
+    }
     if let Some(i) = drop {
         app.lens_selected.remove(i);
     }
-    let cancel = Rect::from_min_size(Pos2::new(m.right() - 256.0, m.bottom() - 54.0), Vec2::new(110.0, 34.0));
-    let ok = Rect::from_min_size(Pos2::new(m.right() - 134.0, m.bottom() - 54.0), Vec2::new(110.0, 34.0));
-    if pill_button(ui, cancel, "Cancel", 0, true).clicked() {
+    let by = m.bottom() - 22.0 - 30.0;
+    let ow = button_width(&p, "Move to Trash", BTN_PRIMARY);
+    let ok = Rect::from_min_size(Pos2::new(m.right() - 22.0 - ow, by), Vec2::new(ow, 30.0));
+    let cw = button_width(&p, "Cancel", BTN_SECONDARY);
+    let cancel = Rect::from_min_size(Pos2::new(ok.left() - 8.0 - cw, by), Vec2::new(cw, 30.0));
+    if pill_button(ui, cancel, "Cancel", BTN_SECONDARY, true).clicked() || app.lens_selected.is_empty() {
         app.lens_review = false;
     }
-    if pill_button(ui, ok, "Remove", 2, !app.lens_selected.is_empty()).clicked() {
+    if pill_button(ui, ok, "Move to Trash", BTN_PRIMARY, !app.lens_selected.is_empty()).clicked() {
         let mut removed = vec![];
         let mut failed = 0;
         let mut freed = 0;
         for (path, b) in app.lens_selected.drain(..) {
-            if spacelens::is_essential(&path) || crate::kit::fs::is_protected(&path).is_some() && path.join(".git").exists() {
+            if scan::is_essential(&path) || crate::kit::fs::is_protected(&path).is_some() && path.join(".git").exists() {
                 failed += 1;
                 continue;
             }
@@ -290,7 +525,7 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             }
         }
         if let Some(root) = app.lens.result.lock().unwrap().as_mut() {
-            spacelens::prune(root, &removed);
+            scan::prune(root, &removed);
         }
         app.lens_review = false;
         let msg = if failed == 0 { format!("Moved {} to the Trash", human_bytes(freed)) } else { format!("Moved {} to the Trash · {failed} items couldn't be removed", human_bytes(freed)) };
@@ -298,22 +533,37 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     }
 }
 
-fn human_count(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.0}M", n as f64 / 1e6)
-    } else if n >= 1_000 {
-        format!("{:.0}K", n as f64 / 1e3)
-    } else {
-        n.to_string()
-    }
-}
-
-/// A made-up tree for screenshots (no personal paths).
+/// A made-up home folder for screenshots (no personal paths).
 pub fn demo_tree(app: &mut App) {
-    let mk = |name: &str, bytes: u64| Node { name: name.into(), path: PathBuf::from(format!("/{name}")), bytes, items: bytes / 400_000, is_dir: true, modified: None, children: vec![Node::default()], other: 0 };
-    let children = vec![mk("Users", 365_000_000_000), mk("Applications", 65_600_000_000), mk("System", 36_500_000_000), mk("opt", 34_700_000_000), mk("private", 18_600_000_000), mk("Library", 11_700_000_000), mk("usr", 3_300_000_000), mk("bin", 7_200_000), mk("sbin", 3_200_000)];
-    let total = children.iter().map(|c| c.bytes).sum();
-    let root = Node { name: "Macintosh HD".into(), path: PathBuf::from("/"), bytes: total, items: 6_000_000, is_dir: true, modified: None, children, other: 120_000_000 };
-    app.lens_path = PathBuf::from("/");
+    const GB: f64 = 1_000_000_000.0;
+    fn mk(parent: &Path, name: &str, gb: f64, kids: Vec<(&str, f64, Vec<(&str, f64)>)>) -> Node {
+        let path = parent.join(name);
+        let children: Vec<Node> = kids
+            .into_iter()
+            .map(|(n, g, sub)| mk(&path, n, g, sub.into_iter().map(|(a, b)| (a, b, vec![])).collect()))
+            .collect();
+        Node { name: name.into(), path: path.clone(), bytes: (gb * GB) as u64, items: (gb * 2400.0) as u64, children, other: 0 }
+    }
+    let base = PathBuf::from("/Users");
+    let root = mk(
+        &base,
+        "me",
+        365.0,
+        vec![
+            ("Library", 182.0, vec![("Containers", 61.0), ("Application Support", 48.0), ("Caches", 34.0), ("Developer", 27.0), ("Mail", 7.0), ("Logs", 5.0)]),
+            ("Projects", 64.2, vec![("web-app", 22.0), ("cleanmebro", 18.0), ("api-server", 14.0), ("notes", 10.2)]),
+            ("Downloads", 38.4, vec![("Xcode_16.xip", 12.0), ("old-movies.zip", 9.4), ("Installers", 8.0), ("Archive", 9.0)]),
+            ("Movies", 31.0, vec![("Screen recordings", 19.0), ("Final Cut", 12.0)]),
+            ("Pictures", 22.5, vec![("Photos Library", 21.0), ("Wallpapers", 1.5)]),
+            ("Documents", 14.1, vec![]),
+            ("Music", 6.3, vec![]),
+            ("Desktop", 2.1, vec![]),
+        ],
+    );
+    let mut root = root;
+    root.other = (4.4 * GB) as u64;
+    app.lens_root = root.path.clone();
+    app.lens_path = root.path.clone();
+    app.lens_selected = vec![(root.path.join("Downloads/Xcode_16.xip"), (12.0 * GB) as u64), (root.path.join("Movies"), (31.0 * GB) as u64)];
     *app.lens.result.lock().unwrap() = Some(root);
 }

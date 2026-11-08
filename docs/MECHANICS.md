@@ -15,7 +15,7 @@ used by `sub_1001a44ec`, "Pressure" at 0x100325900 used by `sub_1001a5118`).
 |---|---|---|
 | Mac Health header | worst of disk / memory / thermal / battery level ("Good", "Fair", "Needs care") — glow assets `HeathStatus_glow_{good,fair,critical}` (`sub_1000294b0`) | — |
 | Claude card (replaces Protection) | plan, session % and week % with reset time | plan limits, local tokens (5h/today/7d + 7-day bars), "what uses your limits" |
-| Macintosh HD | Available: free space, "Free Up" → Cleanup | ring by Applications/Documents/Downloads/Desktop/Other, Health (SMART), Used %, Trash, Space Lens |
+| Macintosh HD | Available: free space, "Free Up" → Cleanup | ring by Applications/Documents/Downloads/Desktop/Other, Health (SMART), Used %, Trash, Disk Map |
 | Memory | Pressure % | ring Active/Wired/Compressed/Available, Pressure, Swap File |
 | Battery | %, Not charging / Charging / Fully charged / time left | charge ring, cycles (of design count), Health %, Temperature |
 | CPU | Load %, thermal word | User/System/Available ring + sparkline, Temperature (thermal state), Uptime |
@@ -128,10 +128,11 @@ Safe items start selected; "ask" items wait for Allow/Keep.
 **Removal**: moved to the Trash by default (can be put back); "Delete right away"
 deletes; emptying the Trash is permanent and confirmed.
 
-## Space Lens
+## Disk Map
 
 Walks a chosen place (Home by default, or the whole disk) on one volume, sizes by
 allocated blocks, keeps files ≥ 8 MB individually and folds the rest into "Other
-items". List sorted by size + bubble map (up to 11 bubbles, radius ∝ size^0.42,
-tangent packing). System folders can't be selected ("essential system item");
-removal goes to the Trash after a review list.
+items". Shown as a drill-down squarified treemap of the current folder (one
+colour per top-level folder; click a folder to zoom in, tick a block's corner to
+select it). System folders can't be selected; removal goes to the Trash after a
+review list.

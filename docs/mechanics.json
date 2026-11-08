@@ -308,22 +308,10 @@
       "estimated": true
     },
     {
-      "name": "space lens kept file size",
-      "group": "spacelens",
+      "name": "disk map kept file size",
+      "group": "diskmap",
       "value": 8000000,
       "unit": "bytes",
-      "estimated": true
-    },
-    {
-      "name": "space lens bubbles",
-      "group": "spacelens",
-      "value": 11,
-      "estimated": true
-    },
-    {
-      "name": "space lens bubble size exponent",
-      "group": "spacelens",
-      "value": 0.42,
       "estimated": true
     }
   ]

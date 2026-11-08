@@ -1,5 +1,5 @@
 //! CleanMeBro — a glassy menu bar companion built from isolated tools (Mac
-//! health, Claude limits, Cleanup, Space Lens) behind one panel of widgets.
+//! health, Claude limits, Cleanup, Disk Map) behind one panel of widgets.
 //!
 //! `--screenshot <file.png>` draws ~120 frames with sample data, saves the
 //! window as a PNG and exits. `--view <name>` picks what it shows: panel,

@@ -1,5 +1,5 @@
-//! Disk Map tool: measures a folder tree and shows it as a list and a
-//! bubble map; selected items go to the Trash after review. Lives in the full
+//! Disk Map tool: measures a folder tree and shows it as a drill-down
+//! treemap; selected items go to the Trash after review. Lives in the full
 //! window.
 
 mod page;
@@ -16,37 +16,26 @@ pub struct Lens {
     pub(crate) lens: scan::Shared,
     pub(crate) lens_root: PathBuf,
     pub(crate) lens_path: PathBuf,
-    pub(crate) lens_back: Vec<PathBuf>,
-    pub(crate) lens_fwd: Vec<PathBuf>,
+    /// Zoom animation: (clicked block when zooming in, folder left when
+    /// zooming out, start time).
+    pub(crate) lens_morph: Option<(Option<egui::Rect>, PathBuf, f64)>,
     pub(crate) lens_selected: Vec<(PathBuf, u64)>,
     pub(crate) lens_review: bool,
     pub(crate) lens_msg: Option<String>,
-    demo: bool,
 }
 
 impl Lens {
-    pub fn new(env: &ToolEnv) -> Self {
+    pub fn new(_env: &ToolEnv) -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         Lens {
             lens: Default::default(),
             lens_root: home.clone(),
             lens_path: home,
-            lens_back: vec![],
-            lens_fwd: vec![],
+            lens_morph: None,
             lens_selected: vec![],
             lens_review: false,
             lens_msg: None,
-            demo: env.demo,
         }
-    }
-
-    /// (volume name, total, available) of the startup disk.
-    pub(crate) fn disk(&self) -> (String, u64, u64) {
-        if self.demo {
-            return ("Macintosh HD".into(), 2_000_000_000_000, 1_440_000_000_000);
-        }
-        let (total, free) = crate::kit::fs::volume_space("/");
-        (crate::kit::fs::root_volume_name(), total, free)
     }
 }
 

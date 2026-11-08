@@ -3,7 +3,7 @@
 //! small monochrome icons (no bitmap assets).
 
 use egui::{
-    epaint::{Mesh, PathShape, PathStroke},
+    epaint::{PathShape, PathStroke},
     Align2, Color32, CornerRadius, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense,
     Shape, Stroke, StrokeKind, Ui, Vec2,
 };
@@ -119,37 +119,6 @@ pub fn rounded_points(rect: Rect, r: f32) -> Vec<Pos2> {
         }
     }
     pts
-}
-
-/// A rounded rectangle filled with a vertical gradient.
-pub fn gradient_rect(painter: &Painter, rect: Rect, r: f32, top: Color32, bottom: Color32) {
-    gradient_rect_dir(painter, rect, r, top, bottom, Vec2::new(0.0, 1.0));
-}
-
-/// A rounded rectangle filled with a linear gradient along `dir`.
-pub fn gradient_rect_dir(
-    painter: &Painter,
-    rect: Rect,
-    r: f32,
-    from: Color32,
-    to: Color32,
-    dir: Vec2,
-) {
-    let pts = rounded_points(rect, r);
-    let dir = dir.normalized();
-    let half = (rect.width() * dir.x.abs() + rect.height() * dir.y.abs()) / 2.0;
-    let center = rect.center();
-    let t_of = |p: Pos2| ((p - center).dot(dir) / half.max(1.0) + 1.0) / 2.0;
-    let mut mesh = Mesh::default();
-    mesh.colored_vertex(center, lerp_color(from, to, 0.5));
-    for p in &pts {
-        mesh.colored_vertex(*p, lerp_color(from, to, t_of(*p)));
-    }
-    let n = pts.len() as u32;
-    for i in 0..n {
-        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
-    }
-    painter.add(Shape::mesh(mesh));
 }
 
 /// The window surface: near-opaque dark material with a 1 pt hairline edge.
@@ -1011,17 +980,6 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
     }
 }
 
-/// Hero mark for start / done screens: a flat rounded square in the card
-/// colour with a tinted glyph (no glows). `phase` is unused (kept for callers).
-pub fn orb(p: &Painter, center: Pos2, radius: f32, base: Color32, glyph: Icon, _phase: f64) {
-    let side = (radius * 0.9).min(96.0);
-    let rect = Rect::from_center_size(center, Vec2::splat(side));
-    let r = (side * 0.24).round();
-    p.rect_filled(rect, r, with_alpha(base, 0.16));
-    p.rect_stroke(rect, r, Stroke::new(1.0, with_alpha(base, 0.35)), StrokeKind::Inside);
-    icon(p, glyph, rect.shrink(side * 0.25), lerp_color(base, Color32::WHITE, 0.35));
-}
-
 pub fn human_bytes(b: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut v = b as f64;
@@ -1056,11 +1014,6 @@ pub fn human_duration(secs: u64) -> String {
     } else {
         format!("{m}m")
     }
-}
-
-/// Hairline edge (white ~10% × `strength`). Kept for older call sites.
-pub fn rim(p: &Painter, rect: Rect, r: f32, strength: f32) {
-    p.rect_stroke(rect, r, Stroke::new(1.0, white((HAIRLINE_STRONG as f32 * strength).min(255.0) as u8)), StrokeKind::Inside);
 }
 
 

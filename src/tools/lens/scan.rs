@@ -1,11 +1,10 @@
-//! Space Lens: measure a folder tree in the background, then browse it as a
-//! sorted list and a bubble map; selected items go to the Trash after review.
+//! Disk Map: measure a folder tree in the background, then browse it as a
+//! drill-down treemap; selected items go to the Trash after review.
 
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 #[derive(Clone, Debug, Default)]
 pub struct Node {
@@ -13,8 +12,6 @@ pub struct Node {
     pub path: PathBuf,
     pub bytes: u64,
     pub items: u64,
-    pub is_dir: bool,
-    pub modified: Option<SystemTime>,
     pub children: Vec<Node>,
     pub other: u64, // small files folded together ("Other items")
 }
@@ -67,13 +64,10 @@ pub fn start(shared: Shared, root: PathBuf, ctx: egui::Context) {
 }
 
 fn walk(p: &Path, dev: u64, s: &Scan, ctx: &egui::Context, last: &mut std::time::Instant, depth: usize) -> Node {
-    let md = p.symlink_metadata().ok();
     let name = p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
     let mut node = Node {
         name,
         path: p.to_path_buf(),
-        is_dir: md.as_ref().map(|m| m.is_dir()).unwrap_or(false),
-        modified: md.as_ref().and_then(|m| m.modified().ok()),
         ..Default::default()
     };
     if s.stop.load(Ordering::Relaxed) {
@@ -108,8 +102,6 @@ fn walk(p: &Path, dev: u64, s: &Scan, ctx: &egui::Context, last: &mut std::time:
                     path: cp,
                     bytes: b,
                     items: 1,
-                    is_dir: false,
-                    modified: cm.modified().ok(),
                     children: vec![],
                     other: 0,
                 });
@@ -160,56 +152,70 @@ pub fn prune(node: &mut Node, removed: &[PathBuf]) -> u64 {
     freed
 }
 
-// ---------------------------------------------------------------- bubbles
+// ---------------------------------------------------------------- treemap
 
-/// Pack up to `max` circles around the centre of `rect`, biggest in the middle,
-/// each new one touching an earlier one as close to the centre as it fits.
-/// Radius grows with size^0.42 so small folders stay readable.
-/// Returns (child index, centre, radius).
-pub fn pack(sizes: &[u64], rect: egui::Rect, max: usize) -> Vec<(usize, egui::Pos2, f32)> {
-    let n = sizes.len().min(max);
-    if n == 0 {
-        return vec![];
+/// Squarified treemap: split `rect` into one block per value (same order,
+/// biggest first works best) with areas proportional to the values and
+/// sides as close to square as the order allows.
+pub fn squarify(values: &[f64], rect: egui::Rect) -> Vec<egui::Rect> {
+    let total: f64 = values.iter().sum();
+    if values.is_empty() || total <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return values.iter().map(|_| egui::Rect::from_min_size(rect.min, egui::Vec2::ZERO)).collect();
     }
-    let weights: Vec<f32> = sizes[..n].iter().map(|&b| (b.max(1) as f32).powf(0.42)).collect();
-    let mut scale = rect.width().min(rect.height()) * 0.30 / weights[0];
-    let center = rect.center();
-    let margin = 10.0;
-    for attempt in 0..8 {
-        let radii: Vec<f32> = weights.iter().map(|w| (w * scale).max(30.0)).collect();
-        let mut placed: Vec<(usize, egui::Pos2, f32)> = vec![(0, center, radii[0])];
-        for (i, &r) in radii.iter().enumerate().skip(1) {
-            let mut best: Option<(f32, egui::Pos2)> = None;
-            for &(_, pc, pr) in &placed {
-                for k in 0..48 {
-                    let a = k as f32 / 48.0 * std::f32::consts::TAU;
-                    let c = pc + egui::vec2(a.cos(), a.sin()) * (pr + r + margin);
-                    if c.x - r < rect.left() || c.x + r > rect.right() || c.y - r < rect.top() || c.y + r > rect.bottom() {
-                        continue;
-                    }
-                    if placed.iter().any(|&(_, q, qr)| (c - q).length() < r + qr + margin - 0.5) {
-                        continue;
-                    }
-                    let d = (c - center).length();
-                    if best.map(|b| d < b.0).unwrap_or(true) {
-                        best = Some((d, c));
-                    }
-                }
-            }
-            if let Some((_, c)) = best {
-                placed.push((i, c, r));
-            }
+    let (mut x, mut y, mut w, mut h) = (rect.left() as f64, rect.top() as f64, rect.width() as f64, rect.height() as f64);
+    let areas: Vec<f64> = values.iter().map(|v| v.max(0.0) * w * h / total).collect();
+    let worst = |row: &[f64], side: f64| -> f64 {
+        if row.is_empty() {
+            return f64::INFINITY;
         }
-        // shrink until everything fits (or we give up and show what fits)
-        if placed.len() == n {
-            return placed;
+        let s: f64 = row.iter().sum();
+        let mx = row.iter().cloned().fold(f64::MIN, f64::max);
+        let mn = row.iter().cloned().fold(f64::MAX, f64::min).max(1e-9);
+        (side * side * mx / (s * s)).max((s * s) / (side * side * mn))
+    };
+    let mut out = Vec::with_capacity(values.len());
+    let mut row: Vec<f64> = Vec::new();
+    let mut place = |row: &mut Vec<f64>, x: &mut f64, y: &mut f64, w: &mut f64, h: &mut f64| {
+        let s: f64 = row.iter().sum();
+        if *w >= *h {
+            let cw = if *h > 0.0 { s / *h } else { 0.0 };
+            let mut yy = *y;
+            for a in row.iter() {
+                let hh = if cw > 0.0 { a / cw } else { 0.0 };
+                out.push(egui::Rect::from_min_size(egui::pos2(*x as f32, yy as f32), egui::vec2(cw as f32, hh as f32)));
+                yy += hh;
+            }
+            *x += cw;
+            *w -= cw;
+        } else {
+            let rh = if *w > 0.0 { s / *w } else { 0.0 };
+            let mut xx = *x;
+            for a in row.iter() {
+                let ww = if rh > 0.0 { a / rh } else { 0.0 };
+                out.push(egui::Rect::from_min_size(egui::pos2(xx as f32, *y as f32), egui::vec2(ww as f32, rh as f32)));
+                xx += ww;
+            }
+            *y += rh;
+            *h -= rh;
         }
-        scale *= 0.88;
-        if attempt == 7 {
-            return placed;
+        row.clear();
+    };
+    let mut i = 0;
+    while i < areas.len() {
+        let side = w.min(h);
+        let mut next = row.clone();
+        next.push(areas[i]);
+        if row.is_empty() || worst(&next, side) <= worst(&row, side) {
+            row.push(areas[i]);
+            i += 1;
+        } else {
+            place(&mut row, &mut x, &mut y, &mut w, &mut h);
         }
     }
-    vec![]
+    if !row.is_empty() {
+        place(&mut row, &mut x, &mut y, &mut w, &mut h);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -217,7 +223,7 @@ mod tests {
     use super::*;
 
     fn node(path: &str, bytes: u64, children: Vec<Node>) -> Node {
-        Node { name: path.rsplit('/').next().unwrap().into(), path: PathBuf::from(path), bytes, is_dir: !children.is_empty(), children, ..Default::default() }
+        Node { name: path.rsplit('/').next().unwrap().into(), path: PathBuf::from(path), bytes, children, ..Default::default() }
     }
 
     fn tree() -> Node {
@@ -254,18 +260,21 @@ mod tests {
     }
 
     #[test]
-    fn bubbles_stay_inside_and_never_overlap() {
-        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
-        let sizes: Vec<u64> = (0..30).map(|i| 1_000_000_000 / (i + 1)).collect();
-        let placed = pack(&sizes, rect, 20);
-        assert!(!placed.is_empty() && placed.len() <= 20);
-        assert_eq!(placed[0].0, 0);
-        for (k, &(_, c, r)) in placed.iter().enumerate() {
-            assert!(c.x - r >= rect.left() - 0.01 && c.x + r <= rect.right() + 0.01 && c.y - r >= rect.top() - 0.01 && c.y + r <= rect.bottom() + 0.01);
-            for &(_, q, qr) in &placed[k + 1..] {
-                assert!((c - q).length() >= r + qr - 0.5);
+    fn treemap_fills_the_rect_without_overlap() {
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(600.0, 500.0));
+        let vals = [182.0, 64.2, 38.4, 31.0, 22.5, 14.1, 6.3, 2.1, 4.4];
+        let r = squarify(&vals, rect);
+        assert_eq!(r.len(), vals.len());
+        let total: f64 = vals.iter().sum();
+        for (k, a) in r.iter().enumerate() {
+            assert!(rect.expand(0.01).contains_rect(*a), "block {k} outside");
+            let want = vals[k] / total * 600.0 * 500.0;
+            assert!(((a.area() as f64) - want).abs() < want * 0.01 + 1.0, "block {k} area");
+            for b in &r[k + 1..] {
+                assert!(a.intersect(*b).area() < 0.5, "blocks overlap");
             }
         }
-        assert!(pack(&[], rect, 10).is_empty());
+        assert!(squarify(&[], rect).is_empty());
+        assert_eq!(squarify(&[0.0, 0.0], rect).len(), 2);
     }
 }

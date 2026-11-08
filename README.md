@@ -1,7 +1,7 @@
 # CleanMeBro
 
 A glassy macOS menu bar companion written in Rust (eframe/egui). It combines a
-Mac health panel, Claude plan limits, an AI-judged Cleanup and Space Lens.
+Mac health panel, Claude plan limits, an AI-judged Cleanup and Disk Map.
 
 ## Features
 
@@ -10,7 +10,7 @@ Mac health panel, Claude plan limits, an AI-judged Cleanup and Space Lens.
 | **Menu bar panel** | Tray icon (title = Claude session %) opens a 440 pt glass panel of widgets: Mac Health verdict, Claude card, tiles for disk, memory, battery, CPU, network, connected devices, plus "Today's Recommendation". Clicking a tile opens a detail sheet beside the panel. Gear → **Customize widgets…** turns widgets on/off and reorders them; the choice is saved. |
 | **Claude** | Plan and limits from the Claude CLI (`claude auth status`, `claude -p /usage`, which spends no tokens). Local token activity is counted from `~/.claude/projects` logs (counts only). |
 | **Cleanup** | Finds junk by rule (System Junk, Xcode, app and developer caches, AI clutter). Claude judges each **path** (never file contents) as safe / ask / keep. Anything unclear waits for your OK. Items go to the Trash by default. |
-| **Space Lens** | Measures a folder tree, then shows it as a sorted list and a bubble map. Selected items go to the Trash after review. |
+| **Disk Map** | Measures a folder tree, then shows it as a drill-down treemap. Selected items go to the Trash after review. |
 
 Every rule and threshold, with its source, is in [docs/MECHANICS.md](docs/MECHANICS.md).
 
@@ -92,7 +92,7 @@ sidebar entry and a footer button. Nothing in `src/core/` changes.
 │       ├── system/          Mac health: readings, widgets, detail sheets
 │       ├── claude/          Claude limits: card, sheet, page, tray title
 │       ├── cleanup/         junk rules, AI judge, removal, Cleanup page, --scan-report
-│       └── lens/            Space Lens: folder measuring and page
+│       └── lens/            Disk Map: folder measuring and page
 ├── docs/
 │   ├── MECHANICS.md     rules, thresholds and where each came from
 │   └── mechanics.json   same data, machine-readable
