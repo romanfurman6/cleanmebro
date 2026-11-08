@@ -1,0 +1,743 @@
+//! Live Mac health readings for the menu panel. A background thread refreshes a
+//! shared snapshot; slow sources (system_profiler, folder sizes) run less often.
+
+use crate::mechanics as m;
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Level {
+    #[default]
+    Good,
+    Fair,
+    Critical,
+}
+
+impl Level {
+    pub fn word(self) -> &'static str {
+        match self {
+            Level::Good => "Good",
+            Level::Fair => "Fair",
+            Level::Critical => "Needs care",
+        }
+    }
+    pub fn worst(self, other: Level) -> Level {
+        use Level::*;
+        match (self, other) {
+            (Critical, _) | (_, Critical) => Critical,
+            (Fair, _) | (_, Fair) => Fair,
+            _ => Good,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Battery {
+    pub present: bool,
+    pub percent: u8,
+    pub charging: bool,
+    pub plugged: bool,
+    pub full: bool,
+    pub minutes_left: Option<u32>,
+    pub cycles: u32,
+    pub design_cycles: u32,
+    pub health_pct: Option<f32>,
+    pub temp_c: Option<f32>,
+    /// macOS's own verdict ("Good", "Fair", "Poor", "Check Battery"...)
+    pub health_text: String,
+    pub permanent_failure: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Device {
+    pub name: String,
+    pub kind: String,
+    pub battery: Option<u8>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Wifi {
+    pub name: String,
+    pub security: String,
+    pub phy: String,
+    pub channel: String,
+    pub signal: String,
+    pub wired: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SpeedTest {
+    pub running: bool,
+    pub progress: f32,
+    pub down_mbps: Option<f64>,
+    pub up_mbps: Option<f64>,
+    pub latency_ms: Option<f64>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Snapshot {
+    pub ready: bool,
+    pub model: String,
+    pub chip: String,
+    pub volume_name: String,
+    pub disk_total: u64,
+    pub disk_free: u64,
+    pub smart_status: String,
+    pub categories: Vec<(String, u64)>, // Applications, Documents, Downloads, Desktop
+    pub trash_bytes: Option<u64>,
+    pub mem_total: u64,
+    pub mem_pressure: f32,
+    pub mem_pressure_level: u32,
+    pub mem_active: u64,
+    pub mem_wired: u64,
+    pub mem_compressed: u64,
+    pub mem_available: u64,
+    pub swap_used: u64,
+    pub swap_total: u64,
+    pub cpu_load: f32,
+    pub cpu_user: f32,
+    pub cpu_system: f32,
+    pub cpu_history: Vec<f32>,
+    pub thermal: u8, // 0 nominal, 1 fair, 2 serious, 3 critical
+    pub uptime_secs: u64,
+    pub battery: Battery,
+    pub net_up: f64,
+    pub net_down: f64,
+    pub net_sent_total: u64,
+    pub net_recv_total: u64,
+    pub online: bool,
+    pub wifi: Wifi,
+    pub devices: Vec<Device>,
+    pub speed: SpeedTest,
+}
+
+impl Snapshot {
+    pub fn disk_level(&self) -> Level {
+        if self.disk_total == 0 {
+            return Level::Good;
+        }
+        // the original raises "out of disk space" below this threshold;
+        // half of it counts as critical here (estimated)
+        let t = m::disk_alert_threshold(self.disk_total);
+        if self.disk_free < t / 2 {
+            Level::Critical
+        } else if self.disk_free < t {
+            Level::Fair
+        } else {
+            Level::Good
+        }
+    }
+    pub fn mem_level(&self) -> Level {
+        match self.mem_pressure_level {
+            0 | m::KERNEL_PRESSURE_NORMAL => Level::Good,
+            m::KERNEL_PRESSURE_WARN => Level::Fair,
+            _ => Level::Critical,
+        }
+    }
+    pub fn thermal_level(&self) -> Level {
+        match self.thermal {
+            0 | 1 => Level::Good,
+            2 => Level::Fair,
+            _ => Level::Critical,
+        }
+    }
+    /// BatteryMonitor sub_25d4: "Check Battery" / "Permanent Battery Failure" or the
+    /// failure flag → service; otherwise macOS's Good / Fair / Poor.
+    pub fn battery_level(&self) -> Level {
+        let b = &self.battery;
+        match m::battery_health_state(&b.health_text, b.permanent_failure) {
+            m::BatteryHealthState::Good | m::BatteryHealthState::Unknown => Level::Good,
+            m::BatteryHealthState::Fair => Level::Fair,
+            m::BatteryHealthState::Poor | m::BatteryHealthState::Service => Level::Critical,
+        }
+    }
+    pub fn uptime_warning(&self) -> bool {
+        self.uptime_secs > m::UPTIME_RESTART_INTERVAL_SECS
+    }
+    pub fn health(&self) -> Level {
+        self.disk_level()
+            .worst(self.mem_level())
+            .worst(self.thermal_level())
+            .worst(self.battery_level())
+    }
+    pub fn uptime_days(&self) -> u64 {
+        self.uptime_secs / m::SECONDS_PER_DAY
+    }
+    pub fn trash_overfill(&self) -> bool {
+        self.trash_bytes.map(|b| b > m::TRASH_SIZE_THRESHOLD).unwrap_or(false)
+    }
+    pub fn thermal_word(&self) -> &'static str {
+        ["Cool", "Warm", "Hot", "Critical"][self.thermal.min(3) as usize]
+    }
+}
+
+pub type Shared = Arc<Mutex<Snapshot>>;
+
+pub fn start(ctx: egui::Context, demo: bool) -> Shared {
+    let shared: Shared = Arc::new(Mutex::new(Snapshot::default()));
+    let s = shared.clone();
+    std::thread::Builder::new()
+        .name("monitor".into())
+        .spawn(move || run(s, ctx, demo))
+        .ok();
+    shared
+}
+
+fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
+    let mut sys = sysinfo::System::new();
+    let mut nets = sysinfo::Networks::new_with_refreshed_list();
+    let mut last_ticks = cpu_ticks();
+    let mut last_net = Instant::now();
+    let mut tick: u64 = 0;
+    // one-off facts
+    {
+        let (model, chip) = hardware();
+        let (vol, smart) = disk_info();
+        let mut s = shared.lock().unwrap();
+        s.model = model;
+        s.chip = chip;
+        s.volume_name = vol;
+        s.smart_status = smart;
+    }
+    loop {
+        // fast readings every refresh
+        sys.refresh_memory();
+        nets.refresh(true);
+        let now_ticks = cpu_ticks();
+        let (load, user, system) = cpu_split(last_ticks, now_ticks);
+        last_ticks = now_ticks;
+        let dt = last_net.elapsed().as_secs_f64().max(0.2);
+        last_net = Instant::now();
+        let (mut rx, mut tx, mut rx_total, mut tx_total) = (0u64, 0u64, 0u64, 0u64);
+        for (name, data) in nets.iter() {
+            if name.starts_with("en") {
+                rx += data.received();
+                tx += data.transmitted();
+                rx_total += data.total_received();
+                tx_total += data.total_transmitted();
+            }
+        }
+        let (total, free) = statvfs("/");
+        let vm = vm_stat();
+        let (swap_used, swap_total) = swap();
+        // kernel pressure level (SystemResourcesMonitor sub_9504): 1 normal, 2 warning, else critical
+        let pressure_level = sysctl_u32("kern.memorystatus_vm_pressure_level").unwrap_or(1);
+        let thermal = crate::native::thermal_state();
+        let uptime = sysinfo::System::uptime();
+
+        let slow_battery = tick % 5 == 0;
+        let slow_profile = tick % 30 == 0;
+        let slow_sizes = tick % 300 == 0;
+        let battery = if slow_battery { Some(battery()) } else { None };
+        let (devices, wifi) = if slow_profile { (Some(bluetooth()), Some(wifi())) } else { (None, None) };
+
+        {
+            let mut s = shared.lock().unwrap();
+            s.ready = true;
+            s.disk_total = total;
+            s.disk_free = free;
+            s.mem_total = sys.total_memory();
+            s.mem_pressure_level = pressure_level;
+            if let Some(vm) = vm {
+                s.mem_active = vm.0;
+                s.mem_wired = vm.1;
+                // "Pressure: N%" = (wired + compressed) / physical memory (sub_90b8)
+                s.mem_pressure = m::memory_pressure_pct(vm.1, vm.2, s.mem_total);
+                s.mem_compressed = vm.2;
+                s.mem_available = s.mem_total.saturating_sub(vm.0 + vm.1 + vm.2);
+            }
+            s.swap_used = swap_used;
+            s.swap_total = swap_total;
+            s.cpu_load = load;
+            s.cpu_user = user;
+            s.cpu_system = system;
+            s.cpu_history.push(load);
+            if s.cpu_history.len() > 60 {
+                s.cpu_history.remove(0);
+            }
+            s.thermal = thermal;
+            s.uptime_secs = uptime;
+            s.net_down = rx as f64 / dt;
+            s.net_up = tx as f64 / dt;
+            s.net_recv_total = rx_total;
+            s.net_sent_total = tx_total;
+            s.online = rx_total + tx_total > 0;
+            if let Some(b) = battery {
+                s.battery = b;
+            }
+            if let Some(d) = devices {
+                s.devices = d;
+            }
+            if let Some(w) = wifi {
+                s.wifi = w;
+            }
+        }
+        ctx.request_repaint();
+
+        if slow_sizes {
+            // folder sizes for the storage chart (can take a few seconds)
+            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+            let cats = vec![
+                ("Applications".to_string(), dir_size(Path::new("/Applications"), 6)),
+                ("Documents".to_string(), dir_size(&home.join("Documents"), 6)),
+                ("Downloads".to_string(), dir_size(&home.join("Downloads"), 6)),
+                ("Desktop".to_string(), dir_size(&home.join("Desktop"), 6)),
+            ];
+            let trash = std::fs::read_dir(home.join(".Trash")).ok().map(|_| dir_size(&home.join(".Trash"), 6));
+            let mut s = shared.lock().unwrap();
+            s.categories = cats;
+            s.trash_bytes = trash;
+            ctx.request_repaint();
+        }
+        tick += 1;
+        std::thread::sleep(Duration::from_millis(m::MONITOR_REFRESH_MS));
+    }
+}
+
+// ---------------------------------------------------------------- sources
+
+fn run_cmd(cmd: &str, args: &[&str]) -> String {
+    Command::new(cmd)
+        .args(args)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+fn hardware() -> (String, String) {
+    let out = run_cmd("system_profiler", &["SPHardwareDataType", "-json"]);
+    let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
+    let item = &v["SPHardwareDataType"][0];
+    let model = item["machine_name"].as_str().unwrap_or("Mac").to_string();
+    let chip = item["chip_type"].as_str().or(item["cpu_type"].as_str()).unwrap_or("").to_string();
+    (model, chip)
+}
+
+fn disk_info() -> (String, String) {
+    let out = run_cmd("diskutil", &["info", "/"]);
+    let mut name = "Macintosh HD".to_string();
+    let mut smart = String::new();
+    for line in out.lines() {
+        let l = line.trim();
+        if let Some(v) = l.strip_prefix("Volume Name:") {
+            name = v.trim().to_string();
+        }
+        if let Some(v) = l.strip_prefix("SMART Status:") {
+            smart = v.trim().to_string();
+        }
+    }
+    (name, smart)
+}
+
+fn statvfs(path: &str) -> (u64, u64) {
+    let c = std::ffi::CString::new(path).unwrap();
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } == 0 {
+        let total = st.f_blocks as u64 * st.f_frsize as u64;
+        let free = st.f_bavail as u64 * st.f_frsize as u64;
+        (total, free)
+    } else {
+        (0, 0)
+    }
+}
+
+pub fn sysctl_u32(name: &str) -> Option<u32> {
+    let c = std::ffi::CString::new(name).ok()?;
+    let mut v: u32 = 0;
+    let mut len = std::mem::size_of::<u32>();
+    let r = unsafe { libc::sysctlbyname(c.as_ptr(), &mut v as *mut u32 as *mut _, &mut len, std::ptr::null_mut(), 0) };
+    (r == 0).then_some(v)
+}
+
+fn swap() -> (u64, u64) {
+    #[repr(C)]
+    struct XswUsage {
+        total: u64,
+        avail: u64,
+        used: u64,
+        pagesize: u32,
+        encrypted: u32,
+    }
+    let c = std::ffi::CString::new("vm.swapusage").unwrap();
+    let mut v: XswUsage = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<XswUsage>();
+    let r = unsafe { libc::sysctlbyname(c.as_ptr(), &mut v as *mut XswUsage as *mut _, &mut len, std::ptr::null_mut(), 0) };
+    if r == 0 {
+        (v.used, v.total)
+    } else {
+        (0, 0)
+    }
+}
+
+/// (app memory, wired, compressed) bytes from vm_stat, as the original's
+/// RAMService computes them (SystemResourcesMonitor sub_90b8):
+/// app memory = anonymous (internal) − purgeable pages.
+fn vm_stat() -> Option<(u64, u64, u64)> {
+    let out = run_cmd("vm_stat", &[]);
+    let mut page = 16384u64;
+    let (mut internal, mut purgeable, mut wired, mut comp) = (0u64, 0u64, 0u64, 0u64);
+    for line in out.lines() {
+        if let Some(i) = line.find("page size of ") {
+            page = line[i + 13..].split_whitespace().next().and_then(|s| s.parse().ok()).unwrap_or(page);
+        }
+        let num = |l: &str| l.rsplit(':').next().map(|s| s.trim().trim_end_matches('.')).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        if line.starts_with("Anonymous pages") {
+            internal = num(line);
+        } else if line.starts_with("Pages purgeable") {
+            purgeable = num(line);
+        } else if line.starts_with("Pages wired down") {
+            wired = num(line);
+        } else if line.starts_with("Pages occupied by compressor") {
+            comp = num(line);
+        }
+    }
+    (wired > 0).then_some((internal.saturating_sub(purgeable) * page, wired * page, comp * page))
+}
+
+fn cpu_ticks() -> [u64; 4] {
+    unsafe {
+        let mut info: libc::host_cpu_load_info = std::mem::zeroed();
+        let mut count = libc::HOST_CPU_LOAD_INFO_COUNT;
+        #[allow(deprecated)]
+        let host = libc::mach_host_self();
+        let r = libc::host_statistics(host, libc::HOST_CPU_LOAD_INFO, &mut info as *mut _ as *mut i32, &mut count);
+        if r != 0 {
+            return [0; 4];
+        }
+        let t = info.cpu_ticks;
+        [t[0] as u64, t[1] as u64, t[2] as u64, t[3] as u64] // user, system, idle, nice
+    }
+}
+
+fn cpu_split(a: [u64; 4], b: [u64; 4]) -> (f32, f32, f32) {
+    let d: Vec<f64> = (0..4).map(|i| b[i].saturating_sub(a[i]) as f64).collect();
+    let total = d.iter().sum::<f64>();
+    if total <= 0.0 {
+        return (0.0, 0.0, 0.0);
+    }
+    let user = ((d[0] + d[3]) / total * 100.0) as f32;
+    let system = (d[1] / total * 100.0) as f32;
+    (user + system, user, system)
+}
+
+fn battery() -> Battery {
+    let out = run_cmd("ioreg", &["-rn", "AppleSmartBattery"]);
+    let mut b = Battery::default();
+    if out.trim().is_empty() {
+        return b;
+    }
+    b.present = true;
+    let mut design = 0f32;
+    let mut nominal = 0f32;
+    let mut raw_max = 0f32;
+    for line in out.lines() {
+        let l = line.trim_start_matches(|c: char| c == ' ' || c == '|').trim();
+        let Some((k, v)) = l.split_once(" = ") else { continue };
+        let k = k.trim_matches('"');
+        let v = v.trim();
+        let n = || v.parse::<f64>().ok();
+        match k {
+            "CurrentCapacity" => b.percent = n().unwrap_or(0.0).clamp(0.0, 100.0) as u8,
+            "IsCharging" => b.charging = v == "Yes",
+            "ExternalConnected" => b.plugged = v == "Yes",
+            "FullyCharged" => b.full = v == "Yes",
+            // BatteryMonitor sub_1bc8: AvgTimeToEmpty / AvgTimeToFull, 65535 = unknown
+            "AvgTimeToEmpty" if !b.charging => {
+                let t = n().unwrap_or(65535.0);
+                b.minutes_left = (t > 0.0 && t < m::BATTERY_TIME_UNKNOWN).then_some(t as u32);
+            }
+            "AvgTimeToFull" if b.charging => {
+                let t = n().unwrap_or(65535.0);
+                b.minutes_left = (t > 0.0 && t < m::BATTERY_TIME_UNKNOWN).then_some(t as u32);
+            }
+            "PermanentFailureStatus" => b.permanent_failure = n().unwrap_or(0.0) != 0.0,
+            "CycleCount" => b.cycles = n().unwrap_or(0.0) as u32,
+            "DesignCycleCount9C" => b.design_cycles = n().unwrap_or(0.0) as u32,
+            "DesignCapacity" => design = n().unwrap_or(0.0) as f32,
+            "NominalChargeCapacity" => nominal = n().unwrap_or(0.0) as f32,
+            "AppleRawMaxCapacity" => raw_max = n().unwrap_or(0.0) as f32,
+            "Temperature" => b.temp_c = n().map(|t| t as f32 / m::BATTERY_TEMP_DIVISOR),
+            _ => {}
+        }
+    }
+    // Apple Silicon reports health from AppleRawMaxCapacity (sub_1bc8)
+    let max = if raw_max > 0.0 { raw_max } else { nominal };
+    b.health_text = power_health_text();
+    if design > 0.0 && max > 0.0 {
+        b.health_pct = Some((max / design * 100.0).min(100.0));
+    }
+    b
+}
+
+/// macOS's battery verdict, the same text the original reads from the power
+/// source ("BatteryHealth" / "BatteryHealthCondition").
+fn power_health_text() -> String {
+    let out = run_cmd("system_profiler", &["SPPowerDataType", "-json"]);
+    let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
+    if let Some(arr) = v["SPPowerDataType"].as_array() {
+        for e in arr {
+            if let Some(h) = e["sppower_battery_health_info"]["sppower_battery_health"].as_str() {
+                return h.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+fn bluetooth() -> Vec<Device> {
+    let out = run_cmd("system_profiler", &["SPBluetoothDataType", "-json"]);
+    let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
+    let mut list = Vec::new();
+    if let Some(arr) = v["SPBluetoothDataType"][0]["device_connected"].as_array() {
+        for entry in arr {
+            if let Some(obj) = entry.as_object() {
+                for (name, info) in obj {
+                    let pct = |k: &str| info[k].as_str().and_then(|s| s.trim_end_matches('%').parse::<u8>().ok());
+                    let battery = pct("device_batteryLevelMain")
+                        .or_else(|| pct("device_batteryLevel"))
+                        .or_else(|| match (pct("device_batteryLevelLeft"), pct("device_batteryLevelRight")) {
+                            (Some(a), Some(b)) => Some(a.min(b)),
+                            (a, b) => a.or(b),
+                        });
+                    // Apple mobile devices (iPhone/iPad) are skipped, as in the original
+                    let minor = info["device_minorType"].as_str().unwrap_or("");
+                    if minor.contains("Phone") || minor.contains("iPad") {
+                        continue;
+                    }
+                    list.push(Device {
+                        name: name.clone(),
+                        kind: info["device_minorType"].as_str().unwrap_or("").to_string(),
+                        battery,
+                    });
+                }
+            }
+        }
+    }
+    list
+}
+
+fn wifi() -> Wifi {
+    let mut w = Wifi::default();
+    let out = run_cmd("system_profiler", &["SPAirPortDataType", "-json"]);
+    let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
+    if let Some(ifaces) = v["SPAirPortDataType"][0]["spairport_airport_interfaces"].as_array() {
+        for i in ifaces {
+            let cur = &i["spairport_current_network_information"];
+            if cur.is_object() {
+                w.name = cur["_name"].as_str().unwrap_or("").to_string();
+                w.security = cur["spairport_security_mode"]
+                    .as_str()
+                    .unwrap_or("")
+                    .replace("spairport_security_mode_", "")
+                    .replace('_', " ")
+                    .to_uppercase();
+                w.phy = cur["spairport_network_phymode"].as_str().unwrap_or("").to_string();
+                w.channel = cur["spairport_network_channel"].as_str().unwrap_or("").to_string();
+                w.signal = cur["spairport_signal_noise"].as_str().unwrap_or("").to_string();
+            }
+        }
+    }
+    if w.name.is_empty() || w.name.contains("redacted") {
+        // macOS hides the network name without Location access
+        let ip = run_cmd("ipconfig", &["getsummary", "en0"]);
+        for line in ip.lines() {
+            let l = line.trim();
+            if let Some(v) = l.strip_prefix("SSID : ") {
+                if !v.contains("redacted") {
+                    w.name = v.to_string();
+                }
+            }
+            if let Some(v) = l.strip_prefix("Security : ") {
+                if w.security.is_empty() {
+                    w.security = v.replace('_', " ");
+                }
+            }
+        }
+    }
+    if w.name.is_empty() || w.name.contains("redacted") {
+        w.name = if w.security.is_empty() { "Network".into() } else { "Wi-Fi".into() };
+    }
+    w
+}
+
+/// Allocated size of a folder, not following links, bounded in depth.
+pub fn dir_size(path: &Path, max_depth: usize) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    fn walk(p: &Path, depth: usize, max: usize, dev: u64) -> u64 {
+        let Ok(rd) = std::fs::read_dir(p) else { return 0 };
+        let mut total = 0;
+        for e in rd.flatten() {
+            let Ok(md) = e.path().symlink_metadata() else { continue };
+            if md.dev() != dev {
+                continue;
+            }
+            total += md.blocks() * 512;
+            if md.is_dir() && depth < max {
+                total += walk(&e.path(), depth + 1, max, dev);
+            }
+        }
+        total
+    }
+    match path.symlink_metadata() {
+        Ok(md) if md.is_dir() => walk(path, 0, max_depth.max(64), md.dev()),
+        Ok(md) => md.blocks() * 512,
+        Err(_) => 0,
+    }
+}
+
+// ---------------------------------------------------------------- speed test
+
+pub fn start_speed_test(shared: Shared, ctx: egui::Context) {
+    {
+        let mut s = shared.lock().unwrap();
+        if s.speed.running {
+            return;
+        }
+        s.speed = SpeedTest { running: true, ..Default::default() };
+    }
+    std::thread::spawn(move || {
+        let set = |f: &dyn Fn(&mut SpeedTest)| {
+            let mut s = shared.lock().unwrap();
+            f(&mut s.speed);
+            ctx.request_repaint();
+        };
+        let agent = ureq::Agent::new_with_config(
+            ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build(),
+        );
+        // latency
+        let t0 = Instant::now();
+        let ping = agent.get(&format!("{}?bytes=0", m::SPEED_TEST_DOWN_URL)).call();
+        if let Err(e) = ping {
+            set(&|s| {
+                s.running = false;
+                s.error = Some(format!("No internet connection ({e})"));
+            });
+            return;
+        }
+        let latency = t0.elapsed().as_secs_f64() * 1000.0;
+        set(&|s| {
+            s.latency_ms = Some(latency);
+            s.progress = 0.1;
+        });
+        // download
+        let t0 = Instant::now();
+        let url = format!("{}?bytes={}", m::SPEED_TEST_DOWN_URL, m::SPEED_TEST_BYTES);
+        let down = agent.get(&url).call().and_then(|r| {
+            let mut reader = r.into_body().into_reader();
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut got = 0u64;
+            loop {
+                use std::io::Read;
+                let n = reader.read(&mut buf).map_err(|e| ureq::Error::Io(e))?;
+                if n == 0 {
+                    break;
+                }
+                got += n as u64;
+            }
+            Ok(got)
+        });
+        match down {
+            Ok(bytes) => {
+                let mbps = bytes as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6;
+                set(&|s| {
+                    s.down_mbps = Some(mbps);
+                    s.progress = 0.6;
+                });
+            }
+            Err(e) => {
+                set(&|s| {
+                    s.running = false;
+                    s.error = Some(format!("Network error: {e}"));
+                });
+                return;
+            }
+        }
+        // upload
+        let payload = vec![0u8; m::SPEED_TEST_UPLOAD_BYTES as usize];
+        let t0 = Instant::now();
+        let up = agent.post(m::SPEED_TEST_UP_URL).send(&payload[..]);
+        let secs = t0.elapsed().as_secs_f64();
+        set(&|s| {
+            if up.is_ok() {
+                s.up_mbps = Some(payload.len() as f64 * 8.0 / secs / 1e6);
+            }
+            s.progress = 1.0;
+            s.running = false;
+        });
+    });
+}
+
+/// "Good for" activities, by download speed in Mbps.
+pub fn good_for(mbps: f64) -> Vec<&'static str> {
+    m::GOOD_FOR
+        .iter()
+        .filter(|(_, need)| mbps >= *need)
+        .map(|(name, _)| *name)
+        .collect()
+}
+
+// ---------------------------------------------------------------- demo data
+
+/// Fixed readings for screenshots, so the picture never shows personal data.
+pub fn demo_snapshot() -> Snapshot {
+    Snapshot {
+        ready: true,
+        model: "MacBook Pro".into(),
+        chip: "Apple M3 Max".into(),
+        volume_name: "Macintosh HD".into(),
+        disk_total: 2_000_000_000_000,
+        disk_free: 1_440_000_000_000,
+        smart_status: "Verified".into(),
+        categories: vec![
+            ("Applications".into(), 65_600_000_000),
+            ("Documents".into(), 940_700_000),
+            ("Downloads".into(), 596_900_000),
+            ("Desktop".into(), 188_000),
+        ],
+        trash_bytes: Some(46_100_000),
+        mem_total: 68_719_476_736,
+        mem_pressure: 17.0,
+        mem_pressure_level: 1,
+        mem_active: 24_000_000_000,
+        mem_wired: 7_600_000_000,
+        mem_compressed: 7_000_000_000,
+        mem_available: 30_000_000_000,
+        swap_used: 4_190_000,
+        swap_total: 1_073_741_824,
+        cpu_load: 16.0,
+        cpu_user: 11.0,
+        cpu_system: 5.0,
+        cpu_history: (0..60).map(|i| 12.0 + ((i as f32) * 0.4).sin() * 6.0).collect(),
+        thermal: 0,
+        uptime_secs: 3 * 86_400 + 5 * 3600,
+        battery: Battery {
+            present: true,
+            percent: 80,
+            charging: false,
+            plugged: true,
+            full: false,
+            minutes_left: None,
+            cycles: 13,
+            design_cycles: 1000,
+            health_pct: Some(100.0),
+            temp_c: Some(30.3),
+            health_text: "Good".into(),
+            permanent_failure: false,
+        },
+        net_up: 3_200_000.0,
+        net_down: 20_000.0,
+        net_sent_total: 1_200_000_000,
+        net_recv_total: 5_400_000_000,
+        online: true,
+        wifi: Wifi { name: "Home Wi-Fi".into(), security: "WPA3 PERSONAL".into(), phy: "802.11ax".into(), channel: "149 (5GHz, 80MHz)".into(), signal: "-52 dBm / -92 dBm".into(), wired: false },
+        devices: vec![
+            Device { name: "AirPods Max".into(), kind: "Headphones".into(), battery: Some(37) },
+            Device { name: "Magic Keyboard".into(), kind: "Keyboard".into(), battery: Some(82) },
+        ],
+        speed: SpeedTest::default(),
+    }
+}

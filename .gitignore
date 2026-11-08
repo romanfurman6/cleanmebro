@@ -1,0 +1,32 @@
+# Rust build output
+target/
+**/target/
+
+# macOS
+.DS_Store
+
+# Agent/workspace scratch (logs, session dumps, local usage)
+agent-session.jsonl
+*.jsonl.bak
+build-activity.log
+feed.json
+craft.json
+usage.json
+inbox/
+pinned/
+checks/
+
+# Investigation tool lock files
+*.lock
+!Cargo.lock
+
+# Screenshots and images stay local
+*.png
+*.jpg
+*.jpeg
+docs/screenshots/
+docs/reference/
+docs/feedback/
+
+# Local research notes
+research/

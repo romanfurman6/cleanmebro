@@ -1,0 +1,330 @@
+{
+  "version": 1,
+  "values": [
+    {
+      "name": "memory pressure percent",
+      "group": "health",
+      "value": "(wired + compressed) / physical",
+      "source": "SystemResourcesMonitor function 0x90b8"
+    },
+    {
+      "name": "memory used",
+      "group": "health",
+      "value": "internal - purgeable + wired + compressed",
+      "source": "SystemResourcesMonitor function 0x90b8"
+    },
+    {
+      "name": "kernel pressure normal",
+      "group": "health",
+      "value": 1,
+      "source": "SystemResourcesMonitor function 0x9504"
+    },
+    {
+      "name": "kernel pressure warning",
+      "group": "health",
+      "value": 2,
+      "source": "SystemResourcesMonitor function 0x9504"
+    },
+    {
+      "name": "battery health levels",
+      "group": "health",
+      "value": "Good/Fair/Poor; Check Battery or Permanent Battery Failure = service",
+      "source": "BatteryMonitor function 0x25d4"
+    },
+    {
+      "name": "battery health percent",
+      "group": "health",
+      "value": "AppleRawMaxCapacity / DesignCapacity",
+      "source": "BatteryMonitor function 0x1bc8"
+    },
+    {
+      "name": "battery temperature divisor",
+      "group": "health",
+      "value": 100,
+      "source": "BatteryMonitor function 0x1bc8"
+    },
+    {
+      "name": "battery unknown time",
+      "group": "health",
+      "value": 65535,
+      "unit": "min",
+      "source": "BatteryMonitor function 0x1bc8"
+    },
+    {
+      "name": "disk alert presets",
+      "group": "health",
+      "value": "2,5,10,20,30,50,100 GB",
+      "source": "SharedPreferences table 0x1c1e0 (sub_1148)"
+    },
+    {
+      "name": "disk alert target",
+      "group": "health",
+      "value": "capacity / 10, nearest preset",
+      "source": "SharedPreferences function 0x1c60"
+    },
+    {
+      "name": "disk alert fallback",
+      "group": "health",
+      "value": 1000000000000,
+      "unit": "bytes",
+      "source": "SharedPreferences function 0x5764"
+    },
+    {
+      "name": "disk critical step",
+      "group": "health",
+      "value": "threshold / 2",
+      "estimated": true
+    },
+    {
+      "name": "trash alert threshold",
+      "group": "health",
+      "value": 2000000000,
+      "unit": "bytes",
+      "source": "SharedPreferences function 0x5594 (TrashSizeLimits[2], table 0x1c280)"
+    },
+    {
+      "name": "bluetooth low battery max",
+      "group": "health",
+      "value": 19,
+      "unit": "%",
+      "source": "HealthIssuesController function 0xa308"
+    },
+    {
+      "name": "restart reminder after",
+      "group": "health",
+      "value": 604800,
+      "unit": "s",
+      "source": "AssistantDomain function 0x1ba28"
+    },
+    {
+      "name": "seconds per uptime day",
+      "group": "health",
+      "value": 86400,
+      "unit": "s",
+      "source": "AssistantDomain function 0x1bbc0"
+    },
+    {
+      "name": "priority drive health",
+      "group": "recommendation",
+      "value": 100,
+      "source": "AssistantDomain function 0x1ecc4"
+    },
+    {
+      "name": "priority battery health",
+      "group": "recommendation",
+      "value": 80,
+      "source": "AssistantDomain function 0x1bdcc"
+    },
+    {
+      "name": "priority out of disk space",
+      "group": "recommendation",
+      "value": 20,
+      "source": "AssistantDomain function 0x19bec"
+    },
+    {
+      "name": "priority trash overfill",
+      "group": "recommendation",
+      "value": 5,
+      "source": "AssistantDomain function 0x1ae60"
+    },
+    {
+      "name": "recommendation cooldown",
+      "group": "recommendation",
+      "value": 604800,
+      "unit": "s",
+      "source": "AssistantDomain function 0x1a98c"
+    },
+    {
+      "name": "heavy chrome usage",
+      "group": "health",
+      "value": 0.2,
+      "source": "SharedPreferences function 0x68ec"
+    },
+    {
+      "name": "large external drive",
+      "group": "health",
+      "value": 128,
+      "unit": "GB",
+      "source": "SharedPreferences function 0x9924"
+    },
+    {
+      "name": "battery health warning",
+      "group": "health",
+      "value": 80,
+      "unit": "%",
+      "source": "string Monitor_Battery_Chart_Cycles_Title_Tooltip in the menu helper"
+    },
+    {
+      "name": "monitor refresh",
+      "group": "health",
+      "value": 2000,
+      "unit": "ms",
+      "estimated": true
+    },
+    {
+      "name": "speed test download size",
+      "group": "network",
+      "value": 25000000,
+      "unit": "bytes",
+      "estimated": true
+    },
+    {
+      "name": "speed test upload size",
+      "group": "network",
+      "value": 8000000,
+      "unit": "bytes",
+      "estimated": true
+    },
+    {
+      "name": "good for online gaming",
+      "group": "network",
+      "value": 25,
+      "unit": "Mbps",
+      "estimated": true
+    },
+    {
+      "name": "good for video streaming",
+      "group": "network",
+      "value": 10,
+      "unit": "Mbps",
+      "estimated": true
+    },
+    {
+      "name": "panel width",
+      "group": "layout",
+      "value": 440,
+      "unit": "pt",
+      "source": "reference picture-1 (882 px at 2x)"
+    },
+    {
+      "name": "panel height",
+      "group": "layout",
+      "value": 796,
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "detail sheet width",
+      "group": "layout",
+      "value": 430,
+      "unit": "pt",
+      "source": "reference picture-4"
+    },
+    {
+      "name": "card corner radius",
+      "group": "layout",
+      "value": 16,
+      "unit": "pt",
+      "source": "reference picture-1"
+    },
+    {
+      "name": "claude limits refresh",
+      "group": "claude",
+      "value": 300,
+      "unit": "s",
+      "estimated": true
+    },
+    {
+      "name": "claude limits source",
+      "group": "claude",
+      "value": "claude -p /usage (no tokens)",
+      "source": "Claude CLI 2.1.302 output on this Mac"
+    },
+    {
+      "name": "claude project in use window",
+      "group": "claude",
+      "value": 30,
+      "unit": "days",
+      "estimated": true
+    },
+    {
+      "name": "claude code catalog",
+      "group": "cleanup",
+      "value": ".claude/debug, cache, telemetry, stats-cache.json, mcp-needs-auth-cache.json, plugins/install-counts-cache.json, shell-snapshots, .local/share/claude/versions",
+      "source": "function 0x7118 in AIToolScanning"
+    },
+    {
+      "name": "claude desktop catalog",
+      "group": "cleanup",
+      "value": "Library/Logs/Claude",
+      "source": "function 0x7308 in AIToolScanning"
+    },
+    {
+      "name": "keep active claude version",
+      "group": "cleanup",
+      "value": "target of ~/.local/bin/claude",
+      "source": "AIToolScanning ActiveVersionResolver / activeVersionSymlink"
+    },
+    {
+      "name": "shell snapshot min age",
+      "group": "cleanup",
+      "value": 2,
+      "unit": "days",
+      "estimated": true
+    },
+    {
+      "name": "old claude data age",
+      "group": "cleanup",
+      "value": 30,
+      "unit": "days",
+      "estimated": true
+    },
+    {
+      "name": "ai judge minimum size",
+      "group": "cleanup",
+      "value": 1000000,
+      "unit": "bytes",
+      "estimated": true
+    },
+    {
+      "name": "ai judge batch",
+      "group": "cleanup",
+      "value": 120,
+      "unit": "paths",
+      "estimated": true
+    },
+    {
+      "name": "ai judge model",
+      "group": "cleanup",
+      "value": "sonnet",
+      "estimated": true
+    },
+    {
+      "name": "adobe media cache path",
+      "group": "cleanup",
+      "value": "~/Library/Application Support/Adobe/Common/Media Cache Files",
+      "source": "string in SystemJunkScanning"
+    },
+    {
+      "name": "spotify cache path",
+      "group": "cleanup",
+      "value": "~/Library/Application Support/Spotify/PersistentCache/Storage",
+      "source": "string in SystemJunkScanning"
+    },
+    {
+      "name": "default removal",
+      "group": "cleanup",
+      "value": "move to Trash",
+      "estimated": true
+    },
+    {
+      "name": "space lens kept file size",
+      "group": "spacelens",
+      "value": 8000000,
+      "unit": "bytes",
+      "estimated": true
+    },
+    {
+      "name": "space lens bubbles",
+      "group": "spacelens",
+      "value": 11,
+      "estimated": true
+    },
+    {
+      "name": "space lens bubble size exponent",
+      "group": "spacelens",
+      "value": 0.42,
+      "estimated": true
+    }
+  ]
+}
