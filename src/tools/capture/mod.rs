@@ -6,6 +6,7 @@
 //! Page routes: "" (as left), "history", "settings".
 
 pub mod editor;
+mod folder;
 mod grab;
 mod hotkeys;
 mod icons;
@@ -56,11 +57,13 @@ enum Done {
     Text(Vec<mac::TextLine>),
     Thumb(u64, Option<egui::ColorImage>),
     Folder(Option<PathBuf>),
+    Files(PathBuf, Vec<folder::FileShot>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     History,
+    Folder,
     Settings,
 }
 
@@ -106,6 +109,10 @@ pub struct Capture {
     perm_skip: bool,
     perm_needed: bool,
     thumbs: Thumbs,
+    /// Images in the screenshot folder, newest first.
+    files: Vec<folder::FileShot>,
+    files_at: Option<Instant>,
+    files_busy: bool,
     tab: Tab,
     /// Recording a new shortcut for this command.
     recording: Option<Command>,
@@ -124,7 +131,9 @@ impl Capture {
     pub fn new(env: &ToolEnv) -> Self {
         let (tx, rx) = channel();
         let (settings, dir, store) = if env.demo {
-            (Settings::default(), None, demo_store())
+            let mut s = Settings::default();
+            s.folder = demo_folder();
+            (s, None, demo_store())
         } else {
             let dir = settings::data_dir();
             (settings::load(&dir), Some(dir.clone()), Store::open(dir.join("history")))
@@ -149,6 +158,9 @@ impl Capture {
             perm_skip: false,
             perm_needed: false,
             thumbs: Thumbs::default(),
+            files: Vec::new(),
+            files_at: None,
+            files_busy: false,
             tab: Tab::History,
             recording: None,
             filter: 0,
@@ -285,8 +297,20 @@ impl Capture {
             Done::Folder(Some(p)) => {
                 self.settings.folder = p;
                 self.save_settings();
+                self.files.clear();
+                self.files_at = None;
             }
             Done::Folder(None) => {}
+            Done::Files(dir, files) => {
+                self.files_busy = false;
+                if dir == self.settings.folder {
+                    self.files = files;
+                    self.files_at = Some(Instant::now());
+                    self.forget_dropped_thumbs();
+                } else {
+                    self.files_at = None;
+                }
+            }
         }
     }
 
@@ -313,6 +337,7 @@ impl Capture {
             match store::save_copy(&img, &self.settings, chrono::Local::now()) {
                 Ok(path) => {
                     saved = true;
+                    self.files_at = None;
                     if let Some(id) = id {
                         self.store.set_saved(id, path);
                     }
@@ -343,17 +368,22 @@ impl Capture {
     }
 
     fn forget_dropped_thumbs(&mut self) {
-        let ids: HashSet<u64> = self.store.shots.iter().map(|s| s.id).collect();
+        let ids: HashSet<u64> = self.store.shots.iter().map(|s| s.id).chain(self.files.iter().map(|f| f.key)).collect();
         self.thumbs.tex.retain(|id, _| ids.contains(id));
     }
 
     /// The thumbnail of a history capture; starts loading it when missing.
     fn thumb(&mut self, id: u64) -> Option<egui::TextureId> {
+        let path = self.store.path(id);
+        self.thumb_at(id, path)
+    }
+
+    /// The thumbnail of the image at `path`, cached under `id`.
+    fn thumb_at(&mut self, id: u64, path: PathBuf) -> Option<egui::TextureId> {
         if let Some(t) = self.thumbs.tex.get(&id) {
             return Some(t.id());
         }
         if self.thumbs.pending.len() < 3 && self.thumbs.pending.insert(id) {
-            let path = self.store.path(id);
             let tx = self.tx.clone();
             let ctx = self.ctx.clone();
             std::thread::spawn(move || {
@@ -432,6 +462,7 @@ impl Capture {
                 if let Some(id) = id {
                     self.store.set_saved(id, path.clone());
                 }
+                self.files_at = None;
                 Some(path)
             }
             Err(e) => {
@@ -449,6 +480,39 @@ impl Capture {
         } else {
             f
         }
+    }
+
+    /// Re-read the screenshot folder when the list is a few seconds old.
+    fn refresh_files(&mut self) {
+        if self.files_busy || self.files_at.is_some_and(|t| t.elapsed().as_secs_f32() < 3.0) {
+            return;
+        }
+        self.files_busy = true;
+        let dir = self.settings.folder.clone();
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            let files = folder::scan(&dir);
+            let _ = tx.send(Done::Files(dir, files));
+            ctx.request_repaint();
+        });
+    }
+
+    fn open_file(&mut self, f: &folder::FileShot) {
+        match image::open(&f.path) {
+            Ok(img) => {
+                self.open_editor(None, img.to_rgba8());
+                if let Some(ew) = &mut self.editor {
+                    ew.ed.title = f.name();
+                }
+            }
+            Err(e) => self.hud(format!("Couldn't open {}: {e}", f.name())),
+        }
+    }
+
+    /// The folder's last part, e.g. "Desktop".
+    fn folder_name(&self) -> String {
+        self.settings.folder.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| self.shown_folder())
     }
 
     fn choose_folder(&mut self) {
@@ -488,6 +552,18 @@ fn demo_store() -> Store {
         }
     }
     st
+}
+
+/// A sample screenshot folder for screenshots of the tool.
+fn demo_folder() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("cleanmebro-capture-demo-{}-folder", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    for (k, (w, h)) in [(794, 446), (640, 410), (920, 300), (794, 520), (760, 520), (900, 560)].iter().enumerate() {
+        let name = format!("Capture 2026-11-08 at 1{}.{:02}.12.png", 7 - k / 3, 41 - k * 6);
+        let _ = grab::sample(*w, *h).save(dir.join(name));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    dir
 }
 
 fn badge() -> Badge {
@@ -555,6 +631,7 @@ impl Tool for Capture {
     fn open_page(&mut self, route: &str) {
         match route {
             "history" => self.tab = Tab::History,
+            "folder" => self.tab = Tab::Folder,
             "settings" => self.tab = Tab::Settings,
             _ => {}
         }
@@ -623,6 +700,10 @@ impl Tool for Capture {
         match view {
             "capture" => {
                 self.tab = Tab::History;
+                Some(View::Page)
+            }
+            "capture-folder" => {
+                self.tab = Tab::Folder;
                 Some(View::Page)
             }
             "capture-settings" => {

@@ -3,11 +3,13 @@
 
 use super::icons::{self, Ico};
 use super::settings::{After, Command, Format, Shortcut, DELAYS, KEEP_MAX, KEEP_MIN};
+use super::folder::FileShot;
 use super::store::{Kind, Shot};
 use super::{mac, Capture, Tab, ID};
 use crate::core::tool::Cx;
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
+use std::path::PathBuf;
 use std::time::Instant;
 
 pub const CARD_H: f32 = 222.0;
@@ -88,10 +90,23 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     }
     y += 26.0 + 12.0;
 
-    section_header(&p, Pos2::new(x0, y), Align2::LEFT_TOP, "RECENT");
+    // the newest images in the screenshot folder; history when it has none
+    c.refresh_files();
+    let items: Vec<Item> = if c.files.is_empty() { c.store.shots.iter().take(4).map(Item::from_shot).collect() } else { c.files.iter().take(4).map(Item::from_file).collect() };
+    let label = if c.files.is_empty() { "RECENT".to_string() } else { format!("RECENT IN {}", c.folder_name().to_uppercase()) };
+    let ch = link(ui, Pos2::new(x1, y + 6.0), Align2::RIGHT_CENTER, "Change folder…", 11.0);
+    let ch_left = ch.rect.left();
+    if ch.on_hover_text(format!("Screenshots go to {}", c.shown_folder())).clicked() {
+        c.choose_folder();
+    }
+    let lr = ui.interact(Rect::from_min_size(Pos2::new(x0, y), Vec2::new(ch_left - x0 - 8.0, 13.0)), id.with("recent-label"), Sense::click());
+    text_fit(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &label, bold(11.0), if lr.hovered() { TEXT_SOFT } else { TEXT_FAINT }, lr.rect.width());
+    if lr.on_hover_text("Open the folder view").clicked() {
+        c.tab = if c.files.is_empty() { Tab::History } else { Tab::Folder };
+        cx.open_page(ID, if c.files.is_empty() { "history" } else { "folder" });
+    }
     y += 18.0;
-    let recent: Vec<Shot> = c.store.shots.iter().take(4).cloned().collect();
-    if recent.is_empty() {
+    if items.is_empty() {
         let r = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 48.0));
         dashed_rect(&p, r, 6.0, white(40));
         let hint = match c.settings.shortcut(Command::Area) {
@@ -101,17 +116,17 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         text_fit(&p, r.center(), Align2::CENTER_CENTER, &hint, font(12.0), TEXT_FAINT, r.width() - 16.0);
         return;
     }
-    for (k, s) in recent.iter().enumerate() {
+    for (k, it) in items.iter().enumerate() {
         let r = Rect::from_min_size(Pos2::new(x0 + k as f32 * (bw + gap), y), Vec2::new(bw, 48.0));
-        let resp = ui.interact(r, id.with(("recent", s.id)), Sense::click());
-        let tex = c.thumb(s.id);
-        thumb(&p, r, tex, (s.w, s.h), 6.0);
+        let resp = ui.interact(r, id.with(("recent", it.key)), Sense::click());
+        let tex = c.thumb_at(it.key, it.path.clone());
+        thumb(&p, r, tex, (it.w, it.h), 6.0);
         p.rect_stroke(r, 6.0, Stroke::new(if resp.hovered() { 1.5 } else { 1.0 }, if resp.hovered() { ACCENT } else { white(26) }), StrokeKind::Inside);
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        if resp.on_hover_text(format!("Capture from {} · click to edit", s.time().format("%-I:%M %P"))).clicked() {
-            c.open_editor_for(s.id);
+        if resp.on_hover_text(format!("{} · click to edit", it.title)).clicked() {
+            run_act(c, Act::Edit, it);
         }
     }
 }
@@ -145,11 +160,17 @@ pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             let n = c.store.shots.len();
             format!("{n} capture{} · {} · saving to {}", if n == 1 { "" } else { "s" }, human_bytes(c.store.bytes_on_disk()), c.shown_folder())
         }
+        Tab::Folder => {
+            c.refresh_files();
+            let n = c.files.len();
+            let more = if n >= super::folder::LIMIT { " (newest)" } else { "" };
+            format!("{n} image{}{more} in {}", if n == 1 { "" } else { "s" }, c.shown_folder())
+        }
         Tab::Settings => "Shortcuts work everywhere, even when the panel is closed.".into(),
     };
     let btns = page_header(&p, r, "Capture", &sub, TEXT_DIM);
     let mut right = btns.right();
-    if c.tab == Tab::History {
+    if c.tab != Tab::Settings {
         let label = "Capture area";
         let w = button_width(&p, label, BTN_PRIMARY) + 18.0;
         let br = Rect::from_min_max(Pos2::new(right - w, btns.top() - 1.0), Pos2::new(right, btns.bottom() + 1.0));
@@ -160,14 +181,17 @@ pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         p.text(Pos2::new(br.left() + 31.0, br.center().y), Align2::LEFT_CENTER, label, bold(13.0), Color32::WHITE);
         right = br.left() - 12.0;
     }
-    let tr = Rect::from_min_max(Pos2::new(right - 170.0, btns.top()), Pos2::new(right, btns.bottom()));
-    if let Some(i) = segmented(ui, tr, ui.scope_id().with("capture-tab"), &["History", "Settings"], (c.tab == Tab::Settings) as usize) {
-        c.tab = if i == 0 { Tab::History } else { Tab::Settings };
+    let tabs = [Tab::History, Tab::Folder, Tab::Settings];
+    let tr = Rect::from_min_max(Pos2::new(right - 246.0, btns.top()), Pos2::new(right, btns.bottom()));
+    let cur = tabs.iter().position(|t| *t == c.tab).unwrap_or(0);
+    if let Some(i) = segmented(ui, tr, ui.scope_id().with("capture-tab"), &["History", "Folder", "Settings"], cur) {
+        c.tab = tabs[i];
         stop_recording(c);
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     match c.tab {
         Tab::History => history(c, ui, body),
+        Tab::Folder => folder_tab(c, ui, body),
         Tab::Settings => settings_page(c, ui, body, cx),
     }
 }
@@ -195,20 +219,198 @@ fn day_label(d: chrono::NaiveDate) -> String {
     }
 }
 
-/// What a history tile does when one of its buttons is pressed.
-enum HistoryAct {
-    Copy(u64),
-    Edit(u64),
-    Pin(u64),
-    Reveal(u64),
-    Delete(u64),
+/// One picture in a grid: a history capture or an image in the folder.
+#[derive(Clone)]
+pub struct Item {
+    key: u64,
+    path: PathBuf,
+    time: chrono::DateTime<chrono::Local>,
+    w: u32,
+    h: u32,
+    title: String,
+    meta: String,
+    pinned: bool,
+    src: Src,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Src {
+    Shot(u64),
+    File,
+}
+
+impl Item {
+    fn from_shot(s: &Shot) -> Item {
+        let meta = match s.kind {
+            Kind::Window | Kind::Screen | Kind::Edited => s.kind.label().to_string(),
+            Kind::Area => format!("{}×{}", s.w, s.h),
+        };
+        // history files live in the app's data folder, next to index.json
+        Item { key: s.id, path: PathBuf::new(), time: s.time(), w: s.w, h: s.h, title: format!("Capture from {}", s.time().format("%-I:%M %P")), meta, pinned: s.pinned, src: Src::Shot(s.id) }
+    }
+    fn from_file(f: &FileShot) -> Item {
+        Item { key: f.key, path: f.path.clone(), time: f.time(), w: f.w, h: f.h, title: f.name(), meta: if f.w > 0 { format!("{}×{}", f.w, f.h) } else { String::new() }, pinned: false, src: Src::File }
+    }
+}
+
+/// What a tile's buttons (or a click) ask for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Act {
+    Copy,
+    Edit,
+    Pin,
+    Reveal,
+    Delete,
+}
+
+fn load(c: &Capture, it: &Item) -> Option<image::RgbaImage> {
+    match it.src {
+        Src::Shot(id) => c.store.load(id),
+        Src::File => image::open(&it.path).ok().map(|i| i.to_rgba8()),
+    }
+}
+
+fn run_act(c: &mut Capture, act: Act, it: &Item) {
+    match (act, &it.src) {
+        (Act::Copy, _) => match load(c, it) {
+            Some(img) if c.copy_image(&img) => c.hud("Copied"),
+            _ => c.hud("Couldn't copy"),
+        },
+        (Act::Edit, Src::Shot(id)) => c.open_editor_for(*id),
+        (Act::Edit, Src::File) => {
+            if let Some(f) = c.files.iter().find(|f| f.key == it.key).cloned() {
+                c.open_file(&f);
+            }
+        }
+        (Act::Pin, Src::Shot(id)) => c.pin_shot(*id),
+        (Act::Pin, Src::File) => match load(c, it) {
+            Some(img) => c.pin(None, img),
+            None => c.hud("Couldn't open it"),
+        },
+        (Act::Reveal, Src::Shot(id)) => {
+            let id = *id;
+            let saved = c.store.get(id).and_then(|s| s.saved.clone()).filter(|p| p.exists());
+            let path = match saved {
+                Some(p) => Some(p),
+                None => c.store.load(id).and_then(|img| c.save_image(Some(id), &img)),
+            };
+            if let Some(p) = path {
+                mac::reveal(&p);
+            }
+        }
+        (Act::Reveal, Src::File) => mac::reveal(&it.path),
+        (Act::Delete, Src::Shot(id)) => {
+            c.store.remove(*id);
+            c.forget_dropped_thumbs();
+        }
+        (Act::Delete, Src::File) => match crate::kit::native::trash_item(&it.path) {
+            Ok(()) => {
+                c.files.retain(|f| f.key != it.key);
+                c.forget_dropped_thumbs();
+                c.hud("Moved to Trash");
+            }
+            Err(e) => c.hud(format!("Couldn't move it to the Trash: {e}")),
+        },
+    }
+}
+
+/// Pictures grouped by day, five to a row, with buttons on hover.
+fn grid(c: &mut Capture, ui: &mut Ui, list: Rect, items: &[Item], salt: &str) -> Vec<(Act, Item)> {
+    let mut days: Vec<(chrono::NaiveDate, Vec<&Item>)> = Vec::new();
+    for it in items {
+        let d = it.time.date_naive();
+        match days.last_mut() {
+            Some((day, v)) if *day == d => v.push(it),
+            _ => days.push((d, vec![it])),
+        }
+    }
+    let x0 = list.left() + 24.0;
+    let cols = 5usize;
+    let gap = 12.0;
+    let cw = (list.width() - 48.0 - gap * (cols as f32 - 1.0)) / cols as f32;
+    let th = 112.0;
+    let cell_h = th + 26.0;
+    let mut acts = Vec::new();
+    let mut child = ui.new_child(UiBuilder::new().max_rect(list));
+    ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show(&mut child, |ui| {
+        let total: f32 = days.iter().map(|(_, v)| 24.0 + v.len().div_ceil(cols) as f32 * (cell_h + gap)).sum::<f32>() + 8.0;
+        let (area, _) = ui.allocate_exact_size(Vec2::new(list.width(), total), Sense::hover());
+        let p = ui.painter().clone();
+        let mut y = area.top();
+        for (d, v) in &days {
+            section_header(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &day_label(*d));
+            y += 24.0;
+            for (i, it) in v.iter().enumerate() {
+                let (row, col) = (i / cols, i % cols);
+                let r = Rect::from_min_size(Pos2::new(x0 + col as f32 * (cw + gap), y + row as f32 * (cell_h + gap)), Vec2::new(cw, th));
+                if !ui.is_rect_visible(r.expand(8.0)) {
+                    continue;
+                }
+                let tex = match it.src {
+                    Src::Shot(id) => c.thumb(id),
+                    Src::File => c.thumb_at(it.key, it.path.clone()),
+                };
+                if let Some(a) = tile_ui(ui, &p, r, it, tex) {
+                    acts.push((a, (*it).clone()));
+                }
+            }
+            y += v.len().div_ceil(cols) as f32 * (cell_h + gap);
+        }
+    });
+    acts
+}
+
+fn tile_ui(ui: &mut Ui, p: &egui::Painter, r: Rect, it: &Item, tex: Option<egui::TextureId>) -> Option<Act> {
+    let id = ui.scope_id().with(("pic", it.key));
+    let resp = ui.interact(r, id, Sense::click()).on_hover_text(&it.title);
+    let hovered = ui.rect_contains_pointer(r);
+    thumb(p, r, tex, (it.w, it.h), 8.0);
+    p.rect_stroke(r, 8.0, if hovered { Stroke::new(2.0, ACCENT) } else { Stroke::new(1.0, white(26)) }, StrokeKind::Inside);
+    if it.pinned {
+        let b = Rect::from_min_size(r.min + Vec2::new(6.0, 6.0), Vec2::splat(20.0));
+        p.circle_filled(b.center(), 10.0, Color32::from_black_alpha(160));
+        icons::draw(p, Ico::Pin, b.shrink(4.0), Color32::WHITE);
+    }
+    let ly = r.bottom() + 12.0;
+    let mr = p.text(Pos2::new(r.right(), ly), Align2::RIGHT_CENTER, &it.meta, font(12.0), TEXT_FAINT);
+    text_fit(p, Pos2::new(r.left(), ly), Align2::LEFT_CENTER, &it.time.format("%-I:%M %P").to_string(), font(12.0), TEXT, mr.left() - r.left() - 6.0);
+    let mut out = None;
+    if hovered {
+        let bar = Rect::from_min_max(Pos2::new(r.left() + 1.0, r.bottom() - 38.0), Pos2::new(r.right() - 1.0, r.bottom() - 1.0));
+        p.rect_filled(bar, egui::CornerRadius { nw: 0, ne: 0, sw: 7, se: 7 }, Color32::from_rgba_unmultiplied(20, 20, 22, 225));
+        let delete_tip = if it.src == Src::File { "Move to Trash" } else { "Delete" };
+        let acts: [(Ico, &str, Act); 5] = [
+            (Ico::Copy, "Copy", Act::Copy),
+            (Ico::Edit, "Edit", Act::Edit),
+            (Ico::Pin, "Pin on screen", Act::Pin),
+            (Ico::Folder, "Show in Finder", Act::Reveal),
+            (Ico::Trash, delete_tip, Act::Delete),
+        ];
+        let bw = 26.0;
+        let total = acts.len() as f32 * bw + (acts.len() - 1) as f32 * 4.0;
+        let mut x = bar.center().x - total / 2.0;
+        for (ico, tip, a) in acts {
+            let br = Rect::from_min_size(Pos2::new(x, bar.center().y - 13.0), Vec2::splat(bw));
+            let b = ui.interact(br, id.with(tip), Sense::click());
+            p.rect_filled(br, 6.0, white(if b.hovered() { 46 } else { 26 }));
+            icons::draw(p, ico, br.shrink(6.0), if a == Act::Delete && b.hovered() { RED } else { TEXT });
+            if b.on_hover_text(tip).clicked() {
+                out = Some(a);
+            }
+            x += bw + 4.0;
+        }
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if out.is_none() && resp.clicked() {
+        out = Some(Act::Edit);
+    }
+    out
 }
 
 fn history(c: &mut Capture, ui: &mut Ui, body: Rect) {
     let p = ui.painter().clone();
     let x0 = body.left() + 24.0;
     let x1 = body.right() - 24.0;
-    // filters
     let fy = body.top() + 12.0;
     let mut x = x0;
     for (i, f) in FILTERS.iter().enumerate() {
@@ -231,8 +433,8 @@ fn history(c: &mut Capture, ui: &mut Ui, body: Rect) {
     p.text(Pos2::new(lr.rect.left(), fy + 13.0), Align2::RIGHT_CENTER, format!("Keeps the last {} · ", c.settings.keep), font(12.0), TEXT_FAINT);
 
     let list = Rect::from_min_max(Pos2::new(body.left(), fy + 38.0), body.max);
-    let shots: Vec<Shot> = c.store.shots.iter().filter(|s| passes(c.filter, s)).cloned().collect();
-    if shots.is_empty() {
+    let items: Vec<Item> = c.store.shots.iter().filter(|s| passes(c.filter, s)).map(Item::from_shot).collect();
+    if items.is_empty() {
         let msg = if c.store.shots.is_empty() { "No captures yet" } else { "Nothing here with this filter" };
         p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT);
         if c.store.shots.is_empty() {
@@ -244,124 +446,49 @@ fn history(c: &mut Capture, ui: &mut Ui, body: Rect) {
         }
         return;
     }
-    // group by day
-    let mut days: Vec<(chrono::NaiveDate, Vec<Shot>)> = Vec::new();
-    for s in shots {
-        let d = s.time().date_naive();
-        match days.last_mut() {
-            Some((day, v)) if *day == d => v.push(s),
-            _ => days.push((d, vec![s])),
-        }
-    }
-    let cols = 5usize;
-    let gap = 12.0;
-    let width = x1 - x0;
-    let cw = (width - gap * (cols as f32 - 1.0)) / cols as f32;
-    let th = 112.0;
-    let cell_h = th + 26.0;
-    let mut acts = Vec::new();
-    let mut child = ui.new_child(UiBuilder::new().max_rect(list));
-    ScrollArea::vertical().id_salt("capture-history").auto_shrink([false, false]).show(&mut child, |ui| {
-        let total: f32 = days.iter().map(|(_, v)| 24.0 + v.len().div_ceil(cols) as f32 * (cell_h + gap)).sum::<f32>() + 8.0;
-        let (area, _) = ui.allocate_exact_size(Vec2::new(list.width(), total), Sense::hover());
-        let p = ui.painter().clone();
-        let mut y = area.top();
-        for (d, v) in &days {
-            section_header(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &day_label(*d));
-            y += 24.0;
-            for (i, s) in v.iter().enumerate() {
-                let (row, col) = (i / cols, i % cols);
-                let r = Rect::from_min_size(Pos2::new(x0 + col as f32 * (cw + gap), y + row as f32 * (cell_h + gap)), Vec2::new(cw, th));
-                if !ui.is_rect_visible(r.expand(8.0)) {
-                    continue;
-                }
-                let tex = c.thumb(s.id);
-                if let Some(a) = history_tile(ui, &p, r, s, tex) {
-                    acts.push(a);
-                }
-            }
-            y += v.len().div_ceil(cols) as f32 * (cell_h + gap);
-        }
-    });
-    for a in acts {
-        match a {
-            HistoryAct::Copy(id) => {
-                if let Some(img) = c.store.load(id) {
-                    if c.copy_image(&img) {
-                        c.hud("Copied");
-                    } else {
-                        c.hud("Couldn't copy");
-                    }
-                }
-            }
-            HistoryAct::Edit(id) => c.open_editor_for(id),
-            HistoryAct::Pin(id) => c.pin_shot(id),
-            HistoryAct::Reveal(id) => {
-                let saved = c.store.get(id).and_then(|s| s.saved.clone()).filter(|p| p.exists());
-                let path = match saved {
-                    Some(p) => Some(p),
-                    None => c.store.load(id).and_then(|img| c.save_image(Some(id), &img)),
-                };
-                if let Some(p) = path {
-                    mac::reveal(&p);
-                }
-            }
-            HistoryAct::Delete(id) => {
-                c.store.remove(id);
-                c.forget_dropped_thumbs();
-            }
-        }
+    for (a, it) in grid(c, ui, list, &items, "capture-history") {
+        run_act(c, a, &it);
     }
 }
 
-fn history_tile(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Shot, tex: Option<egui::TextureId>) -> Option<HistoryAct> {
-    let id = ui.scope_id().with(("shot", s.id));
-    let resp = ui.interact(r, id, Sense::click());
-    let hovered = ui.rect_contains_pointer(r);
-    thumb(p, r, tex, (s.w, s.h), 8.0);
-    p.rect_stroke(r, 8.0, if hovered { Stroke::new(2.0, ACCENT) } else { Stroke::new(1.0, white(26)) }, StrokeKind::Inside);
-    if s.pinned {
-        let b = Rect::from_min_size(r.min + Vec2::new(6.0, 6.0), Vec2::splat(20.0));
-        p.circle_filled(b.center(), 10.0, Color32::from_black_alpha(160));
-        icons::draw(p, Ico::Pin, b.shrink(4.0), Color32::WHITE);
+/// The screenshot folder: every PNG and JPG in it, newest first.
+fn folder_tab(c: &mut Capture, ui: &mut Ui, body: Rect) {
+    let p = ui.painter().clone();
+    let x0 = body.left() + 24.0;
+    let x1 = body.right() - 24.0;
+    let fy = body.top() + 12.0;
+    let cy = fy + 13.0;
+    icons::draw(&p, Ico::Folder, Rect::from_center_size(Pos2::new(x0 + 8.0, cy), Vec2::splat(16.0)), TEXT_DIM);
+    let ow = button_width(&p, "Open in Finder", BTN_SECONDARY) - 6.0;
+    let or = Rect::from_min_max(Pos2::new(x1 - ow, cy - 13.0), Pos2::new(x1, cy + 13.0));
+    if pill_button(ui, or, "Open in Finder", BTN_SECONDARY, true).clicked() {
+        let _ = std::process::Command::new("open").arg(&c.settings.folder).spawn();
     }
-    let meta = match s.kind {
-        Kind::Window | Kind::Screen | Kind::Edited => s.kind.label().to_string(),
-        Kind::Area => format!("{}×{}", s.w, s.h),
-    };
-    let ly = r.bottom() + 12.0;
-    let mr = p.text(Pos2::new(r.right(), ly), Align2::RIGHT_CENTER, meta, font(12.0), TEXT_FAINT);
-    text_fit(p, Pos2::new(r.left(), ly), Align2::LEFT_CENTER, &s.time().format("%-I:%M %P").to_string(), font(12.0), TEXT, mr.left() - r.left() - 6.0);
-    let mut out = None;
-    if hovered {
-        let bar = Rect::from_min_max(Pos2::new(r.left() + 1.0, r.bottom() - 38.0), Pos2::new(r.right() - 1.0, r.bottom() - 1.0));
-        p.rect_filled(bar, egui::CornerRadius { nw: 0, ne: 0, sw: 7, se: 7 }, Color32::from_rgba_unmultiplied(20, 20, 22, 225));
-        let acts: [(Ico, &str, fn(u64) -> HistoryAct); 5] = [
-            (Ico::Copy, "Copy", HistoryAct::Copy),
-            (Ico::Edit, "Edit", HistoryAct::Edit),
-            (Ico::Pin, "Pin on screen", HistoryAct::Pin),
-            (Ico::Folder, "Show in Finder", HistoryAct::Reveal),
-            (Ico::Trash, "Delete", HistoryAct::Delete),
-        ];
-        let bw = 26.0;
-        let total = acts.len() as f32 * bw + (acts.len() - 1) as f32 * 4.0;
-        let mut x = bar.center().x - total / 2.0;
-        for (ico, tip, make) in acts {
-            let br = Rect::from_min_size(Pos2::new(x, bar.center().y - 13.0), Vec2::splat(bw));
-            let b = ui.interact(br, id.with(tip), Sense::click());
-            p.rect_filled(br, 6.0, white(if b.hovered() { 46 } else { 26 }));
-            icons::draw(p, ico, br.shrink(6.0), if tip == "Delete" && b.hovered() { RED } else { TEXT });
-            if b.on_hover_text(tip).clicked() {
-                out = Some(make(s.id));
-            }
-            x += bw + 4.0;
-        }
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    let cw = button_width(&p, "Change folder…", BTN_SECONDARY) - 6.0;
+    let cr = Rect::from_min_max(Pos2::new(or.left() - 8.0 - cw, cy - 13.0), Pos2::new(or.left() - 8.0, cy + 13.0));
+    if pill_button(ui, cr, "Change folder…", BTN_SECONDARY, true).clicked() {
+        c.choose_folder();
     }
-    if out.is_none() && resp.clicked() {
-        out = Some(HistoryAct::Edit(s.id));
+    text_fit(&p, Pos2::new(x0 + 24.0, cy), Align2::LEFT_CENTER, &c.shown_folder(), mono(12.0), TEXT_SOFT, cr.left() - x0 - 36.0);
+
+    let list = Rect::from_min_max(Pos2::new(body.left(), fy + 38.0), body.max);
+    let items: Vec<Item> = c.files.iter().map(Item::from_file).collect();
+    if items.is_empty() {
+        let (msg, hint) = if c.files_busy && c.files_at.is_none() {
+            ("Looking in the folder…", String::new())
+        } else if !c.settings.save {
+            ("No images in this folder", "Turn on \"Save to folder\" in Settings to put every capture here.".to_string())
+        } else {
+            ("No images in this folder", "Captures you take are saved here as PNG or JPG.".to_string())
+        };
+        p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT);
+        p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM);
+        return;
     }
-    out
+    for (a, it) in grid(c, ui, list, &items, "capture-folder") {
+        run_act(c, a, &it);
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_secs(3));
 }
 
 // ---------------------------------------------------------------- settings
