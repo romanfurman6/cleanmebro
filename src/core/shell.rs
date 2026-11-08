@@ -544,7 +544,7 @@ impl App {
             builder = builder.with_active(true);
         }
         let id = egui::ViewportId::from_hash_of("cleanmebro-app");
-        ctx.show_viewport_immediate(id, builder, |ui, _class| {
+        crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
             let vctx = ui.ctx().clone();
             if self.app_focus {
                 self.app_focus = false;
