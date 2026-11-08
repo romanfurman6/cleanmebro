@@ -18,13 +18,6 @@ pub enum Level {
 }
 
 impl Level {
-    pub fn word(self) -> &'static str {
-        match self {
-            Level::Good => "Good",
-            Level::Fair => "Fair",
-            Level::Critical => "Needs care",
-        }
-    }
     pub fn worst(self, other: Level) -> Level {
         use Level::*;
         match (self, other) {

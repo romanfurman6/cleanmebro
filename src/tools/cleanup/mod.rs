@@ -6,8 +6,8 @@
 pub mod engine;
 mod page;
 
-use crate::core::tool::{Action, Badge, Cx, Recommendation, Tool, ToolEnv, ToolId, View};
-use crate::kit::glass::{human_bytes, tint, Icon};
+use crate::core::tool::{Action, Badge, Cx, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::kit::glass::{human_bytes, quick_tile, tint, Icon, QUICK_TILE_H};
 use egui::{Rect, Ui};
 use engine::Group;
 
@@ -39,7 +39,7 @@ impl Cleanup {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Broom, top: tint::CLEANUP, bottom: tint::CLEANUP }
+    Badge { icon: Icon::Broom, color: tint::CLEANUP }
 }
 
 impl Tool for Cleanup {
@@ -54,6 +54,26 @@ impl Tool for Cleanup {
     }
     fn section(&self) -> &'static str {
         "Clean"
+    }
+    fn widgets(&self) -> Vec<WidgetSpec> {
+        vec![WidgetSpec { id: "clean", title: "Clean (quick action)", span: 1, default_on: true, group: None }]
+    }
+    fn widget_height(&self, _widget: &str, _width: f32) -> f32 {
+        QUICK_TILE_H
+    }
+    fn widget_ui(&mut self, _widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        let sub = {
+            let g = self.clean.lock().unwrap();
+            match g.phase {
+                engine::Phase::Results => human_bytes(g.total()),
+                engine::Phase::Scanning | engine::Phase::Judging => "Scanning…".into(),
+                engine::Phase::Cleaning => "Cleaning…".into(),
+                _ => "Scan".into(),
+            }
+        };
+        if quick_tile(ui, rect, ui.scope_id().with("q-clean"), Icon::Broom, tint::CLEANUP, "Clean", &sub, true).clicked() {
+            cx.open_page(ID, "");
+        }
     }
     fn has_page(&self) -> bool {
         true
@@ -71,12 +91,12 @@ impl Tool for Cleanup {
         page::page(self, ui, rect);
     }
     fn recommendations(&self) -> Vec<Recommendation> {
-        let blue = (tint::CLEANUP, tint::CLEANUP);
+        let blue = tint::CLEANUP;
         let go = Action::OpenPage { tool: ID.into(), route: String::new() };
         // always on offer, at the lowest priority
         let mut v = vec![Recommendation {
             priority: 0,
-            badge: Badge { icon: Icon::Broom, top: blue.0, bottom: blue.1 },
+            badge: Badge { icon: Icon::Broom, color: blue },
             title: "Let's give your Mac a quick clean".into(),
             body: "Claude checks each cache and log path and tells you what's safe to remove.".into(),
             action: "Start Cleanup".into(),
@@ -86,7 +106,7 @@ impl Tool for Cleanup {
         if claude_junk > 50_000_000 {
             v.push(Recommendation {
                 priority: 4,
-                badge: Badge { icon: Icon::Broom, top: blue.0, bottom: blue.1 },
+                badge: Badge { icon: Icon::Broom, color: blue },
                 title: "Claude caches can be trimmed".into(),
                 body: format!("{} of old Claude caches, logs and versions are safe to remove.", human_bytes(claude_junk)),
                 action: "Review Cleanup".into(),

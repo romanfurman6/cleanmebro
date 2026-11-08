@@ -59,32 +59,6 @@ impl Group {
             Group::Trash => "Items you already deleted still take space until the Trash is emptied.",
         }
     }
-    pub fn colors(self) -> (egui::Color32, egui::Color32) {
-        use egui::Color32 as C;
-        match self {
-            Group::UserCache => (C::from_rgb(120, 200, 255), C::from_rgb(40, 110, 230)),
-            Group::Logs => (C::from_rgb(190, 190, 200), C::from_rgb(110, 110, 120)),
-            Group::AppCaches => (C::from_rgb(110, 240, 200), C::from_rgb(20, 160, 130)),
-            Group::Xcode => (C::from_rgb(120, 190, 255), C::from_rgb(30, 90, 210)),
-            Group::Developer => (C::from_rgb(255, 200, 120), C::from_rgb(230, 120, 40)),
-            Group::Claude => (C::from_rgb(255, 170, 130), C::from_rgb(214, 100, 70)),
-            Group::AiTools => (C::from_rgb(120, 235, 230), C::from_rgb(20, 160, 170)),
-            Group::Trash => (C::from_rgb(170, 170, 178), C::from_rgb(90, 90, 98)),
-        }
-    }
-    pub fn icon(self) -> crate::kit::glass::Icon {
-        use crate::kit::glass::Icon;
-        match self {
-            Group::UserCache => Icon::Folder,
-            Group::Logs => Icon::Chart,
-            Group::AppCaches => Icon::Monitor,
-            Group::Xcode => Icon::Cpu,
-            Group::Developer => Icon::Gear,
-            Group::Claude => Icon::Sparkle,
-            Group::AiTools => Icon::Sparkle,
-            Group::Trash => Icon::Trash,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

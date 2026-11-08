@@ -1,5 +1,5 @@
 //! The contract between the shell and a tool. A tool is a self-contained
-//! module (Mac health, Claude limits, Cleanup, Space Lens, …) that offers any
+//! module (Mac health, Claude limits, Cleanup, Disk Map, …) that offers any
 //! of: widgets for the menu-bar panel, detail sheets beside the panel, a page
 //! in the full window, recommendations, menu entries and a tray title.
 //!
@@ -23,12 +23,12 @@ pub struct ToolEnv {
     pub demo: bool,
 }
 
-/// The tool's colored icon tile (sidebar, footer, widget settings).
+/// The tool's icon and its one tint (sidebar chip, widget settings,
+/// recommendation banner).
 #[derive(Clone, Copy)]
 pub struct Badge {
     pub icon: Icon,
-    pub top: Color32,
-    pub bottom: Color32,
+    pub color: Color32,
 }
 
 /// A widget a tool offers for the panel.
@@ -41,6 +41,16 @@ pub struct WidgetSpec {
     pub span: u8,
     /// Shown until the user changes the panel.
     pub default_on: bool,
+    /// Widgets of the same group that sit next to each other share one card
+    /// (full-width rows such as the Mac metrics).
+    pub group: Option<&'static str>,
+}
+
+/// The panel's title line: the first tool that returns one wins.
+pub struct PanelHeader {
+    pub title: String,
+    pub status: String,
+    pub dot: Color32,
 }
 
 /// A suggestion for the panel's "Today's Recommendation". The highest
@@ -100,10 +110,6 @@ impl Cx {
     pub fn toggle_detail(&mut self, tool: &str, detail: &str) {
         self.actions.push(Action::ShowDetail { tool: tool.into(), detail: detail.into(), toggle: true });
     }
-    /// Open a detail sheet, keeping it open if it already is.
-    pub fn show_detail(&mut self, tool: &str, detail: &str) {
-        self.actions.push(Action::ShowDetail { tool: tool.into(), detail: detail.into(), toggle: false });
-    }
     pub fn close_detail(&mut self) {
         self.actions.push(Action::CloseDetail);
     }
@@ -141,6 +147,9 @@ pub trait Tool {
     }
 
     // ---- panel widgets
+    fn panel_header(&self) -> Option<PanelHeader> {
+        None
+    }
     fn widgets(&self) -> Vec<WidgetSpec> {
         Vec::new()
     }

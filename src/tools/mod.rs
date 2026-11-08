@@ -23,14 +23,15 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
 /// The panel's widgets on first launch, as `tool/widget` keys. Widgets not
 /// listed follow in tool order. The user can change this in the panel.
 pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
-    "system/health",
-    "claude/limits",
+    "cleanup/clean",
+    "core/planned",
     "system/storage",
     "system/memory",
-    "system/battery",
     "system/cpu",
+    "system/battery",
     "system/network",
     "system/devices",
+    "claude/limits",
     "core/recommendation",
 ];
 

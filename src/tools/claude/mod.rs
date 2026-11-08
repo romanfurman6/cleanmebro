@@ -25,7 +25,7 @@ impl Claude {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Sparkle, top: tint::CLAUDE, bottom: tint::CLAUDE }
+    Badge { icon: Icon::Sparkle, color: tint::CLAUDE }
 }
 
 impl Tool for Claude {
@@ -42,7 +42,7 @@ impl Tool for Claude {
         "Monitor"
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: LIMITS, title: "Claude limits", span: 4, default_on: true }]
+        vec![WidgetSpec { id: LIMITS, title: "Claude limits", span: 4, default_on: true, group: None }]
     }
     fn widget_height(&self, _widget: &str, _width: f32) -> f32 {
         ui::CARD_H

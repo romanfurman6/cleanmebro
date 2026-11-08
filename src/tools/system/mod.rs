@@ -5,7 +5,7 @@ pub mod monitor;
 mod sheets;
 mod ui;
 
-use crate::core::tool::{Action, Badge, Cx, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::core::tool::{Action, Badge, Cx, PanelHeader, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
 use crate::kit::glass::{human_bytes, tint, Icon, BLUE};
 use crate::kit::mechanics as m;
 use egui::{Rect, Ui};
@@ -25,14 +25,14 @@ impl System {
     }
 }
 
-const WIDGETS: [WidgetSpec; 7] = [
-    WidgetSpec { id: "health", title: "Health summary", span: 4, default_on: true },
-    WidgetSpec { id: "storage", title: "Storage", span: 2, default_on: true },
-    WidgetSpec { id: "memory", title: "Memory", span: 2, default_on: true },
-    WidgetSpec { id: "battery", title: "Battery", span: 2, default_on: true },
-    WidgetSpec { id: "cpu", title: "CPU", span: 2, default_on: true },
-    WidgetSpec { id: "network", title: "Network", span: 2, default_on: true },
-    WidgetSpec { id: "devices", title: "Connected Devices", span: 2, default_on: true },
+const METRICS: Option<&str> = Some("metrics");
+const WIDGETS: [WidgetSpec; 6] = [
+    WidgetSpec { id: "storage", title: "Storage", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "memory", title: "Memory", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "cpu", title: "CPU", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "battery", title: "Battery", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "network", title: "Network", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "devices", title: "Connected Devices", span: 4, default_on: true, group: METRICS },
 ];
 
 impl Tool for System {
@@ -43,10 +43,13 @@ impl Tool for System {
         "Mac Health"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::Pulse, top: tint::HEALTH, bottom: tint::HEALTH }
+        Badge { icon: Icon::Pulse, color: tint::HEALTH }
     }
     fn section(&self) -> &'static str {
         "Monitor"
+    }
+    fn panel_header(&self) -> Option<PanelHeader> {
+        Some(ui::header(&self.mon.lock().unwrap()))
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
         WIDGETS.to_vec()
@@ -66,7 +69,7 @@ impl Tool for System {
     /// overfill 5); memory and restart are slotted in by us.
     fn recommendations(&self) -> Vec<Recommendation> {
         let s = self.mon.lock().unwrap().clone();
-        let blue = |icon| Badge { icon, top: BLUE, bottom: BLUE };
+        let blue = |icon| Badge { icon, color: BLUE };
         let detail = |d: &str| Action::ShowDetail { tool: ID.into(), detail: d.into(), toggle: true };
         let page = |t: &str| Action::OpenPage { tool: t.into(), route: String::new() };
         let mut v = Vec::new();
@@ -92,6 +95,6 @@ impl Tool for System {
     }
 
     fn demo_view(&mut self, view: &str) -> Option<View> {
-        WIDGETS.iter().find(|w| w.id == view && w.id != "health").map(|w| View::Detail(w.id))
+        WIDGETS.iter().find(|w| w.id == view).map(|w| View::Detail(w.id))
     }
 }

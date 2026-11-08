@@ -43,10 +43,7 @@ pub const TEAL: Color32 = Color32::from_rgb(0x64, 0xD2, 0xFF);
 pub const PURPLE: Color32 = Color32::from_rgb(0xBF, 0x8C, 0xFF);
 pub const MINT: Color32 = Color32::from_rgb(99, 230, 226);
 pub const GRAY: Color32 = Color32::from_rgb(152, 152, 157);
-/// "Good" status (kept for older call sites).
-pub const CYAN: Color32 = GREEN;
 pub const PINK: Color32 = AMBER;
-pub const VIOLET: Color32 = BLUE;
 
 /// One small tint chip per tool (white glyph on it).
 pub mod tint {
@@ -151,38 +148,6 @@ pub fn gradient_rect_dir(
     let n = pts.len() as u32;
     for i in 0..n {
         mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
-    }
-    painter.add(Shape::mesh(mesh));
-}
-
-/// Soft radial glow (a coloured light behind the glass).
-pub fn glow(painter: &Painter, center: Pos2, radius: f32, color: Color32) {
-    let mut mesh = Mesh::default();
-    let rings = [(0.0, 1.0), (0.35, 0.75), (0.65, 0.38), (1.0, 0.0)];
-    let segs = 48u32;
-    mesh.colored_vertex(center, color);
-    let mut ring_start = Vec::new();
-    for (k, &(rf, af)) in rings.iter().enumerate().skip(1) {
-        ring_start.push(mesh.vertices.len() as u32);
-        for i in 0..segs {
-            let a = i as f32 / segs as f32 * TAU;
-            let p = center + Vec2::new(a.cos(), a.sin()) * radius * rf;
-            mesh.colored_vertex(p, with_alpha(color, color.a() as f32 / 255.0 * af));
-        }
-        let _ = k;
-    }
-    // centre fan
-    let first = ring_start[0];
-    for i in 0..segs {
-        mesh.add_triangle(0, first + i, first + (i + 1) % segs);
-    }
-    for w in ring_start.windows(2) {
-        let (a, b) = (w[0], w[1]);
-        for i in 0..segs {
-            let j = (i + 1) % segs;
-            mesh.add_triangle(a + i, b + i, b + j);
-            mesh.add_triangle(a + i, b + j, a + j);
-        }
     }
     painter.add(Shape::mesh(mesh));
 }
@@ -346,22 +311,6 @@ pub fn stacked_bar(painter: &Painter, rect: Rect, segments: &[(f32, Color32)]) {
             se: if seg.right() >= rect.right() - 0.5 { r as u8 } else { 0 },
         };
         clip.rect_filled(seg, cr, c);
-    }
-}
-
-/// Ring (donut) chart. Segments are (fraction, colour); remainder is a faint track.
-pub fn ring(painter: &Painter, center: Pos2, radius: f32, width: f32, segments: &[(f32, Color32)]) {
-    let track = PathShape::line(arc_points(center, radius, 0.0, TAU, 96), PathStroke::new(width, white(22)));
-    painter.add(track);
-    let mut start = -PI / 2.0;
-    for (f, c) in segments {
-        let sweep = (f.clamp(0.0, 1.0)) * TAU;
-        if sweep < 0.002 {
-            continue;
-        }
-        let n = ((sweep / TAU) * 120.0).max(3.0) as usize;
-        painter.add(PathShape::line(arc_points(center, radius, start, start + sweep, n), PathStroke::new(width, *c)));
-        start += sweep;
     }
 }
 
@@ -1114,12 +1063,6 @@ pub fn rim(p: &Painter, rect: Rect, r: f32, strength: f32) {
     p.rect_stroke(rect, r, Stroke::new(1.0, white((HAIRLINE_STRONG as f32 * strength).min(255.0) as u8)), StrokeKind::Inside);
 }
 
-/// A tool's tint chip (older call sites pass a gradient pair; the darker
-/// `bottom` colour is used flat).
-#[allow(unused_variables)]
-pub fn tile_icon(p: &Painter, rect: Rect, glyph: Icon, top: Color32, bottom: Color32) {
-    tool_chip(p, rect, glyph, bottom);
-}
 
 #[cfg(test)]
 mod tests {

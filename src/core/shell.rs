@@ -16,6 +16,8 @@ use std::time::Instant;
 pub const CORE: &str = "core";
 /// "Today's Recommendation", fed by every tool.
 pub const RECOMMENDATION: &str = "recommendation";
+/// Shell widget: dashed tiles for the tools that are planned but not built.
+pub const PLANNED: &str = "planned";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -122,6 +124,7 @@ impl App {
                 v.push((widget_key(t.id(), w.id), w.default_on));
             }
         }
+        v.push((widget_key(CORE, PLANNED), true));
         v.push((widget_key(CORE, RECOMMENDATION), true));
         // the registry's preferred order first, the rest as the tools list them
         let rank = |k: &str| crate::tools::DEFAULT_WIDGET_ORDER.iter().position(|o| *o == k).unwrap_or(usize::MAX);
@@ -133,7 +136,10 @@ impl App {
     pub fn widget_spec(&self, key: &str) -> Option<(Option<usize>, WidgetSpec)> {
         let (tool, id) = key.split_once('/')?;
         if tool == CORE && id == RECOMMENDATION {
-            return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", span: 4, default_on: true }));
+            return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", span: 4, default_on: true, group: None }));
+        }
+        if tool == CORE && id == PLANNED {
+            return Some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span: 3, default_on: true, group: None }));
         }
         let i = self.tools.iter().position(|t| t.id() == tool)?;
         let spec = self.tools[i].widgets().into_iter().find(|w| w.id == id)?;
@@ -216,7 +222,7 @@ impl App {
     /// The panel's height for its current widgets, before the screen limit.
     fn panel_height(&self) -> f32 {
         let content = super::panel::content_height(self);
-        let h = super::panel::PAD + content + super::panel::FOOTER;
+        let h = super::panel::HEADER + content + super::panel::FOOTER;
         if self.detail.is_some() {
             h.max(m::PANEL_HEIGHT)
         } else {
@@ -398,7 +404,7 @@ impl eframe::App for App {
         match self.mode {
             Mode::Panel => {
                 // one glass sheet; the detail opens on its left behind a hairline
-                glass::backdrop(ui.painter(), full, m::CARD_RADIUS + 6.0, opaque, t);
+                glass::backdrop(ui.painter(), full, m::CARD_RADIUS + 2.0, opaque, t);
                 let panel = Rect::from_min_size(Pos2::new(full.right() - m::PANEL_WIDTH, full.top()), Vec2::new(m::PANEL_WIDTH, full.height()));
                 if self.detail.is_some() {
                     let sheet = Rect::from_min_size(full.left_top(), Vec2::new(m::DETAIL_WIDTH, full.height()));

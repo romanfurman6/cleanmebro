@@ -58,7 +58,7 @@ impl Tool for Lens {
         "Disk Map"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::Map, top: tint::DISK_MAP, bottom: tint::DISK_MAP }
+        Badge { icon: Icon::Map, color: tint::DISK_MAP }
     }
     fn section(&self) -> &'static str {
         "Clean"

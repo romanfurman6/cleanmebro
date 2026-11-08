@@ -49,7 +49,7 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
         let t = &app.tools[i];
         let (label, badge, meta, id) = (t.name(), t.badge(), t.sidebar_meta(), t.id());
         let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, SIDEBAR_ROW_H));
-        if sidebar_item(ui, r, ui.scope_id().with(("nav", id)), badge.icon, badge.bottom, label, &meta, app.page == i, false).clicked() {
+        if sidebar_item(ui, r, ui.scope_id().with(("nav", id)), badge.icon, badge.color, label, &meta, app.page == i, false).clicked() {
             app.page = i;
         }
         y += SIDEBAR_ROW_H + 2.0;
