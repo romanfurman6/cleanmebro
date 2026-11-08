@@ -199,6 +199,10 @@ pub trait Tool {
     fn tick(&mut self, _ctx: &egui::Context) -> bool {
         false
     }
+    /// The user turned the tool on or off in Settings (also called at launch
+    /// for tools left off). Off, `tick` and `windows` aren't called; release
+    /// anything system-wide, such as global shortcuts.
+    fn set_on(&mut self, _on: bool) {}
     /// Called on every frame with a ui pass: show the tool's own extra
     /// windows (`ctx.show_viewport_immediate`), whatever the shell shows.
     fn windows(&mut self, _ctx: &egui::Context, _cx: &mut Cx) {}

@@ -507,6 +507,29 @@ impl Tool for Capture {
     fn section(&self) -> &'static str {
         "Create"
     }
+    fn about(&self) -> &'static str {
+        "Screenshots, markup and text from the screen"
+    }
+    fn set_on(&mut self, on: bool) {
+        if on {
+            self.apply_keys();
+        } else {
+            if let Some(k) = &mut self.keys {
+                k.clear();
+            }
+            self.key_errors.clear();
+            self.recording = None;
+            self.queue.clear();
+            self.countdown = None;
+            self.preview = None;
+            self.pins.clear();
+            self.overlay = None;
+            self.perm_card = None;
+            if let Some(mut ew) = self.editor.take() {
+                self.commit_edit(&mut ew.ed);
+            }
+        }
+    }
     fn sidebar_meta(&self) -> String {
         self.settings.shortcut(Command::Area).map(|s| s.display()).unwrap_or_default()
     }

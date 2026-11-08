@@ -123,6 +123,11 @@ impl App {
             toast: None,
         };
         app.widgets = prefs.resolve(&app.available_widgets());
+        for i in 0..app.tools.len() {
+            if !app.tool_on(i) {
+                app.tools[i].set_on(false);
+            }
+        }
         app.apply_view(&opts.view);
         crate::kit::native::set_dock_icon(app.mode == Mode::Window || demo);
         app
@@ -178,6 +183,7 @@ impl App {
     pub fn set_tool_on(&mut self, i: usize, on: bool) {
         let id = self.tools[i].id().to_string();
         self.tools_off.retain(|x| *x != id);
+        self.tools[i].set_on(on);
         if !on {
             self.tools_off.push(id);
             if self.detail.as_ref().is_some_and(|(d, _)| *d == i) {
@@ -389,8 +395,10 @@ impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // tools poll their background work; some need frames while hidden
         let mut tools_need_frames = false;
-        for t in self.tools.iter_mut() {
-            tools_need_frames |= t.tick(ctx);
+        for i in 0..self.tools.len() {
+            if self.tool_on(i) {
+                tools_need_frames |= self.tools[i].tick(ctx);
+            }
         }
         if (self.app_open || tools_need_frames) && !self.visible {
             ctx.send_viewport_cmd(ViewportCommand::RequestPaintWhileHidden);
@@ -486,8 +494,10 @@ impl eframe::App for App {
                 }
             }
         }
-        for t in self.tools.iter_mut() {
-            t.windows(&ctx, &mut cx);
+        for i in 0..self.tools.len() {
+            if self.tool_on(i) {
+                self.tools[i].windows(&ctx, &mut cx);
+            }
         }
         self.run_actions(&ctx, &mut cx);
         if let Some((msg, at)) = &self.toast {
