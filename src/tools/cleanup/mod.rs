@@ -63,6 +63,10 @@ impl Tool for Cleanup {
             self.clean_group = Some(Group::Claude);
         }
     }
+    fn sidebar_meta(&self) -> String {
+        let g = self.clean.lock().unwrap();
+        if g.phase == engine::Phase::Results { human_bytes(g.total()) } else { String::new() }
+    }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, _cx: &mut Cx) {
         page::page(self, ui, rect);
     }

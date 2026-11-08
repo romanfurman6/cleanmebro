@@ -67,6 +67,9 @@ impl Tool for Claude {
     fn has_page(&self) -> bool {
         true
     }
+    fn sidebar_meta(&self) -> String {
+        self.info.lock().unwrap().session().map(|l| format!("{:.0}%", l.pct)).unwrap_or_default()
+    }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         page::page(&self.info, self.demo, ui, rect, cx);
     }
