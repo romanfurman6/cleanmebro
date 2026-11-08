@@ -31,7 +31,7 @@ mod mac {
         for w in windows.iter() {
             let Some(content) = w.contentView() else { continue };
             let class = content.class().name().to_string_lossy().to_string();
-            if !class.contains("Winit") {
+            if !class.contains("Winit") || w.title().to_string().starts_with(super::PLAIN_WINDOW) {
                 continue;
             }
             let num = w.windowNumber();
@@ -201,6 +201,11 @@ mod mac {
 
 #[cfg(target_os = "macos")]
 pub use mac::*;
+
+/// Windows whose title starts with this get no glass layer behind them: a
+/// tool's floating windows that draw everything themselves (pinned images,
+/// overlays).
+pub const PLAIN_WINDOW: &str = "plain-";
 
 #[cfg(not(target_os = "macos"))]
 mod other {

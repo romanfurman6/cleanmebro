@@ -22,7 +22,7 @@ pub const GAP: f32 = 10.0;
 /// Padding above and below the rows inside a group card.
 const GROUP_PAD: f32 = 4.0;
 /// Planned tools shown as dashed tiles: (icon, label).
-const PLANNED_TILES: [(Icon, &str); 3] = [(Icon::Cup, "Awake"), (Icon::Crop, "Capture"), (Icon::Fan, "Fans")];
+const PLANNED_TILES: [(Icon, &str); 2] = [(Icon::Cup, "Awake"), (Icon::Fan, "Fans")];
 
 pub fn inner_width() -> f32 {
     m::PANEL_WIDTH - 2.0 * PAD
