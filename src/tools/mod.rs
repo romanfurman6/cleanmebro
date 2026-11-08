@@ -3,6 +3,7 @@
 //! and add one line below. Tools must not import each other; shared code
 //! belongs in `crate::kit`.
 
+pub mod capture;
 pub mod claude;
 pub mod cleanup;
 pub mod lens;
@@ -16,6 +17,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
         Box::new(system::System::new(env)),
         Box::new(cleanup::Cleanup::new(env)),
         Box::new(lens::Lens::new(env)),
+        Box::new(capture::Capture::new(env)),
         Box::new(claude::Claude::new(env)),
     ]
 }
@@ -24,7 +26,9 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
 /// listed follow in tool order. The user can change this in the panel.
 pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "cleanup/clean",
+    "capture/tile",
     "core/planned",
+    "capture/capture",
     "system/storage",
     "system/memory",
     "system/cpu",

@@ -151,7 +151,7 @@ impl App {
             return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", span: 4, default_on: true, group: None }));
         }
         if tool == CORE && id == PLANNED {
-            return Some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span: 3, default_on: true, group: None }));
+            return Some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span: 2, default_on: true, group: None }));
         }
         let i = self.tools.iter().position(|t| t.id() == tool)?;
         let spec = self.tools[i].widgets().into_iter().find(|w| w.id == id)?;
@@ -256,6 +256,11 @@ impl App {
                 Action::CloseDetail => {
                     self.detail = None;
                     self.reshape(ctx);
+                }
+                Action::HidePanel => {
+                    if self.mode == Mode::Panel && self.visible && self.screenshot.is_none() {
+                        self.hide(ctx);
+                    }
                 }
                 Action::Toast(msg) => self.toast = Some((msg, Instant::now())),
                 Action::Quit => self.quit(ctx),
@@ -382,7 +387,12 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.app_open && !self.visible {
+        // tools poll their background work; some need frames while hidden
+        let mut tools_need_frames = false;
+        for t in self.tools.iter_mut() {
+            tools_need_frames |= t.tick(ctx);
+        }
+        if (self.app_open || tools_need_frames) && !self.visible {
             ctx.send_viewport_cmd(ViewportCommand::RequestPaintWhileHidden);
         }
         self.handle_tray(ctx);
@@ -475,6 +485,9 @@ impl eframe::App for App {
                     }
                 }
             }
+        }
+        for t in self.tools.iter_mut() {
+            t.windows(&ctx, &mut cx);
         }
         self.run_actions(&ctx, &mut cx);
         if let Some((msg, at)) = &self.toast {

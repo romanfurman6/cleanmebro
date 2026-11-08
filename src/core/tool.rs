@@ -82,6 +82,8 @@ pub enum Action {
     /// request for the open sheet closes it.
     ShowDetail { tool: String, detail: String, toggle: bool },
     CloseDetail,
+    /// Hide the menu-bar panel (e.g. before a screenshot of the screen).
+    HidePanel,
     Toast(String),
     Quit,
 }
@@ -188,6 +190,18 @@ pub trait Tool {
         Vec::new()
     }
     fn menu_action(&mut self, _item: &str, _cx: &mut Cx) {}
+
+    // ---- background
+    /// Called on every frame, and also while every shell window is hidden
+    /// (then without a ui pass): poll background work, global shortcuts and
+    /// so on. Return true while the tool needs frames with a ui pass even
+    /// though nothing of the shell is showing, e.g. for its own windows.
+    fn tick(&mut self, _ctx: &egui::Context) -> bool {
+        false
+    }
+    /// Called on every frame with a ui pass: show the tool's own extra
+    /// windows (`ctx.show_viewport_immediate`), whatever the shell shows.
+    fn windows(&mut self, _ctx: &egui::Context, _cx: &mut Cx) {}
     /// Handle a `--view` name for screenshots: load sample data and say what to show.
     fn demo_view(&mut self, _view: &str) -> Option<View> {
         None
