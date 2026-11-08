@@ -16,6 +16,14 @@ pub struct Node {
     pub other: u64, // small files folded together ("Other items")
 }
 
+/// A top-level folder while mapping: its live byte count, then its finished tree.
+pub struct LiveChild {
+    pub name: String,
+    pub path: PathBuf,
+    pub bytes: Arc<AtomicU64>,
+    pub done: Option<Node>,
+}
+
 #[derive(Default)]
 pub struct Scan {
     pub running: AtomicBool,
@@ -24,9 +32,40 @@ pub struct Scan {
     pub bytes: AtomicU64,
     pub current: Mutex<String>,
     pub result: Mutex<Option<Node>>,
+    /// The root's folders while mapping, so the map can grow live.
+    pub live: Mutex<Option<(PathBuf, Vec<LiveChild>)>>,
 }
 
 pub type Shared = Arc<Scan>;
+
+/// What a folder at `p` is called on the map ("/" is the startup disk).
+pub fn display_name(p: &Path) -> String {
+    p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| "Macintosh HD".into())
+}
+
+/// The map so far while mapping: finished folders in full, the rest as
+/// single blocks with what's been counted. Also returns the folders still
+/// being measured.
+pub fn partial(s: &Scan) -> Option<(Node, Vec<PathBuf>)> {
+    let g = s.live.lock().unwrap();
+    let (root, kids) = g.as_ref()?;
+    let mut pending = Vec::new();
+    let mut children: Vec<Node> = kids
+        .iter()
+        .map(|k| match &k.done {
+            Some(n) => n.clone(),
+            None => {
+                pending.push(k.path.clone());
+                Node { name: k.name.clone(), path: k.path.clone(), bytes: k.bytes.load(Ordering::Relaxed), ..Default::default() }
+            }
+        })
+        .filter(|n| n.bytes > 0)
+        .collect();
+    children.sort_by_key(|c| std::cmp::Reverse(c.bytes));
+    let bytes = children.iter().map(|c| c.bytes).sum();
+    let items = children.iter().map(|c| c.items + 1).sum();
+    Some((Node { name: display_name(root), path: root.clone(), bytes, items, children, other: 0 }, pending))
+}
 
 /// Folders that the system needs; they can be browsed but not selected.
 pub fn is_essential(p: &Path) -> bool {
@@ -43,6 +82,8 @@ pub fn is_essential(p: &Path) -> bool {
 
 const KEEP_FILES_OVER: u64 = 8_000_000;
 
+/// Walk `root` on background threads. Big trees are split across the CPU
+/// cores: a folder's subfolders go to free threads while any are left.
 pub fn start(shared: Shared, root: PathBuf, ctx: egui::Context) {
     if shared.running.swap(true, Ordering::SeqCst) {
         return;
@@ -51,79 +92,187 @@ pub fn start(shared: Shared, root: PathBuf, ctx: egui::Context) {
     shared.files.store(0, Ordering::SeqCst);
     shared.bytes.store(0, Ordering::SeqCst);
     *shared.result.lock().unwrap() = None;
+    *shared.live.lock().unwrap() = None;
     std::thread::spawn(move || {
-        let dev = root.symlink_metadata().map(|m| m.dev()).unwrap_or(0);
-        let mut last = std::time::Instant::now();
-        let node = walk(&root, dev, &shared, &ctx, &mut last, 0);
-        if !shared.stop.load(Ordering::SeqCst) {
-            *shared.result.lock().unwrap() = Some(node);
-        }
+        let w = Walker::new(&root, &shared, &ctx);
+        let node = w.root(&root);
+        *shared.result.lock().unwrap() = Some(node);
+        *shared.live.lock().unwrap() = None;
         shared.running.store(false, Ordering::SeqCst);
         ctx.request_repaint();
     });
 }
 
-fn walk(p: &Path, dev: u64, s: &Scan, ctx: &egui::Context, last: &mut std::time::Instant, depth: usize) -> Node {
-    let name = p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
-    let mut node = Node {
-        name,
-        path: p.to_path_buf(),
-        ..Default::default()
-    };
-    if s.stop.load(Ordering::Relaxed) {
-        return node;
-    }
-    if last.elapsed().as_millis() > 120 {
-        *s.current.lock().unwrap() = p.display().to_string();
-        ctx.request_repaint();
-        *last = std::time::Instant::now();
-    }
-    let Ok(rd) = std::fs::read_dir(p) else { return node };
-    for e in rd.flatten() {
-        let cp = e.path();
-        let Ok(cm) = cp.symlink_metadata() else { continue };
-        if cm.dev() != dev && dev != 0 {
-            continue; // stay on this volume (skips /System/Volumes/Data firmlinks, network mounts)
+/// Volumes and folders a walk stays inside, and the threads it may use.
+struct Walker<'a> {
+    s: &'a Scan,
+    ctx: &'a egui::Context,
+    /// Devices to stay on: the root's, plus the Data volume when mapping "/"
+    /// (macOS reaches /Users, /Applications… through firmlinks onto it).
+    devs: Vec<u64>,
+    /// Folders never entered (the Data volume's own mount point, so nothing
+    /// is counted twice).
+    skip: Vec<PathBuf>,
+    /// Extra threads still free.
+    free: AtomicU64,
+    last: Mutex<std::time::Instant>,
+}
+
+impl<'a> Walker<'a> {
+    fn new(root: &Path, s: &'a Scan, ctx: &'a egui::Context) -> Self {
+        let dev_of = |p: &str| Path::new(p).symlink_metadata().map(|m| m.dev()).ok();
+        let mut devs: Vec<u64> = root.symlink_metadata().map(|m| m.dev()).into_iter().collect();
+        let mut skip = Vec::new();
+        if root == Path::new("/") {
+            devs.extend(dev_of("/System/Volumes/Data"));
+            skip.push(PathBuf::from("/System/Volumes"));
+            skip.push(PathBuf::from("/Volumes"));
         }
-        if cm.is_dir() {
-            let child = walk(&cp, dev, s, ctx, last, depth + 1);
+        let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) as u64;
+        Walker { s, ctx, devs, skip, free: AtomicU64::new(cores.saturating_sub(1).max(1) * 2), last: Mutex::new(std::time::Instant::now()) }
+    }
+
+    fn stay(&self, md: &std::fs::Metadata, p: &Path) -> bool {
+        (self.devs.is_empty() || self.devs.contains(&md.dev())) && !self.skip.iter().any(|x| x == p)
+    }
+
+    /// Take a free thread if there is one.
+    fn try_thread(&self) -> bool {
+        self.free.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1)).is_ok()
+    }
+
+    /// The root: its folders are published live and each one counts into
+    /// its own total while it's walked.
+    fn root(&self, root: &Path) -> Node {
+        let mut node = Node { name: display_name(root), path: root.to_path_buf(), ..Default::default() };
+        let (dirs, files) = self.list(root);
+        self.add_files(&mut node, files, None);
+        let live: Vec<LiveChild> = dirs
+            .iter()
+            .map(|d| LiveChild { name: d.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(), path: d.clone(), bytes: Arc::new(AtomicU64::new(0)), done: None })
+            .collect();
+        let counters: Vec<Arc<AtomicU64>> = live.iter().map(|l| l.bytes.clone()).collect();
+        *self.s.live.lock().unwrap() = Some((root.to_path_buf(), live));
+        let next = AtomicU64::new(0);
+        // every core pulls the next top-level folder; inside one, free threads help
+        let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(dirs.len().max(1));
+        let results: Mutex<Vec<(usize, Node)>> = Mutex::new(Vec::new());
+        std::thread::scope(|sc| {
+            for _ in 0..workers {
+                sc.spawn(|| loop {
+                    let k = next.fetch_add(1, Ordering::SeqCst) as usize;
+                    if k >= dirs.len() {
+                        break;
+                    }
+                    let child = self.walk(&dirs[k], 1, Some(&counters[k]));
+                    if let Some((_, live)) = self.s.live.lock().unwrap().as_mut() {
+                        live[k].done = Some(child.clone());
+                    }
+                    self.ctx.request_repaint();
+                    results.lock().unwrap().push((k, child));
+                });
+            }
+        });
+        for (_, child) in results.into_inner().unwrap() {
             node.bytes += child.bytes;
             node.items += child.items + 1;
             node.children.push(child);
-        } else {
-            let b = cm.blocks() * 512;
-            s.files.fetch_add(1, Ordering::Relaxed);
-            s.bytes.fetch_add(b, Ordering::Relaxed);
+        }
+        node.children.sort_by_key(|c| std::cmp::Reverse(c.bytes));
+        node
+    }
+
+    /// Subfolders and (path, allocated bytes, name) files of `p`, staying on
+    /// the allowed volumes.
+    fn list(&self, p: &Path) -> (Vec<PathBuf>, Vec<(PathBuf, u64, String)>) {
+        let (mut dirs, mut files) = (Vec::new(), Vec::new());
+        let Ok(rd) = std::fs::read_dir(p) else { return (dirs, files) };
+        for e in rd.flatten() {
+            let cp = e.path();
+            let Ok(cm) = cp.symlink_metadata() else { continue };
+            if !self.stay(&cm, &cp) {
+                continue; // other volumes (network mounts, backups) and the Data mount point
+            }
+            if cm.is_dir() {
+                dirs.push(cp);
+            } else {
+                files.push((cp, cm.blocks() * 512, e.file_name().to_string_lossy().into_owned()));
+            }
+        }
+        (dirs, files)
+    }
+
+    fn add_files(&self, node: &mut Node, files: Vec<(PathBuf, u64, String)>, top: Option<&AtomicU64>) {
+        let mut sum = 0;
+        for (path, b, name) in files {
             node.bytes += b;
             node.items += 1;
+            sum += b;
             if b >= KEEP_FILES_OVER {
-                node.children.push(Node {
-                    name: e.file_name().to_string_lossy().into_owned(),
-                    path: cp,
-                    bytes: b,
-                    items: 1,
-                    children: vec![],
-                    other: 0,
-                });
+                node.children.push(Node { name, path, bytes: b, items: 1, children: vec![], other: 0 });
             } else {
                 node.other += b;
             }
         }
+        if let Some(t) = top {
+            t.fetch_add(sum, Ordering::Relaxed);
+        }
+        self.s.bytes.fetch_add(sum, Ordering::Relaxed);
     }
-    node.children.sort_by_key(|c| std::cmp::Reverse(c.bytes));
-    // keep memory bounded deep down: fold tiny folders away
-    if depth > 3 {
-        let mut kept = Vec::new();
-        for c in node.children.drain(..) {
-            if c.bytes >= 1_000_000 || kept.len() < 40 {
-                kept.push(c);
-            } else {
-                node.other += c.bytes;
+
+    fn walk(&self, p: &Path, depth: usize, top: Option<&AtomicU64>) -> Node {
+        let name = p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
+        let mut node = Node { name, path: p.to_path_buf(), ..Default::default() };
+        if self.s.stop.load(Ordering::Relaxed) {
+            return node;
+        }
+        if let Ok(mut last) = self.last.try_lock() {
+            if last.elapsed().as_millis() > 120 {
+                *self.s.current.lock().unwrap() = p.display().to_string();
+                self.ctx.request_repaint();
+                *last = std::time::Instant::now();
             }
         }
-        node.children = kept;
+        let (dirs, files) = self.list(p);
+        self.s.files.fetch_add(files.len() as u64, Ordering::Relaxed);
+        self.add_files(&mut node, files, top);
+        let kids: Vec<Node> = std::thread::scope(|sc| {
+            let mut handles = Vec::new();
+            let mut done = Vec::new();
+            for d in &dirs {
+                if self.try_thread() {
+                    handles.push(sc.spawn(move || {
+                        let n = self.walk(d, depth + 1, top);
+                        self.free.fetch_add(1, Ordering::AcqRel);
+                        n
+                    }));
+                } else {
+                    done.push(self.walk(d, depth + 1, top));
+                }
+            }
+            done.extend(handles.into_iter().filter_map(|h| h.join().ok()));
+            done
+        });
+        for child in kids {
+            node.bytes += child.bytes;
+            node.items += child.items + 1;
+            node.children.push(child);
+        }
+        node.children.sort_by_key(|c| std::cmp::Reverse(c.bytes));
+        // keep memory bounded deep down: fold tiny folders away
+        if depth > 3 {
+            let mut kept = Vec::new();
+            for c in node.children.drain(..) {
+                if c.bytes >= 1_000_000 || kept.len() < 40 {
+                    kept.push(c);
+                } else {
+                    node.other += c.bytes;
+                }
+            }
+            node.children = kept;
+        }
+        node
     }
-    node
 }
 
 /// Find the node at `path` inside `root`.
@@ -257,6 +406,39 @@ mod tests {
         assert!(is_essential(&h));
         assert!(is_essential(&h.join("Library")));
         assert!(!is_essential(&h.join("Downloads/big.iso")));
+    }
+
+    #[test]
+    fn parallel_walk_counts_every_file_once() {
+        let base = std::env::temp_dir().join(format!("cmb-scan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // 6 top folders x 5 subfolders x 4 files of 10 kB, plus one big file
+        for a in 0..6 {
+            for b in 0..5 {
+                let d = base.join(format!("t{a}/s{b}"));
+                std::fs::create_dir_all(&d).unwrap();
+                for c in 0..4 {
+                    std::fs::write(d.join(format!("f{c}")), vec![1u8; 10_000]).unwrap();
+                }
+            }
+        }
+        std::fs::write(base.join("t0/big"), vec![1u8; 9_000_000]).unwrap();
+        let shared: Shared = Default::default();
+        start(shared.clone(), base.clone(), egui::Context::default());
+        let t0 = std::time::Instant::now();
+        while shared.running.load(Ordering::SeqCst) && t0.elapsed().as_secs() < 20 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let root = shared.result.lock().unwrap().take().unwrap();
+        assert_eq!(shared.files.load(Ordering::SeqCst), 6 * 5 * 4 + 1);
+        assert_eq!(root.children.len(), 6);
+        assert_eq!(root.children[0].name, "t0"); // biggest first
+        assert!(root.children[0].children.iter().any(|c| c.name == "big"));
+        let sum: u64 = root.children.iter().map(|c| c.bytes).sum();
+        assert_eq!(root.bytes, sum);
+        assert_eq!(shared.bytes.load(Ordering::SeqCst), root.bytes);
+        assert!(shared.live.lock().unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

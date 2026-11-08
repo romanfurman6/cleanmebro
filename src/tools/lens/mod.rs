@@ -22,19 +22,32 @@ pub struct Lens {
     pub(crate) lens_selected: Vec<(PathBuf, u64)>,
     pub(crate) lens_review: bool,
     pub(crate) lens_msg: Option<String>,
+    /// The map while mapping, refreshed a few times a second: (when, map,
+    /// folders still being measured).
+    pub(crate) lens_live: Option<(f64, scan::Node, Vec<PathBuf>)>,
+    /// Top-level folders in the order they got their colour, so a folder
+    /// keeps its colour while the map grows.
+    pub(crate) lens_hues: Vec<PathBuf>,
+    /// Where each block was drawn last frame, so blocks glide to new sizes.
+    pub(crate) lens_anim: std::collections::HashMap<PathBuf, egui::Rect>,
+    pub(crate) lens_anim_area: egui::Rect,
 }
 
 impl Lens {
     pub fn new(_env: &ToolEnv) -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let root = PathBuf::from("/");
         Lens {
             lens: Default::default(),
-            lens_root: home.clone(),
-            lens_path: home,
+            lens_root: root.clone(),
+            lens_path: root,
             lens_morph: None,
             lens_selected: vec![],
             lens_review: false,
             lens_msg: None,
+            lens_live: None,
+            lens_hues: vec![],
+            lens_anim: Default::default(),
+            lens_anim_area: egui::Rect::NOTHING,
         }
     }
 }
@@ -69,6 +82,9 @@ impl Tool for Lens {
     fn demo_view(&mut self, view: &str) -> Option<View> {
         if view == "lens" {
             page::demo_tree(self);
+            Some(View::Page)
+        } else if view == "lens-live" {
+            page::demo_live(self);
             Some(View::Page)
         } else {
             None

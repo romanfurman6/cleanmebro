@@ -30,13 +30,50 @@ const FOOTER_H: f32 = 42.0;
 const ASIDE_W: f32 = 260.0;
 
 pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
-    let running = app.lens.running.load(Ordering::SeqCst);
-    let has = app.lens.result.lock().unwrap().is_some();
-    if has && !running {
-        results(app, ui, r, cx);
-    } else {
-        start(app, ui, r, running);
+    let shared = app.lens.clone();
+    let now = ui.ctx().input(|i| i.time);
+    if shared.running.load(Ordering::SeqCst) {
+        // the map grows while mapping; rebuild it a few times a second
+        if app.lens_live.as_ref().is_none_or(|l| now - l.0 > 0.25) {
+            app.lens_live = scan::partial(&shared).map(|(n, pending)| (now, n, pending));
+        }
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(120));
+        match app.lens_live.take() {
+            Some(live) => {
+                let act = results(app, ui, r, &live.1, Some(&live.2));
+                app.lens_live = Some(live);
+                if act == Act::Stop {
+                    shared.stop.store(true, Ordering::SeqCst);
+                }
+            }
+            None => start(app, ui, r, true),
+        }
+        return;
     }
+    app.lens_live = None;
+    let guard = shared.result.lock().unwrap();
+    let Some(root) = guard.as_ref() else {
+        drop(guard);
+        start(app, ui, r, false);
+        return;
+    };
+    let act = results(app, ui, r, root, None);
+    drop(guard);
+    if act == Act::NewMap {
+        *shared.result.lock().unwrap() = None;
+        app.lens_selected.clear();
+        app.lens_morph = None;
+        app.lens_anim.clear();
+    } else if app.lens_review {
+        review(app, ui, r, cx);
+    }
+}
+
+#[derive(PartialEq)]
+enum Act {
+    None,
+    NewMap,
+    Stop,
 }
 
 fn home() -> PathBuf {
@@ -169,12 +206,34 @@ fn group_digits(n: u64) -> String {
 
 // ---------------------------------------------------------------- results
 
-/// Colour of the top-level folder that holds `path`.
-fn hue_of(root: &Node, path: &Path) -> Color32 {
-    match root.children.iter().position(|c| path.starts_with(&c.path)) {
-        Some(i) => HUES[i.min(HUES.len() - 1)],
-        None => OTHER_HUE,
+/// Colour of the top-level folder that holds `path`. Folders get their
+/// colour the first time they're drawn and keep it while the map changes.
+fn hue_of(app: &mut App, root: &Path, path: &Path) -> Color32 {
+    let Some(first) = path.strip_prefix(root).ok().and_then(|r| r.components().next()) else { return OTHER_HUE };
+    let top = root.join(first);
+    let i = match app.lens_hues.iter().position(|q| *q == top) {
+        Some(i) => i,
+        None => {
+            app.lens_hues.push(top);
+            app.lens_hues.len() - 1
+        }
+    };
+    HUES[i.min(HUES.len() - 1)]
+}
+
+/// Where a block is drawn this frame: it glides from where it was towards
+/// `target`; a new block grows from its centre.
+fn glide(app: &mut App, key: &Path, target: Rect, snap: bool, dt: f32, moving: &mut bool) -> Rect {
+    let prev = if snap { None } else { app.lens_anim.get(key).copied() };
+    let from = prev.unwrap_or_else(|| if snap { target } else { Rect::from_center_size(target.center(), Vec2::ZERO) });
+    let k = 1.0 - (-dt * 10.0).exp();
+    let shown = lerp_rect(from, target, k);
+    if (shown.min - target.min).length() + (shown.max - target.max).length() > 0.5 {
+        *moving = true;
+    } else {
+        return target;
     }
+    shown
 }
 
 fn pct(part: u64, whole: u64) -> u64 {
@@ -199,17 +258,21 @@ fn lerp_rect(a: Rect, b: Rect, t: f32) -> Rect {
     Rect::from_min_max(a.min + (b.min - a.min) * t, a.max + (b.max - a.max) * t)
 }
 
-fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+/// The treemap screen. `pending` is set while mapping: those folders are
+/// still being measured and the header shows progress with Stop.
+fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[PathBuf]>) -> Act {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
-    let root = app.lens.result.lock().unwrap().clone().unwrap();
-    if scan::find(&root, &app.lens_path).is_none() {
+    let live = pending.is_some();
+    let mut act = Act::None;
+    if scan::find(root, &app.lens_path).is_none() {
         app.lens_path = root.path.clone();
     }
-    let node = scan::find(&root, &app.lens_path).cloned().unwrap_or_else(|| root.clone());
+    let node = scan::find(root, &app.lens_path).unwrap_or(root);
     let mut go_to: Option<PathBuf> = None;
+    let root_label = if root.path == home() { "Home".to_string() } else { root.name.clone() };
 
-    // header: up, breadcrumbs, size, hint, new map
+    // header: up, breadcrumbs, size, then the hint and New map, or progress and Stop
     let hr = Rect::from_min_size(r.min, Vec2::new(r.width(), HEADER_H));
     hairline(&p, hr.left_bottom(), hr.right_bottom());
     let up = Rect::from_min_size(Pos2::new(hr.left() + 20.0, hr.center().y - 14.0), Vec2::splat(28.0));
@@ -220,7 +283,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     if ur.on_hover_text("Up one level").clicked() && can_up {
         go_to = node.path.parent().map(Path::to_path_buf);
     }
-    let mut crumbs: Vec<(String, PathBuf)> = vec![(if root.path == home() { "Home".into() } else { root.name.clone() }, root.path.clone())];
+    let mut crumbs: Vec<(String, PathBuf)> = vec![(root_label.clone(), root.path.clone())];
     if let Ok(rel) = node.path.strip_prefix(&root.path) {
         let mut acc = root.path.clone();
         for c in rel.components() {
@@ -228,16 +291,31 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             crumbs.push((c.as_os_str().to_string_lossy().into_owned(), acc.clone()));
         }
     }
-    let nb = button_width(&p, "New map", BTN_SECONDARY);
+    let (btn, kind) = if live { ("Stop", BTN_SECONDARY) } else { ("New map", BTN_SECONDARY) };
+    let nb = button_width(&p, btn, kind);
     let new_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
-    let hint = p.text(Pos2::new(new_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, "Click a folder to zoom in · tick a corner to select", font(12.0), TEXT_FAINT);
+    let hint_text = if live {
+        format!("Mapping · {} · {} files", human_bytes(app.lens.bytes.load(Ordering::Relaxed)), group_digits(app.lens.files.load(Ordering::Relaxed)))
+    } else {
+        "Click a folder to zoom in · tick a corner to select".to_string()
+    };
+    let hint = p.text(Pos2::new(new_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, hint_text, font(12.0), if live { TEXT_DIM } else { TEXT_FAINT });
+    if live {
+        // a spinner dot before the progress text
+        let t = ctx.input(|i| i.time) as f32;
+        let c = Pos2::new(hint.left() - 12.0, hr.center().y);
+        p.circle_stroke(c, 5.0, Stroke::new(1.5, white(40)));
+        let a0 = t * 5.0;
+        let pts: Vec<Pos2> = (0..=12).map(|i| a0 + i as f32 * 0.15).map(|a| c + Vec2::angled(a) * 5.0).collect();
+        p.add(egui::Shape::line(pts, Stroke::new(1.5, tint::DISK_MAP)));
+    }
     let mut x = up.right() + 8.0;
     let n_crumbs = crumbs.len();
     for (k, (label, path)) in crumbs.iter().enumerate() {
         let last = k + 1 == n_crumbs;
         let g = p.layout_no_wrap(label.clone(), if last { bold(13.0) } else { font(13.0) }, TEXT);
         let br = Rect::from_min_size(Pos2::new(x, hr.center().y - 12.0), Vec2::new(g.size().x + 16.0, 24.0));
-        if br.right() > hint.left() - 80.0 {
+        if br.right() > hint.left() - 100.0 {
             break;
         }
         let resp = ui.interact(br, ui.scope_id().with(("crumb", k)), Sense::click());
@@ -257,11 +335,16 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         }
     }
     p.text(Pos2::new(x + 8.0, hr.center().y), Align2::LEFT_CENTER, human_bytes(node.bytes), font(13.0), TEXT_FAINT);
-    if pill_button(ui, new_r, "New map", BTN_SECONDARY, true).clicked() {
-        *app.lens.result.lock().unwrap() = None;
-        app.lens_selected.clear();
-        app.lens_morph = None;
-        return;
+    if pill_button(ui, new_r, btn, kind, true).clicked() {
+        act = if live { Act::Stop } else { Act::NewMap };
+    }
+    if live {
+        // progress strip along the header's bottom edge
+        let track = Rect::from_min_size(Pos2::new(hr.left(), hr.bottom() - 2.0), Vec2::new(hr.width(), 2.0));
+        let t = ctx.input(|i| i.time);
+        let f = ((t * 0.5).fract() as f32) * 1.4 - 0.4;
+        let seg = Rect::from_min_max(Pos2::new(track.left() + track.width() * f.max(0.0), track.top()), Pos2::new(track.left() + track.width() * (f + 0.4).min(1.0), track.bottom()));
+        p.with_clip_rect(track).rect_filled(seg, 1.0, tint::DISK_MAP);
     }
 
     // treemap
@@ -294,6 +377,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     } else {
         app.lens_morph = None;
     }
+    // blocks glide to new sizes (the map growing while mapping); jump
+    // straight there when zooming, on the first draw and when resized
+    let snap = morph.is_some() || app.lens_anim.is_empty() || app.lens_anim_area != area;
+    let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.1);
+    let mut moving = false;
+    let mut drawn: std::collections::HashMap<PathBuf, Rect> = Default::default();
     let mp = p.with_clip_rect(area.expand(1.0));
     let depth = node.path.strip_prefix(&root.path).map(|x| x.components().count()).unwrap_or(0);
     let n = vals.len();
@@ -301,47 +390,67 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let mut toggle: Option<(PathBuf, u64)> = None;
     for k in 0..n {
         let base = rects[k];
-        let shown = match morph {
+        let child = node.children.get(k);
+        let key = child.map(|c| c.path.clone()).unwrap_or_else(|| node.path.join("\u{0}other"));
+        let target = match morph {
             Some((from, to, e)) => lerp_rect(affine(base, from, to), base, e),
             None => base,
         };
+        let shown = glide(app, &key, target, snap, dt, &mut moving);
+        drawn.insert(key, shown);
         let br = shown.shrink(2.0);
         if br.width() < 1.0 || br.height() < 1.0 {
             continue;
         }
-        let child = node.children.get(k);
         let (name, bytes, path) = match child {
             Some(c) => (c.name.clone(), c.bytes, Some(c.path.clone())),
             None => ("Other items".to_string(), node.other, None),
         };
+        let measuring = path.as_ref().is_some_and(|pa| pending.is_some_and(|q| q.contains(pa)));
         let hue = match &path {
-            Some(pa) if depth == 0 => HUES[k.min(HUES.len() - 1)],
-            Some(pa) => hue_of(&root, pa),
+            Some(pa) => hue_of(app, &root.path, pa),
             None => OTHER_HUE,
         };
         let shade = if depth == 0 { 0.75 } else { 0.45 + 0.4 * (1.0 - k as f32 / (n.max(2) - 1) as f32) };
         let id = ui.scope_id().with(("blk", &name, k));
-        let resp = ui.interact(br, id, if path.is_some() && morph.is_none() { Sense::click() } else { Sense::hover() });
+        let kids = child.map(|c| c.children.len()).unwrap_or(0);
+        let clickable = path.is_some() && morph.is_none() && !measuring;
+        let resp = ui.interact(br, id, if clickable { Sense::click() } else { Sense::hover() });
         let hov = resp.hovered();
-        let mut fill = lerp_color(BG, hue, shade);
-        if hov {
+        let mut fill = lerp_color(BG, hue, if measuring { shade * 0.55 } else { shade });
+        if hov && clickable {
             fill = lerp_color(fill, Color32::WHITE, 0.14);
         }
         mp.rect_filled(br, 8.0, fill);
-        let selectable = path.as_ref().is_some_and(|pa| !scan::is_essential(pa));
+        if measuring {
+            // a soft sheen sweeping across blocks still being measured
+            let w = br.width().max(br.height());
+            let f = ((now * 0.7 + k as f64 * 0.13).fract() as f32) * (br.width() + w) - w * 0.5;
+            let sheen = Rect::from_min_size(Pos2::new(br.left() + f - w * 0.25, br.top()), Vec2::new(w * 0.5, br.height()));
+            mp.with_clip_rect(br.intersect(area.expand(1.0))).rect_filled(sheen, 0.0, white(14));
+            mp.rect_stroke(br, 8.0, Stroke::new(1.0, with_alpha(hue, 0.6)), StrokeKind::Inside);
+        }
+        let selectable = !live && path.as_ref().is_some_and(|pa| !scan::is_essential(pa));
         let on = path.as_ref().is_some_and(|pa| app.lens_selected.iter().any(|(q, _)| q == pa));
         if on {
             mp.rect_stroke(br, 8.0, Stroke::new(3.0, Color32::WHITE), StrokeKind::Inside);
         }
-        let kids = child.map(|c| c.children.len()).unwrap_or(0);
         if br.width() > 64.0 && br.height() > 46.0 {
             let fs = if br.width() > 220.0 && br.height() > 120.0 { 16.0 } else { 12.0 };
             let tw = br.width() - 20.0 - if selectable { 22.0 } else { 0.0 };
             let mut ty = br.top() + 10.0;
             ty += text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &name, bold(fs), Color32::WHITE, tw).height() + 3.0;
-            ty += text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &format!("{} · {}%", human_bytes(bytes), pct(bytes, node.bytes)), font(12.0), white(217), br.width() - 20.0).height() + 3.0;
-            if kids > 0 && ty + 14.0 < br.bottom() {
-                text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &format!("{kids} items · click to open"), font(11.0), white(166), br.width() - 20.0);
+            let size = if measuring { format!("{} so far", human_bytes(bytes)) } else { format!("{} · {}%", human_bytes(bytes), pct(bytes, node.bytes)) };
+            ty += text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &size, font(12.0), white(217), br.width() - 20.0).height() + 3.0;
+            let more = if measuring {
+                Some("measuring…".to_string())
+            } else if kids > 0 {
+                Some(format!("{kids} items · click to open"))
+            } else {
+                None
+            };
+            if let Some(more) = more.filter(|_| ty + 14.0 < br.bottom()) {
+                text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &more, font(11.0), white(166), br.width() - 20.0);
             }
         }
         // selection box in the corner
@@ -360,7 +469,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             box_clicked = bresp.on_hover_text(if on { "Remove from the list" } else { "Add to the list" }).clicked();
         }
         if hov || (morph.is_none() && ui.rect_contains_pointer(br)) {
-            hovered = Some((path.as_ref().map(|pa| tilde(pa)).unwrap_or_else(|| format!("{} · small files", tilde(&node.path))), hue, bytes, (kids > 0).then_some(kids)));
+            hovered = Some((path.as_ref().map(|pa| tilde(pa)).unwrap_or_else(|| format!("{} · small files", tilde(&node.path))), hue, bytes, (kids > 0 && !measuring).then_some(kids)));
         }
         if let Some(pa) = &path {
             if box_clicked {
@@ -373,15 +482,22 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                     toggle = Some((pa.clone(), bytes));
                 }
             }
-            if hov && kids > 0 {
+            if hov && clickable && kids > 0 {
                 ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
             } else if hov && selectable {
                 ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
             }
-            if hov && !selectable {
+            if hov && measuring {
+                resp.on_hover_text("Still measuring this folder.");
+            } else if hov && !live && !selectable {
                 resp.on_hover_text("Your Mac needs this folder, so it can't be removed.");
             }
         }
+    }
+    app.lens_anim = drawn;
+    app.lens_anim_area = area;
+    if moving {
+        ctx.request_repaint();
     }
     if let Some((path, b)) = toggle {
         if let Some(i) = app.lens_selected.iter().position(|(q, _)| q == &path) {
@@ -409,18 +525,21 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     let list_top = ar.top() + 24.0;
     let list_bottom = ar.bottom() - 34.0 - 12.0 - 34.0;
-    if app.lens_selected.is_empty() {
+    if live {
+        paragraph(&p, Pos2::new(ar.left(), list_top), "You can pick what to remove when mapping finishes. Finished folders open already.", font(12.0), TEXT_FAINT, ar.width());
+    } else if app.lens_selected.is_empty() {
         paragraph(&p, Pos2::new(ar.left(), list_top), "Nothing yet. Tick the corner of a block to add it here.", font(12.0), TEXT_FAINT, ar.width());
     }
     let mut drop: Option<usize> = None;
     let rel = |pa: &Path| -> String {
         pa.strip_prefix(&root.path).map(|x| x.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join(" › ")).unwrap_or_else(|_| tilde(pa))
     };
-    let max_rows = ((list_bottom - list_top) / 32.0).floor().max(0.0) as usize;
-    for (i, (pa, b)) in app.lens_selected.iter().enumerate().take(max_rows) {
+    let max_rows = if live { 0 } else { ((list_bottom - list_top) / 32.0).floor().max(0.0) as usize };
+    let picked = app.lens_selected.clone();
+    for (i, (pa, b)) in picked.iter().enumerate().take(max_rows) {
         let rr = Rect::from_min_size(Pos2::new(ar.left(), list_top + i as f32 * 32.0), Vec2::new(ar.width(), 30.0));
         p.rect_filled(rr, R_SMALL, white(13));
-        p.rect_filled(Rect::from_center_size(Pos2::new(rr.left() + 12.0, rr.center().y), Vec2::splat(8.0)), 2.0, hue_of(&root, pa));
+        p.rect_filled(Rect::from_center_size(Pos2::new(rr.left() + 12.0, rr.center().y), Vec2::splat(8.0)), 2.0, hue_of(app, &root.path, pa));
         let xr = Rect::from_center_size(Pos2::new(rr.right() - 14.0, rr.center().y), Vec2::splat(18.0));
         let sr = p.text(Pos2::new(xr.left() - 6.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(*b), font(13.0), TEXT_SOFT);
         text_fit(&p, Pos2::new(rr.left() + 24.0, rr.center().y), Align2::LEFT_CENTER, &rel(pa), font(13.0), TEXT, sr.left() - rr.left() - 32.0);
@@ -430,41 +549,45 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             drop = Some(i);
         }
     }
-    if app.lens_selected.len() > max_rows {
+    if !live && app.lens_selected.len() > max_rows {
         p.text(Pos2::new(ar.left(), list_top + max_rows as f32 * 32.0 + 4.0), Align2::LEFT_TOP, format!("and {} more", app.lens_selected.len() - max_rows), font(12.0), TEXT_FAINT);
     }
     if let Some(i) = drop {
         app.lens_selected.remove(i);
     }
-    let g = p.layout_no_wrap(human_bytes(total), bold(22.0), TEXT);
-    let gw = g.size().x;
-    let ty = ar.bottom() - 34.0 - 12.0 - g.size().y;
-    p.galley(Pos2::new(ar.left(), ty), g, TEXT);
-    p.text(Pos2::new(ar.left() + gw + 6.0, ty + 22.0 * 0.82), Align2::LEFT_BOTTOM, "selected", font(13.0), TEXT_FAINT);
+    if !live {
+        let g = p.layout_no_wrap(human_bytes(total), bold(22.0), TEXT);
+        let gw = g.size().x;
+        let ty = ar.bottom() - 34.0 - 12.0 - g.size().y;
+        p.galley(Pos2::new(ar.left(), ty), g, TEXT);
+        p.text(Pos2::new(ar.left() + gw + 6.0, ty + 22.0 * 0.82), Align2::LEFT_BOTTOM, "selected", font(13.0), TEXT_FAINT);
+    }
     let rb = Rect::from_min_max(Pos2::new(ar.left(), ar.bottom() - 34.0), ar.max);
-    if pill_button(ui, rb, "Review and remove", BTN_PRIMARY, !app.lens_selected.is_empty()).clicked() {
+    if pill_button(ui, rb, "Review and remove", BTN_PRIMARY, !live && !app.lens_selected.is_empty()).clicked() {
         app.lens_review = true;
     }
 
-    // footer: what's under the pointer
+    // footer: what's under the pointer, or what's being measured
     p.rect_filled(fr, CornerRadius { se: 12, ..Default::default() }, FOOTER);
     hairline(&p, fr.left_top(), fr.right_top());
     match hovered {
         Some((path, hue, bytes, kids)) => {
             p.rect_filled(Rect::from_center_size(Pos2::new(fr.left() + 25.0, fr.center().y), Vec2::splat(10.0)), 3.0, hue);
-            let parent = if depth == 0 { "Home".to_string() } else { node.name.clone() };
+            let parent = if depth == 0 { root_label.clone() } else { node.name.clone() };
             let info = format!("{} · {}% of {}{}", human_bytes(bytes), pct(bytes, node.bytes), parent, kids.map(|k| format!(" · {k} items")).unwrap_or_default());
             let ir = p.text(Pos2::new(fr.right() - 20.0, fr.center().y), Align2::RIGHT_CENTER, info, font(13.0), TEXT_DIM);
             text_fit(&p, Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, &path, mono(12.0), TEXT_SOFT, ir.left() - fr.left() - 56.0);
+        }
+        None if live => {
+            let cur = app.lens.current.lock().unwrap().clone();
+            p.text(Pos2::new(fr.left() + 20.0, fr.center().y), Align2::LEFT_CENTER, "Measuring", font(12.0), TEXT_FAINT);
+            text_fit(&p, Pos2::new(fr.left() + 92.0, fr.center().y), Align2::LEFT_CENTER, &tilde(Path::new(&cur)), mono(12.0), TEXT_SOFT, fr.width() - 112.0);
         }
         None => {
             p.text(Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, "Hover a block to see details", mono(12.0), TEXT_FAINT);
         }
     }
-
-    if app.lens_review {
-        review(app, ui, r, cx);
-    }
+    act
 }
 
 fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
@@ -566,4 +689,29 @@ pub fn demo_tree(app: &mut App) {
     app.lens_path = root.path.clone();
     app.lens_selected = vec![(root.path.join("Downloads/Xcode_16.xip"), (12.0 * GB) as u64), (root.path.join("Movies"), (31.0 * GB) as u64)];
     *app.lens.result.lock().unwrap() = Some(root);
+}
+
+/// Mapping in progress, for screenshots: some folders done, others still
+/// counting.
+pub fn demo_live(app: &mut App) {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+    demo_tree(app);
+    let root = app.lens.result.lock().unwrap().take().unwrap();
+    let live: Vec<scan::LiveChild> = root
+        .children
+        .iter()
+        .enumerate()
+        .map(|(k, c)| {
+            let done = matches!(k, 1 | 3 | 5 | 7);
+            let part = if done { c.bytes } else { (c.bytes as f64 * [0.55, 0.0, 0.8, 0.0, 0.35, 0.0, 0.6][k.min(6)]) as u64 };
+            scan::LiveChild { name: c.name.clone(), path: c.path.clone(), bytes: Arc::new(AtomicU64::new(part)), done: done.then(|| c.clone()) }
+        })
+        .collect();
+    app.lens.bytes.store(live.iter().map(|l| l.bytes.load(Ordering::Relaxed)).sum(), Ordering::Relaxed);
+    app.lens.files.store(1_284_311, Ordering::Relaxed);
+    *app.lens.current.lock().unwrap() = root.path.join("Library/Containers/com.apple.mail/Data").display().to_string();
+    *app.lens.live.lock().unwrap() = Some((root.path.clone(), live));
+    app.lens.running.store(true, Ordering::SeqCst);
+    app.lens_selected.clear();
 }
