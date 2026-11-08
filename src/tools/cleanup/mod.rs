@@ -7,8 +7,8 @@ pub mod engine;
 mod page;
 
 use crate::core::tool::{Action, Badge, Cx, Recommendation, Tool, ToolEnv, ToolId, View};
-use crate::kit::glass::{human_bytes, Icon};
-use egui::{Color32, Rect, Ui};
+use crate::kit::glass::{human_bytes, tint, Icon};
+use egui::{Rect, Ui};
 use engine::Group;
 
 pub const ID: ToolId = "cleanup";
@@ -39,7 +39,7 @@ impl Cleanup {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Broom, top: Color32::from_rgb(110, 225, 140), bottom: Color32::from_rgb(30, 165, 80) }
+    Badge { icon: Icon::Broom, top: tint::CLEANUP, bottom: tint::CLEANUP }
 }
 
 impl Tool for Cleanup {
@@ -67,7 +67,7 @@ impl Tool for Cleanup {
         page::page(self, ui, rect);
     }
     fn recommendations(&self) -> Vec<Recommendation> {
-        let blue = (Color32::from_rgb(100, 170, 255), Color32::from_rgb(10, 110, 235));
+        let blue = (tint::CLEANUP, tint::CLEANUP);
         let go = Action::OpenPage { tool: ID.into(), route: String::new() };
         // always on offer, at the lowest priority
         let mut v = vec![Recommendation {

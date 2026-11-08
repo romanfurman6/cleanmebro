@@ -7,8 +7,8 @@ mod page;
 mod ui;
 
 use crate::core::tool::{Action, Badge, Cx, MenuItem, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
-use crate::kit::glass::Icon;
-use egui::{Color32, Rect, Ui};
+use crate::kit::glass::{tint, Icon};
+use egui::{Rect, Ui};
 
 pub const ID: ToolId = "claude";
 const LIMITS: &str = "limits";
@@ -25,7 +25,7 @@ impl Claude {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Sparkle, top: Color32::from_rgb(255, 180, 140), bottom: Color32::from_rgb(214, 100, 70) }
+    Badge { icon: Icon::Sparkle, top: tint::CLAUDE, bottom: tint::CLAUDE }
 }
 
 impl Tool for Claude {

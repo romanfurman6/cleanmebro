@@ -1,4 +1,4 @@
-//! Space Lens tool: measures a folder tree and shows it as a list and a
+//! Disk Map tool: measures a folder tree and shows it as a list and a
 //! bubble map; selected items go to the Trash after review. Lives in the full
 //! window.
 
@@ -6,8 +6,8 @@ mod page;
 pub mod scan;
 
 use crate::core::tool::{Badge, Cx, MenuItem, Tool, ToolEnv, ToolId, View};
-use crate::kit::glass::Icon;
-use egui::{Color32, Rect, Ui};
+use crate::kit::glass::{tint, Icon};
+use egui::{Rect, Ui};
 use std::path::PathBuf;
 
 pub const ID: ToolId = "lens";
@@ -55,10 +55,10 @@ impl Tool for Lens {
         ID
     }
     fn name(&self) -> &'static str {
-        "Space Lens"
+        "Disk Map"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::Lens, top: Color32::from_rgb(100, 170, 255), bottom: Color32::from_rgb(10, 110, 235) }
+        Badge { icon: Icon::Map, top: tint::DISK_MAP, bottom: tint::DISK_MAP }
     }
     fn section(&self) -> &'static str {
         "Clean"
@@ -70,7 +70,7 @@ impl Tool for Lens {
         page::page(self, ui, rect, cx);
     }
     fn menu_items(&self) -> Vec<MenuItem> {
-        vec![MenuItem { id: "open", label: "Space Lens".into() }]
+        vec![MenuItem { id: "open", label: "Disk Map".into() }]
     }
     fn menu_action(&mut self, item: &str, cx: &mut Cx) {
         if item == "open" {
