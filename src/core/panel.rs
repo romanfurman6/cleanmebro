@@ -33,7 +33,10 @@ pub fn cell(width: f32) -> f32 {
 pub fn size_px(size: Size, width: f32) -> Vec2 {
     let c = cell(width);
     let (r, k) = size.dims();
-    Vec2::new(k as f32 * c + (k as f32 - 1.0) * GAP, r as f32 * c + (r as f32 - 1.0) * GAP)
+    Vec2::new(
+        k as f32 * c + (k as f32 - 1.0) * GAP,
+        r as f32 * c + (r as f32 - 1.0) * GAP,
+    )
 }
 
 /// A shown widget and where it goes, relative to the grid's origin.
@@ -63,9 +66,22 @@ pub fn place(app: &App, width: f32) -> (Vec<Placed>, f32) {
             Some((entry, owner, spec.id, spec.fit(e.size)))
         })
         .collect();
-    let sizes: Vec<(u8, f32)> = items.iter().map(|it| (it.3.cols(), size_px(it.3, width).y)).collect();
+    let sizes: Vec<(u8, f32)> = items
+        .iter()
+        .map(|it| (it.3.cols(), size_px(it.3, width).y))
+        .collect();
     let (rects, total) = layout::flow(&sizes, width, GAP);
-    let placed = items.into_iter().zip(rects).map(|((entry, owner, id, size), rect)| Placed { entry, owner, id, size, rect }).collect();
+    let placed = items
+        .into_iter()
+        .zip(rects)
+        .map(|((entry, owner, id, size), rect)| Placed {
+            entry,
+            owner,
+            id,
+            size,
+            rect,
+        })
+        .collect();
     (placed, total)
 }
 
@@ -75,10 +91,22 @@ pub fn draw_widget(app: &mut App, ui: &mut Ui, w: &Placed, r: Rect, cx: &mut Cx)
 }
 
 /// Draw widget `id` of `owner` (`None`: the shell's) at `size` in `r`.
-pub fn draw_at(app: &mut App, ui: &mut Ui, owner: Option<usize>, id: &'static str, size: Size, r: Rect, cx: &mut Cx) {
+pub fn draw_at(
+    app: &mut App,
+    ui: &mut Ui,
+    owner: Option<usize>,
+    id: &'static str,
+    size: Size,
+    r: Rect,
+    cx: &mut Cx,
+) {
     match owner {
         Some(i) => {
-            let mut child = ui.new_child(UiBuilder::new().max_rect(r).id_salt((app.tools[i].id(), id, size.label())));
+            let mut child = ui.new_child(UiBuilder::new().max_rect(r).id_salt((
+                app.tools[i].id(),
+                id,
+                size.label(),
+            )));
             app.tools[i].widget_ui(id, size, &mut child, r, cx);
         }
         None if id == RECOMMENDATION => recommendation(app, ui, r, cx),
@@ -93,21 +121,38 @@ pub fn content_height(app: &App) -> f32 {
 
 pub fn panel(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     header(app, ui, rect);
-    let area = Rect::from_min_max(Pos2::new(rect.left() + PAD, rect.top() + HEADER), Pos2::new(rect.right() - PAD, rect.bottom() - FOOTER));
+    let area = Rect::from_min_max(
+        Pos2::new(rect.left() + PAD, rect.top() + HEADER),
+        Pos2::new(rect.right() - PAD, rect.bottom() - FOOTER),
+    );
     let need = content_height(app);
     if need > area.height() + 0.5 {
         // the bar runs in the right padding, beside the widgets
-        let scroll_r = Rect::from_min_max(area.min, Pos2::new(area.right() + PAD - 2.0, area.bottom()));
-        let mut child = ui.new_child(UiBuilder::new().max_rect(scroll_r).layout(egui::Layout::top_down(egui::Align::Min)));
+        let scroll_r =
+            Rect::from_min_max(area.min, Pos2::new(area.right() + PAD - 2.0, area.bottom()));
+        let mut child = ui.new_child(
+            UiBuilder::new()
+                .max_rect(scroll_r)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
         // a slim bar, so even hovered it stays clear of the widgets
         child.spacing_mut().scroll.bar_width = 6.0;
         child.set_clip_rect(area.expand2(Vec2::new(PAD, 8.0)));
-        ScrollArea::vertical().id_salt("panel-widgets").auto_shrink([false, false]).show(&mut child, |ui| {
-            let (origin, _) = ui.allocate_exact_size(Vec2::new(area.width(), need), Sense::hover());
-            widgets(app, ui, origin, cx);
-        });
+        ScrollArea::vertical()
+            .id_salt("panel-widgets")
+            .auto_shrink([false, false])
+            .show(&mut child, |ui| {
+                let (origin, _) =
+                    ui.allocate_exact_size(Vec2::new(area.width(), need), Sense::hover());
+                widgets(app, ui, origin, cx);
+            });
     } else {
-        widgets(app, ui, Rect::from_min_size(area.min, Vec2::new(area.width(), need)), cx);
+        widgets(
+            app,
+            ui,
+            Rect::from_min_size(area.min, Vec2::new(area.width(), need)),
+            cx,
+        );
     }
     footer(app, ui, rect);
     if app.gear_open {
@@ -117,14 +162,44 @@ pub fn panel(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
 
 /// The title line: the first enabled tool that offers one, or the app name.
 pub fn title_line(app: &App, p: &egui::Painter, x0: f32, top: f32, width: f32) {
-    match app.tools.iter().enumerate().filter(|(i, _)| app.tool_on(*i)).find_map(|(_, t)| t.panel_header()) {
+    match app
+        .tools
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| app.tool_on(*i))
+        .find_map(|(_, t)| t.panel_header())
+    {
         Some(h) => {
-            text_fit(p, Pos2::new(x0, top + 15.0), Align2::LEFT_TOP, &h.title, bold(15.0), TEXT, width);
+            text_fit(
+                p,
+                Pos2::new(x0, top + 15.0),
+                Align2::LEFT_TOP,
+                &h.title,
+                bold(15.0),
+                TEXT,
+                width,
+            );
             p.circle_filled(Pos2::new(x0 + 3.5, top + 42.0), 3.5, h.dot);
-            text_fit(p, Pos2::new(x0 + 13.0, top + 42.0), Align2::LEFT_CENTER, &h.status, font(12.0), TEXT_DIM, width - 13.0);
+            text_fit(
+                p,
+                Pos2::new(x0 + 13.0, top + 42.0),
+                Align2::LEFT_CENTER,
+                &h.status,
+                font(12.0),
+                TEXT_DIM,
+                width - 13.0,
+            );
         }
         None => {
-            text_fit(p, Pos2::new(x0, top + 31.0), Align2::LEFT_CENTER, "CleanMeBro", bold(15.0), TEXT, width);
+            text_fit(
+                p,
+                Pos2::new(x0, top + 31.0),
+                Align2::LEFT_CENTER,
+                "CleanMeBro",
+                bold(15.0),
+                TEXT,
+                width,
+            );
         }
     }
 }
@@ -134,13 +209,20 @@ pub fn title_line(app: &App, p: &egui::Painter, x0: f32, top: f32, width: f32) {
 fn header(app: &mut App, ui: &mut Ui, rect: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
-    let gear = Rect::from_min_size(Pos2::new(rect.right() - 14.0 - 30.0, rect.top() + 16.0), Vec2::splat(30.0));
+    let gear = Rect::from_min_size(
+        Pos2::new(rect.right() - 14.0 - 30.0, rect.top() + 16.0),
+        Vec2::splat(30.0),
+    );
     let win = gear.translate(Vec2::new(-38.0, 0.0));
     let x0 = rect.left() + 16.0;
     title_line(app, &p, x0, rect.top(), win.left() - x0 - 10.0);
     let pages = app.page_tools();
     if !pages.is_empty() && icon_button(ui, win, Icon::Window, "Open CleanMeBro").clicked() {
-        let page = if app.tools.get(app.page).is_some_and(|t| t.has_page()) { app.page } else { pages[0] };
+        let page = if app.tools.get(app.page).is_some_and(|t| t.has_page()) {
+            app.page
+        } else {
+            pages[0]
+        };
         app.open_window(&ctx, page);
     }
     if icon_button(ui, gear, Icon::Gear, "Settings").clicked() {
@@ -152,8 +234,20 @@ fn widgets(app: &mut App, ui: &mut Ui, origin: Rect, cx: &mut Cx) {
     let (placed, _) = place(app, origin.width());
     if placed.is_empty() {
         let p = ui.painter();
-        p.text(origin.center_top() + Vec2::new(0.0, 40.0), Align2::CENTER_CENTER, "No widgets shown", bold(15.0), TEXT_DIM);
-        p.text(origin.center_top() + Vec2::new(0.0, 64.0), Align2::CENTER_CENTER, "Use Edit widgets… to pick some.", font(13.0), TEXT_FAINT);
+        p.text(
+            origin.center_top() + Vec2::new(0.0, 40.0),
+            Align2::CENTER_CENTER,
+            "No widgets shown",
+            bold(15.0),
+            TEXT_DIM,
+        );
+        p.text(
+            origin.center_top() + Vec2::new(0.0, 64.0),
+            Align2::CENTER_CENTER,
+            "Use Edit widgets… to pick some.",
+            font(13.0),
+            TEXT_FAINT,
+        );
         return;
     }
     for w in &placed {
@@ -170,20 +264,47 @@ pub fn size_chips(ui: &mut Ui, rect: Rect, id: Id, offered: &[Size], cur: Size) 
     let w = inner.width() / Size::ALL.len() as f32;
     let mut out = None;
     for (i, z) in Size::ALL.into_iter().enumerate() {
-        let r = Rect::from_min_size(Pos2::new(inner.left() + w * i as f32, inner.top()), Vec2::new(w, inner.height())).shrink2(Vec2::new(1.0, 0.0));
+        let r = Rect::from_min_size(
+            Pos2::new(inner.left() + w * i as f32, inner.top()),
+            Vec2::new(w, inner.height()),
+        )
+        .shrink2(Vec2::new(1.0, 0.0));
         let ok = offered.contains(&z);
-        let resp = ui.interact(r, id.with(i), if ok { Sense::click() } else { Sense::hover() });
+        let resp = ui.interact(
+            r,
+            id.with(i),
+            if ok { Sense::click() } else { Sense::hover() },
+        );
         if z == cur {
             p.rect_filled(r, 7.0, BLUE);
         } else if ok && resp.hovered() {
             p.rect_filled(r, 7.0, white(20));
         }
-        let col = if z == cur { Color32::WHITE } else if ok { TEXT_SOFT } else { white(60) };
-        let g = p.text(r.center(), Align2::CENTER_CENTER, z.label(), if z == cur { bold(12.0) } else { font(12.0) }, col);
+        let col = if z == cur {
+            Color32::WHITE
+        } else if ok {
+            TEXT_SOFT
+        } else {
+            white(60)
+        };
+        let g = p.text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            z.label(),
+            if z == cur { bold(12.0) } else { font(12.0) },
+            col,
+        );
         if !ok {
-            p.line_segment([g.left_center(), g.right_center()], Stroke::new(1.0, white(60)));
+            p.line_segment(
+                [g.left_center(), g.right_center()],
+                Stroke::new(1.0, white(60)),
+            );
         }
-        let resp = resp.on_hover_text(if ok { z.name() } else { "Not offered for this widget" });
+        let resp = resp.on_hover_text(if ok {
+            z.name()
+        } else {
+            "Not offered for this widget"
+        });
         if ok && resp.clicked() && z != cur {
             out = Some(z);
         }
@@ -196,15 +317,50 @@ pub fn size_chips(ui: &mut Ui, rect: Rect, id: Id, offered: &[Size], cur: Size) 
 
 /// The banner with the highest-priority suggestion of any tool.
 fn recommendation(app: &App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-    let Some(rec) = best_recommendation(app.tools.iter().enumerate().filter(|(i, _)| app.tool_on(*i)).flat_map(|(_, t)| t.recommendations())) else {
+    let Some(rec) = best_recommendation(
+        app.tools
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| app.tool_on(*i))
+            .flat_map(|(_, t)| t.recommendations()),
+    ) else {
         let p = ui.painter();
         glass_card(p, rect, R_CARD, 0.0, false);
-        icon(p, Icon::Check, Rect::from_center_size(Pos2::new(rect.left() + 21.0, rect.center().y), Vec2::splat(18.0)), GREEN);
-        p.text(Pos2::new(rect.left() + 40.0, rect.top() + 10.0), Align2::LEFT_TOP, "All good", bold(13.0), TEXT);
-        p.text(Pos2::new(rect.left() + 40.0, rect.top() + 29.0), Align2::LEFT_TOP, "Nothing needs your attention right now.", font(12.0), TEXT_DIM);
+        icon(
+            p,
+            Icon::Check,
+            Rect::from_center_size(
+                Pos2::new(rect.left() + 21.0, rect.center().y),
+                Vec2::splat(18.0),
+            ),
+            GREEN,
+        );
+        p.text(
+            Pos2::new(rect.left() + 40.0, rect.top() + 10.0),
+            Align2::LEFT_TOP,
+            "All good",
+            bold(13.0),
+            TEXT,
+        );
+        p.text(
+            Pos2::new(rect.left() + 40.0, rect.top() + 29.0),
+            Align2::LEFT_TOP,
+            "Nothing needs your attention right now.",
+            font(12.0),
+            TEXT_DIM,
+        );
         return;
     };
-    let resp = banner(ui, rect, ui.scope_id().with("rec"), rec.badge.icon, &rec.title, &rec.body, &rec.action).on_hover_text(&rec.body);
+    let resp = banner(
+        ui,
+        rect,
+        ui.scope_id().with("rec"),
+        rec.badge.icon,
+        &rec.title,
+        &rec.body,
+        &rec.action,
+    )
+    .on_hover_text(&rec.body);
     if resp.clicked() {
         cx.push(rec.go);
     }
@@ -228,11 +384,18 @@ fn footer(app: &mut App, ui: &mut Ui, rect: Rect) {
     let c = Pos2::new(rect.center().x, rect.bottom() - FOOTER / 2.0 - 2.0);
     let r = Rect::from_center_size(c, g.size() + Vec2::new(16.0, 8.0));
     let resp = ui.interact(r, ui.scope_id().with("edit-widgets"), Sense::click());
-    p.galley(c - g.size() / 2.0, g, if resp.hovered() { TEXT_DIM } else { TEXT_FAINT });
+    p.galley(
+        c - g.size() / 2.0,
+        g,
+        if resp.hovered() { TEXT_DIM } else { TEXT_FAINT },
+    );
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    if resp.on_hover_text("Edit the panel's widgets in the CleanMeBro window").clicked() {
+    if resp
+        .on_hover_text("Edit the panel's widgets in the CleanMeBro window")
+        .clicked()
+    {
         let ctx = ui.ctx().clone();
         app.open_settings(&ctx, false);
     }
@@ -246,7 +409,12 @@ fn gear_menu(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         Quit,
     }
     let mut rows: Vec<(Row, String)> = vec![(Row::Customize, "Edit widgets…".into())];
-    for (i, t) in app.tools.iter().enumerate().filter(|(i, _)| app.tool_on(*i)) {
+    for (i, t) in app
+        .tools
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| app.tool_on(*i))
+    {
         for item in t.menu_items() {
             rows.push((Row::Tool(i, item.id), item.label));
         }
@@ -254,22 +422,47 @@ fn gear_menu(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     rows.push((Row::Quit, "Quit CleanMeBro".into()));
     let rh = 28.0;
     let h = rows.len() as f32 * rh + 10.0;
-    let menu = Rect::from_min_size(Pos2::new(rect.right() - 14.0 - 210.0, rect.top() + 52.0), Vec2::new(210.0, h));
+    let menu = Rect::from_min_size(
+        Pos2::new(rect.right() - 14.0 - 210.0, rect.top() + 52.0),
+        Vec2::new(210.0, h),
+    );
     let p = ui.painter().clone();
-    p.rect_filled(menu.translate(Vec2::new(0.0, 4.0)).expand(2.0), R_CARD, egui::Color32::from_black_alpha(60));
+    p.rect_filled(
+        menu.translate(Vec2::new(0.0, 4.0)).expand(2.0),
+        R_CARD,
+        egui::Color32::from_black_alpha(60),
+    );
     p.rect_filled(menu, R_CARD, RAISED);
-    p.rect_stroke(menu, R_CARD, Stroke::new(1.0, white(HAIRLINE_STRONG)), egui::StrokeKind::Inside);
+    p.rect_stroke(
+        menu,
+        R_CARD,
+        Stroke::new(1.0, white(HAIRLINE_STRONG)),
+        egui::StrokeKind::Inside,
+    );
     let mut picked = None;
     for (k, (row, label)) in rows.iter().enumerate() {
-        let rr = Rect::from_min_size(menu.min + Vec2::new(5.0, 5.0 + k as f32 * rh), Vec2::new(menu.width() - 10.0, rh));
+        let rr = Rect::from_min_size(
+            menu.min + Vec2::new(5.0, 5.0 + k as f32 * rh),
+            Vec2::new(menu.width() - 10.0, rh),
+        );
         if matches!(row, Row::Quit) {
-            hairline(&p, Pos2::new(rr.left() + 6.0, rr.top()), Pos2::new(rr.right() - 6.0, rr.top()));
+            hairline(
+                &p,
+                Pos2::new(rr.left() + 6.0, rr.top()),
+                Pos2::new(rr.right() - 6.0, rr.top()),
+            );
         }
         let resp = ui.interact(rr, ui.scope_id().with(("gear", k)), Sense::click());
         if resp.hovered() {
             p.rect_filled(rr.shrink2(Vec2::new(0.0, 1.0)), R_SMALL, BLUE);
         }
-        p.text(rr.left_center() + Vec2::new(10.0, 0.0), Align2::LEFT_CENTER, label, font(13.0), TEXT);
+        p.text(
+            rr.left_center() + Vec2::new(10.0, 0.0),
+            Align2::LEFT_CENTER,
+            label,
+            font(13.0),
+            TEXT,
+        );
         if resp.clicked() {
             picked = Some(k);
         }
@@ -289,8 +482,14 @@ fn gear_menu(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
 
 /// The sheet beside the panel; the tool draws all of it, header included.
 pub fn detail(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-    let Some((i, d)) = app.detail.clone() else { return };
-    let mut child = ui.new_child(UiBuilder::new().max_rect(rect).id_salt(("detail", app.tools[i].id(), &d)));
+    let Some((i, d)) = app.detail.clone() else {
+        return;
+    };
+    let mut child = ui.new_child(UiBuilder::new().max_rect(rect).id_salt((
+        "detail",
+        app.tools[i].id(),
+        &d,
+    )));
     app.tools[i].detail_ui(&d, &mut child, rect, cx);
 }
 
@@ -302,7 +501,10 @@ mod tests {
     fn rec(priority: u32, title: &str) -> Recommendation {
         Recommendation {
             priority,
-            badge: Badge { icon: Icon::Check, color: TEXT },
+            badge: Badge {
+                icon: Icon::Check,
+                color: TEXT,
+            },
             title: title.into(),
             body: String::new(),
             action: String::new(),
@@ -313,7 +515,10 @@ mod tests {
     #[test]
     fn highest_priority_recommendation_wins() {
         assert!(best_recommendation(std::iter::empty()).is_none());
-        let best = best_recommendation(vec![rec(5, "a"), rec(100, "b"), rec(100, "c"), rec(0, "d")].into_iter()).unwrap();
+        let best = best_recommendation(
+            vec![rec(5, "a"), rec(100, "b"), rec(100, "c"), rec(0, "d")].into_iter(),
+        )
+        .unwrap();
         assert_eq!(best.title, "b");
     }
 }

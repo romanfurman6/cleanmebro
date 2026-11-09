@@ -6,7 +6,10 @@ pub mod backend;
 mod page;
 mod ui;
 
-use crate::core::tool::{Action, Badge, Cx, MenuItem, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
+use crate::core::tool::{
+    Action, Badge, Cx, MenuItem, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec,
+    UP_TO_MEDIUM,
+};
 use crate::kit::glass::{tint, Icon};
 use egui::{Rect, Ui};
 
@@ -20,12 +23,18 @@ pub struct Claude {
 
 impl Claude {
     pub fn new(env: &ToolEnv) -> Self {
-        Claude { info: backend::start(env.ctx.clone(), env.demo), demo: env.demo }
+        Claude {
+            info: backend::start(env.ctx.clone(), env.demo),
+            demo: env.demo,
+        }
     }
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Sparkle, color: tint::CLAUDE }
+    Badge {
+        icon: Icon::Sparkle,
+        color: tint::CLAUDE,
+    }
 }
 
 impl Tool for Claude {
@@ -45,7 +54,14 @@ impl Tool for Claude {
         "Monitor"
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: LIMITS, title: "Claude limits", about: "Session and weekly limits, tokens today.", sizes: UP_TO_MEDIUM, size: Size::S14, default_on: true }]
+        vec![WidgetSpec {
+            id: LIMITS,
+            title: "Claude limits",
+            about: "Session and weekly limits, tokens today.",
+            sizes: UP_TO_MEDIUM,
+            size: Size::S14,
+            default_on: true,
+        }]
     }
     fn widget_ui(&mut self, widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         if widget != LIMITS {
@@ -69,28 +85,50 @@ impl Tool for Claude {
         true
     }
     fn sidebar_meta(&self) -> String {
-        self.info.lock().unwrap().session().map(|l| format!("{:.0}%", l.pct)).unwrap_or_default()
+        self.info
+            .lock()
+            .unwrap()
+            .session()
+            .map(|l| format!("{:.0}%", l.pct))
+            .unwrap_or_default()
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         page::page(&self.info, self.demo, ui, rect, cx);
     }
     fn recommendations(&self) -> Vec<Recommendation> {
         let info = self.info.lock().unwrap();
-        let Some(l) = info.session().filter(|l| l.pct >= 80.0) else { return Vec::new() };
+        let Some(l) = info.session().filter(|l| l.pct >= 80.0) else {
+            return Vec::new();
+        };
         vec![Recommendation {
             priority: 60,
             badge: badge(),
             title: "Your Claude session is almost used up".into(),
-            body: format!("{:.0}% of the current 5-hour session is used. It {}.", l.pct, ui::short_reset(&l.resets)),
+            body: format!(
+                "{:.0}% of the current 5-hour session is used. It {}.",
+                l.pct,
+                ui::short_reset(&l.resets)
+            ),
             action: "See Limits".into(),
-            go: Action::ShowDetail { tool: ID.into(), detail: LIMITS.into(), toggle: true },
+            go: Action::ShowDetail {
+                tool: ID.into(),
+                detail: LIMITS.into(),
+                toggle: true,
+            },
         }]
     }
     fn tray_title(&self) -> Option<String> {
-        self.info.lock().unwrap().session().map(|l| format!("{:.0}%", l.pct))
+        self.info
+            .lock()
+            .unwrap()
+            .session()
+            .map(|l| format!("{:.0}%", l.pct))
     }
     fn menu_items(&self) -> Vec<MenuItem> {
-        vec![MenuItem { id: "refresh", label: "Refresh Claude limits".into() }]
+        vec![MenuItem {
+            id: "refresh",
+            label: "Refresh Claude limits".into(),
+        }]
     }
     fn menu_action(&mut self, item: &str, cx: &mut Cx) {
         if item == "refresh" {
@@ -103,8 +141,17 @@ impl Tool for Claude {
             "claude-detail" => Some(View::Detail(LIMITS)),
             "claude" => Some(View::Page),
             "claude-missing" => {
-                let error = Some(format!("Claude Code isn't installed on this Mac. {}", crate::kit::claude_code::Availability::NotInstalled.how()));
-                *self.info.lock().unwrap() = backend::ClaudeInfo { loading: false, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
+                let error = Some(format!(
+                    "Claude Code isn't installed on this Mac. {}",
+                    crate::kit::claude_code::Availability::NotInstalled.how()
+                ));
+                *self.info.lock().unwrap() = backend::ClaudeInfo {
+                    loading: false,
+                    installed: false,
+                    fetched: Some(chrono::Local::now()),
+                    error,
+                    ..Default::default()
+                };
                 Some(View::Page)
             }
             _ => None,

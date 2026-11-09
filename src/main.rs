@@ -11,6 +11,8 @@
 //! `--fan-report` prints every fan and temperature sensor this Mac reports.
 //! `--fan-install` / `--fan-uninstall` add or remove the fan helper,
 //! `--fan-set 2400,3000|auto|hello` talks to it (the lease lasts 8 s).
+//! `--rec-probe <secs> [--no-mic] [--no-sys]` records the main display without
+//! UI and prints what the recorder saw.
 //! `--fan-helper <uid>` is the helper itself (run by launchd as root).
 
 mod core;
@@ -26,7 +28,9 @@ fn main() -> eframe::Result {
         // the fan helper and its test switches
         let a: Vec<String> = std::env::args().collect();
         match a.get(1).map(String::as_str) {
-            Some("--fan-helper") => tools::fan::helper::serve(a.get(2).and_then(|u| u.parse().ok()).unwrap_or(0)),
+            Some("--fan-helper") => {
+                tools::fan::helper::serve(a.get(2).and_then(|u| u.parse().ok()).unwrap_or(0))
+            }
             Some("--fan-install") => {
                 println!("{:?}", tools::fan::helper::install());
                 return Ok(());
@@ -40,12 +44,26 @@ fn main() -> eframe::Result {
                 let req = match a.get(2).map(String::as_str) {
                     None | Some("auto") => Request::Auto,
                     Some("hello") => Request::Hello,
-                    Some(v) => Request::Set { rpm: v.split(',').map(|x| x.parse().ok()).collect() },
+                    Some(v) => Request::Set {
+                        rpm: v.split(',').map(|x| x.parse().ok()).collect(),
+                    },
                 };
                 println!("{:?}", ask(&req));
                 return Ok(());
             }
             _ => {}
+        }
+    }
+    {
+        let a: Vec<String> = std::env::args().collect();
+        if a.get(1).map(String::as_str) == Some("--rec-probe") {
+            let secs = a.get(2).and_then(|v| v.parse().ok()).unwrap_or(5.0);
+            tools::capture::record::probe(
+                secs,
+                !a.iter().any(|v| v == "--no-sys"),
+                !a.iter().any(|v| v == "--no-mic"),
+            );
+            return Ok(());
         }
     }
     if std::env::args().any(|a| a == "--scan-report") {
@@ -75,6 +93,13 @@ fn main() -> eframe::Result {
         .with_decorations(false)
         .with_resizable(false)
         .with_has_shadow(true);
-    let options = eframe::NativeOptions { viewport, ..Default::default() };
-    eframe::run_native("CleanMeBro", options, Box::new(move |cc| Ok(Box::new(core::shell::App::new(cc, opts)))))
+    let options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
+    eframe::run_native(
+        "CleanMeBro",
+        options,
+        Box::new(move |cc| Ok(Box::new(core::shell::App::new(cc, opts)))),
+    )
 }

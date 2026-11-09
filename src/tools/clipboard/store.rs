@@ -19,7 +19,14 @@ pub enum Kind {
 
 impl Kind {
     #[cfg(test)]
-    pub const ALL: [Kind; 6] = [Kind::Text, Kind::Code, Kind::Link, Kind::Image, Kind::Color, Kind::File];
+    pub const ALL: [Kind; 6] = [
+        Kind::Text,
+        Kind::Code,
+        Kind::Link,
+        Kind::Image,
+        Kind::Color,
+        Kind::File,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -62,7 +69,9 @@ pub struct Clip {
 
 impl Clip {
     pub fn is_empty(&self) -> bool {
-        self.text.as_deref().is_none_or(|t| t.trim().is_empty()) && self.png.is_none() && self.files.is_empty()
+        self.text.as_deref().is_none_or(|t| t.trim().is_empty())
+            && self.png.is_none()
+            && self.files.is_empty()
     }
 }
 
@@ -98,12 +107,18 @@ pub struct Entry {
 
 impl Entry {
     pub fn time(&self) -> chrono::DateTime<chrono::Local> {
-        chrono::DateTime::from_timestamp_millis(self.last).map(|t| t.with_timezone(&chrono::Local)).unwrap_or_else(chrono::Local::now)
+        chrono::DateTime::from_timestamp_millis(self.last)
+            .map(|t| t.with_timezone(&chrono::Local))
+            .unwrap_or_else(chrono::Local::now)
     }
 
     pub fn files(&self) -> Vec<PathBuf> {
         if self.kind == Kind::File {
-            self.text.lines().filter(|l| !l.is_empty()).map(PathBuf::from).collect()
+            self.text
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(PathBuf::from)
+                .collect()
         } else {
             Vec::new()
         }
@@ -114,14 +129,24 @@ impl Entry {
         match self.kind {
             Kind::File => {
                 let f = self.files();
-                let name = f.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = f
+                    .first()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 if f.len() > 1 {
                     format!("{name} and {} more", f.len() - 1)
                 } else {
                     name
                 }
             }
-            Kind::Link => self.text.trim().trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_string(),
+            Kind::Link => self
+                .text
+                .trim()
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .trim_end_matches('/')
+                .to_string(),
             _ => self.text.split_whitespace().collect::<Vec<_>>().join(" "),
         }
     }
@@ -129,7 +154,11 @@ impl Entry {
     /// Whether the search words all appear in the entry.
     #[cfg(test)]
     pub fn matches(&self, query: &str) -> bool {
-        let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
+        let words: Vec<String> = query
+            .to_lowercase()
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
         self.matches_words(&words)
     }
 
@@ -145,7 +174,12 @@ impl Entry {
     /// Facts for the detail view: "2 lines · 92 characters".
     pub fn summary(&self) -> String {
         match self.kind {
-            Kind::Image => format!("{}×{} · {}", self.w, self.h, crate::kit::glass::human_bytes(self.bytes)),
+            Kind::Image => format!(
+                "{}×{} · {}",
+                self.w,
+                self.h,
+                crate::kit::glass::human_bytes(self.bytes)
+            ),
             Kind::File => {
                 let n = self.files().len();
                 format!("{n} file{}", if n == 1 { "" } else { "s" })
@@ -187,19 +221,39 @@ pub fn parse_color(s: &str) -> Option<Color32> {
         }
         let v = |i: usize, n: usize| u8::from_str_radix(&hex[i..i + n], 16).ok();
         return match hex.len() {
-            3 => Some(Color32::from_rgb(v(0, 1)? * 17, v(1, 1)? * 17, v(2, 1)? * 17)),
+            3 => Some(Color32::from_rgb(
+                v(0, 1)? * 17,
+                v(1, 1)? * 17,
+                v(2, 1)? * 17,
+            )),
             6 => Some(Color32::from_rgb(v(0, 2)?, v(2, 2)?, v(4, 2)?)),
-            8 => Some(Color32::from_rgba_unmultiplied(v(0, 2)?, v(2, 2)?, v(4, 2)?, v(6, 2)?)),
+            8 => Some(Color32::from_rgba_unmultiplied(
+                v(0, 2)?,
+                v(2, 2)?,
+                v(4, 2)?,
+                v(6, 2)?,
+            )),
             _ => None,
         };
     }
     let lower = s.to_ascii_lowercase();
-    let inner = lower.strip_prefix("rgba(").or_else(|| lower.strip_prefix("rgb(")).and_then(|r| r.strip_suffix(')'))?;
-    let parts: Vec<&str> = inner.split([',', ' ', '/']).filter(|p| !p.is_empty()).collect();
+    let inner = lower
+        .strip_prefix("rgba(")
+        .or_else(|| lower.strip_prefix("rgb("))
+        .and_then(|r| r.strip_suffix(')'))?;
+    let parts: Vec<&str> = inner
+        .split([',', ' ', '/'])
+        .filter(|p| !p.is_empty())
+        .collect();
     if parts.len() < 3 || parts.len() > 4 {
         return None;
     }
-    let ch = |p: &str| p.parse::<f32>().ok().filter(|v| (0.0..=255.0).contains(v)).map(|v| v.round() as u8);
+    let ch = |p: &str| {
+        p.parse::<f32>()
+            .ok()
+            .filter(|v| (0.0..=255.0).contains(v))
+            .map(|v| v.round() as u8)
+    };
     let a = match parts.get(3) {
         Some(p) => {
             let f = p.trim_end_matches('%').parse::<f32>().ok()?;
@@ -208,13 +262,22 @@ pub fn parse_color(s: &str) -> Option<Color32> {
         }
         None => 255,
     };
-    Some(Color32::from_rgba_unmultiplied(ch(parts[0])?, ch(parts[1])?, ch(parts[2])?, a))
+    Some(Color32::from_rgba_unmultiplied(
+        ch(parts[0])?,
+        ch(parts[1])?,
+        ch(parts[2])?,
+        a,
+    ))
 }
 
 fn is_link(s: &str) -> bool {
     let s = s.trim();
-    let rest = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).or_else(|| s.strip_prefix("www."));
-    rest.is_some_and(|r| r.contains('.') || r.contains('/') || r.starts_with("localhost")) && !s.chars().any(char::is_whitespace)
+    let rest = s
+        .strip_prefix("https://")
+        .or_else(|| s.strip_prefix("http://"))
+        .or_else(|| s.strip_prefix("www."));
+    rest.is_some_and(|r| r.contains('.') || r.contains('/') || r.starts_with("localhost"))
+        && !s.chars().any(char::is_whitespace)
 }
 
 /// Apps whose text is almost always code.
@@ -239,11 +302,17 @@ fn looks_like_code(s: &str, bundle: &str) -> bool {
     }
     let t = s.trim();
     let first = t.split_whitespace().next().unwrap_or("");
-    const CMDS: [&str; 16] = ["cargo", "git", "npm", "npx", "yarn", "pnpm", "brew", "sudo", "cd", "ls", "python", "python3", "pip", "docker", "kubectl", "curl"];
+    const CMDS: [&str; 16] = [
+        "cargo", "git", "npm", "npx", "yarn", "pnpm", "brew", "sudo", "cd", "ls", "python",
+        "python3", "pip", "docker", "kubectl", "curl",
+    ];
     if !t.contains('\n') && (CMDS.contains(&first) || t.starts_with("./") || t.starts_with("$ ")) {
         return true;
     }
-    let marks = ["{\n", "};", "=>", "fn ", "def ", "func ", "const ", "let ", "import ", "#include", "</", "();", "){", ") {", "->"];
+    let marks = [
+        "{\n", "};", "=>", "fn ", "def ", "func ", "const ", "let ", "import ", "#include", "</",
+        "();", "){", ") {", "->",
+    ];
     let hits = marks.iter().filter(|m| t.contains(*m)).count();
     hits >= 2 || (hits == 1 && t.lines().count() > 1)
 }
@@ -301,14 +370,27 @@ pub struct Store {
 
 impl Store {
     pub fn open(dir: PathBuf) -> Store {
-        let entries = std::fs::read_to_string(dir.join("index.json")).ok().and_then(|s| serde_json::from_str::<Vec<Entry>>(&s).ok()).unwrap_or_default();
-        Store { dir, entries, saves: true, rev: 0 }
+        let entries = std::fs::read_to_string(dir.join("index.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Vec<Entry>>(&s).ok())
+            .unwrap_or_default();
+        Store {
+            dir,
+            entries,
+            saves: true,
+            rev: 0,
+        }
     }
 
     /// In memory only (tests that don't touch the disk).
     #[cfg(test)]
     pub fn memory(dir: PathBuf) -> Store {
-        Store { dir, entries: Vec::new(), saves: false, rev: 0 }
+        Store {
+            dir,
+            entries: Vec::new(),
+            saves: false,
+            rev: 0,
+        }
     }
 
     fn blob(&self, id: u64, ext: &str) -> PathBuf {
@@ -328,11 +410,15 @@ impl Store {
     }
 
     pub fn rtf(&self, id: u64) -> Option<Vec<u8>> {
-        self.get(id).filter(|e| e.rtf).and_then(|_| std::fs::read(self.blob(id, "rtf")).ok())
+        self.get(id)
+            .filter(|e| e.rtf)
+            .and_then(|_| std::fs::read(self.blob(id, "rtf")).ok())
     }
 
     pub fn html(&self, id: u64) -> Option<Vec<u8>> {
-        self.get(id).filter(|e| e.html).and_then(|_| std::fs::read(self.blob(id, "html")).ok())
+        self.get(id)
+            .filter(|e| e.html)
+            .and_then(|_| std::fs::read(self.blob(id, "html")).ok())
     }
 
     pub fn bytes_on_disk(&self) -> u64 {
@@ -363,7 +449,12 @@ impl Store {
         let kind = classify(clip);
         let (text, h, w, ht) = match kind {
             Kind::File => {
-                let t = clip.files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n");
+                let t = clip
+                    .files
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 let h = hash(&[b"file", t.as_bytes()]);
                 (t, h, 0, 0)
             }
@@ -398,7 +489,23 @@ impl Store {
             id += 1;
         }
         let mut bytes = text.len() as u64;
-        let mut e = Entry { id, kind, text, app: clip.app.clone(), bundle: clip.bundle.clone(), first: now, last: now, count: 1, pinned: false, w, h: ht, rtf: false, html: false, bytes: 0, hash: h };
+        let mut e = Entry {
+            id,
+            kind,
+            text,
+            app: clip.app.clone(),
+            bundle: clip.bundle.clone(),
+            first: now,
+            last: now,
+            count: 1,
+            pinned: false,
+            w,
+            h: ht,
+            rtf: false,
+            html: false,
+            bytes: 0,
+            hash: h,
+        };
         if self.saves {
             let _ = std::fs::create_dir_all(self.dir.join("blobs"));
             if let (Kind::Image, Some(png)) = (kind, &clip.png) {
@@ -493,7 +600,11 @@ impl Store {
 
     /// Pinned first, then the rest; both newest first.
     pub fn ordered(&self) -> Vec<&Entry> {
-        self.entries.iter().filter(|e| e.pinned).chain(self.entries.iter().filter(|e| !e.pinned)).collect()
+        self.entries
+            .iter()
+            .filter(|e| e.pinned)
+            .chain(self.entries.iter().filter(|e| !e.pinned))
+            .collect()
     }
 }
 
@@ -502,10 +613,19 @@ mod tests {
     use super::*;
 
     fn text(t: &str) -> Clip {
-        Clip { text: Some(t.into()), app: "Notes".into(), bundle: "com.apple.Notes".into(), ..Default::default() }
+        Clip {
+            text: Some(t.into()),
+            app: "Notes".into(),
+            bundle: "com.apple.Notes".into(),
+            ..Default::default()
+        }
     }
 
-    const LIM: Limits = Limits { keep: 3, max_days: 30, dedupe: true };
+    const LIM: Limits = Limits {
+        keep: 3,
+        max_days: 30,
+        dedupe: true,
+    };
 
     #[test]
     fn kinds() {
@@ -516,19 +636,31 @@ mod tests {
         assert_eq!(classify(&text("#0B6BD8")), Kind::Color);
         assert_eq!(classify(&text("rgb(11, 107, 216)")), Kind::Color);
         assert_eq!(classify(&text("cargo test --workspace")), Kind::Code);
-        assert_eq!(classify(&text("fn main() {\n    let x = 1;\n}")), Kind::Code);
+        assert_eq!(
+            classify(&text("fn main() {\n    let x = 1;\n}")),
+            Kind::Code
+        );
         let mut t = text("anything");
         t.bundle = "com.apple.Terminal".into();
         assert_eq!(classify(&t), Kind::Code);
-        let f = Clip { files: vec!["/a/b.pdf".into()], ..Default::default() };
+        let f = Clip {
+            files: vec!["/a/b.pdf".into()],
+            ..Default::default()
+        };
         assert_eq!(classify(&f), Kind::File);
     }
 
     #[test]
     fn colors() {
         assert_eq!(parse_color("#fff"), Some(Color32::WHITE));
-        assert_eq!(parse_color(" #0B6BD8 "), Some(Color32::from_rgb(11, 107, 216)));
-        assert_eq!(parse_color("rgba(11, 107, 216, 0.5)").map(|c| c.a()), Some(128));
+        assert_eq!(
+            parse_color(" #0B6BD8 "),
+            Some(Color32::from_rgb(11, 107, 216))
+        );
+        assert_eq!(
+            parse_color("rgba(11, 107, 216, 0.5)").map(|c| c.a()),
+            Some(128)
+        );
         assert_eq!(parse_color("#12345"), None);
         assert_eq!(parse_color("#ggg"), None);
         assert_eq!(parse_color("rgb(300, 0, 0)"), None);
@@ -537,7 +669,9 @@ mod tests {
     #[test]
     fn png_header() {
         let mut png = Vec::new();
-        image::RgbaImage::new(7, 5).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        image::RgbaImage::new(7, 5)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
         assert_eq!(png_size(&png), Some((7, 5)));
         assert_eq!(png_size(b"nope"), None);
     }
@@ -567,7 +701,10 @@ mod tests {
     #[test]
     fn without_dedupe_repeats_add() {
         let mut s = Store::memory(std::env::temp_dir());
-        let lim = Limits { dedupe: false, ..LIM };
+        let lim = Limits {
+            dedupe: false,
+            ..LIM
+        };
         s.add(&text("a"), 1, lim);
         s.add(&text("a"), 2, lim);
         assert_eq!(s.entries.len(), 2);
@@ -581,10 +718,24 @@ mod tests {
         let old = s.add(&text("old"), 0, LIM).unwrap();
         let keep = s.add(&text("pinned"), 1, LIM).unwrap();
         s.set_pinned(keep, true);
-        s.trim(Limits { keep: 100, max_days: 1, dedupe: true }, 2 * day);
+        s.trim(
+            Limits {
+                keep: 100,
+                max_days: 1,
+                dedupe: true,
+            },
+            2 * day,
+        );
         assert!(s.get(old).is_none());
         assert!(s.get(keep).is_some());
-        s.trim(Limits { keep: 100, max_days: 0, dedupe: true }, 900 * day);
+        s.trim(
+            Limits {
+                keep: 100,
+                max_days: 0,
+                dedupe: true,
+            },
+            900 * day,
+        );
         assert!(s.get(keep).is_some());
     }
 
@@ -593,14 +744,39 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cmb-clip-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut png = Vec::new();
-        image::RgbaImage::new(4, 3).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        image::RgbaImage::new(4, 3)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
         let mut s = Store::open(dir.clone());
-        let img = s.add(&Clip { png: Some(png.clone()), app: "Capture".into(), ..Default::default() }, 10, LIM).unwrap();
-        let rich = s.add(&Clip { text: Some("bold".into()), rtf: Some(b"{\\rtf1 bold}".to_vec()), ..Default::default() }, 11, LIM).unwrap();
+        let img = s
+            .add(
+                &Clip {
+                    png: Some(png.clone()),
+                    app: "Capture".into(),
+                    ..Default::default()
+                },
+                10,
+                LIM,
+            )
+            .unwrap();
+        let rich = s
+            .add(
+                &Clip {
+                    text: Some("bold".into()),
+                    rtf: Some(b"{\\rtf1 bold}".to_vec()),
+                    ..Default::default()
+                },
+                11,
+                LIM,
+            )
+            .unwrap();
         crate::kit::fs::flush_writes();
         let back = Store::open(dir.clone());
         assert_eq!(back.entries.len(), 2);
-        assert_eq!(back.get(img).map(|e| (e.kind, e.w, e.h)), Some((Kind::Image, 4, 3)));
+        assert_eq!(
+            back.get(img).map(|e| (e.kind, e.w, e.h)),
+            Some((Kind::Image, 4, 3))
+        );
         assert_eq!(back.png(img), Some(png));
         assert_eq!(back.rtf(rich).as_deref(), Some(&b"{\\rtf1 bold}"[..]));
         let mut back = back;
@@ -613,7 +789,15 @@ mod tests {
     #[test]
     fn titles_and_search() {
         let mut s = Store::memory(std::env::temp_dir());
-        s.add(&Clip { files: vec!["/x/Q4 report.pdf".into(), "/x/b.txt".into()], app: "Finder".into(), ..Default::default() }, 1, LIM);
+        s.add(
+            &Clip {
+                files: vec!["/x/Q4 report.pdf".into(), "/x/b.txt".into()],
+                app: "Finder".into(),
+                ..Default::default()
+            },
+            1,
+            LIM,
+        );
         assert_eq!(s.entries[0].title(), "Q4 report.pdf and 1 more");
         assert!(s.entries[0].matches("finder q4"));
         assert!(!s.entries[0].matches("slack"));

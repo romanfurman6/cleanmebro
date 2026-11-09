@@ -31,7 +31,18 @@ pub enum Tool {
 }
 
 impl Tool {
-    const DRAW: [Tool; 10] = [Tool::Select, Tool::Arrow, Tool::Rect, Tool::Text, Tool::Highlight, Tool::Blur, Tool::Eraser, Tool::Steps, Tool::Crop, Tool::CopyText];
+    const DRAW: [Tool; 10] = [
+        Tool::Select,
+        Tool::Arrow,
+        Tool::Rect,
+        Tool::Text,
+        Tool::Highlight,
+        Tool::Blur,
+        Tool::Eraser,
+        Tool::Steps,
+        Tool::Crop,
+        Tool::CopyText,
+    ];
     const MEASURE: [Tool; 2] = [Tool::Picker, Tool::Ruler];
 
     fn icon(self) -> Ico {
@@ -88,7 +99,16 @@ impl Tool {
 
     /// Tools that drag out a box or a line.
     fn drags(self) -> bool {
-        matches!(self, Tool::Arrow | Tool::Rect | Tool::Highlight | Tool::Blur | Tool::Eraser | Tool::Crop | Tool::CopyText)
+        matches!(
+            self,
+            Tool::Arrow
+                | Tool::Rect
+                | Tool::Highlight
+                | Tool::Blur
+                | Tool::Eraser
+                | Tool::Crop
+                | Tool::CopyText
+        )
     }
 }
 
@@ -117,7 +137,8 @@ const fn tools_w(button: f32, gap: f32) -> f32 {
 }
 
 /// Narrowest editor window: tight tool buttons and icon-only right buttons.
-pub const EDITOR_MIN_WIDTH: f32 = BAR_PAD + tools_w(28.0, 6.0) + BAR_GAP + UNDO_W + UNDO_GAP + RIGHT_ICONS_W + BAR_PAD;
+pub const EDITOR_MIN_WIDTH: f32 =
+    BAR_PAD + tools_w(28.0, 6.0) + BAR_GAP + UNDO_W + UNDO_GAP + RIGHT_ICONS_W + BAR_PAD;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BarLayout {
@@ -135,19 +156,38 @@ impl BarLayout {
         let right = |buttons: f32| UNDO_W + UNDO_GAP + buttons + BAR_PAD;
         let roomy = BAR_PAD + tools_w(32.0, 10.0) + BAR_GAP;
         if roomy + right(labeled_w) <= width {
-            BarLayout { icons_only: false, button: 32.0, group_gap: 10.0 }
+            BarLayout {
+                icons_only: false,
+                button: 32.0,
+                group_gap: 10.0,
+            }
         } else if roomy + right(RIGHT_ICONS_W) <= width {
-            BarLayout { icons_only: true, button: 32.0, group_gap: 10.0 }
+            BarLayout {
+                icons_only: true,
+                button: 32.0,
+                group_gap: 10.0,
+            }
         } else {
-            BarLayout { icons_only: true, button: 28.0, group_gap: 6.0 }
+            BarLayout {
+                icons_only: true,
+                button: 28.0,
+                group_gap: 6.0,
+            }
         }
     }
 
     /// Where the tools end and where the right group starts, for `width`.
     #[cfg(test)]
     pub fn spans(&self, width: f32, labeled_w: f32) -> (f32, f32) {
-        let buttons = if self.icons_only { RIGHT_ICONS_W } else { labeled_w };
-        (BAR_PAD + tools_w(self.button, self.group_gap), width - BAR_PAD - buttons - UNDO_GAP - UNDO_W)
+        let buttons = if self.icons_only {
+            RIGHT_ICONS_W
+        } else {
+            labeled_w
+        };
+        (
+            BAR_PAD + tools_w(self.button, self.group_gap),
+            width - BAR_PAD - buttons - UNDO_GAP - UNDO_W,
+        )
     }
 }
 
@@ -217,7 +257,15 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new(shot: Option<u64>, title: String, base: RgbaImage, px_per_pt: f32, blur: BlurStyle, cover: Cover, keep_breaks: bool) -> Editor {
+    pub fn new(
+        shot: Option<u64>,
+        title: String,
+        base: RgbaImage,
+        px_per_pt: f32,
+        blur: BlurStyle,
+        cover: Cover,
+        keep_breaks: bool,
+    ) -> Editor {
         let (ocr_tx, ocr_rx) = channel();
         Editor {
             shot,
@@ -269,13 +317,44 @@ impl Editor {
         let p = |x: f32, y: f32| Pos2::new(x * s, y * s);
         let red = COLORS[0].1;
         self.doc.marks = vec![
-            Mark::Highlight { r: Rect::from_min_max(p(206.0, 94.0), p(524.0, 112.0)), color: COLORS[1].1 },
-            Mark::Blur { r: Rect::from_min_max(p(216.0, 172.0), p(386.0, 190.0)), style: BlurStyle::Pixelate, boxes: vec![] },
-            Mark::Rect { r: Rect::from_min_max(p(204.0, 212.0), p(536.0, 272.0)), color: red, width: 4.0 * s },
-            Mark::Step { at: p(186.0, 168.0), n: 1, color: red, size: 26.0 * s },
-            Mark::Step { at: p(186.0, 242.0), n: 2, color: red, size: 26.0 * s },
-            Mark::Arrow { a: p(620.0, 380.0), b: p(342.0, 322.0), color: red, width: 4.0 * s },
-            Mark::Text { at: p(560.0, 386.0), text: "then press Save".into(), color: red, size: 17.0 * s },
+            Mark::Highlight {
+                r: Rect::from_min_max(p(206.0, 94.0), p(524.0, 112.0)),
+                color: COLORS[1].1,
+            },
+            Mark::Blur {
+                r: Rect::from_min_max(p(216.0, 172.0), p(386.0, 190.0)),
+                style: BlurStyle::Pixelate,
+                boxes: vec![],
+            },
+            Mark::Rect {
+                r: Rect::from_min_max(p(204.0, 212.0), p(536.0, 272.0)),
+                color: red,
+                width: 4.0 * s,
+            },
+            Mark::Step {
+                at: p(186.0, 168.0),
+                n: 1,
+                color: red,
+                size: 26.0 * s,
+            },
+            Mark::Step {
+                at: p(186.0, 242.0),
+                n: 2,
+                color: red,
+                size: 26.0 * s,
+            },
+            Mark::Arrow {
+                a: p(620.0, 380.0),
+                b: p(342.0, 322.0),
+                color: red,
+                width: 4.0 * s,
+            },
+            Mark::Text {
+                at: p(560.0, 386.0),
+                text: "then press Save".into(),
+                color: red,
+                size: 17.0 * s,
+            },
         ];
         self.tool = Tool::Blur;
     }
@@ -318,7 +397,10 @@ impl Editor {
 
     /// The part of the image on screen: the crop, unless cropping right now.
     fn view(&self) -> Rect {
-        let full = Rect::from_min_size(Pos2::ZERO, Vec2::new(self.base.width() as f32, self.base.height() as f32));
+        let full = Rect::from_min_size(
+            Pos2::ZERO,
+            Vec2::new(self.base.width() as f32, self.base.height() as f32),
+        );
         match self.doc.crop {
             Some(c) if self.tool != Tool::Crop => c.intersect(full),
             _ => full,
@@ -334,17 +416,53 @@ impl Editor {
         p.rect_filled(full, 12.0, BG);
         // title bar
         let title = Rect::from_min_size(full.min, Vec2::new(full.width(), 42.0));
-        p.rect_filled(title, egui::CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, FOOTER);
+        p.rect_filled(
+            title,
+            egui::CornerRadius {
+                nw: 12,
+                ne: 12,
+                sw: 0,
+                se: 0,
+            },
+            FOOTER,
+        );
         hairline(&p, title.left_bottom(), title.right_bottom());
         if lights {
-            for (k, c) in [Color32::from_rgb(255, 95, 87), Color32::from_rgb(254, 188, 46), Color32::from_rgb(40, 200, 64)].iter().enumerate() {
-                p.circle_filled(title.left_center() + Vec2::new(20.0 + 20.0 * k as f32, 0.0), 6.0, *c);
+            for (k, c) in [
+                Color32::from_rgb(255, 95, 87),
+                Color32::from_rgb(254, 188, 46),
+                Color32::from_rgb(40, 200, 64),
+            ]
+            .iter()
+            .enumerate()
+            {
+                p.circle_filled(
+                    title.left_center() + Vec2::new(20.0 + 20.0 * k as f32, 0.0),
+                    6.0,
+                    *c,
+                );
             }
         }
         let (w, h) = self.base.dimensions();
-        let head = p.text(title.center() - Vec2::new(30.0, 0.0), Align2::CENTER_CENTER, &self.title, bold(13.0), TEXT);
-        p.text(Pos2::new(head.right() + 6.0, title.center().y), Align2::LEFT_CENTER, format!("· {w}×{h}"), font(13.0), TEXT_FAINT);
-        let drag = ui.interact(Rect::from_min_max(title.min + Vec2::new(90.0, 0.0), title.max), ui.scope_id().with("drag"), Sense::click_and_drag());
+        let head = p.text(
+            title.center() - Vec2::new(30.0, 0.0),
+            Align2::CENTER_CENTER,
+            &self.title,
+            bold(13.0),
+            TEXT,
+        );
+        p.text(
+            Pos2::new(head.right() + 6.0, title.center().y),
+            Align2::LEFT_CENTER,
+            format!("· {w}×{h}"),
+            font(13.0),
+            TEXT_FAINT,
+        );
+        let drag = ui.interact(
+            Rect::from_min_max(title.min + Vec2::new(90.0, 0.0), title.max),
+            ui.scope_id().with("drag"),
+            Sense::click_and_drag(),
+        );
         if drag.drag_started() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
@@ -356,14 +474,36 @@ impl Editor {
         let strip = Rect::from_min_size(bar.left_bottom(), Vec2::new(full.width(), SUB_BAR_H));
         self.options(ui, strip);
         let top = strip.bottom();
-        hairline(&p, Pos2::new(full.left(), top), Pos2::new(full.right(), top));
+        hairline(
+            &p,
+            Pos2::new(full.left(), top),
+            Pos2::new(full.right(), top),
+        );
         let foot = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 32.0), full.max);
         hairline(&p, foot.left_top(), foot.right_top());
         let marks = self.doc.marks.len();
-        p.text(foot.left_center() + Vec2::new(14.0, 0.0), Align2::LEFT_CENTER, format!("{w}×{h} px · {marks} mark{}", if marks == 1 { "" } else { "s" }), font(12.0), TEXT_FAINT);
-        p.text(foot.right_center() - Vec2::new(14.0, 0.0), Align2::RIGHT_CENTER, "⌘C copy · ⌘S save · ⌘Z undo · Esc close", font(12.0), TEXT_FAINT);
+        p.text(
+            foot.left_center() + Vec2::new(14.0, 0.0),
+            Align2::LEFT_CENTER,
+            format!(
+                "{w}×{h} px · {marks} mark{}",
+                if marks == 1 { "" } else { "s" }
+            ),
+            font(12.0),
+            TEXT_FAINT,
+        );
+        p.text(
+            foot.right_center() - Vec2::new(14.0, 0.0),
+            Align2::RIGHT_CENTER,
+            "⌘C copy · ⌘S save · ⌘Z undo · Esc close",
+            font(12.0),
+            TEXT_FAINT,
+        );
 
-        let canvas = Rect::from_min_max(Pos2::new(full.left(), top), Pos2::new(full.right(), foot.top()));
+        let canvas = Rect::from_min_max(
+            Pos2::new(full.left(), top),
+            Pos2::new(full.right(), foot.top()),
+        );
         p.rect_filled(canvas, 0.0, Color32::from_rgb(0x12, 0x12, 0x14));
         self.canvas(ui, canvas);
         self.keys(ui);
@@ -374,9 +514,17 @@ impl Editor {
         if let Some((msg, at)) = &self.status {
             if at.elapsed().as_secs_f32() < 2.5 {
                 let g = p.layout_no_wrap(msg.clone(), font(13.0), TEXT);
-                let r = Rect::from_center_size(Pos2::new(canvas.center().x, canvas.bottom() - 30.0), g.size() + Vec2::new(28.0, 16.0));
+                let r = Rect::from_center_size(
+                    Pos2::new(canvas.center().x, canvas.bottom() - 30.0),
+                    g.size() + Vec2::new(28.0, 16.0),
+                );
                 p.rect_filled(r, r.height() / 2.0, RAISED);
-                p.rect_stroke(r, r.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
+                p.rect_stroke(
+                    r,
+                    r.height() / 2.0,
+                    Stroke::new(1.0, white(30)),
+                    StrokeKind::Inside,
+                );
                 p.galley(r.center() - g.size() / 2.0, g, TEXT);
                 ui.ctx().request_repaint();
             } else {
@@ -389,11 +537,28 @@ impl Editor {
         let p = ui.painter().clone();
         let y = bar.center().y;
         const RIGHT: [(&str, u8, Ico, &str); 3] = [
-            ("Save  ⌘S", BTN_PRIMARY, Ico::Save, "Save to your captures folder (⌘S)"),
-            ("Copy  ⌘C", BTN_SECONDARY, Ico::Copy, "Copy the picture with your marks (⌘C)"),
-            ("Pin", BTN_SECONDARY, Ico::Pin, "Pin: keep it floating on top"),
+            (
+                "Save  ⌘S",
+                BTN_PRIMARY,
+                Ico::Save,
+                "Save to your captures folder (⌘S)",
+            ),
+            (
+                "Copy  ⌘C",
+                BTN_SECONDARY,
+                Ico::Copy,
+                "Copy the picture with your marks (⌘C)",
+            ),
+            (
+                "Pin",
+                BTN_SECONDARY,
+                Ico::Pin,
+                "Pin: keep it floating on top",
+            ),
         ];
-        let labeled_w = |p: &egui::Painter, (label, kind, ic, _): (&str, u8, Ico, &str)| button_width(p, label, kind) - 6.0 + if ic == Ico::Pin { 18.0 } else { 0.0 };
+        let labeled_w = |p: &egui::Painter, (label, kind, ic, _): (&str, u8, Ico, &str)| {
+            button_width(p, label, kind) - 6.0 + if ic == Ico::Pin { 18.0 } else { 0.0 }
+        };
         let labeled_total: f32 = RIGHT.iter().map(|b| labeled_w(&p, *b)).sum::<f32>() + 2.0 * 8.0;
         let lay = BarLayout::fit(bar.width(), labeled_total);
 
@@ -401,10 +566,16 @@ impl Editor {
         let mut x = bar.left() + BAR_PAD;
         let bw = lay.button;
         let group = |ui: &mut Ui, x: &mut f32, tools: &[Tool], cur: &mut Tool| {
-            let plate = Rect::from_min_size(Pos2::new(*x, y - 16.0), Vec2::new(tools.len() as f32 * bw + 4.0, 32.0));
+            let plate = Rect::from_min_size(
+                Pos2::new(*x, y - 16.0),
+                Vec2::new(tools.len() as f32 * bw + 4.0, 32.0),
+            );
             p.rect_filled(plate, R_BUTTON, white(13));
             for (k, t) in tools.iter().enumerate() {
-                let r = Rect::from_min_size(Pos2::new(plate.left() + 2.0 + bw * k as f32, plate.top() + 2.0), Vec2::new(bw, 28.0));
+                let r = Rect::from_min_size(
+                    Pos2::new(plate.left() + 2.0 + bw * k as f32, plate.top() + 2.0),
+                    Vec2::new(bw, 28.0),
+                );
                 if icon_toggle(ui, r, t.icon(), t.tip(), *cur == *t).clicked() {
                     *cur = *t;
                 }
@@ -422,26 +593,50 @@ impl Editor {
         let mut rx = bar.right() - BAR_PAD;
         for (k, b) in RIGHT.iter().enumerate() {
             let (label, kind, ic, tip) = *b;
-            let w = if lay.icons_only { 34.0 } else { labeled_w(&p, *b) };
+            let w = if lay.icons_only {
+                34.0
+            } else {
+                labeled_w(&p, *b)
+            };
             let r = Rect::from_min_max(Pos2::new(rx - w, y - 14.0), Pos2::new(rx, y + 14.0));
             rx = r.left() - 8.0;
             let resp = if lay.icons_only {
                 let resp = pill_button(ui, r, "", kind, true);
-                icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(14.0)), TEXT);
+                icons::draw(
+                    ui.painter(),
+                    ic,
+                    Rect::from_center_size(r.center(), Vec2::splat(14.0)),
+                    TEXT,
+                );
                 resp
             } else if ic == Ico::Pin {
                 let resp = pill_button(ui, r, "", kind, true);
-                icons::draw(ui.painter(), ic, Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(14.0)), TEXT);
-                ui.painter().text(Pos2::new(r.left() + 28.0, y), Align2::LEFT_CENTER, label, font(12.0), TEXT);
+                icons::draw(
+                    ui.painter(),
+                    ic,
+                    Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(14.0)),
+                    TEXT,
+                );
+                ui.painter().text(
+                    Pos2::new(r.left() + 28.0, y),
+                    Align2::LEFT_CENTER,
+                    label,
+                    font(12.0),
+                    TEXT,
+                );
                 resp
             } else {
                 pill_button(ui, r, label, kind, true)
             };
             if resp.on_hover_text(tip).clicked() {
-                self.requests.push([Request::Save, Request::Copy, Request::Pin][k].clone());
+                self.requests
+                    .push([Request::Save, Request::Copy, Request::Pin][k].clone());
             }
         }
-        let rr = Rect::from_min_size(Pos2::new(rx + 8.0 - UNDO_GAP - 30.0, y - 14.0), Vec2::new(30.0, 28.0));
+        let rr = Rect::from_min_size(
+            Pos2::new(rx + 8.0 - UNDO_GAP - 30.0, y - 14.0),
+            Vec2::new(30.0, 28.0),
+        );
         let ur = rr.translate(Vec2::new(-32.0, 0.0));
         if plain_icon(ui, ur, Ico::Undo, "Undo (⌘Z)", !self.undo.is_empty()).clicked() {
             self.undo();
@@ -471,38 +666,88 @@ impl Editor {
             Tool::Picker => "Pick a color",
             Tool::Ruler => "Ruler",
         };
-        x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, name, bold(12.0), TEXT).right() + 16.0;
+        x = p
+            .text(Pos2::new(x, y), Align2::LEFT_CENTER, name, bold(12.0), TEXT)
+            .right()
+            + 16.0;
         let hint: String = match self.tool {
             Tool::Arrow | Tool::Rect | Tool::Highlight | Tool::Steps | Tool::Text => {
                 for (k, (cname, c)) in COLORS.iter().enumerate() {
                     let r = Rect::from_center_size(Pos2::new(x + 9.0, y), Vec2::splat(18.0));
-                    let resp = ui.interact(r.expand(3.0), ui.scope_id().with(("color", k)), Sense::click()).on_hover_text(*cname);
+                    let resp = ui
+                        .interact(
+                            r.expand(3.0),
+                            ui.scope_id().with(("color", k)),
+                            Sense::click(),
+                        )
+                        .on_hover_text(*cname);
                     if self.color == k {
                         p.circle_stroke(r.center(), 11.5, Stroke::new(2.0, BLUE));
                     }
-                    p.circle_filled(r.center(), 9.0, Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
-                    p.circle_stroke(r.center(), 9.0, Stroke::new(1.0, if self.color == k { Color32::WHITE } else { white(64) }));
+                    p.circle_filled(
+                        r.center(),
+                        9.0,
+                        Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]),
+                    );
+                    p.circle_stroke(
+                        r.center(),
+                        9.0,
+                        Stroke::new(
+                            1.0,
+                            if self.color == k {
+                                Color32::WHITE
+                            } else {
+                                white(64)
+                            },
+                        ),
+                    );
                     if resp.clicked() {
                         self.color = k;
                         self.recolor_selected();
                     }
                     x += 26.0;
                 }
-                p.line_segment([Pos2::new(x + 4.0, y - 9.0), Pos2::new(x + 4.0, y + 9.0)], Stroke::new(1.0, white(26)));
+                p.line_segment(
+                    [Pos2::new(x + 4.0, y - 9.0), Pos2::new(x + 4.0, y + 9.0)],
+                    Stroke::new(1.0, white(26)),
+                );
                 x += 14.0;
                 let sized = matches!(self.tool, Tool::Text | Tool::Steps);
-                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, if sized { "Size" } else { "Width" }, font(12.0), TEXT_DIM).right() + 8.0;
-                let plate = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(3.0 * 30.0 + 4.0, 26.0));
+                x = p
+                    .text(
+                        Pos2::new(x, y),
+                        Align2::LEFT_CENTER,
+                        if sized { "Size" } else { "Width" },
+                        font(12.0),
+                        TEXT_DIM,
+                    )
+                    .right()
+                    + 8.0;
+                let plate =
+                    Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(3.0 * 30.0 + 4.0, 26.0));
                 p.rect_filled(plate, R_BUTTON, white(13));
                 for k in 0..3 {
-                    let r = Rect::from_min_size(Pos2::new(plate.left() + 2.0 + 30.0 * k as f32, plate.top() + 2.0), Vec2::new(30.0, 22.0));
-                    let tip = if sized { ["Small", "Medium", "Large"][k] } else { ["Thin", "Medium", "Thick"][k] };
-                    let resp = ui.interact(r, ui.scope_id().with(("stroke", k)), Sense::click()).on_hover_text(tip);
+                    let r = Rect::from_min_size(
+                        Pos2::new(plate.left() + 2.0 + 30.0 * k as f32, plate.top() + 2.0),
+                        Vec2::new(30.0, 22.0),
+                    );
+                    let tip = if sized {
+                        ["Small", "Medium", "Large"][k]
+                    } else {
+                        ["Thin", "Medium", "Thick"][k]
+                    };
+                    let resp = ui
+                        .interact(r, ui.scope_id().with(("stroke", k)), Sense::click())
+                        .on_hover_text(tip);
                     if self.stroke == k {
                         p.rect_filled(r, 6.0, Color32::from_rgb(0x48, 0x48, 0x4E));
                     }
                     let t = [2.0, 4.0, 6.0][k];
-                    p.rect_filled(Rect::from_center_size(r.center(), Vec2::new(14.0, t)), t / 2.0, if self.stroke == k { TEXT } else { TEXT_SOFT });
+                    p.rect_filled(
+                        Rect::from_center_size(r.center(), Vec2::new(14.0, t)),
+                        t / 2.0,
+                        if self.stroke == k { TEXT } else { TEXT_SOFT },
+                    );
                     if resp.clicked() {
                         self.stroke = k;
                     }
@@ -512,28 +757,66 @@ impl Editor {
             }
             Tool::Blur | Tool::Eraser => {
                 if self.tool == Tool::Blur {
-                    x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Style", font(12.0), TEXT_DIM).right() + 8.0;
+                    x = p
+                        .text(
+                            Pos2::new(x, y),
+                            Align2::LEFT_CENTER,
+                            "Style",
+                            font(12.0),
+                            TEXT_DIM,
+                        )
+                        .right()
+                        + 8.0;
                     let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(200.0, 26.0));
                     let cur = match self.blur {
                         BlurStyle::Pixelate => 0,
                         BlurStyle::Blur => 1,
                         BlurStyle::Solid => 2,
                     };
-                    if let Some(i) = segmented(ui, r, ui.scope_id().with("style"), &["Pixelate", "Blur", "Solid"], cur) {
+                    if let Some(i) = segmented(
+                        ui,
+                        r,
+                        ui.scope_id().with("style"),
+                        &["Pixelate", "Blur", "Solid"],
+                        cur,
+                    ) {
                         self.blur = [BlurStyle::Pixelate, BlurStyle::Blur, BlurStyle::Solid][i];
                     }
                     x = r.right() + 16.0;
                 }
-                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Cover", font(12.0), TEXT_DIM).right() + 8.0;
+                x = p
+                    .text(
+                        Pos2::new(x, y),
+                        Align2::LEFT_CENTER,
+                        "Cover",
+                        font(12.0),
+                        TEXT_DIM,
+                    )
+                    .right()
+                    + 8.0;
                 let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(170.0, 26.0));
-                if let Some(i) = segmented(ui, r, ui.scope_id().with("cover"), &["Whole box", "Only text"], (self.cover == Cover::Text) as usize) {
+                if let Some(i) = segmented(
+                    ui,
+                    r,
+                    ui.scope_id().with("cover"),
+                    &["Whole box", "Only text"],
+                    (self.cover == Cover::Text) as usize,
+                ) {
                     self.cover = if i == 1 { Cover::Text } else { Cover::Box };
                 }
                 x = r.right() + 16.0;
-                if self.tool == Tool::Eraser { "Fills with the color around the text.".into() } else { String::new() }
+                if self.tool == Tool::Eraser {
+                    "Fills with the color around the text.".into()
+                } else {
+                    String::new()
+                }
             }
             Tool::Crop => match self.crop_pending {
-                Some(c) => format!("{:.0} × {:.0} · Enter to crop · Esc to cancel", c.width().round(), c.height().round()),
+                Some(c) => format!(
+                    "{:.0} × {:.0} · Enter to crop · Esc to cancel",
+                    c.width().round(),
+                    c.height().round()
+                ),
                 None => "Drag an area · Enter to crop".into(),
             },
             Tool::CopyText => "Drag over text, it's copied".into(),
@@ -542,7 +825,15 @@ impl Editor {
             Tool::Select => "Click a mark to select, drag to move, ⌫ deletes".into(),
         };
         if !hint.is_empty() {
-            text_fit(&p, Pos2::new(x, y), Align2::LEFT_CENTER, &hint, font(12.0), TEXT_FAINT, (strip.right() - BAR_PAD - x).max(40.0));
+            text_fit(
+                &p,
+                Pos2::new(x, y),
+                Align2::LEFT_CENTER,
+                &hint,
+                font(12.0),
+                TEXT_FAINT,
+                (strip.right() - BAR_PAD - x).max(40.0),
+            );
         }
     }
 
@@ -556,7 +847,9 @@ impl Editor {
 
     /// Crop to the picked area (Enter).
     fn apply_crop(&mut self) {
-        let Some(r) = self.crop_pending.take() else { return };
+        let Some(r) = self.crop_pending.take() else {
+            return;
+        };
         self.push_undo();
         self.doc.crop = Some(r);
         self.tool = Tool::Select;
@@ -568,7 +861,11 @@ impl Editor {
         let c = self.color();
         let mut m = self.doc.marks[i].clone();
         match &mut m {
-            Mark::Arrow { color, .. } | Mark::Rect { color, .. } | Mark::Text { color, .. } | Mark::Highlight { color, .. } | Mark::Step { color, .. } => *color = c,
+            Mark::Arrow { color, .. }
+            | Mark::Rect { color, .. }
+            | Mark::Text { color, .. }
+            | Mark::Highlight { color, .. }
+            | Mark::Step { color, .. } => *color = c,
             _ => return,
         }
         self.push_undo();
@@ -580,13 +877,25 @@ impl Editor {
     fn canvas(&mut self, ui: &mut Ui, area: Rect) {
         let ctx = ui.ctx().clone();
         // the image with its pixel effects, re-rendered when they change
-        let effects: Vec<Mark> = self.doc.marks.iter().filter(|m| m.is_effect()).cloned().collect();
+        let effects: Vec<Mark> = self
+            .doc
+            .marks
+            .iter()
+            .filter(|m| m.is_effect())
+            .cloned()
+            .collect();
         if self.tex.is_none() || self.tex_for.as_ref() != Some(&effects) {
             let img = render::apply_effects(&self.base, &effects);
-            let ci = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
+            let ci = egui::ColorImage::from_rgba_unmultiplied(
+                [img.width() as usize, img.height() as usize],
+                img.as_raw(),
+            );
             match &mut self.tex {
                 Some(t) => t.set(ci, egui::TextureOptions::LINEAR),
-                None => self.tex = Some(ctx.load_texture("capture-editor", ci, egui::TextureOptions::LINEAR)),
+                None => {
+                    self.tex =
+                        Some(ctx.load_texture("capture-editor", ci, egui::TextureOptions::LINEAR))
+                }
             }
             self.effects = Some(img);
             self.tex_for = Some(effects);
@@ -595,7 +904,10 @@ impl Editor {
         let pad = 24.0;
         let avail = area.shrink(pad);
         // fit, but never larger than true size (px_per_pt image pixels per point)
-        let scale = (avail.width() / view.width()).min(avail.height() / view.height()).min(1.0 / self.px_per_pt).max(0.01);
+        let scale = (avail.width() / view.width())
+            .min(avail.height() / view.height())
+            .min(1.0 / self.px_per_pt)
+            .max(0.01);
         let shown = Rect::from_center_size(avail.center(), view.size() * scale);
         let to_screen = |q: Pos2| shown.min + (q - view.min) * scale;
         let to_img = |s: Pos2| view.min + (s - shown.min) / scale;
@@ -603,7 +915,10 @@ impl Editor {
         p.rect_filled(shown.expand(1.0), 4.0, Color32::from_black_alpha(90));
         if let Some(t) = &self.tex {
             let (w, h) = (self.base.width() as f32, self.base.height() as f32);
-            let uv = Rect::from_min_max(Pos2::new(view.min.x / w, view.min.y / h), Pos2::new(view.max.x / w, view.max.y / h));
+            let uv = Rect::from_min_max(
+                Pos2::new(view.min.x / w, view.min.y / h),
+                Pos2::new(view.max.x / w, view.max.y / h),
+            );
             p.image(t.id(), shown, uv, Color32::WHITE);
         }
         // shapes
@@ -611,31 +926,65 @@ impl Editor {
             draw_mark(&p, m, &to_screen, scale);
             if self.selected == Some(i) {
                 let b = m.bounds();
-                p.rect_stroke(Rect::from_min_max(to_screen(b.min), to_screen(b.max)).expand(3.0), 3.0, Stroke::new(1.5, ACCENT), StrokeKind::Outside);
+                p.rect_stroke(
+                    Rect::from_min_max(to_screen(b.min), to_screen(b.max)).expand(3.0),
+                    3.0,
+                    Stroke::new(1.5, ACCENT),
+                    StrokeKind::Outside,
+                );
             }
         }
         if self.tool == Tool::Crop && self.drag.is_none() {
             if let Some(c) = self.crop_pending {
                 let cr = Rect::from_min_max(to_screen(c.min), to_screen(c.max));
                 shade_outside(&p, shown, cr);
-                let corners = [cr.left_top(), cr.right_top(), cr.right_bottom(), cr.left_bottom(), cr.left_top()];
-                p.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.5, Color32::WHITE), 6.0, 4.0));
-                tag(&p, cr.right_bottom() + Vec2::new(6.0, 6.0), &format!("{:.0} × {:.0}", c.width().round(), c.height().round()));
+                let corners = [
+                    cr.left_top(),
+                    cr.right_top(),
+                    cr.right_bottom(),
+                    cr.left_bottom(),
+                    cr.left_top(),
+                ];
+                p.extend(egui::Shape::dashed_line(
+                    &corners,
+                    Stroke::new(1.5, Color32::WHITE),
+                    6.0,
+                    4.0,
+                ));
+                tag(
+                    &p,
+                    cr.right_bottom() + Vec2::new(6.0, 6.0),
+                    &format!("{:.0} × {:.0}", c.width().round(), c.height().round()),
+                );
                 let hint = "Enter to crop · Esc to cancel";
                 let g = p.layout_no_wrap(hint.to_string(), font(12.0), TEXT);
-                let mut at = Pos2::new(cr.center().x - g.size().x / 2.0 - 12.0, cr.top() - g.size().y - 22.0);
+                let mut at = Pos2::new(
+                    cr.center().x - g.size().x / 2.0 - 12.0,
+                    cr.top() - g.size().y - 22.0,
+                );
                 if at.y < area.top() + 4.0 {
                     at.y = cr.bottom() + 10.0;
                 }
-                at.x = at.x.clamp(area.left() + 4.0, area.right() - g.size().x - 28.0);
+                at.x =
+                    at.x.clamp(area.left() + 4.0, area.right() - g.size().x - 28.0);
                 let hr = Rect::from_min_size(at, g.size() + Vec2::new(24.0, 12.0));
                 p.rect_filled(hr, hr.height() / 2.0, RAISED);
-                p.rect_stroke(hr, hr.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
+                p.rect_stroke(
+                    hr,
+                    hr.height() / 2.0,
+                    Stroke::new(1.0, white(30)),
+                    StrokeKind::Inside,
+                );
                 p.galley(hr.center() - g.size() / 2.0, g, TEXT);
             } else if let Some(c) = self.doc.crop {
                 let cr = Rect::from_min_max(to_screen(c.min), to_screen(c.max));
                 shade_outside(&p, shown, cr);
-                p.rect_stroke(cr, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
+                p.rect_stroke(
+                    cr,
+                    0.0,
+                    Stroke::new(1.5, Color32::WHITE),
+                    StrokeKind::Middle,
+                );
             }
         }
 
@@ -643,7 +992,10 @@ impl Editor {
         let hover = resp.hover_pos().filter(|h| shown.contains(*h));
         let at_img = |s: Pos2| {
             let q = to_img(s);
-            Pos2::new(q.x.clamp(view.min.x, view.max.x), q.y.clamp(view.min.y, view.max.y))
+            Pos2::new(
+                q.x.clamp(view.min.x, view.max.x),
+                q.y.clamp(view.min.y, view.max.y),
+            )
         };
 
         // dragging out shapes
@@ -688,7 +1040,12 @@ impl Editor {
                 if resp.clicked() {
                     if let Some(s) = resp.interact_pointer_pos() {
                         let n = self.doc.next_step();
-                        let m = Mark::Step { at: at_img(s), n, color: self.color(), size: STEP_PT[self.stroke] * self.px_per_pt };
+                        let m = Mark::Step {
+                            at: at_img(s),
+                            n,
+                            color: self.color(),
+                            size: STEP_PT[self.stroke] * self.px_per_pt,
+                        };
                         self.add(m);
                     }
                 }
@@ -696,7 +1053,11 @@ impl Editor {
             Tool::Picker => {
                 if let Some(h) = hover {
                     let q = to_img(h);
-                    if let Some(c) = self.effects.as_ref().and_then(|img| render::pixel(img, q.x as i64, q.y as i64)) {
+                    if let Some(c) = self
+                        .effects
+                        .as_ref()
+                        .and_then(|img| render::pixel(img, q.x as i64, q.y as i64))
+                    {
                         loupe(&p, self.effects.as_ref().unwrap(), q, h, c);
                         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
                         if resp.clicked() {
@@ -710,8 +1071,13 @@ impl Editor {
             Tool::Ruler => {
                 if let (Some(h), Some(img)) = (hover, self.effects.as_ref()) {
                     let q = to_img(h);
-                    if let Some((x0, x1, y0, y1)) = render::edge_span(img, q.x as i64, q.y as i64, 10) {
-                        let (wp, hp) = ((x1 - x0 + 1) as f32 / self.px_per_pt, (y1 - y0 + 1) as f32 / self.px_per_pt);
+                    if let Some((x0, x1, y0, y1)) =
+                        render::edge_span(img, q.x as i64, q.y as i64, 10)
+                    {
+                        let (wp, hp) = (
+                            (x1 - x0 + 1) as f32 / self.px_per_pt,
+                            (y1 - y0 + 1) as f32 / self.px_per_pt,
+                        );
                         let yl = Pos2::new(0.0, q.y);
                         let a = to_screen(Pos2::new(x0 as f32, yl.y));
                         let b = to_screen(Pos2::new(x1 as f32 + 1.0, yl.y));
@@ -723,7 +1089,8 @@ impl Editor {
                         let label = format!("{:.0} × {:.0} pt", wp, hp);
                         tag(&p, h + Vec2::new(14.0, 14.0), &label);
                         if resp.clicked() {
-                            self.requests.push(Request::CopyText(format!("{:.0} × {:.0}", wp, hp)));
+                            self.requests
+                                .push(Request::CopyText(format!("{:.0} × {:.0}", wp, hp)));
                             self.flash(format!("Copied {label}"));
                         }
                     }
@@ -740,7 +1107,10 @@ impl Editor {
             let col = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], 255);
             let ink = render::ink_on(c);
             let mut done = false;
-            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(pos, Vec2::new(area.right() - pos.x, size * 2.0))));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(
+                pos,
+                Vec2::new(area.right() - pos.x, size * 2.0),
+            )));
             let tw = (s.chars().count() as f32 * size * 0.62).max(size * 6.0);
             let te = egui::TextEdit::singleline(&mut s)
                 .font(egui::FontId::proportional(size.max(8.0)))
@@ -763,24 +1133,58 @@ impl Editor {
             }
         }
         if self.ocr_busy {
-            spinner(&p, Pos2::new(shown.right() - 16.0, shown.top() + 16.0), 7.0, ctx.input(|i| i.time), Color32::WHITE);
+            spinner(
+                &p,
+                Pos2::new(shown.right() - 16.0, shown.top() + 16.0),
+                7.0,
+                ctx.input(|i| i.time),
+                Color32::WHITE,
+            );
             crate::kit::glass::animate(&ctx);
         }
     }
 
-    fn draw_drag_preview(&self, p: &egui::Painter, a: Pos2, b: Pos2, to_screen: &dyn Fn(Pos2) -> Pos2, scale: f32, shown: Rect) {
+    fn draw_drag_preview(
+        &self,
+        p: &egui::Painter,
+        a: Pos2,
+        b: Pos2,
+        to_screen: &dyn Fn(Pos2) -> Pos2,
+        scale: f32,
+        shown: Rect,
+    ) {
         let r = Rect::from_two_pos(a, b);
         let sr = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
         match self.tool {
             Tool::Crop => {
                 shade_outside(p, shown, sr);
-                p.rect_stroke(sr, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
+                p.rect_stroke(
+                    sr,
+                    0.0,
+                    Stroke::new(1.5, Color32::WHITE),
+                    StrokeKind::Middle,
+                );
                 let (w, h) = (r.width().round(), r.height().round());
-                tag(p, sr.right_bottom() + Vec2::new(6.0, 6.0), &format!("{w:.0} × {h:.0}"));
+                tag(
+                    p,
+                    sr.right_bottom() + Vec2::new(6.0, 6.0),
+                    &format!("{w:.0} × {h:.0}"),
+                );
             }
             Tool::Blur | Tool::Eraser | Tool::CopyText => {
                 p.rect_filled(sr, 3.0, with_alpha(BLUE, 0.16));
-                p.extend(egui::Shape::dashed_line(&[sr.left_top(), sr.right_top(), sr.right_bottom(), sr.left_bottom(), sr.left_top()], Stroke::new(1.5, ACCENT), 5.0, 3.0));
+                p.extend(egui::Shape::dashed_line(
+                    &[
+                        sr.left_top(),
+                        sr.right_top(),
+                        sr.right_bottom(),
+                        sr.left_bottom(),
+                        sr.left_top(),
+                    ],
+                    Stroke::new(1.5, ACCENT),
+                    5.0,
+                    3.0,
+                ));
             }
             _ => {
                 if let Some(m) = self.mark_from_drag(a, b) {
@@ -794,8 +1198,17 @@ impl Editor {
         let r = Rect::from_two_pos(a, b);
         let c = self.color();
         Some(match self.tool {
-            Tool::Arrow => Mark::Arrow { a, b, color: c, width: self.width_px() },
-            Tool::Rect => Mark::Rect { r, color: c, width: self.width_px() },
+            Tool::Arrow => Mark::Arrow {
+                a,
+                b,
+                color: c,
+                width: self.width_px(),
+            },
+            Tool::Rect => Mark::Rect {
+                r,
+                color: c,
+                width: self.width_px(),
+            },
             Tool::Highlight => Mark::Highlight { r, color: c },
             _ => return None,
         })
@@ -816,7 +1229,15 @@ impl Editor {
             // picked, not applied: Enter crops, Esc or another drag replaces it
             Tool::Crop => self.crop_pending = Some(r),
             Tool::Blur | Tool::Eraser => {
-                let m = if self.tool == Tool::Blur { Mark::Blur { r, style: self.blur, boxes: vec![] } } else { Mark::Erase { r, boxes: vec![] } };
+                let m = if self.tool == Tool::Blur {
+                    Mark::Blur {
+                        r,
+                        style: self.blur,
+                        boxes: vec![],
+                    }
+                } else {
+                    Mark::Erase { r, boxes: vec![] }
+                };
                 if self.cover == Cover::Text {
                     self.run_ocr(Ocr::Mark(m), r, ctx);
                 } else {
@@ -829,7 +1250,10 @@ impl Editor {
     }
 
     fn run_ocr(&mut self, job: Ocr, r: Rect, ctx: &egui::Context) {
-        let Some((x, y, w, h)) = render::clamp_rect(r, self.base.width(), self.base.height()) else { return };
+        let Some((x, y, w, h)) = render::clamp_rect(r, self.base.width(), self.base.height())
+        else {
+            return;
+        };
         let src = self.effects.clone().unwrap_or_else(|| self.base.clone());
         let crop = image::imageops::crop_imm(&src, x, y, w, h).to_image();
         let tx = self.ocr_tx.clone();
@@ -875,7 +1299,13 @@ impl Editor {
         }
     }
 
-    fn select_tool(&mut self, resp: &egui::Response, at_img: &dyn Fn(Pos2) -> Pos2, _ctx: &egui::Context, scale: f32) {
+    fn select_tool(
+        &mut self,
+        resp: &egui::Response,
+        at_img: &dyn Fn(Pos2) -> Pos2,
+        _ctx: &egui::Context,
+        scale: f32,
+    ) {
         let slack = 6.0 / scale;
         if resp.drag_started() || resp.clicked() {
             if let Some(s) = resp.interact_pointer_pos() {
@@ -888,7 +1318,9 @@ impl Editor {
                 }
             }
         }
-        if let (Some((i, start, orig)), Some(s)) = (self.moving.clone(), resp.interact_pointer_pos()) {
+        if let (Some((i, start, orig)), Some(s)) =
+            (self.moving.clone(), resp.interact_pointer_pos())
+        {
             if resp.dragged() {
                 let mut m = orig;
                 m.translate(at_img(s) - start);
@@ -911,7 +1343,12 @@ impl Editor {
         if let Some((at, s)) = self.text.take() {
             let s = s.trim().to_string();
             if !s.is_empty() {
-                let m = Mark::Text { at, text: s, color: self.color(), size: TEXT_PT[self.stroke] * self.px_per_pt };
+                let m = Mark::Text {
+                    at,
+                    text: s,
+                    color: self.color(),
+                    size: TEXT_PT[self.stroke] * self.px_per_pt,
+                };
                 self.add(m);
             }
         }
@@ -932,7 +1369,9 @@ impl Editor {
             } else {
                 self.undo();
             }
-        } else if cmd && pressed(Key::C) || ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy))) {
+        } else if cmd && pressed(Key::C)
+            || ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)))
+        {
             self.requests.push(Request::Copy);
         } else if cmd && pressed(Key::S) {
             self.requests.push(Request::Save);
@@ -976,28 +1415,61 @@ fn draw_mark(p: &egui::Painter, m: &Mark, to_screen: &dyn Fn(Pos2) -> Pos2, scal
             let end = render::shaft_end(*a, *b, *width);
             p.line_segment([to_screen(*a), to_screen(end)], Stroke::new(w, c32(*color)));
             p.circle_filled(to_screen(*a), w / 2.0, c32(*color));
-            let head: Vec<Pos2> = render::arrow_head(*a, *b, *width).iter().map(|q| to_screen(*q)).collect();
-            p.add(egui::Shape::convex_polygon(head, c32(*color), Stroke::new(w * 0.6, c32(*color))));
+            let head: Vec<Pos2> = render::arrow_head(*a, *b, *width)
+                .iter()
+                .map(|q| to_screen(*q))
+                .collect();
+            p.add(egui::Shape::convex_polygon(
+                head,
+                c32(*color),
+                Stroke::new(w * 0.6, c32(*color)),
+            ));
         }
         Mark::Rect { r, color, width } => {
             let sr = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
-            p.rect_stroke(sr, width * 1.5 * scale, Stroke::new(width * scale, c32(*color)), StrokeKind::Middle);
+            p.rect_stroke(
+                sr,
+                width * 1.5 * scale,
+                Stroke::new(width * scale, c32(*color)),
+                StrokeKind::Middle,
+            );
         }
         Mark::Highlight { r, color } => {
             let sr = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
-            p.rect_filled(sr, 2.0 * scale, Color32::from_rgba_unmultiplied(color[0], color[1], color[2], 110));
+            p.rect_filled(
+                sr,
+                2.0 * scale,
+                Color32::from_rgba_unmultiplied(color[0], color[1], color[2], 110),
+            );
         }
-        Mark::Text { at, text, color, size } => {
+        Mark::Text {
+            at,
+            text,
+            color,
+            size,
+        } => {
             let s = render::label_size(text, *size);
             let r = Rect::from_min_size(to_screen(*at), s * scale);
             p.rect_filled(r, size * 0.3 * scale, c32(*color));
             let ink = render::ink_on(*color);
-            p.text(r.center(), Align2::CENTER_CENTER, text, egui::FontId::proportional((size * scale).max(4.0)), c32(ink));
+            p.text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                text,
+                egui::FontId::proportional((size * scale).max(4.0)),
+                c32(ink),
+            );
         }
         Mark::Step { at, n, color, size } => {
             let c = to_screen(*at);
             p.circle_filled(c, size * scale / 2.0, c32(*color));
-            p.text(c, Align2::CENTER_CENTER, n.to_string(), bold((size * scale * 0.55).max(4.0)), c32(render::ink_on(*color)));
+            p.text(
+                c,
+                Align2::CENTER_CENTER,
+                n.to_string(),
+                bold((size * scale * 0.55).max(4.0)),
+                c32(render::ink_on(*color)),
+            );
         }
         Mark::Blur { .. } | Mark::Erase { .. } => {}
     }
@@ -1006,10 +1478,32 @@ fn draw_mark(p: &egui::Painter, m: &Mark, to_screen: &dyn Fn(Pos2) -> Pos2, scal
 fn shade_outside(p: &egui::Painter, shown: Rect, keep: Rect) {
     let keep = keep.intersect(shown);
     let shade = Color32::from_black_alpha(140);
-    p.rect_filled(Rect::from_min_max(shown.min, Pos2::new(shown.right(), keep.top())), 0.0, shade);
-    p.rect_filled(Rect::from_min_max(Pos2::new(shown.left(), keep.bottom()), shown.max), 0.0, shade);
-    p.rect_filled(Rect::from_min_max(Pos2::new(shown.left(), keep.top()), Pos2::new(keep.left(), keep.bottom())), 0.0, shade);
-    p.rect_filled(Rect::from_min_max(Pos2::new(keep.right(), keep.top()), Pos2::new(shown.right(), keep.bottom())), 0.0, shade);
+    p.rect_filled(
+        Rect::from_min_max(shown.min, Pos2::new(shown.right(), keep.top())),
+        0.0,
+        shade,
+    );
+    p.rect_filled(
+        Rect::from_min_max(Pos2::new(shown.left(), keep.bottom()), shown.max),
+        0.0,
+        shade,
+    );
+    p.rect_filled(
+        Rect::from_min_max(
+            Pos2::new(shown.left(), keep.top()),
+            Pos2::new(keep.left(), keep.bottom()),
+        ),
+        0.0,
+        shade,
+    );
+    p.rect_filled(
+        Rect::from_min_max(
+            Pos2::new(keep.right(), keep.top()),
+            Pos2::new(shown.right(), keep.bottom()),
+        ),
+        0.0,
+        shade,
+    );
 }
 
 /// A small yellow measurement tag.
@@ -1030,20 +1524,51 @@ pub fn loupe(p: &egui::Painter, img: &RgbaImage, q: Pos2, at: Pos2, c: Rgba8) {
     p.rect_filled(r.expand(3.0), 8.0, Color32::WHITE);
     for dy in 0..n {
         for dx in 0..n {
-            let px = render::pixel(img, q.x as i64 + dx - n / 2, q.y as i64 + dy - n / 2).unwrap_or([0, 0, 0, 255]);
-            let cr = Rect::from_min_size(origin + Vec2::new(dx as f32 * cell, dy as f32 * cell), Vec2::splat(cell));
+            let px = render::pixel(img, q.x as i64 + dx - n / 2, q.y as i64 + dy - n / 2)
+                .unwrap_or([0, 0, 0, 255]);
+            let cr = Rect::from_min_size(
+                origin + Vec2::new(dx as f32 * cell, dy as f32 * cell),
+                Vec2::splat(cell),
+            );
             p.rect_filled(cr, 0.0, c32([px[0], px[1], px[2], 255]));
         }
     }
-    let mid = Rect::from_min_size(origin + Vec2::splat((n / 2) as f32 * cell), Vec2::splat(cell));
-    p.rect_stroke(mid, 0.0, Stroke::new(2.0, Color32::WHITE), StrokeKind::Outside);
-    p.rect_stroke(mid, 0.0, Stroke::new(1.0, Color32::BLACK), StrokeKind::Inside);
+    let mid = Rect::from_min_size(
+        origin + Vec2::splat((n / 2) as f32 * cell),
+        Vec2::splat(cell),
+    );
+    p.rect_stroke(
+        mid,
+        0.0,
+        Stroke::new(2.0, Color32::WHITE),
+        StrokeKind::Outside,
+    );
+    p.rect_stroke(
+        mid,
+        0.0,
+        Stroke::new(1.0, Color32::BLACK),
+        StrokeKind::Inside,
+    );
     let label = render::hex(c);
     let g = p.layout_no_wrap(label, mono(12.0), TEXT);
-    let lr = Rect::from_min_size(Pos2::new(r.left(), r.bottom() + 8.0), Vec2::new(g.size().x + 30.0, 24.0));
+    let lr = Rect::from_min_size(
+        Pos2::new(r.left(), r.bottom() + 8.0),
+        Vec2::new(g.size().x + 30.0, 24.0),
+    );
     p.rect_filled(lr, 7.0, RAISED);
-    p.rect_filled(Rect::from_center_size(Pos2::new(lr.left() + 12.0, lr.center().y), Vec2::splat(12.0)), 3.0, c32([c[0], c[1], c[2], 255]));
-    p.galley(Pos2::new(lr.left() + 22.0, lr.center().y - g.size().y / 2.0), g, TEXT);
+    p.rect_filled(
+        Rect::from_center_size(
+            Pos2::new(lr.left() + 12.0, lr.center().y),
+            Vec2::splat(12.0),
+        ),
+        3.0,
+        c32([c[0], c[1], c[2], 255]),
+    );
+    p.galley(
+        Pos2::new(lr.left() + 22.0, lr.center().y - g.size().y / 2.0),
+        g,
+        TEXT,
+    );
 }
 
 /// A tool button that stays lit while its tool is on.
@@ -1055,16 +1580,34 @@ fn icon_toggle(ui: &mut Ui, r: Rect, ic: Ico, tip: &str, on: bool) -> egui::Resp
     } else if resp.hovered() {
         p.rect_filled(r, 6.0, white(20));
     }
-    icons::draw(p, ic, Rect::from_center_size(r.center(), Vec2::splat(16.0)), if on { Color32::WHITE } else { TEXT_SOFT });
+    icons::draw(
+        p,
+        ic,
+        Rect::from_center_size(r.center(), Vec2::splat(16.0)),
+        if on { Color32::WHITE } else { TEXT_SOFT },
+    );
     resp.on_hover_text(tip)
 }
 
 fn plain_icon(ui: &mut Ui, r: Rect, ic: Ico, tip: &str, enabled: bool) -> egui::Response {
-    let resp = ui.interact(r, ui.scope_id().with(("plain", tip)), if enabled { Sense::click() } else { Sense::hover() });
+    let resp = ui.interact(
+        r,
+        ui.scope_id().with(("plain", tip)),
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
     if enabled && resp.hovered() {
         ui.painter().rect_filled(r, 6.0, white(20));
     }
-    icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(16.0)), if enabled { TEXT_SOFT } else { TEXT_MUTED });
+    icons::draw(
+        ui.painter(),
+        ic,
+        Rect::from_center_size(r.center(), Vec2::splat(16.0)),
+        if enabled { TEXT_SOFT } else { TEXT_MUTED },
+    );
     resp.on_hover_text(tip)
 }
 
@@ -1080,7 +1623,10 @@ mod tests {
             }
             let lay = BarLayout::fit(w, labeled);
             let (left_end, right_start) = lay.spans(w, labeled);
-            assert!(left_end + BAR_GAP <= right_start + 0.01, "overlap at {w}: {lay:?} {left_end} {right_start}");
+            assert!(
+                left_end + BAR_GAP <= right_start + 0.01,
+                "overlap at {w}: {lay:?} {left_end} {right_start}"
+            );
         }
         assert!(BarLayout::fit(EDITOR_MIN_WIDTH, labeled).icons_only);
         assert!(!BarLayout::fit(1200.0, labeled).icons_only);
@@ -1089,21 +1635,42 @@ mod tests {
     use super::*;
 
     fn ed() -> Editor {
-        Editor::new(None, "t".into(), RgbaImage::from_pixel(200, 100, image::Rgba([255, 255, 255, 255])), 2.0, BlurStyle::Pixelate, Cover::Box, true)
+        Editor::new(
+            None,
+            "t".into(),
+            RgbaImage::from_pixel(200, 100, image::Rgba([255, 255, 255, 255])),
+            2.0,
+            BlurStyle::Pixelate,
+            Cover::Box,
+            true,
+        )
     }
 
     #[test]
     fn undo_and_redo_walk_the_history() {
         let mut e = ed();
-        e.add(Mark::Highlight { r: Rect::from_min_max(Pos2::ZERO, Pos2::new(10.0, 10.0)), color: [1, 2, 3, 255] });
-        e.add(Mark::Step { at: Pos2::new(5.0, 5.0), n: 1, color: [0; 4], size: 10.0 });
+        e.add(Mark::Highlight {
+            r: Rect::from_min_max(Pos2::ZERO, Pos2::new(10.0, 10.0)),
+            color: [1, 2, 3, 255],
+        });
+        e.add(Mark::Step {
+            at: Pos2::new(5.0, 5.0),
+            n: 1,
+            color: [0; 4],
+            size: 10.0,
+        });
         assert_eq!(e.doc.marks.len(), 2);
         e.undo();
         assert_eq!(e.doc.marks.len(), 1);
         e.redo();
         assert_eq!(e.doc.marks.len(), 2);
         e.undo();
-        e.add(Mark::Step { at: Pos2::new(1.0, 1.0), n: 1, color: [0; 4], size: 10.0 });
+        e.add(Mark::Step {
+            at: Pos2::new(1.0, 1.0),
+            n: 1,
+            color: [0; 4],
+            size: 10.0,
+        });
         e.redo();
         assert_eq!(e.doc.marks.len(), 2, "a new mark clears redo");
         assert!(e.edited);
@@ -1123,7 +1690,13 @@ mod tests {
         e.finish_drag(Pos2::new(150.0, 80.0), Pos2::new(50.0, 20.0), &ctx);
         assert_eq!(e.doc.crop, None, "a crop drag only picks the area");
         e.apply_crop();
-        assert_eq!(e.doc.crop, Some(Rect::from_min_max(Pos2::new(50.0, 20.0), Pos2::new(150.0, 80.0))));
+        assert_eq!(
+            e.doc.crop,
+            Some(Rect::from_min_max(
+                Pos2::new(50.0, 20.0),
+                Pos2::new(150.0, 80.0)
+            ))
+        );
         assert_eq!(e.rendered().dimensions(), (100, 60));
         // a click without a drag adds nothing
         let n = e.doc.marks.len();
@@ -1145,6 +1718,9 @@ mod tests {
             e.poll_ocr(&ctx);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        assert!(matches!(&e.doc.marks[0], Mark::Erase { boxes, .. } if boxes.is_empty()), "no OCR here: whole box");
+        assert!(
+            matches!(&e.doc.marks[0], Mark::Erase { boxes, .. } if boxes.is_empty()),
+            "no OCR here: whole box"
+        );
     }
 }

@@ -46,32 +46,67 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     let two = w >= TWO_COLUMNS_MIN;
     let cw = if two { (w - GAP_X) / 2.0 } else { w };
 
-    let order = [Sheet::Storage, Sheet::Memory, Sheet::Cpu, Sheet::Battery, Sheet::Network, Sheet::Devices];
+    let order = [
+        Sheet::Storage,
+        Sheet::Memory,
+        Sheet::Cpu,
+        Sheet::Battery,
+        Sheet::Network,
+        Sheet::Devices,
+    ];
     let sections: Vec<Section> = order.iter().map(|k| Section::new(*k, &s)).collect();
-    let heights: Vec<f32> = sections.iter().map(|sec| sec.height(&p, ui.ctx(), &s, cw)).collect();
-    let rows: Vec<f32> = if two { heights.chunks(2).map(|c| c.iter().copied().fold(0.0, f32::max)).collect() } else { heights.clone() };
-    let total = 20.0 + STATUS_H + GAP_Y + rows.iter().sum::<f32>() + GAP_Y * (rows.len().saturating_sub(1)) as f32 + 24.0;
+    let heights: Vec<f32> = sections
+        .iter()
+        .map(|sec| sec.height(&p, ui.ctx(), &s, cw))
+        .collect();
+    let rows: Vec<f32> = if two {
+        heights
+            .chunks(2)
+            .map(|c| c.iter().copied().fold(0.0, f32::max))
+            .collect()
+    } else {
+        heights.clone()
+    };
+    let total = 20.0
+        + STATUS_H
+        + GAP_Y
+        + rows.iter().sum::<f32>()
+        + GAP_Y * (rows.len().saturating_sub(1)) as f32
+        + 24.0;
 
     let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-page"));
     let mut action = SheetAction::None;
-    ScrollArea::vertical().id_salt("health-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), total), Sense::hover());
-        let mut y = area.top() + 20.0;
+    ScrollArea::vertical()
+        .id_salt("health-scroll")
+        .auto_shrink([false, false])
+        .show(&mut child, |ui| {
+            let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), total), Sense::hover());
+            let mut y = area.top() + 20.0;
 
-        status_card(ui, Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, STATUS_H)), &s, recs.first(), cx);
-        y += STATUS_H + GAP_Y;
+            status_card(
+                ui,
+                Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, STATUS_H)),
+                &s,
+                recs.first(),
+                cx,
+            );
+            y += STATUS_H + GAP_Y;
 
-        for (i, sec) in sections.iter().enumerate() {
-            let (col, row) = if two { (i % 2, i / 2) } else { (0, i) };
-            let top = y + rows[..row].iter().sum::<f32>() + GAP_Y * row as f32;
-            let sr = Rect::from_min_size(Pos2::new(x0 + col as f32 * (cw + GAP_X), top), Vec2::new(cw, heights[i]));
-            let mut sui = ui.new_child(UiBuilder::new().max_rect(sr).id_salt(("health-sec", i)));
-            let a = sec.show(&mut sui, sr, &s);
-            if a != SheetAction::None {
-                action = a;
+            for (i, sec) in sections.iter().enumerate() {
+                let (col, row) = if two { (i % 2, i / 2) } else { (0, i) };
+                let top = y + rows[..row].iter().sum::<f32>() + GAP_Y * row as f32;
+                let sr = Rect::from_min_size(
+                    Pos2::new(x0 + col as f32 * (cw + GAP_X), top),
+                    Vec2::new(cw, heights[i]),
+                );
+                let mut sui =
+                    ui.new_child(UiBuilder::new().max_rect(sr).id_salt(("health-sec", i)));
+                let a = sec.show(&mut sui, sr, &s);
+                if a != SheetAction::None {
+                    action = a;
+                }
             }
-        }
-    });
+        });
     match action {
         SheetAction::Open(tool) => cx.open_page(tool, ""),
         SheetAction::SpeedTest => monitor::start_speed_test(mon.clone(), ui.ctx().clone()),
@@ -97,14 +132,20 @@ fn status_card(ui: &mut Ui, r: Rect, s: &Snapshot, rec: Option<&Recommendation>,
             l @ Level::Critical => ("Needs attention", level_color(l)),
         }
     };
-    let chip = Rect::from_min_size(Pos2::new(r.left() + 14.0, r.center().y - 16.0), Vec2::splat(32.0));
+    let chip = Rect::from_min_size(
+        Pos2::new(r.left() + 14.0, r.center().y - 16.0),
+        Vec2::splat(32.0),
+    );
     p.rect_filled(chip, 8.0, with_alpha(col, 0.16));
     p.circle_filled(chip.center(), 5.0, col);
 
     let mut right = r.right() - 14.0;
     if let Some(rec) = rec {
         let bw = button_width(&p, &rec.action, BTN_PRIMARY);
-        let br = Rect::from_min_size(Pos2::new(right - bw, r.center().y - 15.0), Vec2::new(bw, 30.0));
+        let br = Rect::from_min_size(
+            Pos2::new(right - bw, r.center().y - 15.0),
+            Vec2::new(bw, 30.0),
+        );
         if pill_button(ui, br, &rec.action, BTN_PRIMARY, true).clicked() {
             cx.push(rec.go.clone());
         }
@@ -114,8 +155,27 @@ fn status_card(ui: &mut Ui, r: Rect, s: &Snapshot, rec: Option<&Recommendation>,
     let tw = right - tx;
     let (line1, line2) = match rec {
         Some(rec) => (format!("{title} · {}", rec.title), rec.body.clone()),
-        None => (title.to_string(), "Storage, memory, CPU, battery and network look healthy.".to_string()),
+        None => (
+            title.to_string(),
+            "Storage, memory, CPU, battery and network look healthy.".to_string(),
+        ),
     };
-    text_fit(&p, Pos2::new(tx, r.top() + 13.0), Align2::LEFT_TOP, &line1, bold(15.0), TEXT, tw);
-    text_fit(&p, Pos2::new(tx, r.top() + 34.0), Align2::LEFT_TOP, &line2, font(12.0), TEXT_DIM, tw);
+    text_fit(
+        &p,
+        Pos2::new(tx, r.top() + 13.0),
+        Align2::LEFT_TOP,
+        &line1,
+        bold(15.0),
+        TEXT,
+        tw,
+    );
+    text_fit(
+        &p,
+        Pos2::new(tx, r.top() + 34.0),
+        Align2::LEFT_TOP,
+        &line2,
+        font(12.0),
+        TEXT_DIM,
+        tw,
+    );
 }

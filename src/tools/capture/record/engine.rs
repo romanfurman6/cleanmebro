@@ -84,12 +84,20 @@ mod imp {
     use objc2::rc::Retained;
     use objc2::runtime::{AnyObject, ProtocolObject};
     use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, Message};
-    use objc2_av_foundation::{AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor, AVAssetWriterStatus, AVFileTypeMPEG4, AVMediaTypeAudio, AVMediaTypeVideo};
+    use objc2_av_foundation::{
+        AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor,
+        AVAssetWriterStatus, AVFileTypeMPEG4, AVMediaTypeAudio, AVMediaTypeVideo,
+    };
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
     use objc2_core_media::{CMSampleBuffer, CMTime, CMTimeFlags};
     use objc2_core_video::CVPixelBuffer;
-    use objc2_foundation::{NSArray, NSDictionary, NSError, NSNumber, NSObject, NSObjectProtocol, NSString, NSURL};
-    use objc2_screen_capture_kit::{SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamDelegate, SCStreamOutput, SCStreamOutputType};
+    use objc2_foundation::{
+        NSArray, NSDictionary, NSError, NSNumber, NSObject, NSObjectProtocol, NSString, NSURL,
+    };
+    use objc2_screen_capture_kit::{
+        SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamDelegate,
+        SCStreamOutput, SCStreamOutputType,
+    };
     use std::ffi::c_void;
     use std::sync::{Arc, Mutex};
 
@@ -106,7 +114,8 @@ mod imp {
 
     impl RawTime {
         fn secs(self) -> Option<f64> {
-            (self.flags & 1 == 1 && self.timescale > 0).then(|| self.value as f64 / self.timescale as f64)
+            (self.flags & 1 == 1 && self.timescale > 0)
+                .then(|| self.value as f64 / self.timescale as f64)
         }
     }
 
@@ -185,7 +194,12 @@ mod imp {
             flags: u32,
             out: *mut *mut c_void,
         ) -> i32;
-        fn CMBlockBufferReplaceDataBytes(src: *const c_void, dest: *mut c_void, offset: usize, len: usize) -> i32;
+        fn CMBlockBufferReplaceDataBytes(
+            src: *const c_void,
+            dest: *mut c_void,
+            offset: usize,
+            len: usize,
+        ) -> i32;
         fn CMAudioSampleBufferCreateReadyWithPacketDescriptions(
             alloc: *const c_void,
             data: *mut c_void,
@@ -217,11 +231,18 @@ mod imp {
 
     /// Now on the clock the sample buffers use.
     fn host_now() -> f64 {
-        unsafe { CMClockGetTime(CMClockGetHostTimeClock()) }.secs().unwrap_or(0.0)
+        unsafe { CMClockGetTime(CMClockGetHostTimeClock()) }
+            .secs()
+            .unwrap_or(0.0)
     }
 
     fn cm_time(secs: f64) -> CMTime {
-        CMTime { value: (secs * 60_000.0).round() as i64, timescale: 60_000, flags: CMTimeFlags::Valid, epoch: 0 }
+        CMTime {
+            value: (secs * 60_000.0).round() as i64,
+            timescale: 60_000,
+            flags: CMTimeFlags::Valid,
+            epoch: 0,
+        }
     }
 
     fn ns_err(e: &NSError) -> String {
@@ -234,10 +255,36 @@ mod imp {
     }
 
     fn dict(pairs: &[(&str, &AnyObject)]) -> Retained<NSDictionary<NSString, AnyObject>> {
-        let keys: Vec<Retained<NSString>> = pairs.iter().map(|(k, _)| NSString::from_str(k)).collect();
+        let keys: Vec<Retained<NSString>> =
+            pairs.iter().map(|(k, _)| NSString::from_str(k)).collect();
         let key_refs: Vec<&NSString> = keys.iter().map(|k| &**k).collect();
         let vals: Vec<&AnyObject> = pairs.iter().map(|(_, v)| *v).collect();
         NSDictionary::from_slices(&key_refs, &vals)
+    }
+
+    // ------------------------------------------------------------ diagnostics
+
+    /// Recorder diagnostics go to stderr (the dev log), prefixed "[rec]".
+    macro_rules! rlog {
+        ($($a:tt)*) => { eprintln!("[rec {:.3}] {}", host_now(), format!($($a)*)) };
+    }
+
+    /// Counters, printed about once a second while recording.
+    #[derive(Default, Debug)]
+    struct Stats {
+        frames_in: u64,
+        frames_blank: u64,
+        frames_not_ready: u64,
+        frames_failed: u64,
+        sys_in: u64,
+        mic_in: u64,
+        audio_unmapped: u64,
+        audio_unreadable: u64,
+        audio_out_frames: u64,
+        audio_not_ready: u64,
+        audio_failed: u64,
+        first: [Option<f64>; 3],
+        printed_at: f64,
     }
 
     // ------------------------------------------------------------ writer side
@@ -258,6 +305,7 @@ mod imp {
         thumb_at: f64,
         failed: Option<String>,
         done: bool,
+        stats: Stats,
     }
 
     // The writer objects are thread-safe for the use here (one serial queue
@@ -281,7 +329,29 @@ mod imp {
             if unsafe { CMSampleBufferIsValid(raw) } == 0 {
                 return;
             }
-            let Some(t) = unsafe { CMSampleBufferGetPresentationTimeStamp(raw) }.secs() else { return };
+            let Some(t) = unsafe { CMSampleBufferGetPresentationTimeStamp(raw) }.secs() else {
+                return;
+            };
+            let k = if kind == SCStreamOutputType::Screen {
+                0
+            } else if kind == SCStreamOutputType::Audio {
+                1
+            } else {
+                2
+            };
+            if self.stats.first[k].is_none() {
+                self.stats.first[k] = Some(t);
+                rlog!(
+                    "first {} buffer at {t:.3} (host now {:.3}){}",
+                    ["screen", "system audio", "mic"][k],
+                    host_now(),
+                    if k > 0 {
+                        describe_audio(raw)
+                    } else {
+                        String::new()
+                    }
+                );
+            }
             if kind == SCStreamOutputType::Screen {
                 self.on_frame(raw, t);
             } else if kind == SCStreamOutputType::Audio {
@@ -290,15 +360,30 @@ mod imp {
                 self.on_audio(raw, t, Src::Mic);
             }
             if unsafe { self.writer.status() } == AVAssetWriterStatus::Failed {
-                let why = unsafe { self.writer.error() }.map(|e| ns_err(&e)).unwrap_or_else(|| "the video file couldn't be written".into());
+                let why = unsafe { self.writer.error() }
+                    .map(|e| ns_err(&e))
+                    .unwrap_or_else(|| "the video file couldn't be written".into());
+                rlog!("writer failed: {why}");
                 self.failed = Some(why);
+            }
+            let now = host_now();
+            if now - self.stats.printed_at >= 1.0 {
+                self.stats.printed_at = now;
+                rlog!(
+                    "{:?} mixer pos {} writer status {:?}",
+                    self.stats,
+                    self.mixer.position(),
+                    unsafe { self.writer.status() }
+                );
             }
         }
 
         fn on_frame(&mut self, raw: *const c_void, t: f64) {
             // frames where nothing changed come without a picture
             let pb = unsafe { CMSampleBufferGetImageBuffer(raw) };
+            self.stats.frames_in += 1;
             if pb.is_null() {
+                self.stats.frames_blank += 1;
                 return;
             }
             self.clock.start(t);
@@ -308,10 +393,17 @@ mod imp {
             }
             if unsafe { self.video.isReadyForMoreMediaData() } {
                 let pixels = unsafe { &*(pb as *const CVPixelBuffer) };
-                if unsafe { self.adaptor.appendPixelBuffer_withPresentationTime(pixels, cm_time(vt)) } {
+                if unsafe {
+                    self.adaptor
+                        .appendPixelBuffer_withPresentationTime(pixels, cm_time(vt))
+                } {
                     self.last_video = vt;
                     self.frames += 1;
+                } else {
+                    self.stats.frames_failed += 1;
                 }
+            } else {
+                self.stats.frames_not_ready += 1;
             }
             if self.thumb.is_none() || vt - self.thumb_at >= 1.0 {
                 self.thumb = thumbnail(pb, 640);
@@ -323,8 +415,18 @@ mod imp {
             if self.audio.is_none() {
                 return;
             }
-            let Some(vt) = self.clock.map(t) else { return };
-            let Some(stereo) = read_pcm(raw) else { return };
+            match src {
+                Src::System => self.stats.sys_in += 1,
+                Src::Mic => self.stats.mic_in += 1,
+            }
+            let Some(vt) = self.clock.map(t) else {
+                self.stats.audio_unmapped += 1;
+                return;
+            };
+            let Some(stereo) = read_pcm(raw) else {
+                self.stats.audio_unreadable += 1;
+                return;
+            };
             let at = (vt * mixer::RATE as f64).round() as i64;
             self.mixer.push(src, at, &stereo);
             self.drain(false);
@@ -339,7 +441,11 @@ mod imp {
 
         fn append_audio(&mut self, at: i64, stereo: &[f32]) {
             let Some(input) = &self.audio else { return };
-            if stereo.is_empty() || !unsafe { input.isReadyForMoreMediaData() } {
+            if stereo.is_empty() {
+                return;
+            }
+            if !unsafe { input.isReadyForMoreMediaData() } {
+                self.stats.audio_not_ready += 1;
                 return;
             }
             unsafe {
@@ -356,7 +462,17 @@ mod imp {
                         reserved: 0,
                     };
                     let mut fmt = std::ptr::null_mut();
-                    if CMAudioFormatDescriptionCreate(std::ptr::null(), &asbd, 0, std::ptr::null(), 0, std::ptr::null(), std::ptr::null(), &mut fmt) != 0 {
+                    if CMAudioFormatDescriptionCreate(
+                        std::ptr::null(),
+                        &asbd,
+                        0,
+                        std::ptr::null(),
+                        0,
+                        std::ptr::null(),
+                        std::ptr::null(),
+                        &mut fmt,
+                    ) != 0
+                    {
                         return;
                     }
                     self.audio_fmt = fmt;
@@ -364,21 +480,78 @@ mod imp {
                 let len = std::mem::size_of_val(stereo);
                 let mut block = std::ptr::null_mut();
                 // kCMBlockBufferAssureMemoryNowFlag
-                if CMBlockBufferCreateWithMemoryBlock(std::ptr::null(), std::ptr::null_mut(), len, std::ptr::null(), std::ptr::null(), 0, len, 1, &mut block) != 0 {
+                if CMBlockBufferCreateWithMemoryBlock(
+                    std::ptr::null(),
+                    std::ptr::null_mut(),
+                    len,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    0,
+                    len,
+                    1,
+                    &mut block,
+                ) != 0
+                {
                     return;
                 }
-                if CMBlockBufferReplaceDataBytes(stereo.as_ptr() as *const c_void, block, 0, len) != 0 {
+                if CMBlockBufferReplaceDataBytes(stereo.as_ptr() as *const c_void, block, 0, len)
+                    != 0
+                {
                     CFRelease(block);
                     return;
                 }
-                let pts = RawTime { value: at, timescale: mixer::RATE as i32, flags: 1, epoch: 0 };
+                let pts = RawTime {
+                    value: at,
+                    timescale: mixer::RATE as i32,
+                    flags: 1,
+                    epoch: 0,
+                };
                 let mut sb = std::ptr::null_mut();
-                let ok = CMAudioSampleBufferCreateReadyWithPacketDescriptions(std::ptr::null(), block, self.audio_fmt, (stereo.len() / 2) as isize, pts, std::ptr::null(), &mut sb) == 0;
+                let ok = CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+                    std::ptr::null(),
+                    block,
+                    self.audio_fmt,
+                    (stereo.len() / 2) as isize,
+                    pts,
+                    std::ptr::null(),
+                    &mut sb,
+                ) == 0;
                 CFRelease(block);
                 if ok && !sb.is_null() {
-                    input.appendSampleBuffer(&*(sb as *const CMSampleBuffer));
+                    if input.appendSampleBuffer(&*(sb as *const CMSampleBuffer)) {
+                        self.stats.audio_out_frames += (stereo.len() / 2) as u64;
+                    } else {
+                        self.stats.audio_failed += 1;
+                    }
                     CFRelease(sb);
+                } else {
+                    self.stats.audio_failed += 1;
                 }
+            }
+        }
+    }
+
+    /// The format of an audio sample buffer, for the log.
+    fn describe_audio(raw: *const c_void) -> String {
+        unsafe {
+            let desc = CMSampleBufferGetFormatDescription(raw);
+            let asbd = if desc.is_null() {
+                None
+            } else {
+                CMAudioFormatDescriptionGetStreamBasicDescription(desc)
+                    .as_ref()
+                    .copied()
+            };
+            match asbd {
+                Some(a) => format!(
+                    ", {} Hz, {} ch, format {:08x} flags {:x}, {} bits",
+                    a.sample_rate,
+                    a.channels_per_frame,
+                    a.format_id,
+                    a.format_flags,
+                    a.bits_per_channel
+                ),
+                None => ", no format".into(),
             }
         }
     }
@@ -397,12 +570,22 @@ mod imp {
             let mut list: BufList = std::mem::zeroed();
             let mut block = std::ptr::null_mut();
             // kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment
-            let st = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(raw, std::ptr::null_mut(), &mut list, std::mem::size_of::<BufList>(), std::ptr::null(), std::ptr::null(), 1, &mut block);
+            let st = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+                raw,
+                std::ptr::null_mut(),
+                &mut list,
+                std::mem::size_of::<BufList>(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+                &mut block,
+            );
             if st != 0 {
                 return None;
             }
             let float = asbd.format_flags & FLAG_FLOAT != 0;
-            let int16 = !float && asbd.format_flags & FLAG_SIGNED != 0 && asbd.bits_per_channel == 16;
+            let int16 =
+                !float && asbd.format_flags & FLAG_SIGNED != 0 && asbd.bits_per_channel == 16;
             let planar = asbd.format_flags & FLAG_PLANAR != 0;
             let n = (list.n as usize).min(8);
             let mut owned: Vec<Vec<f32>> = Vec::with_capacity(n);
@@ -410,9 +593,17 @@ mod imp {
                 if b.data.is_null() {
                     owned.push(Vec::new());
                 } else if float && asbd.bits_per_channel == 32 {
-                    owned.push(std::slice::from_raw_parts(b.data as *const f32, b.size as usize / 4).to_vec());
+                    owned.push(
+                        std::slice::from_raw_parts(b.data as *const f32, b.size as usize / 4)
+                            .to_vec(),
+                    );
                 } else if int16 {
-                    owned.push(std::slice::from_raw_parts(b.data as *const i16, b.size as usize / 2).iter().map(|&v| v as f32 / 32768.0).collect());
+                    owned.push(
+                        std::slice::from_raw_parts(b.data as *const i16, b.size as usize / 2)
+                            .iter()
+                            .map(|&v| v as f32 / 32768.0)
+                            .collect(),
+                    );
                 } else {
                     owned.push(Vec::new());
                 }
@@ -420,7 +611,12 @@ mod imp {
             if !block.is_null() {
                 CFRelease(block);
             }
-            let pcm = Pcm { rate: asbd.sample_rate, channels: asbd.channels_per_frame as usize, planes: owned.iter().map(|v| v.as_slice()).collect(), interleaved: !planar };
+            let pcm = Pcm {
+                rate: asbd.sample_rate,
+                channels: asbd.channels_per_frame as usize,
+                planes: owned.iter().map(|v| v.as_slice()).collect(),
+                interleaved: !planar,
+            };
             Some(mixer::to_stereo(&pcm))
         }
     }
@@ -434,7 +630,10 @@ mod imp {
             let (w, h) = (CVPixelBufferGetWidth(pb), CVPixelBufferGetHeight(pb));
             let fmt = CVPixelBufferGetPixelFormatType(pb);
             let k = (max_w as f64 / w.max(1) as f64).min(1.0);
-            let (tw, th) = (((w as f64 * k) as u32).max(1), ((h as f64 * k) as u32).max(1));
+            let (tw, th) = (
+                ((w as f64 * k) as u32).max(1),
+                ((h as f64 * k) as u32).max(1),
+            );
             let mut img = image::RgbaImage::new(tw, th);
             let y_base = CVPixelBufferGetBaseAddressOfPlane(pb, 0);
             let y_row = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
@@ -458,7 +657,16 @@ mod imp {
                         let r = yy + 1.793 * (cr - 128.0);
                         let g = yy - 0.213 * (cb - 128.0) - 0.533 * (cr - 128.0);
                         let b = yy + 2.112 * (cb - 128.0);
-                        img.put_pixel(tx, ty, image::Rgba([r.clamp(0.0, 255.0) as u8, g.clamp(0.0, 255.0) as u8, b.clamp(0.0, 255.0) as u8, 255]));
+                        img.put_pixel(
+                            tx,
+                            ty,
+                            image::Rgba([
+                                r.clamp(0.0, 255.0) as u8,
+                                g.clamp(0.0, 255.0) as u8,
+                                b.clamp(0.0, 255.0) as u8,
+                                255,
+                            ]),
+                        );
                     }
                 }
             } else if ok {
@@ -499,6 +707,7 @@ mod imp {
         unsafe impl SCStreamDelegate for Output {
             #[unsafe(method(stream:didStopWithError:))]
             fn did_stop(&self, _stream: &SCStream, error: &NSError) {
+                rlog!("stream stopped: {}", ns_err(error));
                 if let Ok(mut s) = self.ivars().lock() {
                     if !s.done {
                         s.failed = Some(ns_err(error));
@@ -554,7 +763,10 @@ mod imp {
 
         /// Length of the video so far, in seconds.
         pub fn length(&self) -> f64 {
-            self.shared.lock().map(|s| s.clock.length(host_now())).unwrap_or(0.0)
+            self.shared
+                .lock()
+                .map(|s| s.clock.length(host_now()))
+                .unwrap_or(0.0)
         }
 
         /// Why the recording broke off, if it did.
@@ -564,10 +776,20 @@ mod imp {
 
         /// Stop and finish the file; `done` runs on a background thread.
         pub fn stop(self, done: Reply<Stopped>) {
-            let Session { stream, output, shared, path, size } = self;
+            let Session {
+                stream,
+                output,
+                shared,
+                path,
+                size,
+            } = self;
             let cell = Mutex::new(Some(SendBox((done, output, shared, path))));
             let block = RcBlock::new(move |_err: *mut NSError| {
-                let Some(SendBox((done, _output, shared, path))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
+                let Some(SendBox((done, _output, shared, path))) =
+                    cell.lock().ok().and_then(|mut c| c.take())
+                else {
+                    return;
+                };
                 finish(shared, path, size, done);
             });
             unsafe { stream.stopCaptureWithCompletionHandler(Some(&block)) };
@@ -589,12 +811,23 @@ mod imp {
         }
     }
 
-    fn finish(shared: Arc<Mutex<Shared>>, path: std::path::PathBuf, size: (u32, u32), done: Reply<Stopped>) {
+    fn finish(
+        shared: Arc<Mutex<Shared>>,
+        path: std::path::PathBuf,
+        size: (u32, u32),
+        done: Reply<Stopped>,
+    ) {
         let mut s = match shared.lock() {
             Ok(s) => s,
             Err(_) => return done(Err("The recorder broke".into())),
         };
         s.done = true;
+        rlog!(
+            "stop: {:?} frames {} length {:.2}",
+            s.stats,
+            s.frames,
+            s.clock.length(host_now())
+        );
         if let Some(why) = s.failed.clone() {
             unsafe { s.writer.cancelWriting() };
             let _ = std::fs::remove_file(&path);
@@ -619,11 +852,27 @@ mod imp {
         drop(s);
         let cell = Mutex::new(Some(SendBox((done, thumb, writer.clone(), shared))));
         let block = RcBlock::new(move || {
-            let Some(SendBox((done, thumb, writer, _shared))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
+            let Some(SendBox((done, thumb, writer, _shared))) =
+                cell.lock().ok().and_then(|mut c| c.take())
+            else {
+                return;
+            };
+            rlog!(
+                "finished: status {:?} error {:?}",
+                unsafe { writer.status() },
+                unsafe { writer.error() }.map(|e| ns_err(&e))
+            );
             if unsafe { writer.status() } == AVAssetWriterStatus::Completed {
-                done(Ok(Stopped { path: path.clone(), secs, size, thumb }));
+                done(Ok(Stopped {
+                    path: path.clone(),
+                    secs,
+                    size,
+                    thumb,
+                }));
             } else {
-                let why = unsafe { writer.error() }.map(|e| ns_err(&e)).unwrap_or_else(|| "the video file couldn't be finished".into());
+                let why = unsafe { writer.error() }
+                    .map(|e| ns_err(&e))
+                    .unwrap_or_else(|| "the video file couldn't be finished".into());
                 done(Err(why));
             }
         });
@@ -637,7 +886,9 @@ mod imp {
     pub fn start(cfg: Config, reply: Reply<Session>) {
         let cell = Mutex::new(Some(SendBox((cfg, reply))));
         let block = RcBlock::new(move |content: *mut SCShareableContent, err: *mut NSError| {
-            let Some(SendBox((cfg, reply))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
+            let Some(SendBox((cfg, reply))) = cell.lock().ok().and_then(|mut c| c.take()) else {
+                return;
+            };
             let content = unsafe { content.as_ref() };
             match (content, unsafe { err.as_ref() }) {
                 (Some(content), _) => match build(&cfg, content) {
@@ -648,7 +899,9 @@ mod imp {
                 (None, None) => reply(Err("Screen Recording isn't allowed".into())),
             }
         });
-        unsafe { SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(false, true, &block) };
+        unsafe {
+            SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(false, true, &block)
+        };
     }
 
     type Built = (Retained<SCStream>, Retained<Output>, Arc<Mutex<Shared>>);
@@ -663,17 +916,28 @@ mod imp {
             let apps = content.applications();
             let ours: Vec<_> = apps.iter().filter(|a| a.processID() == me).collect();
             let windows = content.windows();
-            let keep: Vec<_> = windows.iter().filter(|w| Some(w.windowID()) == cfg.keep_window).collect();
+            let keep: Vec<_> = windows
+                .iter()
+                .filter(|w| Some(w.windowID()) == cfg.keep_window)
+                .collect();
             let display_of = |id: u32| content.displays().iter().find(|d| d.displayID() == id);
             let filter = match &cfg.target {
                 Target::Display(id) | Target::Area { display: id, .. } => {
                     let d = display_of(*id).ok_or("That display is gone")?;
                     let ours = NSArray::from_retained_slice(&ours);
                     let keep = NSArray::from_retained_slice(&keep);
-                    SCContentFilter::initWithDisplay_excludingApplications_exceptingWindows(SCContentFilter::alloc(), &d, &ours, &keep)
+                    SCContentFilter::initWithDisplay_excludingApplications_exceptingWindows(
+                        SCContentFilter::alloc(),
+                        &d,
+                        &ours,
+                        &keep,
+                    )
                 }
                 Target::Window(id) => {
-                    let w = windows.iter().find(|w| w.windowID() == *id).ok_or("That window is gone")?;
+                    let w = windows
+                        .iter()
+                        .find(|w| w.windowID() == *id)
+                        .ok_or("That window is gone")?;
                     SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &w)
                 }
             };
@@ -681,7 +945,12 @@ mod imp {
             let conf = SCStreamConfiguration::new();
             conf.setWidth(cfg.size.0 as usize);
             conf.setHeight(cfg.size.1 as usize);
-            conf.setMinimumFrameInterval(CMTime { value: 1, timescale: cfg.fps.max(1) as i32, flags: CMTimeFlags::Valid, epoch: 0 });
+            conf.setMinimumFrameInterval(CMTime {
+                value: 1,
+                timescale: cfg.fps.max(1) as i32,
+                flags: CMTimeFlags::Valid,
+                epoch: 0,
+            });
             conf.setPixelFormat(PIXELS_420V);
             conf.setQueueDepth(6);
             conf.setShowsCursor(cfg.cursor);
@@ -689,7 +958,16 @@ mod imp {
                 conf.setShowMouseClicks(cfg.clicks);
             }
             if let Target::Area { rect, .. } = &cfg.target {
-                conf.setSourceRect(CGRect { origin: CGPoint { x: rect[0], y: rect[1] }, size: CGSize { width: rect[2], height: rect[3] } });
+                conf.setSourceRect(CGRect {
+                    origin: CGPoint {
+                        x: rect[0],
+                        y: rect[1],
+                    },
+                    size: CGSize {
+                        width: rect[2],
+                        height: rect[3],
+                    },
+                });
             }
             conf.setCapturesAudio(cfg.system_audio);
             conf.setSampleRate(mixer::RATE as isize);
@@ -710,16 +988,34 @@ mod imp {
             }
             let url = NSURL::fileURLWithPath(&NSString::from_str(&cfg.path.to_string_lossy()));
             let file_type = AVFileTypeMPEG4.ok_or("mp4 isn't available")?;
-            let writer = AVAssetWriter::assetWriterWithURL_fileType_error(&url, file_type).map_err(|e| ns_err(&e))?;
+            let writer = AVAssetWriter::assetWriterWithURL_fileType_error(&url, file_type)
+                .map_err(|e| ns_err(&e))?;
 
             let num = |v: f64| NSNumber::new_f64(v);
-            let (bitrate, fps, keyframes) = (num(cfg.bitrate as f64), num(cfg.fps as f64), num((cfg.fps * 2) as f64));
+            let (bitrate, fps, keyframes) = (
+                num(cfg.bitrate as f64),
+                num(cfg.fps as f64),
+                num((cfg.fps * 2) as f64),
+            );
             let profile = NSString::from_str("H264_High_AutoLevel");
-            let compression = dict(&[("AverageBitRate", any(&*bitrate)), ("ExpectedFrameRate", any(&*fps)), ("MaxKeyFrameInterval", any(&*keyframes)), ("ProfileLevel", any(&*profile))]);
+            let compression = dict(&[
+                ("AverageBitRate", any(&*bitrate)),
+                ("ExpectedFrameRate", any(&*fps)),
+                ("MaxKeyFrameInterval", any(&*keyframes)),
+                ("ProfileLevel", any(&*profile)),
+            ]);
             let (w, h) = (num(cfg.size.0 as f64), num(cfg.size.1 as f64));
             let codec = NSString::from_str("avc1");
-            let vset = dict(&[("AVVideoCodecKey", any(&*codec)), ("AVVideoWidthKey", any(&*w)), ("AVVideoHeightKey", any(&*h)), ("AVVideoCompressionPropertiesKey", any(&*compression))]);
-            let video = AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(AVMediaTypeVideo.ok_or("no video")?, Some(&vset));
+            let vset = dict(&[
+                ("AVVideoCodecKey", any(&*codec)),
+                ("AVVideoWidthKey", any(&*w)),
+                ("AVVideoHeightKey", any(&*h)),
+                ("AVVideoCompressionPropertiesKey", any(&*compression)),
+            ]);
+            let video = AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
+                AVMediaTypeVideo.ok_or("no video")?,
+                Some(&vset),
+            );
             video.setExpectsMediaDataInRealTime(true);
             if !writer.canAddInput(&video) {
                 return Err("This Mac can't encode video at that size".into());
@@ -728,9 +1024,22 @@ mod imp {
             let adaptor = AVAssetWriterInputPixelBufferAdaptor::assetWriterInputPixelBufferAdaptorWithAssetWriterInput_sourcePixelBufferAttributes(&video, None);
 
             let audio = if cfg.system_audio || mic {
-                let (fmt, rate, ch, br) = (NSNumber::new_u32(AAC), num(mixer::RATE as f64), num(2.0), num(160_000.0));
-                let aset = dict(&[("AVFormatIDKey", any(&*fmt)), ("AVSampleRateKey", any(&*rate)), ("AVNumberOfChannelsKey", any(&*ch)), ("AVEncoderBitRateKey", any(&*br))]);
-                let a = AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(AVMediaTypeAudio.ok_or("no audio")?, Some(&aset));
+                let (fmt, rate, ch, br) = (
+                    NSNumber::new_u32(AAC),
+                    num(mixer::RATE as f64),
+                    num(2.0),
+                    num(160_000.0),
+                );
+                let aset = dict(&[
+                    ("AVFormatIDKey", any(&*fmt)),
+                    ("AVSampleRateKey", any(&*rate)),
+                    ("AVNumberOfChannelsKey", any(&*ch)),
+                    ("AVEncoderBitRateKey", any(&*br)),
+                ]);
+                let a = AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
+                    AVMediaTypeAudio.ok_or("no audio")?,
+                    Some(&aset),
+                );
                 a.setExpectsMediaDataInRealTime(true);
                 if writer.canAddInput(&a) {
                     writer.addInput(&a);
@@ -742,7 +1051,10 @@ mod imp {
                 None
             };
             if !writer.startWriting() {
-                return Err(writer.error().map(|e| ns_err(&e)).unwrap_or_else(|| "Couldn't start the video file".into()));
+                return Err(writer
+                    .error()
+                    .map(|e| ns_err(&e))
+                    .unwrap_or_else(|| "Couldn't start the video file".into()));
             }
             writer.startSessionAtSourceTime(cm_time(0.0));
 
@@ -760,31 +1072,73 @@ mod imp {
                 thumb_at: 0.0,
                 failed: None,
                 done: false,
+                stats: Stats::default(),
             }));
+            rlog!("start: {:?} {}x{} @{} fps, system audio {}, mic {:?} (capture mic: {mic}), audio input {}", cfg.target, cfg.size.0, cfg.size.1, cfg.fps, cfg.system_audio, cfg.mic, shared.lock().map(|s| s.audio.is_some()).unwrap_or(false));
             let output = Output::new(shared.clone());
-            let delegate: &ProtocolObject<dyn SCStreamDelegate> = ProtocolObject::from_ref(&*output);
-            let stream = SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &conf, Some(delegate));
+            let delegate: &ProtocolObject<dyn SCStreamDelegate> =
+                ProtocolObject::from_ref(&*output);
+            let stream = SCStream::initWithFilter_configuration_delegate(
+                SCStream::alloc(),
+                &filter,
+                &conf,
+                Some(delegate),
+            );
             let queue = DispatchQueue::new("cleanmebro.record", None);
             let out: &ProtocolObject<dyn SCStreamOutput> = ProtocolObject::from_ref(&*output);
-            stream.addStreamOutput_type_sampleHandlerQueue_error(out, SCStreamOutputType::Screen, Some(&queue)).map_err(|e| ns_err(&e))?;
+            stream
+                .addStreamOutput_type_sampleHandlerQueue_error(
+                    out,
+                    SCStreamOutputType::Screen,
+                    Some(&queue),
+                )
+                .map_err(|e| ns_err(&e))?;
             if cfg.system_audio {
-                stream.addStreamOutput_type_sampleHandlerQueue_error(out, SCStreamOutputType::Audio, Some(&queue)).map_err(|e| ns_err(&e))?;
+                stream
+                    .addStreamOutput_type_sampleHandlerQueue_error(
+                        out,
+                        SCStreamOutputType::Audio,
+                        Some(&queue),
+                    )
+                    .map_err(|e| ns_err(&e))?;
             }
             if mic {
-                stream.addStreamOutput_type_sampleHandlerQueue_error(out, SCStreamOutputType::Microphone, Some(&queue)).map_err(|e| ns_err(&e))?;
+                stream
+                    .addStreamOutput_type_sampleHandlerQueue_error(
+                        out,
+                        SCStreamOutputType::Microphone,
+                        Some(&queue),
+                    )
+                    .map_err(|e| ns_err(&e))?;
             }
             Ok((stream, output, shared))
         }
     }
 
-    fn run(stream: Retained<SCStream>, output: Retained<Output>, shared: Arc<Mutex<Shared>>, cfg: Config, reply: Reply<Session>) {
-        let session = Session { stream: stream.clone(), output, shared, path: cfg.path.clone(), size: cfg.size };
+    fn run(
+        stream: Retained<SCStream>,
+        output: Retained<Output>,
+        shared: Arc<Mutex<Shared>>,
+        cfg: Config,
+        reply: Reply<Session>,
+    ) {
+        let session = Session {
+            stream: stream.clone(),
+            output,
+            shared,
+            path: cfg.path.clone(),
+            size: cfg.size,
+        };
         let cell = Mutex::new(Some(SendBox((session, reply))));
         let block = RcBlock::new(move |err: *mut NSError| {
-            let Some(SendBox((session, reply))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
+            let Some(SendBox((session, reply))) = cell.lock().ok().and_then(|mut c| c.take())
+            else {
+                return;
+            };
             match unsafe { err.as_ref() } {
                 Some(e) => {
                     let why = ns_err(e);
+                    rlog!("start failed: {why}");
                     session.discard();
                     reply(Err(why));
                 }

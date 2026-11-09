@@ -78,8 +78,14 @@ pub struct Live {
 pub enum Phase {
     Idle,
     Pick(Pick),
-    Countdown { chosen: Chosen, until: Instant, total: u32 },
-    Starting { chosen: Chosen },
+    Countdown {
+        chosen: Chosen,
+        until: Instant,
+        total: u32,
+    },
+    Starting {
+        chosen: Chosen,
+    },
     Live(Box<Live>),
     /// The file is being finished.
     Saving,
@@ -140,7 +146,21 @@ pub const SAVED_SECS: f32 = 8.0;
 impl Recorder {
     pub fn new(ctx: egui::Context) -> Recorder {
         let (tx, rx) = channel();
-        Recorder { phase: Phase::Idle, displays: Vec::new(), camera: None, mics: Vec::new(), cams: Vec::new(), saved: None, tx, rx, last_area: None, out: Vec::new(), folder: PathBuf::new(), last_display: Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 900.0)), ctx }
+        Recorder {
+            phase: Phase::Idle,
+            displays: Vec::new(),
+            camera: None,
+            mics: Vec::new(),
+            cams: Vec::new(),
+            saved: None,
+            tx,
+            rx,
+            last_area: None,
+            out: Vec::new(),
+            folder: PathBuf::new(),
+            last_display: Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 900.0)),
+            ctx,
+        }
     }
 
     pub fn idle(&self) -> bool {
@@ -183,7 +203,14 @@ impl Recorder {
         self.mics = sys::devices(Media::Mic);
         self.cams = sys::devices(Media::Camera);
         let display = sys::display_at(&self.displays, sys::mouse());
-        self.phase = Phase::Pick(Pick { source: Source::Display, display, windows: Vec::new(), drag: None, area: self.last_area, frames: 0 });
+        self.phase = Phase::Pick(Pick {
+            source: Source::Display,
+            display,
+            windows: Vec::new(),
+            drag: None,
+            area: self.last_area,
+            frames: 0,
+        });
         if s.camera {
             self.show_camera(s);
         }
@@ -217,7 +244,10 @@ impl Recorder {
     /// The camera bubble's spot: bottom left of what's recorded.
     fn camera_spot(&self, d: f32) -> Pos2 {
         let r = match &self.phase {
-            Phase::Pick(p) => p.area.filter(|_| p.source == Source::Area).or_else(|| self.displays.get(p.display).map(|d| d.frame)),
+            Phase::Pick(p) => p
+                .area
+                .filter(|_| p.source == Source::Area)
+                .or_else(|| self.displays.get(p.display).map(|d| d.frame)),
             Phase::Countdown { chosen, .. } | Phase::Starting { chosen } => Some(chosen.rect),
             Phase::Live(l) => Some(l.chosen.rect),
             _ => None,
@@ -291,7 +321,11 @@ impl Recorder {
         if list.is_empty() {
             return;
         }
-        let i = cur.as_ref().and_then(|id| list.iter().position(|d| &d.id == id)).map(|i| i + 1).unwrap_or(0);
+        let i = cur
+            .as_ref()
+            .and_then(|id| list.iter().position(|d| &d.id == id))
+            .map(|i| i + 1)
+            .unwrap_or(0);
         *cur = Some(list[i % list.len()].id.clone());
         if m == Media::Camera && self.camera.is_some() {
             self.camera = None;
@@ -305,7 +339,11 @@ impl Recorder {
             Media::Camera => (&self.cams, &s.camera_device, "Default camera"),
             Media::Mic => (&self.mics, &s.mic_device, "Default microphone"),
         };
-        cur.as_ref().and_then(|id| list.iter().find(|d| &d.id == id)).or_else(|| list.first()).map(|d| d.name.clone()).unwrap_or_else(|| none.to_string())
+        cur.as_ref()
+            .and_then(|id| list.iter().find(|d| &d.id == id))
+            .or_else(|| list.first())
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| none.to_string())
     }
 
     /// Pick what's under the picker's choice and count down.
@@ -314,7 +352,11 @@ impl Recorder {
             self.last_area = Some(chosen.rect);
         }
         if s.countdown > 0 {
-            self.phase = Phase::Countdown { until: Instant::now() + Duration::from_secs(s.countdown as u64), total: s.countdown, chosen };
+            self.phase = Phase::Countdown {
+                until: Instant::now() + Duration::from_secs(s.countdown as u64),
+                total: s.countdown,
+                chosen,
+            };
         } else {
             self.launch(chosen, s);
         }
@@ -331,7 +373,8 @@ impl Recorder {
     pub fn launch(&mut self, chosen: Chosen, s: &RecSettings) {
         let folder = self.folder.clone();
         let path = free_path(&folder, &Settings::recording_name(chrono::Local::now()));
-        let mic = (s.mic && sys::access(Media::Mic) == Access::Allowed).then(|| s.mic_device.clone());
+        let mic =
+            (s.mic && sys::access(Media::Mic) == Access::Allowed).then(|| s.mic_device.clone());
         let cfg = engine::Config {
             target: chosen.target.clone(),
             size: chosen.size,
@@ -357,7 +400,9 @@ impl Recorder {
     }
 
     pub fn stop(&mut self) {
-        let Phase::Live(live) = std::mem::replace(&mut self.phase, Phase::Saving) else { return };
+        let Phase::Live(live) = std::mem::replace(&mut self.phase, Phase::Saving) else {
+            return;
+        };
         self.camera = None;
         self.last_display = live.chosen.display.frame;
         let tx = self.tx.clone();
@@ -370,8 +415,12 @@ impl Recorder {
 
     /// Throw the recording away; `again` starts over from the countdown.
     pub fn discard(&mut self, again: bool, s: &RecSettings) {
-        let Phase::Live(live) = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
-        let Live { chosen, session, .. } = *live;
+        let Phase::Live(live) = std::mem::replace(&mut self.phase, Phase::Idle) else {
+            return;
+        };
+        let Live {
+            chosen, session, ..
+        } = *live;
         session.discard();
         if again {
             self.choose(chosen, s);
@@ -383,7 +432,9 @@ impl Recorder {
 
     /// Delete / Restart from the bar: ask first once it's long enough.
     pub fn ask_or(&mut self, what: Confirm, s: &RecSettings) {
-        let Phase::Live(live) = &mut self.phase else { return };
+        let Phase::Live(live) = &mut self.phase else {
+            return;
+        };
         if live.session.length() >= CONFIRM_AFTER && live.confirm != Some(what) {
             live.confirm = Some(what);
             return;
@@ -413,24 +464,38 @@ impl Recorder {
     pub fn tray(&self) -> Option<String> {
         let l = self.live()?;
         let t = timeline::clock_label(l.session.length());
-        Some(if l.paused { format!("❚❚ {t}") } else { format!("● {t}") })
+        Some(if l.paused {
+            format!("❚❚ {t}")
+        } else {
+            format!("● {t}")
+        })
     }
 
     /// Background results and timers; call once per pass.
     pub fn tick(&mut self, s: &mut RecSettings) {
         while let Ok(e) = self.rx.try_recv() {
             match e {
-                Event::Started(Ok(session)) => match std::mem::replace(&mut self.phase, Phase::Idle) {
-                    Phase::Starting { chosen } => {
-                        session.set_mic_muted(false);
-                        self.phase = Phase::Live(Box::new(Live { chosen, session, paused: false, mic_muted: false, confirm: None, settings_open: false, bar_at: None }));
+                Event::Started(Ok(session)) => {
+                    match std::mem::replace(&mut self.phase, Phase::Idle) {
+                        Phase::Starting { chosen } => {
+                            session.set_mic_muted(false);
+                            self.phase = Phase::Live(Box::new(Live {
+                                chosen,
+                                session,
+                                paused: false,
+                                mic_muted: false,
+                                confirm: None,
+                                settings_open: false,
+                                bar_at: None,
+                            }));
+                        }
+                        // cancelled while starting
+                        other => {
+                            session.discard();
+                            self.phase = other;
+                        }
                     }
-                    // cancelled while starting
-                    other => {
-                        session.discard();
-                        self.phase = other;
-                    }
-                },
+                }
                 Event::Started(Err(e)) => {
                     if matches!(self.phase, Phase::Starting { .. }) {
                         self.phase = Phase::Idle;
@@ -452,9 +517,17 @@ impl Recorder {
                             Media::Camera => s.camera = false,
                             Media::Mic => s.mic = false,
                         }
-                        self.camera = if m == Media::Camera { None } else { self.camera.take() };
+                        self.camera = if m == Media::Camera {
+                            None
+                        } else {
+                            self.camera.take()
+                        };
                         self.out.push(Out::SaveSettings);
-                        self.hud(if m == Media::Camera { "Camera not allowed" } else { "Microphone not allowed" });
+                        self.hud(if m == Media::Camera {
+                            "Camera not allowed"
+                        } else {
+                            "Microphone not allowed"
+                        });
                     }
                     _ => {}
                 },
@@ -462,7 +535,9 @@ impl Recorder {
         }
         if let Phase::Countdown { until, .. } = &self.phase {
             if Instant::now() >= *until {
-                if let Phase::Countdown { chosen, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
+                if let Phase::Countdown { chosen, .. } =
+                    std::mem::replace(&mut self.phase, Phase::Idle)
+                {
                     self.launch(chosen, s);
                 }
             }
@@ -481,6 +556,73 @@ impl Recorder {
 }
 
 /// A file name in `dir` that isn't taken yet.
+/// `--rec-probe <secs> [--no-mic] [--no-sys]`: record the main display for
+/// `secs` without any UI, print what the recorder saw (stderr) and where the
+/// file went. For checking the capture pipeline from a terminal or a script.
+pub fn probe(secs: f64, system_audio: bool, mic: bool) {
+    #[cfg(target_os = "macos")]
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        let _ = objc2_app_kit::NSApplication::sharedApplication(mtm);
+    }
+    let s = RecSettings::default();
+    let Some(d) = sys::displays().into_iter().next() else {
+        eprintln!("[probe] no display");
+        return;
+    };
+    let chosen = chose_display(&d, &s);
+    let dir = std::env::temp_dir();
+    let path = free_path(&dir, "rec-probe.mp4");
+    let mic_ok = mic && sys::access(Media::Mic) == Access::Allowed;
+    eprintln!(
+        "[probe] display {} {:?} -> {:?} @{} fps; mic asked {mic}, allowed {mic_ok}",
+        d.name,
+        d.pixels(),
+        chosen.size,
+        chosen.fps
+    );
+    let cfg = engine::Config {
+        target: chosen.target,
+        size: chosen.size,
+        fps: chosen.fps,
+        bitrate: timeline::bitrate(chosen.size.0, chosen.size.1, chosen.fps, s.quality),
+        cursor: true,
+        clicks: false,
+        system_audio,
+        mic: mic_ok.then_some(None),
+        keep_window: None,
+        path,
+    };
+    let (tx, rx) = channel();
+    engine::start(cfg, Box::new(move |r| drop(tx.send(r))));
+    let session = match rx.recv_timeout(Duration::from_secs(10)) {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => return eprintln!("[probe] start failed: {e}"),
+        Err(_) => return eprintln!("[probe] start timed out"),
+    };
+    let until = Instant::now() + Duration::from_secs_f64(secs);
+    while Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(250));
+        let t = Instant::now();
+        let l = session.length();
+        if t.elapsed() > Duration::from_millis(100) {
+            eprintln!("[probe] length() took {:?}", t.elapsed());
+        }
+        eprintln!("[probe] length {l:.2}");
+    }
+    let (tx, rx) = channel();
+    session.stop(Box::new(move |r| drop(tx.send(r))));
+    match rx.recv_timeout(Duration::from_secs(15)) {
+        Ok(Ok(st)) => eprintln!(
+            "[probe] saved {} ({:.2} s, {:?})",
+            st.path.display(),
+            st.secs,
+            st.size
+        ),
+        Ok(Err(e)) => eprintln!("[probe] save failed: {e}"),
+        Err(_) => eprintln!("[probe] save timed out"),
+    }
+}
+
 pub fn free_path(dir: &std::path::Path, name: &str) -> PathBuf {
     let mut p = dir.join(name);
     let stem = name.trim_end_matches(".mp4");
@@ -495,14 +637,26 @@ pub fn free_path(dir: &std::path::Path, name: &str) -> PathBuf {
 /// Recording a whole display.
 pub fn chose_display(d: &Display, s: &RecSettings) -> Chosen {
     let (w, h) = d.pixels();
-    Chosen { target: Target::Display(d.id), display: d.clone(), rect: d.frame, size: timeline::out_size(w, h, s.quality), fps: s.fps.min(d.fps) }
+    Chosen {
+        target: Target::Display(d.id),
+        display: d.clone(),
+        rect: d.frame,
+        size: timeline::out_size(w, h, s.quality),
+        fps: s.fps.min(d.fps),
+    }
 }
 
 /// Recording one window (its frame now, in global points).
 pub fn chose_window(d: &Display, w: &Win, s: &RecSettings) -> Chosen {
     let px = (w.frame.width() * d.scale).round() as u32;
     let py = (w.frame.height() * d.scale).round() as u32;
-    Chosen { target: Target::Window(w.id), display: d.clone(), rect: w.frame, size: timeline::out_size(px, py, s.quality), fps: s.fps.min(d.fps) }
+    Chosen {
+        target: Target::Window(w.id),
+        display: d.clone(),
+        rect: w.frame,
+        size: timeline::out_size(px, py, s.quality),
+        fps: s.fps.min(d.fps),
+    }
 }
 
 /// Recording part of a display; `area` in global points, kept inside it.
@@ -514,9 +668,20 @@ pub fn chose_area(d: &Display, area: Rect, s: &RecSettings) -> Option<Chosen> {
     // whole points, so the frame and the video agree
     let a = Rect::from_min_max(a.min.round(), a.max.round());
     let local = a.translate(-d.frame.min.to_vec2());
-    let (px, py) = ((a.width() * d.scale).round() as u32, (a.height() * d.scale).round() as u32);
+    let (px, py) = (
+        (a.width() * d.scale).round() as u32,
+        (a.height() * d.scale).round() as u32,
+    );
     Some(Chosen {
-        target: Target::Area { display: d.id, rect: [local.left() as f64, local.top() as f64, local.width() as f64, local.height() as f64] },
+        target: Target::Area {
+            display: d.id,
+            rect: [
+                local.left() as f64,
+                local.top() as f64,
+                local.width() as f64,
+                local.height() as f64,
+            ],
+        },
         display: d.clone(),
         rect: a,
         size: timeline::out_size(px, py, s.quality),
@@ -529,7 +694,13 @@ mod tests {
     use super::*;
 
     fn display() -> Display {
-        Display { id: 7, name: "Studio Display".into(), frame: Rect::from_min_size(Pos2::new(1512.0, 0.0), Vec2::new(2560.0, 1440.0)), scale: 2.0, fps: 60 }
+        Display {
+            id: 7,
+            name: "Studio Display".into(),
+            frame: Rect::from_min_size(Pos2::new(1512.0, 0.0), Vec2::new(2560.0, 1440.0)),
+            scale: 2.0,
+            fps: 60,
+        }
     }
 
     #[test]
@@ -546,12 +717,23 @@ mod tests {
         let s = RecSettings::default();
         let area = Rect::from_min_max(Pos2::new(1612.4, 100.0), Pos2::new(1612.4 + 640.0, 460.0));
         let c = chose_area(&display(), area, &s).unwrap();
-        assert_eq!(c.target, Target::Area { display: 7, rect: [100.0, 100.0, 640.0, 360.0] });
+        assert_eq!(
+            c.target,
+            Target::Area {
+                display: 7,
+                rect: [100.0, 100.0, 640.0, 360.0]
+            }
+        );
         assert_eq!(c.size, (1280, 720));
         let off = Rect::from_min_max(Pos2::new(3900.0, 1300.0), Pos2::new(4500.0, 1700.0));
         let c = chose_area(&display(), off, &s).unwrap();
         assert_eq!(c.rect.max, Pos2::new(4072.0, 1440.0));
-        assert!(chose_area(&display(), Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::splat(10.0)), &s).is_none());
+        assert!(chose_area(
+            &display(),
+            Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::splat(10.0)),
+            &s
+        )
+        .is_none());
     }
 
     #[test]
@@ -560,7 +742,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let first = free_path(&dir, "Recording x.mp4");
         std::fs::write(&first, b"").unwrap();
-        assert_eq!(free_path(&dir, "Recording x.mp4"), dir.join("Recording x 2.mp4"));
+        assert_eq!(
+            free_path(&dir, "Recording x.mp4"),
+            dir.join("Recording x 2.mp4")
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

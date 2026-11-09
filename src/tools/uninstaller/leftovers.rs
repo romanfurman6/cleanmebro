@@ -10,8 +10,8 @@
 //! inside the app. Anything that matches two installed apps, or that the
 //! shared protection rules keep, is never offered.
 
-use crate::kit::plist;
 use crate::kit::fs::is_protected;
+use crate::kit::plist;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -58,29 +58,119 @@ struct Place {
 }
 
 const USER_PLACES: &[Place] = &[
-    Place { rel: "Application Support", kind: Kind::Support, by_name: true, orphans: true },
-    Place { rel: "Caches", kind: Kind::Caches, by_name: true, orphans: true },
-    Place { rel: "Preferences", kind: Kind::Preferences, by_name: false, orphans: true },
-    Place { rel: "Preferences/ByHost", kind: Kind::Preferences, by_name: false, orphans: true },
-    Place { rel: "Containers", kind: Kind::Containers, by_name: false, orphans: true },
-    Place { rel: "Group Containers", kind: Kind::GroupContainers, by_name: false, orphans: false },
-    Place { rel: "Saved Application State", kind: Kind::SavedState, by_name: false, orphans: true },
-    Place { rel: "Logs", kind: Kind::Logs, by_name: true, orphans: true },
-    Place { rel: "HTTPStorages", kind: Kind::WebData, by_name: false, orphans: true },
-    Place { rel: "WebKit", kind: Kind::WebData, by_name: false, orphans: true },
-    Place { rel: "Cookies", kind: Kind::WebData, by_name: false, orphans: true },
-    Place { rel: "Application Scripts", kind: Kind::Containers, by_name: false, orphans: true },
+    Place {
+        rel: "Application Support",
+        kind: Kind::Support,
+        by_name: true,
+        orphans: true,
+    },
+    Place {
+        rel: "Caches",
+        kind: Kind::Caches,
+        by_name: true,
+        orphans: true,
+    },
+    Place {
+        rel: "Preferences",
+        kind: Kind::Preferences,
+        by_name: false,
+        orphans: true,
+    },
+    Place {
+        rel: "Preferences/ByHost",
+        kind: Kind::Preferences,
+        by_name: false,
+        orphans: true,
+    },
+    Place {
+        rel: "Containers",
+        kind: Kind::Containers,
+        by_name: false,
+        orphans: true,
+    },
+    Place {
+        rel: "Group Containers",
+        kind: Kind::GroupContainers,
+        by_name: false,
+        orphans: false,
+    },
+    Place {
+        rel: "Saved Application State",
+        kind: Kind::SavedState,
+        by_name: false,
+        orphans: true,
+    },
+    Place {
+        rel: "Logs",
+        kind: Kind::Logs,
+        by_name: true,
+        orphans: true,
+    },
+    Place {
+        rel: "HTTPStorages",
+        kind: Kind::WebData,
+        by_name: false,
+        orphans: true,
+    },
+    Place {
+        rel: "WebKit",
+        kind: Kind::WebData,
+        by_name: false,
+        orphans: true,
+    },
+    Place {
+        rel: "Cookies",
+        kind: Kind::WebData,
+        by_name: false,
+        orphans: true,
+    },
+    Place {
+        rel: "Application Scripts",
+        kind: Kind::Containers,
+        by_name: false,
+        orphans: true,
+    },
 ];
 
 /// launchd folders: (path under the root, needs admin).
 const LAUNCH_USER: &str = "LaunchAgents";
-const LAUNCH_SYSTEM: &[(&str, bool)] = &[("Library/LaunchAgents", false), ("Library/LaunchDaemons", true)];
+const LAUNCH_SYSTEM: &[(&str, bool)] = &[
+    ("Library/LaunchAgents", false),
+    ("Library/LaunchDaemons", true),
+];
 const HELPERS_SYSTEM: &str = "Library/PrivilegedHelperTools";
 
 /// Folder names that are vendors or shared homes, never one app's.
 const SHARED_NAMES: &[&str] = &[
-    "apple", "google", "microsoft", "adobe", "jetbrains", "mozilla", "oracle", "java", "crashreporter", "com.apple", "cloudkit", "icloud", "caches", "logs", "temp", "tmp", "default", "app", "data", "electron", "node", "python",
-    "homebrew", "setapp", "steam", "unity", "autodesk", "zoom", "code",
+    "apple",
+    "google",
+    "microsoft",
+    "adobe",
+    "jetbrains",
+    "mozilla",
+    "oracle",
+    "java",
+    "crashreporter",
+    "com.apple",
+    "cloudkit",
+    "icloud",
+    "caches",
+    "logs",
+    "temp",
+    "tmp",
+    "default",
+    "app",
+    "data",
+    "electron",
+    "node",
+    "python",
+    "homebrew",
+    "setapp",
+    "steam",
+    "unity",
+    "autodesk",
+    "zoom",
+    "code",
 ];
 
 /// The places to look in. Tests point these at temp folders.
@@ -94,7 +184,10 @@ pub struct Roots {
 
 impl Roots {
     pub fn real() -> Self {
-        Roots { user_library: crate::kit::fs::home().join("Library"), system: PathBuf::from("/") }
+        Roots {
+            user_library: crate::kit::fs::home().join("Library"),
+            system: PathBuf::from("/"),
+        }
     }
 }
 
@@ -144,7 +237,15 @@ impl Index {
                 if pl.rel == "Preferences" && path.is_dir() {
                     continue;
                 }
-                entries.push(Entry { path, name, kind: pl.kind, by_name: pl.by_name, orphans: pl.orphans, admin: false, job: None });
+                entries.push(Entry {
+                    path,
+                    name,
+                    kind: pl.kind,
+                    by_name: pl.by_name,
+                    orphans: pl.orphans,
+                    admin: false,
+                    job: None,
+                });
             }
         }
         let mut jobs = |dir: PathBuf, admin: bool| {
@@ -153,9 +254,24 @@ impl Index {
                     continue;
                 }
                 let v = plist::read(&path);
-                let label = v.as_ref().and_then(|v| v.get_str("Label")).unwrap_or(name.trim_end_matches(".plist")).to_string();
-                let strings = v.as_ref().map(|v| v.strings().into_iter().map(String::from).collect()).unwrap_or_default();
-                entries.push(Entry { path, name, kind: Kind::Launch, by_name: false, orphans: false, admin, job: Some((label, strings)) });
+                let label = v
+                    .as_ref()
+                    .and_then(|v| v.get_str("Label"))
+                    .unwrap_or(name.trim_end_matches(".plist"))
+                    .to_string();
+                let strings = v
+                    .as_ref()
+                    .map(|v| v.strings().into_iter().map(String::from).collect())
+                    .unwrap_or_default();
+                entries.push(Entry {
+                    path,
+                    name,
+                    kind: Kind::Launch,
+                    by_name: false,
+                    orphans: false,
+                    admin,
+                    job: Some((label, strings)),
+                });
             }
         };
         jobs(roots.user_library.join(LAUNCH_USER), false);
@@ -163,7 +279,15 @@ impl Index {
             jobs(roots.system.join(rel), *admin);
         }
         for (path, name) in list(&roots.system.join(HELPERS_SYSTEM)) {
-            entries.push(Entry { path, name, kind: Kind::Launch, by_name: false, orphans: false, admin: true, job: None });
+            entries.push(Entry {
+                path,
+                name,
+                kind: Kind::Launch,
+                by_name: false,
+                orphans: false,
+                admin: true,
+                job: None,
+            });
         }
         Index { entries }
     }
@@ -176,13 +300,22 @@ impl Index {
             if !belongs(e, app, all) {
                 continue;
             }
-            if all.iter().any(|o| o.id != app.id && o.path != app.path && belongs(e, o, all)) {
+            if all
+                .iter()
+                .any(|o| o.id != app.id && o.path != app.path && belongs(e, o, all))
+            {
                 continue;
             }
             if is_protected(&e.path).is_some() {
                 continue;
             }
-            out.push(Item { path: e.path.clone(), kind: e.kind, bytes: 0, admin: e.admin, selected: true });
+            out.push(Item {
+                path: e.path.clone(),
+                kind: e.kind,
+                bytes: 0,
+                admin: e.admin,
+                selected: true,
+            });
         }
         out.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.path.cmp(&b.path)));
         out
@@ -192,7 +325,12 @@ impl Index {
     /// named after. `known` = every bundle id still on this Mac (installed
     /// anywhere, or running); `min_age_secs`: entries touched more recently
     /// are left alone, something is still using them.
-    pub fn orphans(&self, known: &HashSet<String>, now: i64, min_age_secs: i64) -> BTreeMap<String, Vec<Item>> {
+    pub fn orphans(
+        &self,
+        known: &HashSet<String>,
+        now: i64,
+        min_age_secs: i64,
+    ) -> BTreeMap<String, Vec<Item>> {
         let known_lc: Vec<String> = known.iter().map(|k| k.to_lowercase()).collect();
         let mut out: BTreeMap<String, Vec<Item>> = BTreeMap::new();
         for e in &self.entries {
@@ -218,10 +356,18 @@ impl Index {
             if known_lc.iter().any(|k| related(&lc, k)) {
                 continue;
             }
-            if is_protected(&e.path).is_some() || newest_mtime(&e.path).is_some_and(|t| now - t < min_age_secs) {
+            if is_protected(&e.path).is_some()
+                || newest_mtime(&e.path).is_some_and(|t| now - t < min_age_secs)
+            {
                 continue;
             }
-            out.entry(id).or_default().push(Item { path: e.path.clone(), kind: e.kind, bytes: 0, admin: e.admin, selected: true });
+            out.entry(id).or_default().push(Item {
+                path: e.path.clone(),
+                kind: e.kind,
+                bytes: 0,
+                admin: e.admin,
+                selected: true,
+            });
         }
         out
     }
@@ -235,9 +381,15 @@ fn belongs(e: &Entry, app: &Owner, all: &[Owner]) -> bool {
     let id = app.id.to_lowercase();
     if let Some((label, strings)) = &e.job {
         let inside = format!("{}/", app.path.display());
-        return under_id(&label.to_lowercase(), &id) || (!app.path.as_os_str().is_empty() && strings.iter().any(|s| s.starts_with(&inside) || *s == app.path.display().to_string()));
+        return under_id(&label.to_lowercase(), &id)
+            || (!app.path.as_os_str().is_empty()
+                && strings
+                    .iter()
+                    .any(|s| s.starts_with(&inside) || *s == app.path.display().to_string()));
     }
-    let stem = id_of(&e.name).unwrap_or_else(|| e.name.clone()).to_lowercase();
+    let stem = id_of(&e.name)
+        .unwrap_or_else(|| e.name.clone())
+        .to_lowercase();
     if e.kind == Kind::Launch {
         // privileged helper tools are named by id
         return under_id(&stem, &id);
@@ -251,8 +403,13 @@ fn belongs(e: &Entry, app: &Owner, all: &[Owner]) -> bool {
             return true;
         }
         if let Some(vendor) = vendor_of(&id) {
-            let others = all.iter().any(|o| o.id.to_lowercase() != id && o.id.to_lowercase().starts_with(&format!("{vendor}.")));
-            if !others && (stem == format!("group.{vendor}") || stem.ends_with(&format!(".group.{vendor}"))) {
+            let others = all.iter().any(|o| {
+                o.id.to_lowercase() != id && o.id.to_lowercase().starts_with(&format!("{vendor}."))
+            });
+            if !others
+                && (stem == format!("group.{vendor}")
+                    || stem.ends_with(&format!(".group.{vendor}")))
+            {
                 return true;
             }
         }
@@ -260,8 +417,14 @@ fn belongs(e: &Entry, app: &Owner, all: &[Owner]) -> bool {
     }
     if e.by_name {
         let name = app.name.trim().to_lowercase();
-        let same_name = all.iter().filter(|o| o.name.trim().to_lowercase() == name).count();
-        return name.chars().count() >= 3 && !SHARED_NAMES.contains(&name.as_str()) && same_name <= 1 && e.name.to_lowercase() == name;
+        let same_name = all
+            .iter()
+            .filter(|o| o.name.trim().to_lowercase() == name)
+            .count();
+        return name.chars().count() >= 3
+            && !SHARED_NAMES.contains(&name.as_str())
+            && same_name <= 1
+            && e.name.to_lowercase() == name;
     }
     false
 }
@@ -311,13 +474,16 @@ pub fn looks_like_bundle_id(s: &str) -> bool {
     if !(2..=6).contains(&tld.len()) || !tld.chars().all(|c| c.is_ascii_lowercase()) {
         return false;
     }
-    s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
 /// macOS's own ids: never orphans.
 pub fn is_system_id(id: &str) -> bool {
     let l = id.to_lowercase();
-    l.starts_with("com.apple.") || l.starts_with("group.com.apple.") || l.starts_with("systemgroup.")
+    l.starts_with("com.apple.")
+        || l.starts_with("group.com.apple.")
+        || l.starts_with("systemgroup.")
 }
 
 /// Newest modification time in a folder (its top two levels), or of a file.
@@ -328,10 +494,20 @@ fn newest_mtime(p: &Path) -> Option<i64> {
     }
     let mut best = mtime(p);
     if p.is_dir() {
-        for e in std::fs::read_dir(p).into_iter().flatten().flatten().take(500) {
+        for e in std::fs::read_dir(p)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .take(500)
+        {
             best = best.max(mtime(&e.path()));
             if e.path().is_dir() {
-                for f in std::fs::read_dir(e.path()).into_iter().flatten().flatten().take(200) {
+                for f in std::fs::read_dir(e.path())
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .take(200)
+                {
                     best = best.max(mtime(&f.path()));
                 }
             }
@@ -342,7 +518,9 @@ fn newest_mtime(p: &Path) -> Option<i64> {
 
 /// (path, file name) of each entry of `dir`, hidden ones skipped.
 fn list(dir: &Path) -> Vec<(PathBuf, String)> {
-    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     let mut out: Vec<(PathBuf, String)> = rd
         .flatten()
         .map(|e| (e.path(), e.file_name().to_string_lossy().into_owned()))
@@ -363,9 +541,13 @@ pub mod tests {
 
     impl Fake {
         pub fn new(tag: &str) -> Fake {
-            let root = std::env::temp_dir().join(format!("cmb-uninst-{tag}-{}", std::process::id()));
+            let root =
+                std::env::temp_dir().join(format!("cmb-uninst-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&root);
-            let roots = Roots { user_library: root.join("home/Library"), system: root.join("sys") };
+            let roots = Roots {
+                user_library: root.join("home/Library"),
+                system: root.join("sys"),
+            };
             std::fs::create_dir_all(&roots.user_library).unwrap();
             Fake { root, roots }
         }
@@ -387,18 +569,34 @@ pub mod tests {
     }
 
     fn owner(id: &str, name: &str, path: &str) -> Owner {
-        Owner { id: id.into(), name: name.into(), path: PathBuf::from(path) }
+        Owner {
+            id: id.into(),
+            name: name.into(),
+            path: PathBuf::from(path),
+        }
     }
 
     fn rels(items: &[Item], f: &Fake) -> Vec<String> {
-        items.iter().map(|i| i.path.strip_prefix(&f.root).unwrap().display().to_string()).collect()
+        items
+            .iter()
+            .map(|i| i.path.strip_prefix(&f.root).unwrap().display().to_string())
+            .collect()
     }
 
     #[test]
     fn ids_from_names() {
-        assert_eq!(id_of("com.docker.docker.plist").as_deref(), Some("com.docker.docker"));
-        assert_eq!(id_of("com.docker.docker.savedState").as_deref(), Some("com.docker.docker"));
-        assert_eq!(id_of("com.foo.bar.0A1B2C3D-1111-2222-3333-444455556666.plist").as_deref(), Some("com.foo.bar"));
+        assert_eq!(
+            id_of("com.docker.docker.plist").as_deref(),
+            Some("com.docker.docker")
+        );
+        assert_eq!(
+            id_of("com.docker.docker.savedState").as_deref(),
+            Some("com.docker.docker")
+        );
+        assert_eq!(
+            id_of("com.foo.bar.0A1B2C3D-1111-2222-3333-444455556666.plist").as_deref(),
+            Some("com.foo.bar")
+        );
         assert_eq!(id_of("Slack"), None);
         assert_eq!(id_of("com.foo"), None);
         assert!(!looks_like_bundle_id("Com.Foo.bar"));
@@ -432,10 +630,20 @@ pub mod tests {
         }
         f.file("home/Library/LaunchAgents/com.tinyspeck.updater.plist", "<plist><dict><key>Label</key><string>com.tinyspeck.updater</string><key>ProgramArguments</key><array><string>/Applications/Slack.app/Contents/Helper</string></array></dict></plist>");
         f.file("sys/Library/LaunchDaemons/com.tinyspeck.slackmacgap.helper.plist", "<plist><dict><key>Label</key><string>com.tinyspeck.slackmacgap.helper</string></dict></plist>");
-        f.file("sys/Library/LaunchDaemons/com.other.plist", "<plist><dict><key>Label</key><string>com.other.daemon</string></dict></plist>");
+        f.file(
+            "sys/Library/LaunchDaemons/com.other.plist",
+            "<plist><dict><key>Label</key><string>com.other.daemon</string></dict></plist>",
+        );
         let idx = Index::build(&f.roots);
-        let slack = owner("com.tinyspeck.slackmacgap", "Slack", "/Applications/Slack.app");
-        let all = vec![slack.clone(), owner("com.other.app", "Other", "/Applications/Other.app")];
+        let slack = owner(
+            "com.tinyspeck.slackmacgap",
+            "Slack",
+            "/Applications/Slack.app",
+        );
+        let all = vec![
+            slack.clone(),
+            owner("com.other.app", "Other", "/Applications/Other.app"),
+        ];
         let got = idx.for_app(&slack, &all);
         let r = rels(&got, &f);
         let want = [
@@ -477,8 +685,16 @@ pub mod tests {
         let docker = owner("com.docker.docker", "Docker", "/Applications/Docker.app");
         assert_eq!(idx.for_app(&docker, std::slice::from_ref(&docker)).len(), 1);
         // two apps of one vendor share it: keep
-        let idea = owner("com.jetbrains.intellij", "IntelliJ IDEA", "/Applications/IntelliJ IDEA.app");
-        let pyc = owner("com.jetbrains.pycharm", "PyCharm", "/Applications/PyCharm.app");
+        let idea = owner(
+            "com.jetbrains.intellij",
+            "IntelliJ IDEA",
+            "/Applications/IntelliJ IDEA.app",
+        );
+        let pyc = owner(
+            "com.jetbrains.pycharm",
+            "PyCharm",
+            "/Applications/PyCharm.app",
+        );
         assert!(idx.for_app(&idea, &[idea.clone(), pyc]).is_empty());
     }
 

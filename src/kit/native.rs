@@ -6,9 +6,10 @@ mod mac {
     use objc2::rc::Retained;
     use objc2::MainThreadMarker;
     use objc2_app_kit::{
-        NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua, NSApplication, NSApplicationActivationPolicy,
-        NSAutoresizingMaskOptions, NSColor, NSGlassEffectView, NSGlassEffectViewStyle, NSView, NSVisualEffectBlendingMode,
-        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode, NSWorkspace,
+        NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua, NSApplication,
+        NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSColor, NSGlassEffectView,
+        NSGlassEffectViewStyle, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+        NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode, NSWorkspace,
     };
     use objc2_foundation::NSProcessInfo;
     use std::cell::RefCell;
@@ -25,11 +26,15 @@ mod mac {
     /// (NSGlassEffectView, macOS 26+) with its own rounded corners, or the
     /// older frosted NSVisualEffectView. Our drawing stays on top, mostly clear.
     pub fn apply_glass(corner_radius: f64) {
-        let Some(mtm) = MainThreadMarker::new() else { return };
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
         let app = NSApplication::sharedApplication(mtm);
         let windows = app.windows();
         for w in windows.iter() {
-            let Some(content) = w.contentView() else { continue };
+            let Some(content) = w.contentView() else {
+                continue;
+            };
             let class = content.class().name().to_string_lossy().to_string();
             if !class.contains("Winit") || w.title().to_string().starts_with(super::PLAIN_WINDOW) {
                 continue;
@@ -39,7 +44,9 @@ mod mac {
             if known {
                 continue;
             }
-            let Some(superview) = (unsafe { content.superview() }) else { continue };
+            let Some(superview) = (unsafe { content.superview() }) else {
+                continue;
+            };
             w.setOpaque(false);
             w.setBackgroundColor(Some(&NSColor::clearColor()));
             // dark glass so white text stays readable on any wallpaper
@@ -59,8 +66,15 @@ mod mac {
                 e.setState(NSVisualEffectState::Active);
                 Retained::into_super(e)
             };
-            view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
-            superview.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Below, Some(&content));
+            view.setAutoresizingMask(
+                NSAutoresizingMaskOptions::ViewWidthSizable
+                    | NSAutoresizingMaskOptions::ViewHeightSizable,
+            );
+            superview.addSubview_positioned_relativeTo(
+                &view,
+                NSWindowOrderingMode::Below,
+                Some(&content),
+            );
             w.invalidateShadow();
             GLASS.with(|g| g.borrow_mut().push((num, view)));
         }
@@ -68,20 +82,40 @@ mod mac {
 
     /// Diagnostic: describe our windows (frames, view classes, glass layers).
     pub fn debug_windows() -> String {
-        let Some(mtm) = MainThreadMarker::new() else { return String::new() };
+        let Some(mtm) = MainThreadMarker::new() else {
+            return String::new();
+        };
         let app = NSApplication::sharedApplication(mtm);
         let mut out = String::new();
         for w in app.windows().iter() {
             let f = w.frame();
-            out.push_str(&format!("win #{} frame {:?} opaque {} visible {}\n", w.windowNumber(), (f.origin.x, f.origin.y, f.size.width, f.size.height), w.isOpaque(), w.isVisible()));
+            out.push_str(&format!(
+                "win #{} frame {:?} opaque {} visible {}\n",
+                w.windowNumber(),
+                (f.origin.x, f.origin.y, f.size.width, f.size.height),
+                w.isOpaque(),
+                w.isVisible()
+            ));
             if let Some(c) = w.contentView() {
                 let cf = c.frame();
-                out.push_str(&format!("  content {} {:?}\n", c.class().name().to_string_lossy(), (cf.size.width, cf.size.height)));
+                out.push_str(&format!(
+                    "  content {} {:?}\n",
+                    c.class().name().to_string_lossy(),
+                    (cf.size.width, cf.size.height)
+                ));
                 if let Some(sv) = unsafe { c.superview() } {
-                    out.push_str(&format!("  super {}\n", sv.class().name().to_string_lossy()));
+                    out.push_str(&format!(
+                        "  super {}\n",
+                        sv.class().name().to_string_lossy()
+                    ));
                     for v in sv.subviews().iter() {
                         let vf = v.frame();
-                        out.push_str(&format!("    sub {} {:?} hidden {}\n", v.class().name().to_string_lossy(), (vf.origin.x, vf.origin.y, vf.size.width, vf.size.height), v.isHidden()));
+                        out.push_str(&format!(
+                            "    sub {} {:?} hidden {}\n",
+                            v.class().name().to_string_lossy(),
+                            (vf.origin.x, vf.origin.y, vf.size.width, vf.size.height),
+                            v.isHidden()
+                        ));
                     }
                 }
             }
@@ -91,14 +125,22 @@ mod mac {
 
     /// Accessory = menu bar app with no Dock icon; Regular = normal app window.
     pub fn set_dock_icon(visible: bool) {
-        let Some(mtm) = MainThreadMarker::new() else { return };
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
         let app = NSApplication::sharedApplication(mtm);
-        let policy = if visible { NSApplicationActivationPolicy::Regular } else { NSApplicationActivationPolicy::Accessory };
+        let policy = if visible {
+            NSApplicationActivationPolicy::Regular
+        } else {
+            NSApplicationActivationPolicy::Accessory
+        };
         let _ = app.setActivationPolicy(policy);
     }
 
     pub fn activate() {
-        let Some(mtm) = MainThreadMarker::new() else { return };
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
         let app = NSApplication::sharedApplication(mtm);
         #[allow(deprecated)]
         app.activateIgnoringOtherApps(true);
@@ -108,10 +150,16 @@ mod mac {
     /// with alpha, `px` pixels tall. None when the name doesn't exist.
     pub fn render_symbol(name: &str, px: f64, weight: f64) -> Option<(usize, usize, Vec<u8>)> {
         use objc2::AllocAnyThread;
-        use objc2_app_kit::{NSBitmapImageRep, NSCompositingOperation, NSDeviceRGBColorSpace, NSGraphicsContext, NSImage, NSImageSymbolConfiguration};
+        use objc2_app_kit::{
+            NSBitmapImageRep, NSCompositingOperation, NSDeviceRGBColorSpace, NSGraphicsContext,
+            NSImage, NSImageSymbolConfiguration,
+        };
         use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
         MainThreadMarker::new()?;
-        let img = NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None)?;
+        let img = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+            &NSString::from_str(name),
+            None,
+        )?;
         let cfg = NSImageSymbolConfiguration::configurationWithPointSize_weight(px, weight);
         let img = img.imageWithSymbolConfiguration(&cfg)?;
         let size = img.size();
@@ -203,7 +251,9 @@ mod mac {
         NSFileManager::defaultManager()
             .trashItemAtURL_resultingItemURL_error(&url, Some(&mut out))
             .map_err(|e| e.localizedDescription().to_string())?;
-        out.and_then(|u| u.path()).map(|s| std::path::PathBuf::from(s.to_string())).ok_or_else(|| "Moved, but the Trash didn't say where".to_string())
+        out.and_then(|u| u.path())
+            .map(|s| std::path::PathBuf::from(s.to_string()))
+            .ok_or_else(|| "Moved, but the Trash didn't say where".to_string())
     }
 }
 
@@ -243,7 +293,10 @@ mod other {
     pub fn trash_item_at(p: &std::path::Path) -> Result<std::path::PathBuf, String> {
         let trash = dirs::home_dir().ok_or("No home folder")?.join(".Trash");
         std::fs::create_dir_all(&trash).map_err(|e| e.to_string())?;
-        let base = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let base = p
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let mut dest = trash.join(&base);
         let mut k = 1;
         while dest.symlink_metadata().is_ok() {

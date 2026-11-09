@@ -18,10 +18,14 @@ const DIR_SIZE_MAX_DEPTH: usize = 64;
 pub fn dir_size(path: &Path) -> u64 {
     use std::os::unix::fs::MetadataExt;
     fn walk(p: &Path, depth: usize, max: usize, dev: u64) -> u64 {
-        let Ok(rd) = std::fs::read_dir(p) else { return 0 };
+        let Ok(rd) = std::fs::read_dir(p) else {
+            return 0;
+        };
         let mut total = 0;
         for e in rd.flatten() {
-            let Ok(md) = e.path().symlink_metadata() else { continue };
+            let Ok(md) = e.path().symlink_metadata() else {
+                continue;
+            };
             if md.dev() != dev {
                 continue;
             }
@@ -44,17 +48,28 @@ pub fn dir_size(path: &Path) -> u64 {
 /// A file or folder of the app's own data:
 /// `~/Library/Application Support/cleanmebro/<name>`.
 pub fn data_path(name: &str) -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join(name)
+    dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("cleanmebro")
+        .join(name)
 }
 
 /// A JSON file's value, or the default when it is missing or unreadable.
 pub fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
-    std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
 }
 
 /// `v` as JSON; `pretty` for files people may open.
 fn to_json<T: Serialize + ?Sized>(v: &T, pretty: bool) -> Option<Vec<u8>> {
-    if pretty { serde_json::to_vec_pretty(v) } else { serde_json::to_vec(v) }.ok()
+    if pretty {
+        serde_json::to_vec_pretty(v)
+    } else {
+        serde_json::to_vec(v)
+    }
+    .ok()
 }
 
 /// Write `bytes` through a temp file beside `path` and move it in place,
@@ -85,7 +100,10 @@ fn writer() -> &'static Mutex<Sender<Write>> {
     static TX: OnceLock<Mutex<Sender<Write>>> = OnceLock::new();
     TX.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel::<Write>();
-        std::thread::Builder::new().name("writer".into()).spawn(move || write_loop(rx)).ok();
+        std::thread::Builder::new()
+            .name("writer".into())
+            .spawn(move || write_loop(rx))
+            .ok();
         Mutex::new(tx)
     })
 }
@@ -116,14 +134,22 @@ fn write_loop(rx: Receiver<Write>) {
 /// Serializing happens here, so later changes to `v` don't leak in.
 pub fn save_json_later<T: Serialize + ?Sized>(path: &Path, v: &T, pretty: bool) {
     if let Some(b) = to_json(v, pretty) {
-        let _ = writer().lock().unwrap_or_else(|e| e.into_inner()).send(Write::File(path.to_path_buf(), b));
+        let _ = writer()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .send(Write::File(path.to_path_buf(), b));
     }
 }
 
 /// Wait (up to 2 s) until every background save so far is on disk.
 pub fn flush_writes() {
     let (tx, rx) = std::sync::mpsc::channel();
-    if writer().lock().unwrap_or_else(|e| e.into_inner()).send(Write::Flush(tx)).is_ok() {
+    if writer()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .send(Write::Flush(tx))
+        .is_ok()
+    {
         let _ = rx.recv_timeout(std::time::Duration::from_secs(2));
     }
 }
@@ -144,7 +170,21 @@ pub fn volume_space(path: &str) -> (u64, u64) {
 /// Paths that are never offered for removal, whatever the rules or the AI say.
 pub fn is_protected(p: &Path) -> Option<&'static str> {
     let h = home();
-    let personal = ["Documents", "Desktop", "Pictures", "Movies", "Music", "Projects", "Developer", "Dropbox", "Library/Mobile Documents", "Library/Keychains", "Library/Messages", ".ssh", ".gnupg"];
+    let personal = [
+        "Documents",
+        "Desktop",
+        "Pictures",
+        "Movies",
+        "Music",
+        "Projects",
+        "Developer",
+        "Dropbox",
+        "Library/Mobile Documents",
+        "Library/Keychains",
+        "Library/Messages",
+        ".ssh",
+        ".gnupg",
+    ];
     for d in personal {
         if p.starts_with(h.join(d)) {
             return Some("Personal files and settings are never removed");
@@ -153,7 +193,19 @@ pub fn is_protected(p: &Path) -> Option<&'static str> {
     if p.starts_with(h.join("Library/Mail")) {
         return Some("Mail data is never removed");
     }
-    let claude_keep = ["settings.json", "settings.local.json", "CLAUDE.md", "skills", "plugins/marketplaces", "plugins/repos", "agents", "commands", "history.jsonl", "scheduled-tasks", "sessions"];
+    let claude_keep = [
+        "settings.json",
+        "settings.local.json",
+        "CLAUDE.md",
+        "skills",
+        "plugins/marketplaces",
+        "plugins/repos",
+        "agents",
+        "commands",
+        "history.jsonl",
+        "scheduled-tasks",
+        "sessions",
+    ];
     for d in claude_keep {
         if p.starts_with(h.join(".claude").join(d)) {
             return Some("Your Claude settings, skills and history are kept");
@@ -216,7 +268,10 @@ mod tests {
         }
         flush_writes();
         assert_eq!(load_json::<Vec<i32>>(&f), vec![19]);
-        assert_eq!(load_json::<Vec<i32>>(&dir.join("missing.json")), Vec::<i32>::new());
+        assert_eq!(
+            load_json::<Vec<i32>>(&dir.join("missing.json")),
+            Vec::<i32>::new()
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

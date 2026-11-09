@@ -63,13 +63,27 @@ impl AppRow {
         self.items.iter().map(|i| i.bytes).sum()
     }
     pub fn app_bytes(&self) -> u64 {
-        self.items.iter().filter(|i| i.kind == Kind::App).map(|i| i.bytes).sum()
+        self.items
+            .iter()
+            .filter(|i| i.kind == Kind::App)
+            .map(|i| i.bytes)
+            .sum()
     }
     pub fn owner(&self) -> Owner {
-        Owner { id: self.id.clone(), name: self.name.clone(), path: self.path.clone() }
+        Owner {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            path: self.path.clone(),
+        }
     }
     pub fn target(&self, reset: bool) -> Target {
-        Target { name: self.name.clone(), id: self.id.clone(), app: Some(self.path.clone()), items: self.items.clone(), reset }
+        Target {
+            name: self.name.clone(),
+            id: self.id.clone(),
+            app: Some(self.path.clone()),
+            items: self.items.clone(),
+            reset,
+        }
     }
 }
 
@@ -89,7 +103,13 @@ impl Orphan {
         self.items.iter().map(|i| i.bytes).sum()
     }
     pub fn target(&self) -> Target {
-        Target { name: self.name.clone(), id: self.id.clone(), app: None, items: self.items.clone(), reset: false }
+        Target {
+            name: self.name.clone(),
+            id: self.id.clone(),
+            app: None,
+            items: self.items.clone(),
+            reset: false,
+        }
     }
 }
 
@@ -100,7 +120,10 @@ pub enum Phase {
     /// Reading the app folders.
     Listing,
     /// Apps are listed; sizes and files come in.
-    Sizing { done: usize, total: usize },
+    Sizing {
+        done: usize,
+        total: usize,
+    },
     Ready,
 }
 
@@ -157,7 +180,6 @@ pub struct State {
     pub page_seen: bool,
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -171,7 +193,11 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { watch_removed: true, drop_zone: true, known: BTreeMap::new() }
+        Settings {
+            watch_removed: true,
+            drop_zone: true,
+            known: BTreeMap::new(),
+        }
     }
 }
 
@@ -286,7 +312,12 @@ impl Uninstaller {
             return u;
         }
         u.st.lock().unwrap().settings = Settings::load();
-        watch(u.st.clone(), u.app_roots.clone(), u.roots.clone(), env.ctx.clone());
+        watch(
+            u.st.clone(),
+            u.app_roots.clone(),
+            u.roots.clone(),
+            env.ctx.clone(),
+        );
         watch_drag(u.st.clone(), u.app_roots.clone(), env.ctx.clone());
         u
     }
@@ -300,7 +331,12 @@ impl Uninstaller {
         if self.demo {
             return;
         }
-        start_scan(self.st.clone(), self.app_roots.clone(), self.roots.clone(), self.ctx.clone());
+        start_scan(
+            self.st.clone(),
+            self.app_roots.clone(),
+            self.roots.clone(),
+            self.ctx.clone(),
+        );
     }
 
     /// Move `targets` to the Trash in the background.
@@ -313,8 +349,25 @@ impl Uninstaller {
             return;
         }
         if self.demo {
-            let moved = targets.iter().flat_map(|t| t.items.iter().filter(|i| i.selected)).map(|i| remove::Moved { from: i.path.clone(), to: i.path.clone(), admin: false, bytes: i.bytes }).collect();
-            g.last = Some((Report { moved, names: targets.iter().map(|t| t.name.clone()).collect(), reset: targets.iter().all(|t| t.reset), failed: vec![] }, Instant::now()));
+            let moved = targets
+                .iter()
+                .flat_map(|t| t.items.iter().filter(|i| i.selected))
+                .map(|i| remove::Moved {
+                    from: i.path.clone(),
+                    to: i.path.clone(),
+                    admin: false,
+                    bytes: i.bytes,
+                })
+                .collect();
+            g.last = Some((
+                Report {
+                    moved,
+                    names: targets.iter().map(|t| t.name.clone()).collect(),
+                    reset: targets.iter().all(|t| t.reset),
+                    failed: vec![],
+                },
+                Instant::now(),
+            ));
             return;
         }
         g.working = Some("Starting…".into());
@@ -322,7 +375,12 @@ impl Uninstaller {
             g.removed_by_us.insert(t.id.clone());
         }
         drop(g);
-        let (st, roots, app_roots, ctx) = (self.st.clone(), self.roots.clone(), self.app_roots.clone(), self.ctx.clone());
+        let (st, roots, app_roots, ctx) = (
+            self.st.clone(),
+            self.roots.clone(),
+            self.app_roots.clone(),
+            self.ctx.clone(),
+        );
         std::thread::Builder::new()
             .name("uninstaller-remove".into())
             .spawn(move || {
@@ -346,11 +404,18 @@ impl Uninstaller {
 
     /// Put the last removal back.
     pub fn undo(&self) {
-        let Some((rep, _)) = self.st.lock().unwrap().last.take() else { return };
+        let Some((rep, _)) = self.st.lock().unwrap().last.take() else {
+            return;
+        };
         if self.demo {
             return;
         }
-        let (st, roots, app_roots, ctx) = (self.st.clone(), self.roots.clone(), self.app_roots.clone(), self.ctx.clone());
+        let (st, roots, app_roots, ctx) = (
+            self.st.clone(),
+            self.roots.clone(),
+            self.app_roots.clone(),
+            self.ctx.clone(),
+        );
         st.lock().unwrap().working = Some("Putting things back…".into());
         std::thread::Builder::new()
             .name("uninstaller-undo".into())
@@ -360,7 +425,10 @@ impl Uninstaller {
                     let mut g = st.lock().unwrap();
                     g.working = None;
                     if !failed.is_empty() {
-                        let mut r = Report { names: vec![format!("{n} put back")], ..Default::default() };
+                        let mut r = Report {
+                            names: vec![format!("{n} put back")],
+                            ..Default::default()
+                        };
                         r.failed = failed;
                         g.last = Some((r, Instant::now()));
                     }
@@ -373,36 +441,60 @@ impl Uninstaller {
 
     /// An app was dropped (page, widget or drop zone): find its files, then confirm.
     pub fn dropped(&self, path: PathBuf) {
-        let path = path.ancestors().find(|a| a.extension().is_some_and(|e| e == "app")).map(Path::to_path_buf).unwrap_or(path);
+        let path = path
+            .ancestors()
+            .find(|a| a.extension().is_some_and(|e| e == "app"))
+            .map(Path::to_path_buf)
+            .unwrap_or(path);
         let mut g = self.st.lock().unwrap();
         if !path.extension().is_some_and(|e| e == "app") {
-            g.drop = Drop::Refused(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "Not an app. Drop an app from Applications.".into());
+            g.drop = Drop::Refused(
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                "Not an app. Drop an app from Applications.".into(),
+            );
             return;
         }
         if let Some(row) = g.apps.iter().find(|a| a.path == path && a.sized) {
             g.drop = match row.locked {
-                Some(why) => Drop::Refused(row.name.clone(), format!("{why}, so it can't be removed.")),
+                Some(why) => {
+                    Drop::Refused(row.name.clone(), format!("{why}, so it can't be removed."))
+                }
                 None => Drop::Confirm(row.target(false)),
             };
             return;
         }
         g.drop = Drop::Reading(path.clone());
         drop(g);
-        let (st, roots, app_roots, ctx) = (self.st.clone(), self.roots.clone(), self.app_roots.clone(), self.ctx.clone());
+        let (st, roots, app_roots, ctx) = (
+            self.st.clone(),
+            self.roots.clone(),
+            self.app_roots.clone(),
+            self.ctx.clone(),
+        );
         std::thread::Builder::new()
             .name("uninstaller-drop".into())
             .spawn(move || {
                 let casks = apps::cask_apps();
-                let others: Vec<Owner> = st.lock().unwrap().apps.iter().map(|a| a.owner()).collect();
+                let others: Vec<Owner> =
+                    st.lock().unwrap().apps.iter().map(|a| a.owner()).collect();
                 let res = read_app(&path, &casks, &roots, &others, &app_roots);
                 let mut g = st.lock().unwrap();
                 if matches!(&g.drop, Drop::Reading(p) if *p == path) {
                     g.drop = match res {
                         Some(row) => match row.locked {
-                            Some(why) => Drop::Refused(row.name, format!("{why}, so it can't be removed.")),
+                            Some(why) => {
+                                Drop::Refused(row.name, format!("{why}, so it can't be removed."))
+                            }
                             None => Drop::Confirm(row.target(false)),
                         },
-                        None => Drop::Refused(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "Couldn't read this app.".into()),
+                        None => Drop::Refused(
+                            path.file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default(),
+                            "Couldn't read this app.".into(),
+                        ),
                     };
                 }
                 ctx.request_repaint();
@@ -418,10 +510,15 @@ impl Uninstaller {
         let mut idx: Vec<usize> = (0..g.apps.len())
             .filter(|&i| {
                 let a = &g.apps[i];
-                (q.is_empty() || a.name.to_lowercase().contains(&q) || a.id.to_lowercase().contains(&q))
+                (q.is_empty()
+                    || a.name.to_lowercase().contains(&q)
+                    || a.id.to_lowercase().contains(&q))
                     && match self.filter {
                         Filter::All => true,
-                        Filter::Unused => a.locked.is_none() && a.last_used.is_some_and(|t| now - t > UNUSED_DAYS * 86400),
+                        Filter::Unused => {
+                            a.locked.is_none()
+                                && a.last_used.is_some_and(|t| now - t > UNUSED_DAYS * 86400)
+                        }
                         Filter::Large => a.total() >= LARGE,
                         Filter::Source(s) => a.source == s,
                     }
@@ -429,9 +526,21 @@ impl Uninstaller {
             .collect();
         let apps = &g.apps;
         match self.sort {
-            Sort::Size => idx.sort_by(|&a, &b| apps[b].total().cmp(&apps[a].total()).then(apps[a].name.to_lowercase().cmp(&apps[b].name.to_lowercase()))),
+            Sort::Size => idx.sort_by(|&a, &b| {
+                apps[b].total().cmp(&apps[a].total()).then(
+                    apps[a]
+                        .name
+                        .to_lowercase()
+                        .cmp(&apps[b].name.to_lowercase()),
+                )
+            }),
             Sort::Name => idx.sort_by_key(|&a| apps[a].name.to_lowercase()),
-            Sort::LastUsed => idx.sort_by(|&a, &b| apps[a].last_used.unwrap_or(i64::MAX).cmp(&apps[b].last_used.unwrap_or(i64::MAX))),
+            Sort::LastUsed => idx.sort_by(|&a, &b| {
+                apps[a]
+                    .last_used
+                    .unwrap_or(i64::MAX)
+                    .cmp(&apps[b].last_used.unwrap_or(i64::MAX))
+            }),
         }
         // apps that can't be removed go last
         idx.sort_by_key(|&i| apps[i].locked.is_some());
@@ -440,7 +549,13 @@ impl Uninstaller {
 }
 
 /// Read one bundle: info, files, sizes.
-fn read_app(path: &Path, casks: &[String], roots: &Roots, others: &[Owner], _app_roots: &[PathBuf]) -> Option<AppRow> {
+fn read_app(
+    path: &Path,
+    casks: &[String],
+    roots: &Roots,
+    others: &[Owner],
+    _app_roots: &[PathBuf],
+) -> Option<AppRow> {
     let info = apps::read_info(path)?;
     let source = apps::source(path, &info.id, casks);
     let mut row = AppRow {
@@ -450,7 +565,10 @@ fn read_app(path: &Path, casks: &[String], roots: &Roots, others: &[Owner], _app
         version: info.version,
         source,
         locked: apps::locked(path, &info.id, source),
-        last_used: apps::last_used(&[path.to_path_buf()]).into_iter().next().flatten(),
+        last_used: apps::last_used(&[path.to_path_buf()])
+            .into_iter()
+            .next()
+            .flatten(),
         items: Vec::new(),
         sized: false,
     };
@@ -464,7 +582,13 @@ fn read_app(path: &Path, casks: &[String], roots: &Roots, others: &[Owner], _app
 }
 
 fn fill_items(row: &mut AppRow, index: &Index, all: &[Owner]) {
-    let mut items = vec![Item { path: row.path.clone(), kind: Kind::App, bytes: dir_size(&row.path), admin: false, selected: true }];
+    let mut items = vec![Item {
+        path: row.path.clone(),
+        kind: Kind::App,
+        bytes: dir_size(&row.path),
+        admin: false,
+        selected: true,
+    }];
     for mut it in index.for_app(&row.owner(), all) {
         it.bytes = dir_size(&it.path);
         items.push(it);
@@ -510,9 +634,21 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
     let used = apps::last_used(&bundles);
     let mut rows: Vec<AppRow> = Vec::new();
     for (k, b) in bundles.iter().enumerate() {
-        let Some(info) = apps::read_info(b) else { continue };
+        let Some(info) = apps::read_info(b) else {
+            continue;
+        };
         let source = apps::source(b, &info.id, &casks);
-        rows.push(AppRow { path: b.clone(), name: info.name, id: info.id.clone(), version: info.version, source, locked: apps::locked(b, &info.id, source), last_used: used[k], items: Vec::new(), sized: false });
+        rows.push(AppRow {
+            path: b.clone(),
+            name: info.name,
+            id: info.id.clone(),
+            version: info.version,
+            source,
+            locked: apps::locked(b, &info.id, source),
+            last_used: used[k],
+            items: Vec::new(),
+            sized: false,
+        });
     }
     {
         let mut g = st.lock().unwrap();
@@ -530,7 +666,10 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
         if !full {
             return false;
         }
-        g.phase = Phase::Sizing { done: 0, total: rows.len() };
+        g.phase = Phase::Sizing {
+            done: 0,
+            total: rows.len(),
+        };
     }
     ctx.request_repaint();
     let index = Index::build(roots);
@@ -551,7 +690,10 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
             }
             *slot = row;
         }
-        g.phase = Phase::Sizing { done: n + 1, total: rows.len() };
+        g.phase = Phase::Sizing {
+            done: n + 1,
+            total: rows.len(),
+        };
         drop(g);
         ctx.request_repaint();
     }
@@ -569,7 +711,13 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
                 it.bytes = dir_size(&it.path);
             }
             let touched = items.iter().filter_map(|i| mtime(&i.path)).max();
-            Orphan { name: names.get(&id).cloned().unwrap_or_else(|| pretty_name(&id)), id, items, touched, selected: true }
+            Orphan {
+                name: names.get(&id).cloned().unwrap_or_else(|| pretty_name(&id)),
+                id,
+                items,
+                touched,
+                selected: true,
+            }
         })
         .collect();
     orphans.sort_by_key(|o| std::cmp::Reverse(o.bytes()));
@@ -591,7 +739,11 @@ fn mtime(p: &Path) -> Option<i64> {
 /// "com.hnc.Discord" → "Discord", "us.zoom.xos" → "Zoom xos".
 pub fn pretty_name(id: &str) -> String {
     let parts: Vec<&str> = id.split('.').collect();
-    let pick = if parts.len() >= 3 { &parts[parts.len() - 1] } else { parts.last().unwrap_or(&id) };
+    let pick = if parts.len() >= 3 {
+        &parts[parts.len() - 1]
+    } else {
+        parts.last().unwrap_or(&id)
+    };
     let mut c = pick.chars();
     match c.next() {
         Some(f) => f.to_uppercase().chain(c).collect(),
@@ -613,21 +765,39 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
                 if now_b == last {
                     continue;
                 }
-                let gone: Vec<PathBuf> = last.iter().filter(|p| !now_b.contains(p)).cloned().collect();
+                let gone: Vec<PathBuf> = last
+                    .iter()
+                    .filter(|p| !now_b.contains(p))
+                    .cloned()
+                    .collect();
                 last = now_b;
                 let (watching, rows, ours) = {
                     let g = st.lock().unwrap();
-                    (g.settings.watch_removed, g.apps.clone(), g.removed_by_us.clone())
+                    (
+                        g.settings.watch_removed,
+                        g.apps.clone(),
+                        g.removed_by_us.clone(),
+                    )
                 };
                 if watching {
                     for p in gone {
-                        let Some(row) = rows.iter().find(|r| r.path == p) else { continue };
+                        let Some(row) = rows.iter().find(|r| r.path == p) else {
+                            continue;
+                        };
                         // moved elsewhere (renamed, other folder) or removed by us
-                        if ours.contains(&row.id) || rows.iter().any(|r| r.id == row.id && r.path != p && r.path.exists()) {
+                        if ours.contains(&row.id)
+                            || rows
+                                .iter()
+                                .any(|r| r.id == row.id && r.path != p && r.path.exists())
+                        {
                             continue;
                         }
                         let index = Index::build(&roots);
-                        let others: Vec<Owner> = rows.iter().filter(|r| r.path != p).map(|r| r.owner()).collect();
+                        let others: Vec<Owner> = rows
+                            .iter()
+                            .filter(|r| r.path != p)
+                            .map(|r| r.owner())
+                            .collect();
                         let mut all = others.clone();
                         all.push(row.owner());
                         let mut items: Vec<Item> = index.for_app(&row.owner(), &all);
@@ -637,7 +807,16 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
                         if items.iter().map(|i| i.bytes).sum::<u64>() < 100_000 {
                             continue;
                         }
-                        st.lock().unwrap().notice = Some(Notice { target: Target { name: row.name.clone(), id: row.id.clone(), app: None, items, reset: false }, at: Instant::now() });
+                        st.lock().unwrap().notice = Some(Notice {
+                            target: Target {
+                                name: row.name.clone(),
+                                id: row.id.clone(),
+                                app: None,
+                                items,
+                                reset: false,
+                            },
+                            at: Instant::now(),
+                        });
                         ctx.request_repaint();
                     }
                 }
@@ -670,7 +849,13 @@ fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) {
                 if n != last && on {
                     last = n;
                     if down {
-                        let apps: Vec<PathBuf> = mac::drag_files().into_iter().filter(|p| p.extension().is_some_and(|e| e == "app") && app_roots.iter().any(|r| p.starts_with(r))).collect();
+                        let apps: Vec<PathBuf> = mac::drag_files()
+                            .into_iter()
+                            .filter(|p| {
+                                p.extension().is_some_and(|e| e == "app")
+                                    && app_roots.iter().any(|r| p.starts_with(r))
+                            })
+                            .collect();
                         if !apps.is_empty() {
                             g.drag = Drag { apps, until: None };
                             ctx.request_repaint();
@@ -701,7 +886,10 @@ impl Tool for Uninstaller {
         "Uninstaller"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::Trash, color: TINT }
+        Badge {
+            icon: Icon::Trash,
+            color: TINT,
+        }
     }
     fn section(&self) -> &'static str {
         "Clean"
@@ -718,7 +906,14 @@ impl Tool for Uninstaller {
         }
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: DROP, title: "Uninstall", about: "Drop an app on it to remove it with its files.", sizes: &[Size::S11, Size::S12, Size::S14], size: Size::S11, default_on: false }]
+        vec![WidgetSpec {
+            id: DROP,
+            title: "Uninstall",
+            about: "Drop an app on it to remove it with its files.",
+            sizes: &[Size::S11, Size::S12, Size::S14],
+            size: Size::S11,
+            default_on: false,
+        }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(self, size, ui, rect, cx);
@@ -754,7 +949,13 @@ impl Tool for Uninstaller {
         let g = self.st.lock().unwrap();
         let busy = g.working.is_some() || matches!(g.phase, Phase::Listing | Phase::Sizing { .. });
         // our own floating windows need frames while the shell is hidden
-        let windows = self.on && (!g.drag.apps.is_empty() || g.notice.is_some() || !matches!(g.drop, Drop::Idle) || g.last.as_ref().is_some_and(|(_, t)| t.elapsed() < Duration::from_secs(8)));
+        let windows = self.on
+            && (!g.drag.apps.is_empty()
+                || g.notice.is_some()
+                || !matches!(g.drop, Drop::Idle)
+                || g.last
+                    .as_ref()
+                    .is_some_and(|(_, t)| t.elapsed() < Duration::from_secs(8)));
         if busy && (windows || crate::kit::activity::visible()) {
             ctx.request_repaint_after(Duration::from_millis(250));
         }
@@ -781,14 +982,21 @@ mod tests {
 
     #[test]
     fn filters_and_sorting() {
-        let env = ToolEnv { ctx: egui::Context::default(), demo: true };
+        let env = ToolEnv {
+            ctx: egui::Context::default(),
+            demo: true,
+        };
         let mut u = Uninstaller::new(&env);
         let all = u.visible();
         assert!(all.len() > 5);
         {
             let g = u.st.lock().unwrap();
             // biggest first, locked ones last
-            let sizes: Vec<u64> = all.iter().filter(|&&i| g.apps[i].locked.is_none()).map(|&i| g.apps[i].total()).collect();
+            let sizes: Vec<u64> = all
+                .iter()
+                .filter(|&&i| g.apps[i].locked.is_none())
+                .map(|&i| g.apps[i].total())
+                .collect();
             assert!(sizes.windows(2).all(|w| w[0] >= w[1]));
             assert!(g.apps[*all.last().unwrap()].locked.is_some());
         }
@@ -797,7 +1005,9 @@ mod tests {
         {
             let g = u.st.lock().unwrap();
             assert!(!unused.is_empty());
-            assert!(unused.iter().all(|&i| g.apps[i].last_used.is_some_and(|t| u.now() - t > UNUSED_DAYS * 86400)));
+            assert!(unused.iter().all(|&i| g.apps[i]
+                .last_used
+                .is_some_and(|t| u.now() - t > UNUSED_DAYS * 86400)));
         }
         u.filter = Filter::All;
         u.search = "dock".into();

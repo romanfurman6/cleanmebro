@@ -56,7 +56,9 @@ pub type Shared = Arc<Scan>;
 
 /// What a folder at `p` is called on the map ("/" is the startup disk).
 pub fn display_name(p: &Path) -> String {
-    p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| "Macintosh HD".into())
+    p.file_name()
+        .map(|x| x.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Macintosh HD".into())
 }
 
 /// The root's folders so far while mapping, with what's been counted in
@@ -67,7 +69,12 @@ pub fn partial(s: &Scan) -> Option<(PathBuf, Vec<LiveRow>)> {
     let (root, kids) = g.as_ref()?;
     let rows = kids
         .iter()
-        .map(|k| LiveRow { name: k.name.clone(), path: k.path.clone(), bytes: k.bytes.load(Ordering::Relaxed), done: k.done })
+        .map(|k| LiveRow {
+            name: k.name.clone(),
+            path: k.path.clone(),
+            bytes: k.bytes.load(Ordering::Relaxed),
+            done: k.done,
+        })
         .filter(|r| r.bytes > 0)
         .collect();
     Some((root.clone(), rows))
@@ -78,13 +85,25 @@ pub fn partial(s: &Scan) -> Option<(PathBuf, Vec<LiveRow>)> {
 /// pops a system dialog even with Full Disk Access, so the map never
 /// enters them.
 pub fn asks_permission(p: &Path) -> bool {
-    if p.extension().is_some_and(|e| e == "musiclibrary" || e == "tvlibrary") {
+    if p.extension()
+        .is_some_and(|e| e == "musiclibrary" || e == "tvlibrary")
+    {
         return true;
     }
-    let Some(home) = dirs::home_dir() else { return false };
-    ["Music/Music", "Music/iTunes", "Movies/TV", "Library/Calendars", "Library/Reminders", "Library/Application Support/AddressBook", "Library/Application Support/CallHistoryDB"]
-        .iter()
-        .any(|x| p == home.join(x))
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    [
+        "Music/Music",
+        "Music/iTunes",
+        "Movies/TV",
+        "Library/Calendars",
+        "Library/Reminders",
+        "Library/Application Support/AddressBook",
+        "Library/Application Support/CallHistoryDB",
+    ]
+    .iter()
+    .any(|x| p == home.join(x))
 }
 
 /// Run the current thread just below the UI, so mapping never makes the
@@ -99,14 +118,40 @@ fn below_ui() {
 /// Folders that the system needs; they can be browsed but not selected.
 pub fn is_essential(p: &Path) -> bool {
     let home = dirs::home_dir().unwrap_or_default();
-    let fixed = ["/System", "/usr", "/bin", "/sbin", "/private", "/Library", "/Applications", "/opt", "/cores", "/dev", "/etc", "/var", "/tmp", "/Volumes", "/Users"];
+    let fixed = [
+        "/System",
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/private",
+        "/Library",
+        "/Applications",
+        "/opt",
+        "/cores",
+        "/dev",
+        "/etc",
+        "/var",
+        "/tmp",
+        "/Volumes",
+        "/Users",
+    ];
     if fixed.iter().any(|f| p == Path::new(f)) {
         return true;
     }
-    if p.starts_with("/System") || p.starts_with("/usr") || p.starts_with("/bin") || p.starts_with("/sbin") || p.starts_with("/private/var/db") {
+    if p.starts_with("/System")
+        || p.starts_with("/usr")
+        || p.starts_with("/bin")
+        || p.starts_with("/sbin")
+        || p.starts_with("/private/var/db")
+    {
         return true;
     }
-    p == home || p == home.join("Library") || p == home.join("Library/Application Support") || p == home.join("Library/Containers") || p == home.join("Library/Preferences") || p == home.join("Library/Keychains")
+    p == home
+        || p == home.join("Library")
+        || p == home.join("Library/Application Support")
+        || p == home.join("Library/Containers")
+        || p == home.join("Library/Preferences")
+        || p == home.join("Library/Keychains")
 }
 
 const KEEP_FILES_OVER: u64 = 8_000_000;
@@ -197,7 +242,9 @@ pub fn load(shared: &Shared, ctx: &egui::Context) -> bool {
     let (s, ctx) = (shared.clone(), ctx.clone());
     std::thread::spawn(move || {
         below_ui();
-        let saved: Option<Saved> = std::fs::File::open(&path).ok().and_then(|f| serde_json::from_reader(std::io::BufReader::new(f)).ok());
+        let saved: Option<Saved> = std::fs::File::open(&path)
+            .ok()
+            .and_then(|f| serde_json::from_reader(std::io::BufReader::new(f)).ok());
         if let Some(saved) = saved {
             let mut r = s.result.lock().unwrap();
             if r.is_none() && !s.running.load(Ordering::SeqCst) {
@@ -229,16 +276,29 @@ struct Walker<'a> {
 impl<'a> Walker<'a> {
     fn new(root: &Path, s: &'a Scan, ctx: &'a egui::Context) -> Self {
         let dev_of = |p: &str| Path::new(p).symlink_metadata().map(|m| m.dev()).ok();
-        let mut devs: Vec<u64> = root.symlink_metadata().map(|m| m.dev()).into_iter().collect();
+        let mut devs: Vec<u64> = root
+            .symlink_metadata()
+            .map(|m| m.dev())
+            .into_iter()
+            .collect();
         let mut skip = Vec::new();
         if root == Path::new("/") {
             devs.extend(dev_of("/System/Volumes/Data"));
             skip.push(PathBuf::from("/System/Volumes"));
             skip.push(PathBuf::from("/Volumes"));
         }
-        let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) as u64;
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4) as u64;
         // leave a core for the window
-        Walker { s, ctx, devs, skip, free: AtomicU64::new(cores.saturating_sub(2).max(1)), last: Mutex::new(std::time::Instant::now()) }
+        Walker {
+            s,
+            ctx,
+            devs,
+            skip,
+            free: AtomicU64::new(cores.saturating_sub(2).max(1)),
+            last: Mutex::new(std::time::Instant::now()),
+        }
     }
 
     fn stay(&self, md: &std::fs::Metadata, p: &Path) -> bool {
@@ -247,24 +307,43 @@ impl<'a> Walker<'a> {
 
     /// Take a free thread if there is one.
     fn try_thread(&self) -> bool {
-        self.free.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1)).is_ok()
+        self.free
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1))
+            .is_ok()
     }
 
     /// The root: its folders are published live and each one counts into
     /// its own total while it's walked.
     fn root(&self, root: &Path) -> Node {
-        let mut node = Node { name: display_name(root), path: root.to_path_buf(), ..Default::default() };
+        let mut node = Node {
+            name: display_name(root),
+            path: root.to_path_buf(),
+            ..Default::default()
+        };
         let (dirs, files) = self.list(root);
         self.add_files(&mut node, files, None);
         let live: Vec<LiveChild> = dirs
             .iter()
-            .map(|d| LiveChild { name: d.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(), path: d.clone(), bytes: Arc::new(AtomicU64::new(0)), done: false })
+            .map(|d| LiveChild {
+                name: d
+                    .file_name()
+                    .map(|x| x.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                path: d.clone(),
+                bytes: Arc::new(AtomicU64::new(0)),
+                done: false,
+            })
             .collect();
         let counters: Vec<Arc<AtomicU64>> = live.iter().map(|l| l.bytes.clone()).collect();
         *self.s.live.lock().unwrap() = Some((root.to_path_buf(), live));
         let next = AtomicU64::new(0);
         // every core pulls the next top-level folder; inside one, free threads help
-        let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).saturating_sub(1).max(1).min(dirs.len().max(1));
+        let workers = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .saturating_sub(1)
+            .max(1)
+            .min(dirs.len().max(1));
         let results: Mutex<Vec<(usize, Node)>> = Mutex::new(Vec::new());
         std::thread::scope(|sc| {
             for _ in 0..workers {
@@ -297,33 +376,53 @@ impl<'a> Walker<'a> {
     /// the allowed volumes.
     fn list(&self, p: &Path) -> (Vec<PathBuf>, Vec<(PathBuf, u64, String)>) {
         let (mut dirs, mut files) = (Vec::new(), Vec::new());
-        let Ok(rd) = std::fs::read_dir(p) else { return (dirs, files) };
+        let Ok(rd) = std::fs::read_dir(p) else {
+            return (dirs, files);
+        };
         for e in rd.flatten() {
             let cp = e.path();
             if asks_permission(&cp) {
                 continue; // never touch folders behind a permission prompt
             }
-            let Ok(cm) = cp.symlink_metadata() else { continue };
+            let Ok(cm) = cp.symlink_metadata() else {
+                continue;
+            };
             if !self.stay(&cm, &cp) {
                 continue; // other volumes (network mounts, backups) and the Data mount point
             }
             if cm.is_dir() {
                 dirs.push(cp);
             } else {
-                files.push((cp, cm.blocks() * 512, e.file_name().to_string_lossy().into_owned()));
+                files.push((
+                    cp,
+                    cm.blocks() * 512,
+                    e.file_name().to_string_lossy().into_owned(),
+                ));
             }
         }
         (dirs, files)
     }
 
-    fn add_files(&self, node: &mut Node, files: Vec<(PathBuf, u64, String)>, top: Option<&AtomicU64>) {
+    fn add_files(
+        &self,
+        node: &mut Node,
+        files: Vec<(PathBuf, u64, String)>,
+        top: Option<&AtomicU64>,
+    ) {
         let mut sum = 0;
         for (path, b, name) in files {
             node.bytes += b;
             node.items += 1;
             sum += b;
             if b >= KEEP_FILES_OVER {
-                node.children.push(Node { name, path, bytes: b, items: 1, children: vec![], other: 0 });
+                node.children.push(Node {
+                    name,
+                    path,
+                    bytes: b,
+                    items: 1,
+                    children: vec![],
+                    other: 0,
+                });
             } else {
                 node.other += b;
             }
@@ -335,8 +434,15 @@ impl<'a> Walker<'a> {
     }
 
     fn walk(&self, p: &Path, depth: usize, top: Option<&AtomicU64>) -> Node {
-        let name = p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
-        let mut node = Node { name, path: p.to_path_buf(), ..Default::default() };
+        let name = p
+            .file_name()
+            .map(|x| x.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.display().to_string());
+        let mut node = Node {
+            name,
+            path: p.to_path_buf(),
+            ..Default::default()
+        };
         if self.s.stop.load(Ordering::Relaxed) {
             return node;
         }
@@ -348,7 +454,9 @@ impl<'a> Walker<'a> {
             }
         }
         let (dirs, files) = self.list(p);
-        self.s.files.fetch_add(files.len() as u64, Ordering::Relaxed);
+        self.s
+            .files
+            .fetch_add(files.len() as u64, Ordering::Relaxed);
         self.add_files(&mut node, files, top);
         let kids: Vec<Node> = std::thread::scope(|sc| {
             let mut handles = Vec::new();
@@ -395,7 +503,10 @@ pub fn find<'a>(root: &'a Node, path: &Path) -> Option<&'a Node> {
     if root.path == path {
         return Some(root);
     }
-    root.children.iter().filter(|c| path.starts_with(&c.path)).find_map(|c| find(c, path))
+    root.children
+        .iter()
+        .filter(|c| path.starts_with(&c.path))
+        .find_map(|c| find(c, path))
 }
 
 /// Remove nodes whose paths were deleted, fixing sizes on the way up.
@@ -424,9 +535,17 @@ pub fn prune(node: &mut Node, removed: &[PathBuf]) -> u64 {
 pub fn squarify(values: &[f64], rect: egui::Rect) -> Vec<egui::Rect> {
     let total: f64 = values.iter().sum();
     if values.is_empty() || total <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
-        return values.iter().map(|_| egui::Rect::from_min_size(rect.min, egui::Vec2::ZERO)).collect();
+        return values
+            .iter()
+            .map(|_| egui::Rect::from_min_size(rect.min, egui::Vec2::ZERO))
+            .collect();
     }
-    let (mut x, mut y, mut w, mut h) = (rect.left() as f64, rect.top() as f64, rect.width() as f64, rect.height() as f64);
+    let (mut x, mut y, mut w, mut h) = (
+        rect.left() as f64,
+        rect.top() as f64,
+        rect.width() as f64,
+        rect.height() as f64,
+    );
     let areas: Vec<f64> = values.iter().map(|v| v.max(0.0) * w * h / total).collect();
     let worst = |row: &[f64], side: f64| -> f64 {
         if row.is_empty() {
@@ -446,7 +565,10 @@ pub fn squarify(values: &[f64], rect: egui::Rect) -> Vec<egui::Rect> {
             let mut yy = *y;
             for a in row.iter() {
                 let hh = if cw > 0.0 { a / cw } else { 0.0 };
-                out.push(egui::Rect::from_min_size(egui::pos2(*x as f32, yy as f32), egui::vec2(cw as f32, hh as f32)));
+                out.push(egui::Rect::from_min_size(
+                    egui::pos2(*x as f32, yy as f32),
+                    egui::vec2(cw as f32, hh as f32),
+                ));
                 yy += hh;
             }
             *x += cw;
@@ -456,7 +578,10 @@ pub fn squarify(values: &[f64], rect: egui::Rect) -> Vec<egui::Rect> {
             let mut xx = *x;
             for a in row.iter() {
                 let ww = if rh > 0.0 { a / rh } else { 0.0 };
-                out.push(egui::Rect::from_min_size(egui::pos2(xx as f32, *y as f32), egui::vec2(ww as f32, rh as f32)));
+                out.push(egui::Rect::from_min_size(
+                    egui::pos2(xx as f32, *y as f32),
+                    egui::vec2(ww as f32, rh as f32),
+                ));
                 xx += ww;
             }
             *y += rh;
@@ -487,11 +612,28 @@ mod tests {
     use super::*;
 
     fn node(path: &str, bytes: u64, children: Vec<Node>) -> Node {
-        Node { name: path.rsplit('/').next().unwrap().into(), path: PathBuf::from(path), bytes, children, ..Default::default() }
+        Node {
+            name: path.rsplit('/').next().unwrap().into(),
+            path: PathBuf::from(path),
+            bytes,
+            children,
+            ..Default::default()
+        }
     }
 
     fn tree() -> Node {
-        node("/r", 100, vec![node("/r/a", 60, vec![node("/r/a/x", 50, vec![]), node("/r/a/y", 10, vec![])]), node("/r/ab", 40, vec![])])
+        node(
+            "/r",
+            100,
+            vec![
+                node(
+                    "/r/a",
+                    60,
+                    vec![node("/r/a/x", 50, vec![]), node("/r/a/y", 10, vec![])],
+                ),
+                node("/r/ab", 40, vec![]),
+            ],
+        )
     }
 
     #[test]
@@ -525,7 +667,11 @@ mod tests {
     #[test]
     fn saved_map_round_trips() {
         let t = tree();
-        let json = serde_json::to_string(&Saved { when: 7, root: t.clone() }).unwrap();
+        let json = serde_json::to_string(&Saved {
+            when: 7,
+            root: t.clone(),
+        })
+        .unwrap();
         let back: Saved = serde_json::from_str(&json).unwrap();
         assert_eq!(back.when, 7);
         assert_eq!(find(&back.root, Path::new("/r/a/x")).unwrap().bytes, 50);
@@ -585,7 +731,10 @@ mod tests {
         for (k, a) in r.iter().enumerate() {
             assert!(rect.expand(0.01).contains_rect(*a), "block {k} outside");
             let want = vals[k] / total * 600.0 * 500.0;
-            assert!(((a.area() as f64) - want).abs() < want * 0.01 + 1.0, "block {k} area");
+            assert!(
+                ((a.area() as f64) - want).abs() < want * 0.01 + 1.0,
+                "block {k} area"
+            );
             for b in &r[k + 1..] {
                 assert!(a.intersect(*b).area() < 0.5, "blocks overlap");
             }

@@ -10,7 +10,9 @@ mod power;
 mod sessions;
 mod ui;
 
-use crate::core::tool::{Badge, Cx, MenuItem, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
+use crate::core::tool::{
+    Badge, Cx, MenuItem, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES,
+};
 use crate::kit::glass::{tint, Icon};
 use egui::{Rect, Ui};
 use engine::{now, Engine, State};
@@ -36,7 +38,10 @@ impl KeepAwake {
     pub fn new(env: &ToolEnv) -> Self {
         if env.demo {
             let (engine, t) = demo_engine(State::Claude);
-            return KeepAwake { engine: Arc::new(Mutex::new(engine)), demo_now: Some(t) };
+            return KeepAwake {
+                engine: Arc::new(Mutex::new(engine)),
+                demo_now: Some(t),
+            };
         }
         let engine: Shared = Arc::new(Mutex::new(Engine::new(Some(engine::data_dir()))));
         let shared = engine.clone();
@@ -45,7 +50,10 @@ impl KeepAwake {
             .name("keep-awake".into())
             .spawn(move || watch(shared, ctx))
             .ok();
-        KeepAwake { engine, demo_now: None }
+        KeepAwake {
+            engine,
+            demo_now: None,
+        }
     }
 
     fn now(&self) -> i64 {
@@ -72,7 +80,11 @@ fn watch(engine: Shared, ctx: egui::Context) {
     loop {
         let t = now();
         let watch_claude = engine.lock().unwrap().settings.claude;
-        let found = if watch_claude { scanner.scan(&root, t) } else { Vec::new() };
+        let found = if watch_claude {
+            scanner.scan(&root, t)
+        } else {
+            Vec::new()
+        };
         {
             let mut e = engine.lock().unwrap();
             let before = (e.state(t), e.sessions.clone());
@@ -87,7 +99,10 @@ fn watch(engine: Shared, ctx: egui::Context) {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Cup, color: tint::KEEP_AWAKE }
+    Badge {
+        icon: Icon::Cup,
+        color: tint::KEEP_AWAKE,
+    }
 }
 
 /// Sample data for screenshots, showing `state`.
@@ -97,11 +112,26 @@ fn demo_engine(state: State) -> (Engine, i64) {
     let mut e = Engine::new(None);
     let h = |x: f64| t - ((13.0 + 7.0 / 60.0 - x) * 3600.0) as i64;
     e.log = vec![
-        engine::Span { start: h(9.2), end: h(9.9), claude: false },
-        engine::Span { start: h(10.7), end: h(11.3), claude: true },
-        engine::Span { start: h(11.3), end: h(11.9), claude: false },
+        engine::Span {
+            start: h(9.2),
+            end: h(9.9),
+            claude: false,
+        },
+        engine::Span {
+            start: h(10.7),
+            end: h(11.3),
+            claude: true,
+        },
+        engine::Span {
+            start: h(11.3),
+            end: h(11.9),
+            claude: false,
+        },
     ];
-    let idle = Session { project: "notes".into(), last_write: t - 3 * 3600 };
+    let idle = Session {
+        project: "notes".into(),
+        last_write: t - 3 * 3600,
+    };
     match state {
         State::Off => {
             e.sessions = vec![idle];
@@ -113,8 +143,14 @@ fn demo_engine(state: State) -> (Engine, i64) {
         }
         State::Claude => {
             e.sessions = vec![
-                Session { project: "cleanmebro".into(), last_write: h(11.9) },
-                Session { project: "api-server".into(), last_write: h(11.9) },
+                Session {
+                    project: "cleanmebro".into(),
+                    last_write: h(11.9),
+                },
+                Session {
+                    project: "api-server".into(),
+                    last_write: h(11.9),
+                },
                 idle.clone(),
             ];
             e.step(h(11.9));
@@ -122,7 +158,13 @@ fn demo_engine(state: State) -> (Engine, i64) {
             e.sessions[1].last_write = t - 48;
         }
         State::WindDown { .. } => {
-            e.sessions = vec![Session { project: "cleanmebro".into(), last_write: t - 300 }, idle];
+            e.sessions = vec![
+                Session {
+                    project: "cleanmebro".into(),
+                    last_write: t - 300,
+                },
+                idle,
+            ];
             e.step(t - 300);
         }
     }
@@ -150,7 +192,14 @@ impl Tool for KeepAwake {
         ui::short_state(self.state()).into()
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: CARD, title: "Keep Awake", about: "The switch, and what keeps your Mac up.", sizes: ALL_SIZES, size: Size::S11, default_on: true }]
+        vec![WidgetSpec {
+            id: CARD,
+            title: "Keep Awake",
+            about: "The switch, and what keeps your Mac up.",
+            sizes: ALL_SIZES,
+            size: Size::S11,
+            default_on: true,
+        }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(self, size, ui, rect, cx);
@@ -163,7 +212,15 @@ impl Tool for KeepAwake {
     }
     fn menu_items(&self) -> Vec<MenuItem> {
         let on = self.engine.lock().unwrap().manual_since.is_some();
-        vec![MenuItem { id: MENU_TOGGLE, label: if on { "Let the Mac sleep" } else { "Keep the Mac awake" }.into() }]
+        vec![MenuItem {
+            id: MENU_TOGGLE,
+            label: if on {
+                "Let the Mac sleep"
+            } else {
+                "Keep the Mac awake"
+            }
+            .into(),
+        }]
     }
     fn menu_action(&mut self, item: &str, _cx: &mut Cx) {
         if item == MENU_TOGGLE {
@@ -204,10 +261,15 @@ mod tests {
     #[test]
     fn demo_states_show_what_they_say() {
         for (want, matches) in [
-            (State::Off, (|s: State| s == State::Off) as fn(State) -> bool),
+            (
+                State::Off,
+                (|s: State| s == State::Off) as fn(State) -> bool,
+            ),
             (State::Manual, |s| s == State::Manual),
             (State::Claude, |s| s == State::Claude),
-            (State::WindDown { left: 0 }, |s| matches!(s, State::WindDown { .. })),
+            (State::WindDown { left: 0 }, |s| {
+                matches!(s, State::WindDown { .. })
+            }),
         ] {
             let (e, t) = demo_engine(want);
             assert!(matches(e.state(t)), "{want:?} → {:?}", e.state(t));

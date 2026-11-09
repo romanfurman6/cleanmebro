@@ -2,12 +2,12 @@
 //! drawing pieces the page shares: spinning blades, speed dials, the heat
 //! scale and sparklines.
 
-use super::data::{heat, heat_text, rpm_text, Fan, Group, Snapshot};
 use super::control::Mode;
+use super::data::{heat, heat_text, rpm_text, Fan, Group, Snapshot};
 use super::{Cmd, HelperState, Live, ID, SHEET};
 use crate::core::tool::{Cx, Size};
-use crate::kit::tile;
 use crate::kit::glass::*;
+use crate::kit::tile;
 use egui::epaint::Mesh;
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2};
 use std::f32::consts::{PI, TAU};
@@ -40,11 +40,16 @@ pub fn blades(p: &egui::Painter, c: Pos2, r: f32, angle: f32, color: Color32, hu
         let center = c + dir * r * 0.52;
         // an ellipse along the blade, leaned back a little like a real blade
         let lean = a + 0.35;
-        let (ax, ay) = (Vec2::angled(lean) * r * 0.46, Vec2::angled(lean + PI / 2.0) * r * 0.19);
-        let pts: Vec<Pos2> = (0..16).map(|i| {
-            let u = i as f32 / 16.0 * TAU;
-            center + ax * u.cos() + ay * u.sin()
-        }).collect();
+        let (ax, ay) = (
+            Vec2::angled(lean) * r * 0.46,
+            Vec2::angled(lean + PI / 2.0) * r * 0.19,
+        );
+        let pts: Vec<Pos2> = (0..16)
+            .map(|i| {
+                let u = i as f32 / 16.0 * TAU;
+                center + ax * u.cos() + ay * u.sin()
+            })
+            .collect();
         p.add(Shape::convex_polygon(pts, color, Stroke::NONE));
     }
     p.circle_filled(c, r * 0.24, hub);
@@ -99,7 +104,15 @@ pub fn heat_pos(c: f32) -> f32 {
 }
 
 /// A line through `values` scaled between `lo` and `hi`, optionally filled below.
-pub fn sparkline(p: &egui::Painter, r: Rect, values: &[f32], lo: f32, hi: f32, color: Color32, fill: Option<Color32>) {
+pub fn sparkline(
+    p: &egui::Painter,
+    r: Rect,
+    values: &[f32],
+    lo: f32,
+    hi: f32,
+    color: Color32,
+    fill: Option<Color32>,
+) {
     if values.len() < 2 {
         return;
     }
@@ -109,7 +122,10 @@ pub fn sparkline(p: &egui::Painter, r: Rect, values: &[f32], lo: f32, hi: f32, c
         .enumerate()
         .map(|(i, v)| {
             let f = ((v - lo) / (hi - lo).max(1.0)).clamp(0.0, 1.0);
-            Pos2::new(r.left() + r.width() * i as f32 / n, r.bottom() - 1.0 - (r.height() - 2.0) * f)
+            Pos2::new(
+                r.left() + r.width() * i as f32 / n,
+                r.bottom() - 1.0 - (r.height() - 2.0) * f,
+            )
         })
         .collect();
     if let Some(fc) = fill {
@@ -158,13 +174,28 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let x1 = rect.right() - 12.0;
         let y0 = rect.top() + CARD_H + 4.0;
         hairline(p, Pos2::new(x0, y0 - 6.0), Pos2::new(x1, y0 - 6.0));
-        p.text(Pos2::new(x0, y0 + 4.0), Align2::LEFT_TOP, "Temperatures", font(11.0), TEXT_FAINT);
+        p.text(
+            Pos2::new(x0, y0 + 4.0),
+            Align2::LEFT_TOP,
+            "Temperatures",
+            font(11.0),
+            TEXT_FAINT,
+        );
         let groups = s.groups();
         let lh = 24.0;
         let fit = ((rect.bottom() - 10.0 - (y0 + 22.0)) / lh).floor().max(0.0) as usize;
         for (i, g) in groups.iter().take(fit).enumerate() {
-            let lr = Rect::from_min_size(Pos2::new(x0, y0 + 22.0 + i as f32 * lh), Vec2::new(x1 - x0, lh));
-            tile::bar_line(p, lr, g.group.label(), Some((heat_pos(g.max).max(0.03), heat(g.max))), &format!("{:.0} °C", g.max));
+            let lr = Rect::from_min_size(
+                Pos2::new(x0, y0 + 22.0 + i as f32 * lh),
+                Vec2::new(x1 - x0, lh),
+            );
+            tile::bar_line(
+                p,
+                lr,
+                g.group.label(),
+                Some((heat_pos(g.max).max(0.03), heat(g.max))),
+                &format!("{:.0} °C", g.max),
+            );
         }
         return;
     }
@@ -182,7 +213,9 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         "No data".into()
     };
     let frac = s.avg_frac().unwrap_or(0.0);
-    let hot = hottest_text(s).map(|(g, c)| format!("{g} {c:.0} °C")).unwrap_or_default();
+    let hot = hottest_text(s)
+        .map(|(g, c)| format!("{g} {c:.0} °C"))
+        .unwrap_or_default();
     let resp = match size {
         Size::S11 => {
             let resp = tile::card(ui, rect, id, sel);
@@ -190,17 +223,67 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
             let c = Pos2::new(rect.center().x, rect.top() + 32.0);
             ring(p, c, 22.0, 4.0, frac, LINE);
             blades(p, c, 16.0, spin(t, rpm.unwrap_or(0.0)), BLADE, CARD);
-            text_fit(p, Pos2::new(rect.center().x, rect.bottom() - 9.0), Align2::CENTER_BOTTOM, &value, font(11.0), TEXT_SOFT, rect.width() - 10.0);
+            text_fit(
+                p,
+                Pos2::new(rect.center().x, rect.bottom() - 9.0),
+                Align2::CENTER_BOTTOM,
+                &value,
+                font(11.0),
+                TEXT_SOFT,
+                rect.width() - 10.0,
+            );
             resp
         }
-        Size::S12 => tile::wide(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, if rpm.is_some() { Ok((frac.max(0.02), LINE)) } else { Err(hot.as_str()) }, sel),
+        Size::S12 => tile::wide(
+            ui,
+            rect,
+            id,
+            Icon::Fan,
+            tint::FAN,
+            "Fans",
+            &value,
+            if rpm.is_some() {
+                Ok((frac.max(0.02), LINE))
+            } else {
+                Err(hot.as_str())
+            },
+            sel,
+        ),
         _ => {
-            let (resp, right) = tile::row_split(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, &hot, sel);
-            let mut lines: Vec<(String, Option<(f32, Color32)>, String)> = s.fans.iter().take(2).enumerate().map(|(i, f)| (fan_name(i, s.fans.len()), Some((f.frac().max(0.02), LINE)), format!("{:.0} rpm", f.rpm))).collect();
+            let (resp, right) = tile::row_split(
+                ui,
+                rect,
+                id,
+                Icon::Fan,
+                tint::FAN,
+                "Fans",
+                &value,
+                &hot,
+                sel,
+            );
+            let mut lines: Vec<(String, Option<(f32, Color32)>, String)> = s
+                .fans
+                .iter()
+                .take(2)
+                .enumerate()
+                .map(|(i, f)| {
+                    (
+                        fan_name(i, s.fans.len()),
+                        Some((f.frac().max(0.02), LINE)),
+                        format!("{:.0} rpm", f.rpm),
+                    )
+                })
+                .collect();
             if let Some((g, c)) = hottest_text(s) {
                 lines.push((g, None, format!("{c:.0} °C")));
             }
-            let empty = if !s.loaded { "Reading…" } else if s.has_smc { "No fans · cools passively" } else { "Fan speed unavailable" };
+            let empty = if !s.loaded {
+                "Reading…"
+            } else if s.has_smc {
+                "No fans · cools passively"
+            } else {
+                "Fan speed unavailable"
+            };
             tile::lines(ui.painter(), right, &lines, empty);
             resp
         }
@@ -209,13 +292,23 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     if let Some(r) = rpm {
         let p = ui.painter();
         let chip = match size {
-            Size::S12 => Some(Rect::from_min_size(Pos2::new(rect.left() + tile::PAD, rect.top() + 9.0), Vec2::splat(18.0))),
+            Size::S12 => Some(Rect::from_min_size(
+                Pos2::new(rect.left() + tile::PAD, rect.top() + 9.0),
+                Vec2::splat(18.0),
+            )),
             Size::S14 => Some(tile::row_chip(rect)),
             _ => None,
         };
         if let Some(chip) = chip {
             p.rect_filled(chip, chip.width() * 0.28, tint::FAN);
-            blades(p, chip.center(), chip.width() * 0.36, spin(t, r), Color32::WHITE, tint::FAN);
+            blades(
+                p,
+                chip.center(),
+                chip.width() * 0.36,
+                spin(t, r),
+                Color32::WHITE,
+                tint::FAN,
+            );
         }
     }
     keep_spinning(ui, s);
@@ -236,28 +329,64 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let x0 = rect.left() + 12.0;
     let x1 = rect.right() - 12.0;
     let hy = rect.top() + 20.0;
-    tool_chip(&p, Rect::from_center_size(Pos2::new(x0 + 10.0, hy), Vec2::splat(20.0)), Icon::Fan, tint::FAN);
-    p.text(Pos2::new(x0 + 28.0, hy), Align2::LEFT_CENTER, "Fans", bold(13.0), TEXT);
+    tool_chip(
+        &p,
+        Rect::from_center_size(Pos2::new(x0 + 10.0, hy), Vec2::splat(20.0)),
+        Icon::Fan,
+        tint::FAN,
+    );
+    p.text(
+        Pos2::new(x0 + 28.0, hy),
+        Align2::LEFT_CENTER,
+        "Fans",
+        bold(13.0),
+        TEXT,
+    );
     let mode = if s.fanless() { "No fans" } else { "Auto" };
-    p.text(Pos2::new(x1, hy), Align2::RIGHT_CENTER, mode, font(12.0), TEXT_DIM);
+    p.text(
+        Pos2::new(x1, hy),
+        Align2::RIGHT_CENTER,
+        mode,
+        font(12.0),
+        TEXT_DIM,
+    );
 
     // fans
     let fy = rect.top() + 38.0;
     let fh = 52.0;
     if !s.loaded {
-        spinner(&p, Pos2::new(rect.center().x, fy + fh / 2.0), 8.0, t, TEXT_DIM);
+        spinner(
+            &p,
+            Pos2::new(rect.center().x, fy + fh / 2.0),
+            8.0,
+            t,
+            TEXT_DIM,
+        );
         crate::kit::glass::animate(ui.ctx());
     } else if s.fans.is_empty() {
         let r = Rect::from_min_size(Pos2::new(x0, fy), Vec2::new(x1 - x0, fh));
         p.rect_filled(r, 10.0, white(10));
-        let msg = if s.has_smc { "This Mac has no fans. It cools passively." } else { "Fan speed isn't available on this Mac." };
-        text_fit(&p, Pos2::new(r.left() + 12.0, r.center().y), Align2::LEFT_CENTER, msg, font(12.0), TEXT_DIM, r.width() - 24.0);
+        let msg = if s.has_smc {
+            "This Mac has no fans. It cools passively."
+        } else {
+            "Fan speed isn't available on this Mac."
+        };
+        text_fit(
+            &p,
+            Pos2::new(r.left() + 12.0, r.center().y),
+            Align2::LEFT_CENTER,
+            msg,
+            font(12.0),
+            TEXT_DIM,
+            r.width() - 24.0,
+        );
     } else {
         let n = s.fans.len().min(2);
         let gap = 8.0;
         let bw = (x1 - x0 - gap * (n as f32 - 1.0)) / n as f32;
         for (i, f) in s.fans.iter().take(n).enumerate() {
-            let r = Rect::from_min_size(Pos2::new(x0 + i as f32 * (bw + gap), fy), Vec2::new(bw, fh));
+            let r =
+                Rect::from_min_size(Pos2::new(x0 + i as f32 * (bw + gap), fy), Vec2::new(bw, fh));
             mini_fan(&p, r, f, &fan_name(i, s.fans.len()), t);
         }
         keep_spinning(ui, s);
@@ -267,8 +396,20 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let ty = fy + fh + 12.0;
     match hottest_text(s) {
         Some((g, c)) => {
-            p.text(Pos2::new(x0, ty + 7.0), Align2::LEFT_CENTER, format!("Hottest · {g}"), font(12.0), TEXT_DIM);
-            p.text(Pos2::new(x1, ty + 7.0), Align2::RIGHT_CENTER, format!("{c:.0} °C"), bold(13.0), heat_text(c));
+            p.text(
+                Pos2::new(x0, ty + 7.0),
+                Align2::LEFT_CENTER,
+                format!("Hottest · {g}"),
+                font(12.0),
+                TEXT_DIM,
+            );
+            p.text(
+                Pos2::new(x1, ty + 7.0),
+                Align2::RIGHT_CENTER,
+                format!("{c:.0} °C"),
+                bold(13.0),
+                heat_text(c),
+            );
             let br = Rect::from_min_max(Pos2::new(x0, ty + 20.0), Pos2::new(x1, ty + 26.0));
             heat_scale(&p, br);
             let mx = br.left() + br.width() * heat_pos(c);
@@ -279,10 +420,24 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
             let lo = hot.iter().copied().fold(f32::MAX, f32::min).min(c) - 4.0;
             let hi = hot.iter().copied().fold(f32::MIN, f32::max).max(c) + 4.0;
             let bottom = rect.bottom().min(rect.top() + CARD_H) - 10.0;
-            sparkline(&p, Rect::from_min_max(Pos2::new(x0, ty + 34.0), Pos2::new(x1, bottom)), &hot, lo, hi, HOT_LINE, None);
+            sparkline(
+                &p,
+                Rect::from_min_max(Pos2::new(x0, ty + 34.0), Pos2::new(x1, bottom)),
+                &hot,
+                lo,
+                hi,
+                HOT_LINE,
+                None,
+            );
         }
         None if s.loaded => {
-            p.text(Pos2::new(x0, ty + 7.0), Align2::LEFT_CENTER, "No temperature sensors found", font(12.0), TEXT_DIM);
+            p.text(
+                Pos2::new(x0, ty + 7.0),
+                Align2::LEFT_CENTER,
+                "No temperature sensors found",
+                font(12.0),
+                TEXT_DIM,
+            );
         }
         None => {}
     }
@@ -299,9 +454,27 @@ fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str, t: f64) {
     ring(p, c, 17.0, 3.0, f.frac(), LINE);
     blades(p, c, 12.0, spin(t, f.rpm), BLADE, CARD);
     let x = c.x + 26.0;
-    p.text(Pos2::new(x, r.center().y - 9.0), Align2::LEFT_CENTER, name, font(11.0), TEXT_DIM);
-    let g = p.text(Pos2::new(x, r.center().y + 8.0), Align2::LEFT_CENTER, rpm_text(f.rpm), bold(15.0), TEXT);
-    p.text(Pos2::new(g.right() + 4.0, r.center().y + 9.0), Align2::LEFT_CENTER, "rpm", font(11.0), TEXT_FAINT);
+    p.text(
+        Pos2::new(x, r.center().y - 9.0),
+        Align2::LEFT_CENTER,
+        name,
+        font(11.0),
+        TEXT_DIM,
+    );
+    let g = p.text(
+        Pos2::new(x, r.center().y + 8.0),
+        Align2::LEFT_CENTER,
+        rpm_text(f.rpm),
+        bold(15.0),
+        TEXT,
+    );
+    p.text(
+        Pos2::new(g.right() + 4.0, r.center().y + 9.0),
+        Align2::LEFT_CENTER,
+        "rpm",
+        font(11.0),
+        TEXT_FAINT,
+    );
 }
 
 // ---------------------------------------------------------------- sheet
@@ -314,7 +487,10 @@ pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Ve
     let (title, sub) = if s.fans.is_empty() {
         ("Temperatures".to_string(), s.chip.clone())
     } else {
-        ("Fans".to_string(), format!("{} · mode {}", plural(s.fans.len(), "fan"), mode_word(l)))
+        (
+            "Fans".to_string(),
+            format!("{} · mode {}", plural(s.fans.len(), "fan"), mode_word(l)),
+        )
     };
     if sheet_header(ui, rect, Icon::Fan, tint::FAN, &title, &sub) {
         cx.close_detail();
@@ -324,28 +500,70 @@ pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Ve
     let mut y = rect.top() + SHEET_HEADER_H + 16.0;
 
     if let (Some(avg), Some(frac)) = (s.avg_rpm(), s.avg_frac()) {
-        y += hero_number(&p, Pos2::new(x0, y), &rpm_text(avg), "rpm", &format!("{} · {:.0}% of max", if s.fans.len() > 1 { "average" } else { "now" }, frac * 100.0)) + 12.0;
+        y += hero_number(
+            &p,
+            Pos2::new(x0, y),
+            &rpm_text(avg),
+            "rpm",
+            &format!(
+                "{} · {:.0}% of max",
+                if s.fans.len() > 1 { "average" } else { "now" },
+                frac * 100.0
+            ),
+        ) + 12.0;
         for (i, f) in s.fans.iter().enumerate() {
-            p.text(Pos2::new(x0, y), Align2::LEFT_TOP, fan_name(i, s.fans.len()), font(12.0), TEXT_DIM);
-            p.text(Pos2::new(x0 + w, y), Align2::RIGHT_TOP, format!("{} of {}", rpm_text(f.rpm), rpm_text(f.max)), font(12.0), TEXT);
+            p.text(
+                Pos2::new(x0, y),
+                Align2::LEFT_TOP,
+                fan_name(i, s.fans.len()),
+                font(12.0),
+                TEXT_DIM,
+            );
+            p.text(
+                Pos2::new(x0 + w, y),
+                Align2::RIGHT_TOP,
+                format!("{} of {}", rpm_text(f.rpm), rpm_text(f.max)),
+                font(12.0),
+                TEXT,
+            );
             let br = Rect::from_min_size(Pos2::new(x0, y + 19.0), Vec2::new(w, 8.0));
             p.rect_filled(br, 4.0, white(20));
-            let fr = Rect::from_min_size(br.min, Vec2::new((br.width() * f.frac()).max(8.0), br.height()));
+            let fr = Rect::from_min_size(
+                br.min,
+                Vec2::new((br.width() * f.frac()).max(8.0), br.height()),
+            );
             p.rect_filled(fr, 4.0, LINE);
             if f.max > 0.0 {
                 let mx = br.left() + br.width() * (f.min / f.max).clamp(0.0, 1.0);
-                p.rect_filled(Rect::from_center_size(Pos2::new(mx, br.center().y), Vec2::new(2.0, 12.0)), 1.0, white(140));
+                p.rect_filled(
+                    Rect::from_center_size(Pos2::new(mx, br.center().y), Vec2::new(2.0, 12.0)),
+                    1.0,
+                    white(140),
+                );
             }
             y += 36.0;
         }
-        p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "The tick marks the lowest speed the fan allows.", font(11.0), TEXT_FAINT);
+        p.text(
+            Pos2::new(x0, y),
+            Align2::LEFT_TOP,
+            "The tick marks the lowest speed the fan allows.",
+            font(11.0),
+            TEXT_FAINT,
+        );
         y += 24.0;
         // quick mode switch; anything that needs more (helper, curve) opens the page
         let labels: Vec<&str> = Mode::ALL.iter().map(|m| m.label()).collect();
-        if let Some(i) = segmented(ui, Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 28.0)), ui.scope_id().with("fan-mode"), &labels, l.settings.mode.index()) {
+        if let Some(i) = segmented(
+            ui,
+            Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 28.0)),
+            ui.scope_id().with("fan-mode"),
+            &labels,
+            l.settings.mode.index(),
+        ) {
             let mut st = l.settings.clone();
             st.mode = Mode::ALL[i];
-            let open = st.mode == Mode::Curve || (st.mode != Mode::Auto && l.helper != HelperState::Ready);
+            let open =
+                st.mode == Mode::Curve || (st.mode != Mode::Auto && l.helper != HelperState::Ready);
             cmds.push(Cmd::Set(st, true));
             if open {
                 cx.open_page(ID, "");
@@ -362,11 +580,29 @@ pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Ve
         };
         let ir = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 56.0));
         p.rect_filled(ir, R_CARD, with_alpha(tint::FAN, 0.14));
-        p.rect_stroke(ir, R_CARD, Stroke::new(1.0, with_alpha(tint::FAN, 0.4)), egui::StrokeKind::Inside);
-        paragraph(&p, ir.min + Vec2::new(12.0, 10.0), msg, font(12.0), TEXT_SOFT, w - 24.0);
+        p.rect_stroke(
+            ir,
+            R_CARD,
+            Stroke::new(1.0, with_alpha(tint::FAN, 0.4)),
+            egui::StrokeKind::Inside,
+        );
+        paragraph(
+            &p,
+            ir.min + Vec2::new(12.0, 10.0),
+            msg,
+            font(12.0),
+            TEXT_SOFT,
+            w - 24.0,
+        );
         y = ir.bottom() + 14.0;
         if let Some((g, c)) = hottest_text(s) {
-            y += hero_number(&p, Pos2::new(x0, y), &format!("{c:.0}"), "°C", &format!("hottest · {g}")) + 14.0;
+            y += hero_number(
+                &p,
+                Pos2::new(x0, y),
+                &format!("{c:.0}"),
+                "°C",
+                &format!("hottest · {g}"),
+            ) + 14.0;
         }
     }
 
@@ -378,10 +614,29 @@ pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Ve
         glass_card(&p, gr, R_CARD, 0.0, false);
         for (i, g) in groups.iter().take(rows).enumerate() {
             let cy = gr.top() + 4.0 + 15.0 + i as f32 * 30.0;
-            p.rect_filled(Rect::from_center_size(Pos2::new(gr.left() + 16.5, cy), Vec2::splat(9.0)), 3.0, heat(g.max));
-            p.text(Pos2::new(gr.left() + 31.0, cy), Align2::LEFT_CENTER, g.group.label(), font(13.0), TEXT);
-            let vr = p.text(Pos2::new(gr.right() - 12.0, cy), Align2::RIGHT_CENTER, format!("{:.0} °C", g.max), font(13.0), heat_text(g.max));
-            let br = Rect::from_min_max(Pos2::new(vr.left() - 12.0 - 70.0, cy - 2.0), Pos2::new(vr.left() - 12.0, cy + 2.0));
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(gr.left() + 16.5, cy), Vec2::splat(9.0)),
+                3.0,
+                heat(g.max),
+            );
+            p.text(
+                Pos2::new(gr.left() + 31.0, cy),
+                Align2::LEFT_CENTER,
+                g.group.label(),
+                font(13.0),
+                TEXT,
+            );
+            let vr = p.text(
+                Pos2::new(gr.right() - 12.0, cy),
+                Align2::RIGHT_CENTER,
+                format!("{:.0} °C", g.max),
+                font(13.0),
+                heat_text(g.max),
+            );
+            let br = Rect::from_min_max(
+                Pos2::new(vr.left() - 12.0 - 70.0, cy - 2.0),
+                Pos2::new(vr.left() - 12.0, cy + 2.0),
+            );
             bar(&p, br, heat_pos(g.max).max(0.03), heat(g.max));
         }
         y = gr.bottom() + 12.0;
@@ -390,7 +645,11 @@ pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Ve
     // thermal pressure
     let (hint, col) = thermal_hint(s.thermal);
     let fr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 0.0));
-    let need = p.layout(hint.to_string(), font(12.0), TEXT_FAINT, w - 24.0).size().y + 35.0;
+    let need = p
+        .layout(hint.to_string(), font(12.0), TEXT_FAINT, w - 24.0)
+        .size()
+        .y
+        + 35.0;
     let fr = Rect::from_min_size(fr.min, Vec2::new(w, need));
     let by = rect.bottom() - 16.0 - 30.0;
     if fr.bottom() < by - 8.0 {
@@ -400,7 +659,15 @@ pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Ve
 
     let label = "Open Fan Control";
     let bw = button_width(&p, label, BTN_PRIMARY);
-    if pill_button(ui, Rect::from_min_size(Pos2::new(rect.right() - 16.0 - bw, by), Vec2::new(bw, 30.0)), label, BTN_PRIMARY, true).clicked() {
+    if pill_button(
+        ui,
+        Rect::from_min_size(Pos2::new(rect.right() - 16.0 - bw, by), Vec2::new(bw, 30.0)),
+        label,
+        BTN_PRIMARY,
+        true,
+    )
+    .clicked()
+    {
         cx.open_page(ID, "");
     }
     keep_spinning(ui, s);
@@ -422,9 +689,15 @@ pub fn mode_word(l: &Live) -> String {
 pub fn thermal_hint(level: u8) -> (&'static str, Color32) {
     match level {
         0 => ("No slowdown. macOS only throttles from Serious up.", GREEN),
-        1 => ("Slightly slowed. A hard surface under the Mac helps.", AMBER),
+        1 => (
+            "Slightly slowed. A hard surface under the Mac helps.",
+            AMBER,
+        ),
         2 => ("macOS is slowing the chip down to cool it.", AMBER),
-        _ => ("Heavily slowed. Close demanding apps and give the Mac air.", RED),
+        _ => (
+            "Heavily slowed. Close demanding apps and give the Mac air.",
+            RED,
+        ),
     }
 }
 

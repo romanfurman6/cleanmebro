@@ -3,9 +3,9 @@
 //! safe / ask / keep. Anything not clearly safe waits for the person's OK.
 
 use crate::kit::claude_code;
+use crate::kit::fs::dir_size;
 use crate::kit::fs::{home, is_protected, move_to_trash};
 use crate::kit::mechanics as m;
-use crate::kit::fs::dir_size;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -141,20 +141,39 @@ pub struct State {
 
 impl State {
     pub fn total(&self) -> u64 {
-        self.items.iter().filter(|i| i.verdict != Verdict::Keep).map(|i| i.bytes).sum()
+        self.items
+            .iter()
+            .filter(|i| i.verdict != Verdict::Keep)
+            .map(|i| i.bytes)
+            .sum()
     }
     pub fn selected_bytes(&self) -> u64 {
-        self.items.iter().filter(|i| i.selected).map(|i| i.bytes).sum()
+        self.items
+            .iter()
+            .filter(|i| i.selected)
+            .map(|i| i.bytes)
+            .sum()
     }
     pub fn pending_questions(&self) -> usize {
-        self.items.iter().filter(|i| i.verdict == Verdict::Ask && i.by != Who::You).count()
+        self.items
+            .iter()
+            .filter(|i| i.verdict == Verdict::Ask && i.by != Who::You)
+            .count()
     }
     pub fn group_bytes(&self, g: Group) -> u64 {
-        self.items.iter().filter(|i| i.group == g && i.verdict != Verdict::Keep).map(|i| i.bytes).sum()
+        self.items
+            .iter()
+            .filter(|i| i.group == g && i.verdict != Verdict::Keep)
+            .map(|i| i.bytes)
+            .sum()
     }
     /// Claude junk safe to clean (for the panel's recommendation).
     pub fn claude_safe_bytes(&self) -> u64 {
-        self.items.iter().filter(|i| i.group == Group::Claude && i.verdict == Verdict::Safe).map(|i| i.bytes).sum()
+        self.items
+            .iter()
+            .filter(|i| i.group == Group::Claude && i.verdict == Verdict::Safe)
+            .map(|i| i.bytes)
+            .sum()
     }
 }
 
@@ -183,7 +202,15 @@ impl Ctx {
         self.egui.request_repaint();
     }
     #[allow(clippy::too_many_arguments)]
-    fn add(&mut self, group: Group, title: &str, path: PathBuf, kind: &'static str, verdict: Verdict, reason: &str) {
+    fn add(
+        &mut self,
+        group: Group,
+        title: &str,
+        path: PathBuf,
+        kind: &'static str,
+        verdict: Verdict,
+        reason: &str,
+    ) {
         if !path.exists() {
             return;
         }
@@ -214,12 +241,30 @@ impl Ctx {
             it.reason = why.into();
             it.hard_keep = true;
         }
-        let name = path.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if verdict == Verdict::Safe && kind == "Caches" && (self.running_ids.contains(&name) || self.running_names.contains(&title.to_lowercase())) {
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if verdict == Verdict::Safe
+            && kind == "Caches"
+            && (self.running_ids.contains(&name)
+                || self.running_names.contains(&title.to_lowercase()))
+        {
             it.verdict = Verdict::Ask;
             it.app_running = true;
-            let app = if title.contains(' ') && title.len() > 18 { pretty(&name) } else { title.to_string() };
-            it.reason = format!("{} is open right now — quit it first or allow anyway", if app.is_empty() { title.to_string() } else { app });
+            let app = if title.contains(' ') && title.len() > 18 {
+                pretty(&name)
+            } else {
+                title.to_string()
+            };
+            it.reason = format!(
+                "{} is open right now — quit it first or allow anyway",
+                if app.is_empty() {
+                    title.to_string()
+                } else {
+                    app
+                }
+            );
         }
         self.items.push(it);
     }
@@ -235,13 +280,17 @@ fn age_days(p: &Path) -> f64 {
 }
 
 fn children(p: &Path) -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(p).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+    let mut v: Vec<PathBuf> = std::fs::read_dir(p)
+        .map(|rd| rd.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
     v.sort();
     v
 }
 
 fn fname(p: &Path) -> String {
-    p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+    p.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Friendly app name from a bundle id or folder name.
@@ -266,14 +315,19 @@ pub fn pretty(name: &str) -> String {
     }
     if name.matches('.').count() >= 2 && !name.contains(' ') {
         let parts: Vec<&str> = name.split('.').collect();
-        let generic = ["macos", "mac", "osx", "desktop", "app", "client", "helper", "agent", "main"];
+        let generic = [
+            "macos", "mac", "osx", "desktop", "app", "client", "helper", "agent", "main",
+        ];
         let mut last = parts[parts.len() - 1];
         if generic.contains(&last.to_lowercase().as_str()) && parts.len() >= 3 {
             last = parts[parts.len() - 2];
         }
         let s = last.replace(['-', '_'], " ");
         let mut chars = s.chars();
-        return chars.next().map(|f| f.to_uppercase().chain(chars).collect()).unwrap_or_default();
+        return chars
+            .next()
+            .map(|f| f.to_uppercase().chain(chars).collect())
+            .unwrap_or_default();
     }
     name.to_string()
 }
@@ -300,11 +354,21 @@ const CHROMIUM_CACHES: [&str; 9] = [
 pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
     {
         let mut g = shared.lock().unwrap();
-        *g = State { phase: Phase::Scanning, with_ai: use_ai, ..Default::default() };
+        *g = State {
+            phase: Phase::Scanning,
+            with_ai: use_ai,
+            ..Default::default()
+        };
     }
     std::thread::spawn(move || {
         let (running_ids, running_names) = running_apps();
-        let mut c = Ctx { items: Vec::new(), running_ids, running_names, shared: shared.clone(), egui: ctx.clone() };
+        let mut c = Ctx {
+            items: Vec::new(),
+            running_ids,
+            running_names,
+            shared: shared.clone(),
+            egui: ctx.clone(),
+        };
         let steps: [ScanStep; 8] = [
             ("Claude", scan_claude),
             ("AI tools", scan_ai_tools),
@@ -328,8 +392,13 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
         c.items.retain(|it| seen.insert(it.path.clone()));
         // drop items nested inside another item
         let paths: Vec<PathBuf> = c.items.iter().map(|i| i.path.clone()).collect();
-        c.items.retain(|it| !paths.iter().any(|p| p != &it.path && it.path.starts_with(p)));
-        c.items.sort_by(|a, b| a.group.cmp(&b.group).then(b.bytes.cmp(&a.bytes)));
+        c.items.retain(|it| {
+            !paths
+                .iter()
+                .any(|p| p != &it.path && it.path.starts_with(p))
+        });
+        c.items
+            .sort_by(|a, b| a.group.cmp(&b.group).then(b.bytes.cmp(&a.bytes)));
         for it in c.items.iter_mut() {
             it.selected = it.verdict == Verdict::Safe && !it.permanent;
         }
@@ -337,7 +406,11 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
         {
             let mut g = shared.lock().unwrap();
             g.items = std::mem::take(&mut c.items);
-            g.phase = if use_ai && !stopped { Phase::Judging } else { Phase::Results };
+            g.phase = if use_ai && !stopped {
+                Phase::Judging
+            } else {
+                Phase::Results
+            };
         }
         ctx.request_repaint();
         if use_ai && !stopped {
@@ -359,71 +432,215 @@ fn scan_claude(c: &mut Ctx) {
     let cl = h.join(".claude");
     let claude_running = c.running_names.iter().any(|n| n == "claude") || process_running("claude");
     // AIToolScanning sub_7118: Claude Code catalog
-    c.add(Group::Claude, "Claude Code debug logs", cl.join("debug"), "Logs", Verdict::Safe, "Debug logs; Claude Code writes new ones as needed");
-    c.add(Group::Claude, "Claude Code cache", cl.join("cache"), "Caches", Verdict::Safe, "Cache; rebuilt automatically");
-    c.add(Group::Claude, "Claude Code telemetry", cl.join("telemetry"), "Caches", Verdict::Safe, "Usage telemetry waiting to be sent");
-    c.add(Group::Claude, "Stats cache", cl.join("stats-cache.json"), "Caches", Verdict::Safe, "Cached statistics; recalculated");
-    c.add(Group::Claude, "MCP sign-in cache", cl.join("mcp-needs-auth-cache.json"), "Caches", Verdict::Safe, "Cached MCP sign-in state");
-    c.add(Group::Claude, "Plugin install counts", cl.join("plugins/install-counts-cache.json"), "Caches", Verdict::Safe, "Cached plugin popularity counts");
+    c.add(
+        Group::Claude,
+        "Claude Code debug logs",
+        cl.join("debug"),
+        "Logs",
+        Verdict::Safe,
+        "Debug logs; Claude Code writes new ones as needed",
+    );
+    c.add(
+        Group::Claude,
+        "Claude Code cache",
+        cl.join("cache"),
+        "Caches",
+        Verdict::Safe,
+        "Cache; rebuilt automatically",
+    );
+    c.add(
+        Group::Claude,
+        "Claude Code telemetry",
+        cl.join("telemetry"),
+        "Caches",
+        Verdict::Safe,
+        "Usage telemetry waiting to be sent",
+    );
+    c.add(
+        Group::Claude,
+        "Stats cache",
+        cl.join("stats-cache.json"),
+        "Caches",
+        Verdict::Safe,
+        "Cached statistics; recalculated",
+    );
+    c.add(
+        Group::Claude,
+        "MCP sign-in cache",
+        cl.join("mcp-needs-auth-cache.json"),
+        "Caches",
+        Verdict::Safe,
+        "Cached MCP sign-in state",
+    );
+    c.add(
+        Group::Claude,
+        "Plugin install counts",
+        cl.join("plugins/install-counts-cache.json"),
+        "Caches",
+        Verdict::Safe,
+        "Cached plugin popularity counts",
+    );
     // shell snapshots: only the old ones (a running session uses the newest)
     let snaps = cl.join("shell-snapshots");
     for f in children(&snaps) {
         let age = age_days(&f);
         if age >= m::SHELL_SNAPSHOT_MIN_AGE_DAYS {
-            c.add(Group::Claude, "Old shell snapshot", f, "Temp Files", Verdict::Safe, "Temporary shell snapshot from a finished session");
+            c.add(
+                Group::Claude,
+                "Old shell snapshot",
+                f,
+                "Temp Files",
+                Verdict::Safe,
+                "Temporary shell snapshot from a finished session",
+            );
         }
     }
     // stale versions: keep the one ~/.local/bin/claude points to (ActiveVersionResolver)
     let versions = h.join(".local/share/claude/versions");
     let active = std::fs::canonicalize(h.join(".local/bin/claude")).ok();
     for v in children(&versions) {
-        let is_active = active.as_ref().map(|a| a.starts_with(&v) || a == &v).unwrap_or(false);
+        let is_active = active
+            .as_ref()
+            .map(|a| a.starts_with(&v) || a == &v)
+            .unwrap_or(false);
         if !is_active {
-            c.add(Group::Claude, &format!("Claude Code {}", fname(&v)), v, "Stale Versions", Verdict::Safe, "Old Claude Code version; the one you run is kept");
+            c.add(
+                Group::Claude,
+                &format!("Claude Code {}", fname(&v)),
+                v,
+                "Stale Versions",
+                Verdict::Safe,
+                "Old Claude Code version; the one you run is kept",
+            );
         }
     }
-    c.add(Group::Claude, "Claude CLI logs", h.join("Library/Caches/claude-cli-nodejs"), "Logs", Verdict::Safe, "Claude Code's own error/MCP logs");
+    c.add(
+        Group::Claude,
+        "Claude CLI logs",
+        h.join("Library/Caches/claude-cli-nodejs"),
+        "Logs",
+        Verdict::Safe,
+        "Claude Code's own error/MCP logs",
+    );
     // AIToolScanning sub_7308: Claude Desktop
-    c.add(Group::Claude, "Claude Desktop logs", h.join("Library/Logs/Claude"), "Logs", Verdict::Safe, "Claude Desktop logs");
-    c.add(Group::Claude, "Claude Desktop cache", h.join("Library/Caches/com.anthropic.claudefordesktop"), "Caches", Verdict::Safe, "App cache; rebuilt automatically");
-    c.add(Group::Claude, "Claude updater cache", h.join("Library/Caches/com.anthropic.claudefordesktop.ShipIt"), "Caches", Verdict::Safe, "Leftover update download");
+    c.add(
+        Group::Claude,
+        "Claude Desktop logs",
+        h.join("Library/Logs/Claude"),
+        "Logs",
+        Verdict::Safe,
+        "Claude Desktop logs",
+    );
+    c.add(
+        Group::Claude,
+        "Claude Desktop cache",
+        h.join("Library/Caches/com.anthropic.claudefordesktop"),
+        "Caches",
+        Verdict::Safe,
+        "App cache; rebuilt automatically",
+    );
+    c.add(
+        Group::Claude,
+        "Claude updater cache",
+        h.join("Library/Caches/com.anthropic.claudefordesktop.ShipIt"),
+        "Caches",
+        Verdict::Safe,
+        "Leftover update download",
+    );
     let desk = h.join("Library/Application Support/Claude");
     let desktop_running = c.running_ids.contains("com.anthropic.claudefordesktop");
     for sub in CHROMIUM_CACHES {
         let p = desk.join(sub);
-        let (v, r) = if desktop_running { (Verdict::Ask, "Claude Desktop is open — its web cache is in use") } else { (Verdict::Safe, "Web view cache; rebuilt automatically") };
-        c.add(Group::Claude, &format!("Claude Desktop {}", sub), p, "Caches", v, r);
+        let (v, r) = if desktop_running {
+            (
+                Verdict::Ask,
+                "Claude Desktop is open — its web cache is in use",
+            )
+        } else {
+            (Verdict::Safe, "Web view cache; rebuilt automatically")
+        };
+        c.add(
+            Group::Claude,
+            &format!("Claude Desktop {}", sub),
+            p,
+            "Caches",
+            v,
+            r,
+        );
     }
-    c.add(Group::Claude, "Claude Desktop VM image", desk.join("vm_bundles"), "Downloads", Verdict::Ask, "Sandbox VM image for agent mode; downloaded again if removed");
-    c.add(Group::Claude, "Claude Desktop Code VM", desk.join("claude-code-vm"), "Downloads", Verdict::Ask, "Runtime for Claude Code inside the desktop app; re-downloaded if removed");
+    c.add(
+        Group::Claude,
+        "Claude Desktop VM image",
+        desk.join("vm_bundles"),
+        "Downloads",
+        Verdict::Ask,
+        "Sandbox VM image for agent mode; downloaded again if removed",
+    );
+    c.add(
+        Group::Claude,
+        "Claude Desktop Code VM",
+        desk.join("claude-code-vm"),
+        "Downloads",
+        Verdict::Ask,
+        "Runtime for Claude Code inside the desktop app; re-downloaded if removed",
+    );
     // projects: the ones you use are kept, old ones are offered for review
     for p in claude_code::scan_projects() {
         let idle = p.days_idle();
         let name = p.display_name();
         if p.in_use() {
-            c.add(Group::Claude, &format!("Project · {name}"), p.folder.clone(), "Projects", Verdict::Keep, &format!("You used this project {} — kept", ago(idle)));
+            c.add(
+                Group::Claude,
+                &format!("Project · {name}"),
+                p.folder.clone(),
+                "Projects",
+                Verdict::Keep,
+                &format!("You used this project {} — kept", ago(idle)),
+            );
             if let Some(it) = c.items.last_mut() {
                 if it.path == p.folder {
                     it.hard_keep = true;
                 }
             }
         } else if !p.cwd_exists {
-            c.add(Group::Claude, &format!("Project · {name}"), p.folder.clone(), "Old Sessions", Verdict::Ask, &format!("Chat history for a folder that no longer exists; last used {}", ago(idle)));
+            c.add(
+                Group::Claude,
+                &format!("Project · {name}"),
+                p.folder.clone(),
+                "Old Sessions",
+                Verdict::Ask,
+                &format!(
+                    "Chat history for a folder that no longer exists; last used {}",
+                    ago(idle)
+                ),
+            );
         } else {
             c.add(Group::Claude, &format!("Project · {name}"), p.folder.clone(), "Old Sessions", Verdict::Ask, &format!("Chat history not used for {} days (the project folder itself is never touched)", idle as u64));
         }
     }
     // old file-history snapshots and uploads
-    for (sub, label, kind) in [("file-history", "Edit history", "Old Sessions"), ("uploads", "Uploaded files", "Temp Files")] {
+    for (sub, label, kind) in [
+        ("file-history", "Edit history", "Old Sessions"),
+        ("uploads", "Uploaded files", "Temp Files"),
+    ] {
         for f in children(&cl.join(sub)) {
             if age_days(&f) > m::CLAUDE_OLD_DATA_DAYS as f64 {
-                c.add(Group::Claude, &format!("{label} · {}", short_id(&fname(&f))), f, kind, Verdict::Ask, &format!("{label} older than {} days", m::CLAUDE_OLD_DATA_DAYS));
+                c.add(
+                    Group::Claude,
+                    &format!("{label} · {}", short_id(&fname(&f))),
+                    f,
+                    kind,
+                    Verdict::Ask,
+                    &format!("{label} older than {} days", m::CLAUDE_OLD_DATA_DAYS),
+                );
             }
         }
     }
     if claude_running {
         // a live session may hold files in these folders
-        for it in c.items.iter_mut().filter(|i| i.group == Group::Claude && i.kind == "Temp Files" && i.verdict == Verdict::Safe) {
+        for it in c.items.iter_mut().filter(|i| {
+            i.group == Group::Claude && i.kind == "Temp Files" && i.verdict == Verdict::Safe
+        }) {
             if it.age_days < 1.0 {
                 it.verdict = Verdict::Ask;
                 it.reason = "Claude is running — this may belong to an open session".into();
@@ -451,7 +668,11 @@ fn ago(days: f64) -> String {
 }
 
 fn process_running(name: &str) -> bool {
-    Command::new("pgrep").args(["-x", name]).output().map(|o| o.status.success()).unwrap_or(false)
+    Command::new("pgrep")
+        .args(["-x", name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 // ---- other AI tools (AIToolScanning catalog)
@@ -459,26 +680,103 @@ fn process_running(name: &str) -> bool {
 fn scan_ai_tools(c: &mut Ctx) {
     let h = home();
     for sub in ["codex_apps_server_info", "codex_apps_tools"] {
-        c.add(Group::AiTools, "Codex cache", h.join(".codex/cache").join(sub), "Caches", Verdict::Safe, "Codex app cache");
+        c.add(
+            Group::AiTools,
+            "Codex cache",
+            h.join(".codex/cache").join(sub),
+            "Caches",
+            Verdict::Safe,
+            "Codex app cache",
+        );
     }
     let gem = h.join(".gemini/antigravity-browser-profile");
-    for sub in ["Default/Cache", "Default/Code Cache", "Default/DawnGraphiteCache", "Default/DawnWebGPUCache", "Default/GPUCache", "Default/Service Worker/CacheStorage", "GraphiteDawnCache", "component_crx_cache", "extensions_crx_cache"] {
-        c.add(Group::AiTools, "Gemini / Antigravity browser cache", gem.join(sub), "Caches", Verdict::Safe, "Browser cache of the agent profile");
+    for sub in [
+        "Default/Cache",
+        "Default/Code Cache",
+        "Default/DawnGraphiteCache",
+        "Default/DawnWebGPUCache",
+        "Default/GPUCache",
+        "Default/Service Worker/CacheStorage",
+        "GraphiteDawnCache",
+        "component_crx_cache",
+        "extensions_crx_cache",
+    ] {
+        c.add(
+            Group::AiTools,
+            "Gemini / Antigravity browser cache",
+            gem.join(sub),
+            "Caches",
+            Verdict::Safe,
+            "Browser cache of the agent profile",
+        );
     }
     let mcp = h.join(".cache/chrome-devtools-mcp/chrome-profile");
-    for sub in ["Default/Cache", "Default/Code Cache", "Default/DawnCache", "Default/GPUCache", "Default/GrShaderCache", "Default/GraphiteDawnCache", "Default/Service Worker/CacheStorage", "GraphiteDawnCache", "component_crx_cache", "extensions_crx_cache"] {
-        c.add(Group::AiTools, "Chrome DevTools MCP cache", mcp.join(sub), "Caches", Verdict::Safe, "Browser cache of the MCP profile");
+    for sub in [
+        "Default/Cache",
+        "Default/Code Cache",
+        "Default/DawnCache",
+        "Default/GPUCache",
+        "Default/GrShaderCache",
+        "Default/GraphiteDawnCache",
+        "Default/Service Worker/CacheStorage",
+        "GraphiteDawnCache",
+        "component_crx_cache",
+        "extensions_crx_cache",
+    ] {
+        c.add(
+            Group::AiTools,
+            "Chrome DevTools MCP cache",
+            mcp.join(sub),
+            "Caches",
+            Verdict::Safe,
+            "Browser cache of the MCP profile",
+        );
     }
     for f in children(&h.join(".local/share/cursor-agent")) {
         if f.extension().map(|e| e == "log").unwrap_or(false) {
-            c.add(Group::AiTools, "Cursor agent log", f, "Logs", Verdict::Safe, "Cursor agent log file");
+            c.add(
+                Group::AiTools,
+                "Cursor agent log",
+                f,
+                "Logs",
+                Verdict::Safe,
+                "Cursor agent log file",
+            );
         }
     }
-    c.add(Group::AiTools, "OpenCode logs", h.join(".local/share/opencode/log"), "Logs", Verdict::Safe, "OpenCode logs");
+    c.add(
+        Group::AiTools,
+        "OpenCode logs",
+        h.join(".local/share/opencode/log"),
+        "Logs",
+        Verdict::Safe,
+        "OpenCode logs",
+    );
     // local models are big and costly to get back: always ask
-    c.add(Group::AiTools, "Ollama models", h.join(".ollama/models"), "Local Models", Verdict::Ask, "Downloaded models may still be used by your projects");
-    c.add(Group::AiTools, "LM Studio models", h.join(".lmstudio/models"), "Local Models", Verdict::Ask, "Downloaded models may still be used by your projects");
-    c.add(Group::AiTools, "Hugging Face cache", h.join(".cache/huggingface"), "Local Models", Verdict::Ask, "Downloaded models and datasets; large to download again");
+    c.add(
+        Group::AiTools,
+        "Ollama models",
+        h.join(".ollama/models"),
+        "Local Models",
+        Verdict::Ask,
+        "Downloaded models may still be used by your projects",
+    );
+    c.add(
+        Group::AiTools,
+        "LM Studio models",
+        h.join(".lmstudio/models"),
+        "Local Models",
+        Verdict::Ask,
+        "Downloaded models may still be used by your projects",
+    );
+    c.add(
+        Group::AiTools,
+        "Hugging Face cache",
+        h.join(".cache/huggingface"),
+        "Local Models",
+        Verdict::Ask,
+        "Downloaded models and datasets; large to download again",
+    );
 }
 
 // ---- System Junk: user caches (CMUserCachesScanTask)
@@ -486,9 +784,16 @@ fn scan_ai_tools(c: &mut Ctx) {
 fn scan_user_caches(c: &mut Ctx) {
     let h = home();
     let caches = h.join("Library/Caches");
-    let skip = ["claude-cli-nodejs", "com.anthropic.claudefordesktop", "com.anthropic.claudefordesktop.ShipIt"];
+    let skip = [
+        "claude-cli-nodejs",
+        "com.anthropic.claudefordesktop",
+        "com.anthropic.claudefordesktop.ShipIt",
+    ];
     let keep = [
-        ("com.apple.bird", "iCloud Drive sync state — removing it can disrupt syncing"),
+        (
+            "com.apple.bird",
+            "iCloud Drive sync state — removing it can disrupt syncing",
+        ),
         ("CloudKit", "iCloud sync data"),
         ("com.apple.cloudd", "iCloud sync data"),
         ("com.apple.nsurlsessiond", "Downloads in progress for apps"),
@@ -504,13 +809,26 @@ fn scan_user_caches(c: &mut Ctx) {
             continue;
         }
         if let Some((_, why)) = keep.iter().find(|(k, _)| *k == n) {
-            c.add(Group::UserCache, &pretty(&n), p, "Caches", Verdict::Keep, why);
+            c.add(
+                Group::UserCache,
+                &pretty(&n),
+                p,
+                "Caches",
+                Verdict::Keep,
+                why,
+            );
             continue;
         }
         let (v, why) = if n.starts_with("com.apple.") {
-            (Verdict::Ask, "macOS system cache — usually safe, rebuilt by macOS")
+            (
+                Verdict::Ask,
+                "macOS system cache — usually safe, rebuilt by macOS",
+            )
         } else if n == "Homebrew" {
-            (Verdict::Safe, "Downloaded installers; Homebrew fetches them again")
+            (
+                Verdict::Safe,
+                "Downloaded installers; Homebrew fetches them again",
+            )
         } else {
             (Verdict::Safe, "App cache; the app rebuilds it")
         };
@@ -551,7 +869,14 @@ fn scan_app_caches(c: &mut Ctx) {
             for sub in CHROMIUM_CACHES {
                 let p = base.join(sub);
                 if p.is_dir() {
-                    c.add(Group::AppCaches, &format!("{} · {}", pretty(&n), sub), p, "Caches", Verdict::Safe, "Web view cache; rebuilt automatically");
+                    c.add(
+                        Group::AppCaches,
+                        &format!("{} · {}", pretty(&n), sub),
+                        p,
+                        "Caches",
+                        Verdict::Safe,
+                        "Web view cache; rebuilt automatically",
+                    );
                 }
             }
         }
@@ -564,8 +889,19 @@ fn scan_app_caches(c: &mut Ctx) {
         let n = fname(&ct);
         let p = ct.join("Data/Library/Caches");
         if p.is_dir() {
-            let v = if n.starts_with("com.apple.") { Verdict::Ask } else { Verdict::Safe };
-            c.add(Group::AppCaches, &format!("{} (sandboxed)", pretty(&n)), p, "Caches", v, "Sandboxed app cache; rebuilt automatically");
+            let v = if n.starts_with("com.apple.") {
+                Verdict::Ask
+            } else {
+                Verdict::Safe
+            };
+            c.add(
+                Group::AppCaches,
+                &format!("{} (sandboxed)", pretty(&n)),
+                p,
+                "Caches",
+                v,
+                "Sandboxed app cache; rebuilt automatically",
+            );
         }
     }
 }
@@ -579,13 +915,31 @@ fn scan_logs(c: &mut Ctx) {
         if n == "Claude" || n.starts_with('.') {
             continue;
         }
-        let title = if n == "DiagnosticReports" { "Crash reports".to_string() } else { format!("{} logs", pretty(&n)) };
-        c.add(Group::Logs, &title, p, "Logs", Verdict::Safe, "Log files; only useful for debugging");
+        let title = if n == "DiagnosticReports" {
+            "Crash reports".to_string()
+        } else {
+            format!("{} logs", pretty(&n))
+        };
+        c.add(
+            Group::Logs,
+            &title,
+            p,
+            "Logs",
+            Verdict::Safe,
+            "Log files; only useful for debugging",
+        );
     }
     for ct in children(&h.join("Library/Containers")) {
         let p = ct.join("Data/Library/Logs");
         if p.is_dir() {
-            c.add(Group::Logs, &format!("{} logs (sandboxed)", pretty(&fname(&ct))), p, "Logs", Verdict::Safe, "Log files of a sandboxed app");
+            c.add(
+                Group::Logs,
+                &format!("{} logs (sandboxed)", pretty(&fname(&ct))),
+                p,
+                "Logs",
+                Verdict::Safe,
+                "Log files of a sandboxed app",
+            );
         }
     }
 }
@@ -595,30 +949,108 @@ fn scan_logs(c: &mut Ctx) {
 fn scan_xcode(c: &mut Ctx) {
     let x = home().join("Library/Developer");
     for p in children(&x.join("Xcode/DerivedData")) {
-        c.add(Group::Xcode, &format!("Derived Data · {}", fname(&p).split('-').next().unwrap_or("")), p, "Build Data", Verdict::Safe, "Build products and index; Xcode rebuilds them");
+        c.add(
+            Group::Xcode,
+            &format!(
+                "Derived Data · {}",
+                fname(&p).split('-').next().unwrap_or("")
+            ),
+            p,
+            "Build Data",
+            Verdict::Safe,
+            "Build products and index; Xcode rebuilds them",
+        );
     }
-    c.add(Group::Xcode, "Xcode Caches", x.join("Xcode/DocumentationCache"), "Caches", Verdict::Safe, "Documentation cache");
-    c.add(Group::Xcode, "Swift module cache", x.join("Xcode/ModuleCache.noindex"), "Caches", Verdict::Safe, "Precompiled module cache");
-    c.add(Group::Xcode, "SwiftUI Previews", x.join("Xcode/UserData/Previews"), "Caches", Verdict::Safe, "Preview simulator data");
-    c.add(Group::Xcode, "iOS Device Logs", x.join("Xcode/iOS Device Logs"), "Logs", Verdict::Safe, "Device logs collected by Xcode");
-    c.add(Group::Xcode, "Simulator caches", x.join("CoreSimulator/Caches"), "Caches", Verdict::Safe, "Simulator dyld caches; rebuilt on boot");
-    for os in ["iOS DeviceSupport", "watchOS DeviceSupport", "macOS DeviceSupport", "tvOS DeviceSupport", "visionOS DeviceSupport"] {
+    c.add(
+        Group::Xcode,
+        "Xcode Caches",
+        x.join("Xcode/DocumentationCache"),
+        "Caches",
+        Verdict::Safe,
+        "Documentation cache",
+    );
+    c.add(
+        Group::Xcode,
+        "Swift module cache",
+        x.join("Xcode/ModuleCache.noindex"),
+        "Caches",
+        Verdict::Safe,
+        "Precompiled module cache",
+    );
+    c.add(
+        Group::Xcode,
+        "SwiftUI Previews",
+        x.join("Xcode/UserData/Previews"),
+        "Caches",
+        Verdict::Safe,
+        "Preview simulator data",
+    );
+    c.add(
+        Group::Xcode,
+        "iOS Device Logs",
+        x.join("Xcode/iOS Device Logs"),
+        "Logs",
+        Verdict::Safe,
+        "Device logs collected by Xcode",
+    );
+    c.add(
+        Group::Xcode,
+        "Simulator caches",
+        x.join("CoreSimulator/Caches"),
+        "Caches",
+        Verdict::Safe,
+        "Simulator dyld caches; rebuilt on boot",
+    );
+    for os in [
+        "iOS DeviceSupport",
+        "watchOS DeviceSupport",
+        "macOS DeviceSupport",
+        "tvOS DeviceSupport",
+        "visionOS DeviceSupport",
+    ] {
         let mut vers = children(&x.join("Xcode").join(os));
         vers.sort_by_key(|v| version_key(&fname(v)));
         let newest = vers.last().cloned();
         for v in vers {
             let latest = Some(&v) == newest.as_ref();
-            let (verdict, why) = if latest { (Verdict::Ask, "Newest device support — needed to debug on that device") } else { (Verdict::Safe, "Support files for an older OS version; recreated when you connect that device") };
-            c.add(Group::Xcode, &format!("{} {}", os.replace(" DeviceSupport", ""), fname(&v)), v, "Device Support", verdict, why);
+            let (verdict, why) = if latest {
+                (
+                    Verdict::Ask,
+                    "Newest device support — needed to debug on that device",
+                )
+            } else {
+                (
+                    Verdict::Safe,
+                    "Support files for an older OS version; recreated when you connect that device",
+                )
+            };
+            c.add(
+                Group::Xcode,
+                &format!("{} {}", os.replace(" DeviceSupport", ""), fname(&v)),
+                v,
+                "Device Support",
+                verdict,
+                why,
+            );
         }
     }
     for a in children(&x.join("Xcode/Archives")) {
-        c.add(Group::Xcode, &format!("Archives {}", fname(&a)), a, "Archives", Verdict::Ask, "App archives hold debug symbols for builds you shipped");
+        c.add(
+            Group::Xcode,
+            &format!("Archives {}", fname(&a)),
+            a,
+            "Archives",
+            Verdict::Ask,
+            "App archives hold debug symbols for builds you shipped",
+        );
     }
 }
 
 fn version_key(s: &str) -> Vec<u32> {
-    s.split(|c: char| !c.is_ascii_digit()).filter_map(|x| x.parse().ok()).take(4).collect()
+    s.split(|c: char| !c.is_ascii_digit())
+        .filter_map(|x| x.parse().ok())
+        .take(4)
+        .collect()
 }
 
 // ---- developer caches (Gradle from the original, the rest common package managers)
@@ -626,15 +1058,60 @@ fn version_key(s: &str) -> Vec<u32> {
 fn scan_developer(c: &mut Ctx) {
     let h = home();
     let rules: [(&str, &str, Verdict, &str); 9] = [
-        (".npm/_cacache", "npm cache", Verdict::Safe, "npm downloads; fetched again when needed"),
-        (".gradle/caches", "Gradle caches", Verdict::Safe, "Gradle dependency cache"),
-        (".cache/pip", "pip cache", Verdict::Safe, "Python package downloads"),
-        ("go/pkg/mod/cache/download", "Go module downloads", Verdict::Safe, "Go module download cache"),
-        (".bun/install/cache", "Bun cache", Verdict::Safe, "Bun package downloads"),
-        (".yarn/berry/cache", "Yarn cache", Verdict::Safe, "Yarn package downloads"),
-        (".cargo/registry/cache", "Rust crate downloads", Verdict::Ask, "Crate archives; needed for offline builds"),
-        (".cocoapods/repos", "CocoaPods specs", Verdict::Ask, "Spec repositories; cloned again on next install"),
-        ("Library/pnpm/store", "pnpm store", Verdict::Ask, "Shared package store linked into your projects"),
+        (
+            ".npm/_cacache",
+            "npm cache",
+            Verdict::Safe,
+            "npm downloads; fetched again when needed",
+        ),
+        (
+            ".gradle/caches",
+            "Gradle caches",
+            Verdict::Safe,
+            "Gradle dependency cache",
+        ),
+        (
+            ".cache/pip",
+            "pip cache",
+            Verdict::Safe,
+            "Python package downloads",
+        ),
+        (
+            "go/pkg/mod/cache/download",
+            "Go module downloads",
+            Verdict::Safe,
+            "Go module download cache",
+        ),
+        (
+            ".bun/install/cache",
+            "Bun cache",
+            Verdict::Safe,
+            "Bun package downloads",
+        ),
+        (
+            ".yarn/berry/cache",
+            "Yarn cache",
+            Verdict::Safe,
+            "Yarn package downloads",
+        ),
+        (
+            ".cargo/registry/cache",
+            "Rust crate downloads",
+            Verdict::Ask,
+            "Crate archives; needed for offline builds",
+        ),
+        (
+            ".cocoapods/repos",
+            "CocoaPods specs",
+            Verdict::Ask,
+            "Spec repositories; cloned again on next install",
+        ),
+        (
+            "Library/pnpm/store",
+            "pnpm store",
+            Verdict::Ask,
+            "Shared package store linked into your projects",
+        ),
     ];
     for (rel, title, v, why) in rules {
         c.add(Group::Developer, title, h.join(rel), "Caches", v, why);
@@ -646,7 +1123,14 @@ fn scan_developer(c: &mut Ctx) {
 fn scan_trash(c: &mut Ctx) {
     let t = home().join(".Trash");
     if std::fs::read_dir(&t).is_ok() {
-        c.add(Group::Trash, "Trash", t, "Trash", Verdict::Safe, "Already deleted items; emptying can't be undone");
+        c.add(
+            Group::Trash,
+            "Trash",
+            t,
+            "Trash",
+            Verdict::Safe,
+            "Already deleted items; emptying can't be undone",
+        );
         if let Some(it) = c.items.last_mut() {
             if it.group == Group::Trash {
                 it.permanent = true;
@@ -658,15 +1142,24 @@ fn scan_trash(c: &mut Ctx) {
 // ---------------------------------------------------------------- AI judge
 
 fn judge(shared: &Shared, ctx: &egui::Context) {
-    let Some(bin) = claude_code::claude_bin().filter(|_| claude_code::availability().ready()) else {
+    let Some(bin) = claude_code::claude_bin().filter(|_| claude_code::availability().ready())
+    else {
         let mut g = shared.lock().unwrap();
-        g.ai_error = Some(format!("{}, so only the built-in rules were used.", claude_code::availability().short()));
+        g.ai_error = Some(format!(
+            "{}, so only the built-in rules were used.",
+            claude_code::availability().short()
+        ));
         return;
     };
     let h = home().display().to_string();
     let candidates: Vec<usize> = {
         let g = shared.lock().unwrap();
-        g.items.iter().enumerate().filter(|(_, it)| !it.hard_keep && it.bytes >= m::AI_MIN_BYTES).map(|(i, _)| i).collect()
+        g.items
+            .iter()
+            .enumerate()
+            .filter(|(_, it)| !it.hard_keep && it.bytes >= m::AI_MIN_BYTES)
+            .map(|(i, _)| i)
+            .collect()
     };
     let batches: Vec<Vec<usize>> = candidates.chunks(m::AI_BATCH).map(|c| c.to_vec()).collect();
     let n = batches.len().max(1);
@@ -674,14 +1167,15 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
         if shared.lock().unwrap().stop {
             break;
         }
-        let lines: String = {
-            let g = shared.lock().unwrap();
-            batch
-                .iter()
-                .enumerate()
-                .map(|(k, &i)| {
-                    let it = &g.items[i];
-                    format!(
+        let lines: String =
+            {
+                let g = shared.lock().unwrap();
+                batch
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &i)| {
+                        let it = &g.items[i];
+                        format!(
                         "{k} | {} | {} | modified {} days ago | group: {} | rule says {} ({}){}\n",
                         it.path.display().to_string().replacen(&h, "~", 1),
                         crate::kit::glass::human_bytes(it.bytes),
@@ -691,27 +1185,59 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
                         it.rule_reason,
                         if it.app_running { " | app is open now" } else { "" }
                     )
-                })
-                .collect()
-        };
+                    })
+                    .collect()
+            };
         {
             let mut g = shared.lock().unwrap();
-            g.ai_status = format!("Claude is reviewing {} paths (batch {} of {})…", batch.len(), bi + 1, n);
+            g.ai_status = format!(
+                "Claude is reviewing {} paths (batch {} of {})…",
+                batch.len(),
+                bi + 1,
+                n
+            );
             g.progress = bi as f32 / n as f32;
         }
         ctx.request_repaint();
         let out = Command::new(&bin)
             .current_dir(std::env::temp_dir())
-            .args(["-p", &lines, "--system-prompt", SYSTEM, "--output-format", "json", "--no-session-persistence", "--model", m::AI_MODEL, "--tools", "", "--strict-mcp-config"])
+            .args([
+                "-p",
+                &lines,
+                "--system-prompt",
+                SYSTEM,
+                "--output-format",
+                "json",
+                "--no-session-persistence",
+                "--model",
+                m::AI_MODEL,
+                "--tools",
+                "",
+                "--strict-mcp-config",
+            ])
             .output();
         let text = match out {
             Ok(o) if !o.status.success() => {
-                let err = String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("").to_string();
+                let err = String::from_utf8_lossy(&o.stderr)
+                    .trim()
+                    .lines()
+                    .last()
+                    .unwrap_or("")
+                    .to_string();
                 let mut g = shared.lock().unwrap();
-                g.ai_error = Some(if err.is_empty() { "Claude couldn't review the paths; the built-in rules were used.".into() } else { format!("Claude couldn't review the paths ({err}); the built-in rules were used.") });
+                g.ai_error = Some(if err.is_empty() {
+                    "Claude couldn't review the paths; the built-in rules were used.".into()
+                } else {
+                    format!(
+                        "Claude couldn't review the paths ({err}); the built-in rules were used."
+                    )
+                });
                 return;
             }
-            Ok(o) => serde_json::from_slice::<serde_json::Value>(&o.stdout).ok().and_then(|v| v["result"].as_str().map(|s| s.to_string())).unwrap_or_default(),
+            Ok(o) => serde_json::from_slice::<serde_json::Value>(&o.stdout)
+                .ok()
+                .and_then(|v| v["result"].as_str().map(|s| s.to_string()))
+                .unwrap_or_default(),
             Err(e) => {
                 shared.lock().unwrap().ai_error = Some(format!("Couldn't run Claude: {e}"));
                 return;
@@ -720,7 +1246,10 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
         let verdicts = parse_verdicts(&text);
         let mut g = shared.lock().unwrap();
         if verdicts.is_empty() {
-            g.ai_error = Some("Claude's answer couldn't be read; the built-in rules were used for some items.".into());
+            g.ai_error = Some(
+                "Claude's answer couldn't be read; the built-in rules were used for some items."
+                    .into(),
+            );
             continue;
         }
         g.ai_used = true;
@@ -761,8 +1290,12 @@ Claude Code chat histories of projects the person still uses must be keep; histo
 Reply ONLY with a JSON array like [{\"i\":0,\"v\":\"safe\",\"r\":\"reason in under 14 words\"}] covering every line.";
 
 fn parse_verdicts(text: &str) -> Vec<(usize, Verdict, String)> {
-    let (Some(a), Some(b)) = (text.find('['), text.rfind(']')) else { return vec![] };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text[a..=b]) else { return vec![] };
+    let (Some(a), Some(b)) = (text.find('['), text.rfind(']')) else {
+        return vec![];
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text[a..=b]) else {
+        return vec![];
+    };
     v.as_array()
         .map(|arr| {
             arr.iter()
@@ -790,7 +1323,11 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
         g.cleaned_count = 0;
         g.failed.clear();
         g.log.clear();
-        g.items.iter().filter(|i| i.selected && i.verdict != Verdict::Keep && !i.hard_keep).cloned().collect()
+        g.items
+            .iter()
+            .filter(|i| i.selected && i.verdict != Verdict::Keep && !i.hard_keep)
+            .cloned()
+            .collect()
     };
     std::thread::spawn(move || {
         let n = targets.len().max(1);
@@ -820,12 +1357,17 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
                 Ok(()) => {
                     g.cleaned_bytes += it.bytes;
                     g.cleaned_count += 1;
-                    g.log.push(format!("Removed {} ({})", it.path.display(), crate::kit::glass::human_bytes(it.bytes)));
+                    g.log.push(format!(
+                        "Removed {} ({})",
+                        it.path.display(),
+                        crate::kit::glass::human_bytes(it.bytes)
+                    ));
                     g.items.retain(|x| x.path != it.path);
                 }
                 Err(e) => {
                     g.failed.push((it.title.clone(), e.clone()));
-                    g.log.push(format!("Couldn't remove {}: {e}", it.path.display()));
+                    g.log
+                        .push(format!("Couldn't remove {}: {e}", it.path.display()));
                 }
             }
         }

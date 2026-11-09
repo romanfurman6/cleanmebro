@@ -10,7 +10,11 @@ pub struct Camera;
 
 #[cfg(not(target_os = "macos"))]
 impl Camera {
-    pub fn open(_device: Option<&str>, _diameter: f32, _center: egui::Pos2) -> Result<Camera, String> {
+    pub fn open(
+        _device: Option<&str>,
+        _diameter: f32,
+        _center: egui::Pos2,
+    ) -> Result<Camera, String> {
         Err("The camera needs macOS".into())
     }
     pub fn window_number(&self) -> u32 {
@@ -26,8 +30,14 @@ mod imp {
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::{msg_send, MainThreadMarker, MainThreadOnly};
-    use objc2_app_kit::{NSBackingStoreType, NSColor, NSScreen, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask};
-    use objc2_av_foundation::{AVCaptureDevice, AVCaptureDeviceInput, AVCaptureSession, AVCaptureVideoPreviewLayer, AVLayerVideoGravityResizeAspectFill, AVMediaTypeVideo};
+    use objc2_app_kit::{
+        NSBackingStoreType, NSColor, NSScreen, NSWindow, NSWindowCollectionBehavior,
+        NSWindowStyleMask,
+    };
+    use objc2_av_foundation::{
+        AVCaptureDevice, AVCaptureDeviceInput, AVCaptureSession, AVCaptureVideoPreviewLayer,
+        AVLayerVideoGravityResizeAspectFill, AVMediaTypeVideo,
+    };
     use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
     pub struct Camera {
@@ -53,24 +63,39 @@ mod imp {
                     .and_then(|id| AVCaptureDevice::deviceWithUniqueID(&NSString::from_str(id)))
                     .or_else(|| AVCaptureDevice::defaultDeviceWithMediaType(media))
                     .ok_or("No camera found")?;
-                let input = AVCaptureDeviceInput::deviceInputWithDevice_error(&dev).map_err(|e| e.localizedDescription().to_string())?;
+                let input = AVCaptureDeviceInput::deviceInputWithDevice_error(&dev)
+                    .map_err(|e| e.localizedDescription().to_string())?;
                 let session = AVCaptureSession::new();
                 if !session.canAddInput(&input) {
                     return Err("The camera is busy".into());
                 }
                 session.addInput(&input);
 
-                let top = NSScreen::screens(mtm).firstObject().map(|s| s.frame().size.height).unwrap_or(0.0);
+                let top = NSScreen::screens(mtm)
+                    .firstObject()
+                    .map(|s| s.frame().size.height)
+                    .unwrap_or(0.0);
                 let d = diameter as f64;
-                let origin = NSPoint::new(center.x as f64 - d / 2.0, top - center.y as f64 - d / 2.0);
-                let window = NSWindow::initWithContentRect_styleMask_backing_defer(NSWindow::alloc(mtm), NSRect::new(origin, NSSize::new(d, d)), NSWindowStyleMask::Borderless, NSBackingStoreType::Buffered, false);
+                let origin =
+                    NSPoint::new(center.x as f64 - d / 2.0, top - center.y as f64 - d / 2.0);
+                let window = NSWindow::initWithContentRect_styleMask_backing_defer(
+                    NSWindow::alloc(mtm),
+                    NSRect::new(origin, NSSize::new(d, d)),
+                    NSWindowStyleMask::Borderless,
+                    NSBackingStoreType::Buffered,
+                    false,
+                );
                 window.setReleasedWhenClosed(false);
                 window.setOpaque(false);
                 window.setBackgroundColor(Some(&NSColor::clearColor()));
                 window.setHasShadow(true);
                 window.setMovableByWindowBackground(true);
                 window.setLevel(LEVEL);
-                window.setCollectionBehavior(NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::Stationary | NSWindowCollectionBehavior::FullScreenAuxiliary);
+                window.setCollectionBehavior(
+                    NSWindowCollectionBehavior::CanJoinAllSpaces
+                        | NSWindowCollectionBehavior::Stationary
+                        | NSWindowCollectionBehavior::FullScreenAuxiliary,
+                );
                 let view = window.contentView().ok_or("no view")?;
                 view.setWantsLayer(true);
                 let preview = AVCaptureVideoPreviewLayer::layerWithSession(&session);
@@ -83,7 +108,11 @@ mod imp {
                         c.setVideoMirrored(true);
                     }
                 }
-                let cam = Camera { window, session, preview };
+                let cam = Camera {
+                    window,
+                    session,
+                    preview,
+                };
                 cam.lay_out(d);
                 if let Some(root) = view.layer() {
                     root.addSublayer(&cam.preview);
@@ -120,18 +149,35 @@ mod imp {
 
         /// Centre the bubble at `center` (global points, top-left origin).
         pub fn move_to(&self, center: Pos2) {
-            let Some(mtm) = MainThreadMarker::new() else { return };
-            let top = NSScreen::screens(mtm).firstObject().map(|s| s.frame().size.height).unwrap_or(0.0);
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
+            let top = NSScreen::screens(mtm)
+                .firstObject()
+                .map(|s| s.frame().size.height)
+                .unwrap_or(0.0);
             let f = self.window.frame();
-            let origin = NSPoint::new(center.x as f64 - f.size.width / 2.0, top - center.y as f64 - f.size.height / 2.0);
+            let origin = NSPoint::new(
+                center.x as f64 - f.size.width / 2.0,
+                top - center.y as f64 - f.size.height / 2.0,
+            );
             self.window.setFrameOrigin(origin);
         }
 
         pub fn set_diameter(&self, d: f32) {
             let d = d as f64;
             let f = self.window.frame();
-            let c = NSPoint::new(f.origin.x + f.size.width / 2.0, f.origin.y + f.size.height / 2.0);
-            self.window.setFrame_display(NSRect::new(NSPoint::new(c.x - d / 2.0, c.y - d / 2.0), NSSize::new(d, d)), true);
+            let c = NSPoint::new(
+                f.origin.x + f.size.width / 2.0,
+                f.origin.y + f.size.height / 2.0,
+            );
+            self.window.setFrame_display(
+                NSRect::new(
+                    NSPoint::new(c.x - d / 2.0, c.y - d / 2.0),
+                    NSSize::new(d, d),
+                ),
+                true,
+            );
             self.lay_out(d);
         }
     }

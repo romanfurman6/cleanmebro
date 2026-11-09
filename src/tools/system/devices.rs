@@ -47,15 +47,28 @@ impl Kind {
         let t = minor.to_lowercase();
         if n.contains("airpods max") {
             Kind::Headphones
-        } else if n.contains("airpods") || n.contains("buds") || n.contains("beats fit") || n.contains("powerbeats") || n.contains("studio buds") {
+        } else if n.contains("airpods")
+            || n.contains("buds")
+            || n.contains("beats fit")
+            || n.contains("powerbeats")
+            || n.contains("studio buds")
+        {
             Kind::Earbuds
-        } else if t.contains("mouse") || n.contains("mouse") || n.contains("mx master") || n.contains("mx anywhere") {
+        } else if t.contains("mouse")
+            || n.contains("mouse")
+            || n.contains("mx master")
+            || n.contains("mx anywhere")
+        {
             Kind::Mouse
         } else if t.contains("trackpad") || n.contains("trackpad") {
             Kind::Trackpad
         } else if t.contains("keyboard") || n.contains("keyboard") || n.contains("keys") {
             Kind::Keyboard
-        } else if t.contains("head") || t.contains("audio") || t.contains("speaker") || n.contains("headphones") {
+        } else if t.contains("head")
+            || t.contains("audio")
+            || t.contains("speaker")
+            || n.contains("headphones")
+        {
             Kind::Headphones
         } else {
             Kind::Other
@@ -92,7 +105,11 @@ impl Device {
     }
     /// Left, right and case for earbuds (None where a part isn't reported).
     pub fn parts(&self) -> [(&'static str, Option<u8>); 3] {
-        [("Left", self.left), ("Right", self.right), ("Case", self.case)]
+        [
+            ("Left", self.left),
+            ("Right", self.right),
+            ("Case", self.case),
+        ]
     }
     /// "L 42 · R 38 · Case 71" for earbuds, the kind otherwise.
     pub fn detail(&self) -> String {
@@ -110,7 +127,12 @@ impl Device {
     pub fn short(&self) -> String {
         match self.kind {
             Kind::Earbuds | Kind::Headphones if self.name.contains("AirPods") => "AirPods".into(),
-            Kind::Other => self.name.split_whitespace().last().unwrap_or("Device").to_string(),
+            Kind::Other => self
+                .name
+                .split_whitespace()
+                .last()
+                .unwrap_or("Device")
+                .to_string(),
             k => k.label().to_string(),
         }
     }
@@ -163,7 +185,12 @@ fn pct(v: &Value) -> Option<u8> {
 /// "Headphones".
 fn is_mobile(minor: &str, name: &str) -> bool {
     let t = minor.to_lowercase();
-    t == "phone" || t.contains("smartphone") || t.contains("ipad") || t.contains("iphone") || name.contains("iPhone") || name.contains("iPad")
+    t == "phone"
+        || t.contains("smartphone")
+        || t.contains("ipad")
+        || t.contains("iphone")
+        || name.contains("iPhone")
+        || name.contains("iPad")
 }
 
 /// Devices from `system_profiler SPBluetoothDataType -json`. iPhone and
@@ -171,9 +198,13 @@ fn is_mobile(minor: &str, name: &str) -> bool {
 pub fn parse_profiler(json: &str) -> Vec<Device> {
     let v: Value = serde_json::from_str(json).unwrap_or(Value::Null);
     let mut list = Vec::new();
-    let Some(arr) = v["SPBluetoothDataType"][0]["device_connected"].as_array() else { return list };
+    let Some(arr) = v["SPBluetoothDataType"][0]["device_connected"].as_array() else {
+        return list;
+    };
     for entry in arr {
-        let Some(obj) = entry.as_object() else { continue };
+        let Some(obj) = entry.as_object() else {
+            continue;
+        };
         for (name, info) in obj {
             let minor = info["device_minorType"].as_str().unwrap_or("");
             if is_mobile(minor, name) {
@@ -183,13 +214,17 @@ pub fn parse_profiler(json: &str) -> Vec<Device> {
                 name: name.clone(),
                 kind: Kind::guess(minor, name),
                 address: norm_addr(info["device_address"].as_str().unwrap_or("")),
-                main: pct(&info["device_batteryLevelMain"]).or_else(|| pct(&info["device_batteryLevel"])),
+                main: pct(&info["device_batteryLevelMain"])
+                    .or_else(|| pct(&info["device_batteryLevel"])),
                 left: pct(&info["device_batteryLevelLeft"]),
                 right: pct(&info["device_batteryLevelRight"]),
                 case: pct(&info["device_batteryLevelCase"]),
             };
             // over-ear headphones that only report "Main" stay single
-            if d.kind == Kind::Earbuds && d.main.is_some() && (d.left.is_some() || d.right.is_some()) {
+            if d.kind == Kind::Earbuds
+                && d.main.is_some()
+                && (d.left.is_some() || d.right.is_some())
+            {
                 d.main = None;
             }
             list.push(d);
@@ -214,7 +249,11 @@ pub fn parse_ioreg(out: &str) -> Vec<Hid> {
     let mut cur: (Option<String>, Option<String>, Option<u8>) = (None, None, None);
     let flush = |c: &mut (Option<String>, Option<String>, Option<u8>), list: &mut Vec<Hid>| {
         if let (Some(p), Some(b)) = (c.0.take(), c.2.take()) {
-            list.push(Hid { product: p, address: c.1.take().map(|a| norm_addr(&a)).unwrap_or_default(), pct: b.min(100) });
+            list.push(Hid {
+                product: p,
+                address: c.1.take().map(|a| norm_addr(&a)).unwrap_or_default(),
+                pct: b.min(100),
+            });
         }
         *c = (None, None, None);
     };
@@ -224,12 +263,16 @@ pub fn parse_ioreg(out: &str) -> Vec<Hid> {
             flush(&mut cur, &mut list);
             continue;
         }
-        let Some((k, v)) = t.split_once(" = ") else { continue };
+        let Some((k, v)) = t.split_once(" = ") else {
+            continue;
+        };
         let k = k.trim().trim_matches('"');
         let v = v.trim();
         match k {
             "Product" => cur.0 = Some(v.trim_matches('"').to_string()),
-            "DeviceAddress" | "SerialNumber" if cur.1.is_none() && v.contains(['-', ':']) => cur.1 = Some(v.trim_matches('"').to_string()),
+            "DeviceAddress" | "SerialNumber" if cur.1.is_none() && v.contains(['-', ':']) => {
+                cur.1 = Some(v.trim_matches('"').to_string())
+            }
             "BatteryPercent" => cur.2 = v.parse::<u8>().ok(),
             _ => {}
         }
@@ -245,14 +288,24 @@ pub fn merge(list: &mut Vec<Device>, hid: &[Hid]) {
         let at = list
             .iter()
             .position(|d| !h.address.is_empty() && d.address == h.address)
-            .or_else(|| list.iter().position(|d| d.name.eq_ignore_ascii_case(&h.product) || d.name.ends_with(&h.product)));
+            .or_else(|| {
+                list.iter().position(|d| {
+                    d.name.eq_ignore_ascii_case(&h.product) || d.name.ends_with(&h.product)
+                })
+            });
         match at {
             Some(i) => {
                 if !list[i].split() {
                     list[i].main = Some(h.pct);
                 }
             }
-            None => list.push(Device { name: h.product.clone(), kind: Kind::guess("", &h.product), address: h.address.clone(), main: Some(h.pct), ..Default::default() }),
+            None => list.push(Device {
+                name: h.product.clone(),
+                kind: Kind::guess("", &h.product),
+                address: h.address.clone(),
+                main: Some(h.pct),
+                ..Default::default()
+            }),
         }
     }
 }
@@ -273,7 +326,13 @@ impl Alerts {
         let mut out = Vec::new();
         for d in devs {
             let Some(b) = d.battery() else { continue };
-            let step = if b <= m::BT_CRITICAL_BATTERY_MAX_PCT { 2 } else if b <= m::BT_LOW_BATTERY_MAX_PCT { 1 } else { 0 };
+            let step = if b <= m::BT_CRITICAL_BATTERY_MAX_PCT {
+                2
+            } else if b <= m::BT_LOW_BATTERY_MAX_PCT {
+                1
+            } else {
+                0
+            };
             let had = self.fired.get(&d.name).copied().unwrap_or(0);
             if b >= m::BT_ALERT_RESET_PCT {
                 self.fired.remove(&d.name);
@@ -281,7 +340,11 @@ impl Alerts {
             }
             if step > had {
                 self.fired.insert(d.name.clone(), step);
-                let verb = if d.kind == Kind::Earbuds || d.name.ends_with('s') { "are" } else { "is" };
+                let verb = if d.kind == Kind::Earbuds || d.name.ends_with('s') {
+                    "are"
+                } else {
+                    "is"
+                };
                 let title = format!("{} {verb} at {b}%", d.name);
                 let body = if d.split() {
                     let side = match (d.left, d.right) {
@@ -289,7 +352,11 @@ impl Alerts {
                         (Some(l), Some(r)) if r < l => "Right AirPod is almost empty. ",
                         _ => "",
                     };
-                    if side.is_empty() { "Put them in the case.".to_string() } else { format!("{side}Put them in the case.") }
+                    if side.is_empty() {
+                        "Put them in the case.".to_string()
+                    } else {
+                        format!("{side}Put them in the case.")
+                    }
                 } else if step == 2 {
                     "Almost empty. Charge it now.".to_string()
                 } else {
@@ -315,7 +382,10 @@ pub struct Prefs {
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { alerts: true, menu_bar: true }
+        Prefs {
+            alerts: true,
+            menu_bar: true,
+        }
     }
 }
 
@@ -347,17 +417,41 @@ pub fn tray_title(devs: &[Device], prefs: Prefs) -> Option<String> {
 pub fn open_bluetooth_settings() {
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.BluetoothSettings").spawn();
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.BluetoothSettings")
+            .spawn();
     }
 }
 
 /// The devices the demo screenshots show.
 pub fn demo() -> Vec<Device> {
     vec![
-        Device { name: "AirPods Pro".into(), kind: Kind::Earbuds, left: Some(42), right: Some(38), case: Some(71), ..Default::default() },
-        Device { name: "Magic Keyboard".into(), kind: Kind::Keyboard, main: Some(82), ..Default::default() },
-        Device { name: "MX Master 3S".into(), kind: Kind::Mouse, main: Some(14), ..Default::default() },
-        Device { name: "Magic Trackpad".into(), kind: Kind::Trackpad, main: Some(67), ..Default::default() },
+        Device {
+            name: "AirPods Pro".into(),
+            kind: Kind::Earbuds,
+            left: Some(42),
+            right: Some(38),
+            case: Some(71),
+            ..Default::default()
+        },
+        Device {
+            name: "Magic Keyboard".into(),
+            kind: Kind::Keyboard,
+            main: Some(82),
+            ..Default::default()
+        },
+        Device {
+            name: "MX Master 3S".into(),
+            kind: Kind::Mouse,
+            main: Some(14),
+            ..Default::default()
+        },
+        Device {
+            name: "Magic Trackpad".into(),
+            kind: Kind::Trackpad,
+            main: Some(67),
+            ..Default::default()
+        },
     ]
 }
 
@@ -379,7 +473,10 @@ mod tests {
         assert_eq!(v.len(), 4);
         let pods = &v[0];
         assert_eq!(pods.kind, Kind::Earbuds);
-        assert_eq!((pods.left, pods.right, pods.case), (Some(42), Some(38), Some(71)));
+        assert_eq!(
+            (pods.left, pods.right, pods.case),
+            (Some(42), Some(38), Some(71))
+        );
         assert_eq!(pods.battery(), Some(38));
         assert_eq!(pods.detail(), "L 42 · R 38 · Case 71");
         assert_eq!(pods.address, "aa-bb-cc-dd-ee-01");
@@ -394,7 +491,12 @@ mod tests {
 
     #[test]
     fn one_airpod_in() {
-        let d = Device { name: "AirPods".into(), kind: Kind::Earbuds, left: Some(51), ..Default::default() };
+        let d = Device {
+            name: "AirPods".into(),
+            kind: Kind::Earbuds,
+            left: Some(51),
+            ..Default::default()
+        };
         assert_eq!(d.battery(), Some(51));
         assert_eq!(d.detail(), "L 51 · R –");
     }
@@ -416,7 +518,14 @@ mod tests {
     fn ioreg_is_merged_by_address_and_adds_new_devices() {
         let hid = parse_ioreg(IOREG);
         assert_eq!(hid.len(), 2);
-        assert_eq!(hid[0], Hid { product: "Magic Keyboard".into(), address: "aa-bb-cc-dd-ee-02".into(), pct: 79 });
+        assert_eq!(
+            hid[0],
+            Hid {
+                product: "Magic Keyboard".into(),
+                address: "aa-bb-cc-dd-ee-02".into(),
+                pct: 79
+            }
+        );
         let mut v = parse_profiler(PROFILER);
         merge(&mut v, &hid);
         assert_eq!(v[1].battery(), Some(79));
@@ -427,13 +536,23 @@ mod tests {
     #[test]
     fn alerts_fire_once_per_step_and_reset_after_charging() {
         let mut a = Alerts::default();
-        let mouse = |b| vec![Device { name: "MX Master 3S".into(), kind: Kind::Mouse, main: Some(b), ..Default::default() }];
+        let mouse = |b| {
+            vec![Device {
+                name: "MX Master 3S".into(),
+                kind: Kind::Mouse,
+                main: Some(b),
+                ..Default::default()
+            }]
+        };
         assert!(a.check(&mouse(40)).is_empty());
         let n = a.check(&mouse(19));
         assert_eq!(n.len(), 1);
         assert_eq!(n[0].0, "MX Master 3S is at 19%");
         assert!(a.check(&mouse(18)).is_empty());
-        assert!(a.check(&mouse(22)).is_empty(), "no reset below the reset line");
+        assert!(
+            a.check(&mouse(22)).is_empty(),
+            "no reset below the reset line"
+        );
         assert!(a.check(&mouse(19)).is_empty());
         assert_eq!(a.check(&mouse(9)).len(), 1);
         assert!(a.check(&mouse(5)).is_empty());
@@ -446,7 +565,16 @@ mod tests {
         let p = Prefs::default();
         let mut v = demo();
         assert_eq!(tray_title(&v, p).as_deref(), Some("Mouse 14%"));
-        assert_eq!(tray_title(&v, Prefs { menu_bar: false, ..p }), None);
+        assert_eq!(
+            tray_title(
+                &v,
+                Prefs {
+                    menu_bar: false,
+                    ..p
+                }
+            ),
+            None
+        );
         v[2].main = Some(60);
         assert_eq!(tray_title(&v, p), None);
         v[0].right = Some(6);
@@ -456,8 +584,20 @@ mod tests {
     #[test]
     fn lowest_first_puts_unknown_last() {
         let mut v = demo();
-        v.push(Device { name: "Speaker".into(), ..Default::default() });
+        v.push(Device {
+            name: "Speaker".into(),
+            ..Default::default()
+        });
         let names: Vec<_> = lowest_first(&v).into_iter().map(|d| d.name).collect();
-        assert_eq!(names, ["MX Master 3S", "AirPods Pro", "Magic Trackpad", "Magic Keyboard", "Speaker"]);
+        assert_eq!(
+            names,
+            [
+                "MX Master 3S",
+                "AirPods Pro",
+                "Magic Trackpad",
+                "Magic Keyboard",
+                "Speaker"
+            ]
+        );
     }
 }
