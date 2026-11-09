@@ -663,13 +663,13 @@ fn settings_page(c: &mut Capture, ui: &mut Ui, body: Rect, cx: &mut Cx) {
     record_keys(c, ui, cx);
     let mut child = ui.new_child(UiBuilder::new().max_rect(body));
     ScrollArea::vertical().id_salt("capture-settings").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), 680.0), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), 740.0), Sense::hover());
         let p = ui.painter().clone();
         let gap = 20.0;
         let x0 = area.left() + 24.0;
         let colw = (area.width() - 48.0 - gap) / 2.0;
-        shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())));
-        let ry = area.top() + 16.0 + 28.0 + Command::ALL.len() as f32 * ROW_H + 8.0 + 24.0;
+        let below = shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())));
+        let ry = below + 28.0;
         recording_options(c, ui, &p, Rect::from_min_size(Pos2::new(x0, ry), Vec2::new(colw, area.bottom() - ry)));
         options(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())));
     });
@@ -709,7 +709,8 @@ fn record_keys(c: &mut Capture, ui: &mut Ui, cx: &mut Cx) {
     ui.ctx().request_repaint();
 }
 
-fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
+/// Returns the bottom of what it drew.
+fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) -> f32 {
     let x0 = col.left();
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Keyboard shortcuts", bold(15.0), TEXT);
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), Command::ALL.len());
@@ -773,7 +774,7 @@ fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     }
     let ny = card.bottom() + 10.0;
     icons::draw(p, Ico::Keyboard, Rect::from_min_size(Pos2::new(x0 + 2.0, ny), Vec2::splat(14.0)), TEXT_FAINT);
-    paragraph(
+    let h = paragraph(
         p,
         Pos2::new(x0 + 22.0, ny),
         "⌘⇧3, ⌘⇧4 and ⌘⇧5 belong to macOS. Pick one of them and you get a warning; turn the macOS one off in System Settings › Keyboard first.",
@@ -781,6 +782,7 @@ fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
         TEXT_DIM,
         col.width() - 24.0,
     );
+    ny + h
 }
 
 fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {

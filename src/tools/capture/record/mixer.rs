@@ -52,6 +52,11 @@ impl Mixer {
         m
     }
 
+    /// The next frame to hand out.
+    pub fn position(&self) -> i64 {
+        self.pos
+    }
+
     fn track(&mut self, s: Src) -> &mut Track {
         match s {
             Src::System => &mut self.sys,

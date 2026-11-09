@@ -10,6 +10,7 @@
 
 pub mod camera;
 pub mod engine;
+pub mod meter;
 pub mod mixer;
 pub mod sys;
 pub mod timeline;
@@ -119,6 +120,11 @@ pub struct Recorder {
     pub camera: Option<camera::Camera>,
     pub mics: Vec<sys::Device>,
     pub cams: Vec<sys::Device>,
+    /// The device list open in the picker.
+    pub menu: Option<Media>,
+    /// The picker's live mic level, and which mic it was opened for.
+    pub meter: Option<meter::MicMeter>,
+    meter_for: Option<Option<String>>,
     pub saved: Option<Saved>,
     pub tx: Sender<Event>,
     rx: Receiver<Event>,
@@ -140,7 +146,7 @@ pub const SAVED_SECS: f32 = 8.0;
 impl Recorder {
     pub fn new(ctx: egui::Context) -> Recorder {
         let (tx, rx) = channel();
-        Recorder { phase: Phase::Idle, displays: Vec::new(), camera: None, mics: Vec::new(), cams: Vec::new(), saved: None, tx, rx, last_area: None, out: Vec::new(), folder: PathBuf::new(), last_display: Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 900.0)), ctx }
+        Recorder { phase: Phase::Idle, displays: Vec::new(), camera: None, mics: Vec::new(), cams: Vec::new(), menu: None, meter: None, meter_for: None, saved: None, tx, rx, last_area: None, out: Vec::new(), folder: PathBuf::new(), last_display: Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 900.0)), ctx }
     }
 
     pub fn idle(&self) -> bool {
@@ -182,6 +188,7 @@ impl Recorder {
         }
         self.mics = sys::devices(Media::Mic);
         self.cams = sys::devices(Media::Camera);
+        self.menu = None;
         let display = sys::display_at(&self.displays, sys::mouse());
         self.phase = Phase::Pick(Pick { source: Source::Display, display, windows: Vec::new(), drag: None, area: self.last_area, frames: 0 });
         if s.camera {
@@ -192,6 +199,7 @@ impl Recorder {
     /// Esc in the picker, or cancelling the countdown.
     pub fn cancel(&mut self) {
         self.phase = Phase::Idle;
+        self.menu = None;
         self.camera = None;
     }
 
@@ -282,22 +290,34 @@ impl Recorder {
         self.out.push(Out::SaveSettings);
     }
 
-    /// The next camera or microphone in the list.
-    pub fn next_device(&mut self, m: Media, s: &mut RecSettings) {
-        let (list, cur) = match m {
-            Media::Camera => (&self.cams, &mut s.camera_device),
-            Media::Mic => (&self.mics, &mut s.mic_device),
+    /// Use device `id` for the camera or microphone, turning it on.
+    pub fn use_device(&mut self, m: Media, id: String, s: &mut RecSettings) {
+        self.menu = None;
+        let (cur, on) = match m {
+            Media::Camera => (&mut s.camera_device, s.camera),
+            Media::Mic => (&mut s.mic_device, s.mic),
         };
-        if list.is_empty() {
-            return;
-        }
-        let i = cur.as_ref().and_then(|id| list.iter().position(|d| &d.id == id)).map(|i| i + 1).unwrap_or(0);
-        *cur = Some(list[i % list.len()].id.clone());
-        if m == Media::Camera && self.camera.is_some() {
-            self.camera = None;
-            self.show_camera(s);
+        let changed = cur.as_deref() != Some(id.as_str());
+        *cur = Some(id);
+        match (m, on) {
+            (Media::Camera, false) => self.toggle_camera(s),
+            (Media::Mic, false) => self.toggle_mic(s),
+            (Media::Camera, true) if changed && self.camera.is_some() => {
+                self.camera = None;
+                self.show_camera(s);
+            }
+            _ => {}
         }
         self.out.push(Out::SaveSettings);
+    }
+
+    /// The device in use: the chosen one if it's still there, else the first.
+    pub fn device_id(&self, m: Media, s: &RecSettings) -> Option<String> {
+        let (list, cur) = match m {
+            Media::Camera => (&self.cams, &s.camera_device),
+            Media::Mic => (&self.mics, &s.mic_device),
+        };
+        cur.as_ref().filter(|id| list.iter().any(|d| &d.id == *id)).or_else(|| list.first().map(|d| &d.id)).cloned()
     }
 
     pub fn device_name(&self, m: Media, s: &RecSettings) -> String {
@@ -331,7 +351,7 @@ impl Recorder {
     pub fn launch(&mut self, chosen: Chosen, s: &RecSettings) {
         let folder = self.folder.clone();
         let path = free_path(&folder, &Settings::recording_name(chrono::Local::now()));
-        let mic = (s.mic && sys::access(Media::Mic) == Access::Allowed).then(|| s.mic_device.clone());
+        let mic = (s.mic && sys::access(Media::Mic) == Access::Allowed).then(|| s.mic_device.clone().filter(|id| self.mics.iter().any(|d| &d.id == id)));
         let cfg = engine::Config {
             target: chosen.target.clone(),
             size: chosen.size,
@@ -358,6 +378,7 @@ impl Recorder {
 
     pub fn stop(&mut self) {
         let Phase::Live(live) = std::mem::replace(&mut self.phase, Phase::Saving) else { return };
+        eprintln!("[rec] stop at {:.2} s", live.session.length());
         self.camera = None;
         self.last_display = live.chosen.display.frame;
         let tx = self.tx.clone();
@@ -416,8 +437,25 @@ impl Recorder {
         Some(if l.paused { format!("❚❚ {t}") } else { format!("● {t}") })
     }
 
+    /// Listen to the chosen mic while the picker is up (for its meter).
+    fn keep_meter(&mut self, s: &RecSettings) {
+        let want = matches!(self.phase, Phase::Pick(_)) && s.mic && sys::access(Media::Mic) == Access::Allowed;
+        if !want {
+            self.meter = None;
+            self.meter_for = None;
+            return;
+        }
+        let dev = s.mic_device.clone().filter(|id| self.mics.iter().any(|d| &d.id == id));
+        if self.meter_for.as_ref() != Some(&dev) {
+            self.meter = None;
+            self.meter = meter::MicMeter::open(dev.as_deref());
+            self.meter_for = Some(dev);
+        }
+    }
+
     /// Background results and timers; call once per pass.
     pub fn tick(&mut self, s: &mut RecSettings) {
+        self.keep_meter(s);
         while let Ok(e) = self.rx.try_recv() {
             match e {
                 Event::Started(Ok(session)) => match std::mem::replace(&mut self.phase, Phase::Idle) {
@@ -432,6 +470,7 @@ impl Recorder {
                     }
                 },
                 Event::Started(Err(e)) => {
+                    eprintln!("[rec] couldn't start: {e}");
                     if matches!(self.phase, Phase::Starting { .. }) {
                         self.phase = Phase::Idle;
                         self.camera = None;
@@ -439,6 +478,7 @@ impl Recorder {
                     self.hud(format!("Couldn't record: {e}"));
                 }
                 Event::Stopped(r) => {
+                    eprintln!("[rec] stopped: {:?}", r.as_ref().map(|st| (&st.path, st.secs)));
                     self.phase = Phase::Idle;
                     match r {
                         Ok(st) => self.out.push(Out::Saved(st)),
@@ -469,6 +509,7 @@ impl Recorder {
         }
         let failed = self.live().and_then(|l| l.session.failure());
         if let Some(why) = failed {
+            eprintln!("[rec] failed: {why}");
             self.hud(format!("Recording stopped: {why}"));
             self.stop();
         }
@@ -477,6 +518,58 @@ impl Recorder {
                 self.saved = None;
             }
         }
+    }
+}
+
+/// `--rec-probe <secs> [--no-mic] [--no-sys]`: record the main display for
+/// `secs` without any UI, print what the recorder saw (stderr) and where the
+/// file went. For checking the capture pipeline from a terminal or a script.
+pub fn probe(secs: f64, system_audio: bool, mic: bool) {
+    #[cfg(target_os = "macos")]
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        let _ = objc2_app_kit::NSApplication::sharedApplication(mtm);
+    }
+    let s = RecSettings::default();
+    let Some(d) = sys::displays().into_iter().next() else {
+        eprintln!("[probe] no display");
+        return;
+    };
+    let chosen = chose_display(&d, &s);
+    let path = free_path(&std::env::temp_dir(), "rec-probe.mp4");
+    let mic_ok = mic && sys::access(Media::Mic) == Access::Allowed;
+    eprintln!("[probe] display {} {:?} -> {:?} @{} fps; mic asked {mic}, allowed {mic_ok}", d.name, d.pixels(), chosen.size, chosen.fps);
+    let cfg = engine::Config {
+        target: chosen.target,
+        size: chosen.size,
+        fps: chosen.fps,
+        bitrate: timeline::bitrate(chosen.size.0, chosen.size.1, chosen.fps, s.quality),
+        cursor: true,
+        clicks: false,
+        system_audio,
+        mic: mic_ok.then_some(None),
+        keep_window: None,
+        path,
+    };
+    let (tx, rx) = channel();
+    engine::start(cfg, Box::new(move |r| drop(tx.send(r))));
+    let session = match rx.recv_timeout(Duration::from_secs(10)) {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => return eprintln!("[probe] start failed: {e}"),
+        Err(_) => return eprintln!("[probe] start timed out"),
+    };
+    let until = Instant::now() + Duration::from_secs_f64(secs);
+    while Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(250));
+        let t = Instant::now();
+        let l = session.length();
+        eprintln!("[probe] length {l:.2} (took {:?})", t.elapsed());
+    }
+    let (tx, rx) = channel();
+    session.stop(Box::new(move |r| drop(tx.send(r))));
+    match rx.recv_timeout(Duration::from_secs(15)) {
+        Ok(Ok(st)) => eprintln!("[probe] saved {} ({:.2} s, {:?})", st.path.display(), st.secs, st.size),
+        Ok(Err(e)) => eprintln!("[probe] save failed: {e}"),
+        Err(_) => eprintln!("[probe] save timed out"),
     }
 }
 
