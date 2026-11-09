@@ -11,6 +11,7 @@ pub mod probe;
 mod ui;
 
 use crate::core::tool::{Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
+use crate::kit::activity::{self, Kick};
 use crate::kit::glass::{tint, Icon};
 use control::{Guard, Mode, Settings};
 use data::Snapshot;
@@ -72,14 +73,14 @@ pub struct FanControl {
     live: Arc<Mutex<Live>>,
     on: Arc<AtomicBool>,
     /// Wakes the background thread early after a change.
-    kick: Arc<AtomicBool>,
+    kick: Arc<Kick>,
     demo: bool,
 }
 
 impl FanControl {
     pub fn new(env: &ToolEnv) -> Self {
         let on = Arc::new(AtomicBool::new(true));
-        let kick = Arc::new(AtomicBool::new(false));
+        let kick = Arc::new(Kick::new());
         let live = Arc::new(Mutex::new(Live { settings: if env.demo { Settings::default() } else { control::load() }, ..Default::default() }));
         let snap = if env.demo { Arc::new(Mutex::new(data::demo())) } else { start(env.ctx.clone(), on.clone(), live.clone(), kick.clone()) };
         FanControl { snap, live, on, kick, demo: env.demo }
@@ -93,7 +94,7 @@ impl FanControl {
                         control::save(&s);
                     }
                     self.live.lock().unwrap().settings = s;
-                    self.kick.store(true, Ordering::Relaxed);
+                    self.kick.kick();
                 }
                 Cmd::Install | Cmd::Uninstall if self.demo => {}
                 Cmd::Install | Cmd::Uninstall => {
@@ -117,7 +118,7 @@ impl FanControl {
                             l.manual = false;
                         }
                         drop(l);
-                        kick.store(true, Ordering::Relaxed);
+                        kick.kick();
                         ctx.request_repaint();
                     });
                 }
@@ -140,7 +141,7 @@ impl Drop for FanControl {
 
 /// Read the sensors every [`data::SAMPLE_SECS`] on a background thread
 /// while the tool is on, and tell the helper what the fans should do.
-fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: Arc<AtomicBool>) -> Shared {
+fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: Arc<Kick>) -> Shared {
     let snap: Shared = Arc::new(Mutex::new(Snapshot::default()));
     let out = snap.clone();
     std::thread::Builder::new()
@@ -149,11 +150,10 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: 
             let mut probe = probe::Probe::open();
             let chip = chip_name();
             let mut held = false;
-            let mut last_read = std::time::Instant::now() - Duration::from_secs(60);
+            let mut read_at = activity::Every::default();
             loop {
                 let on_now = on.load(Ordering::Relaxed);
-                if on_now && last_read.elapsed() >= Duration::from_secs(data::SAMPLE_SECS) {
-                    last_read = std::time::Instant::now();
+                if on_now && read_at.due(Duration::from_secs(data::SAMPLE_SECS)) {
                     let r = probe.read();
                     let thermal = crate::kit::native::thermal_state();
                     let mut s = out.lock().unwrap();
@@ -173,6 +173,13 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: 
                     (l.settings.clone(), tripped)
                 };
                 let want = on_now && s.loaded && !s.fans.is_empty() && settings.mode != Mode::Auto && !tripped;
+                // nothing to hold and nobody looking (or the tool is off):
+                // leave the helper alone, its state is asked when shown
+                if !want && !held && !(on_now && activity::visible()) {
+                    let wait = if on_now { Duration::from_secs(data::SAMPLE_SECS) } else { Duration::from_secs(3600) };
+                    activity::nap(wait, Some(&kick));
+                    continue;
+                }
                 let reply = if want {
                     let temp = settings.curve.source.read(&s);
                     let rpm = settings.targets(&s.fans, temp);
@@ -197,14 +204,10 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: 
                     };
                     l.manual = reply.as_ref().is_some_and(|r| r.manual);
                 }
-                ctx.request_repaint();
-                // sleep until the next sample, or a change from the UI
-                for _ in 0..(data::SAMPLE_SECS * 10) {
-                    if kick.swap(false, Ordering::Relaxed) {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
+                activity::repaint(&ctx);
+                // sleep until the next sample, a change from the UI, or the
+                // panel opening
+                activity::nap(Duration::from_secs(data::SAMPLE_SECS), Some(&kick));
             }
         })
         .ok();
@@ -276,7 +279,7 @@ impl Tool for FanControl {
     }
     fn set_on(&mut self, on: bool) {
         self.on.store(on, Ordering::Relaxed);
-        self.kick.store(true, Ordering::Relaxed);
+        self.kick.kick();
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {
         match view {

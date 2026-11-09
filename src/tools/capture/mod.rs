@@ -50,10 +50,22 @@ pub enum Measure {
     Ruler,
 }
 
+/// A new capture's small pictures, made off the UI thread.
+struct Small {
+    thumb: egui::ColorImage,
+    preview: egui::ColorImage,
+}
+
 /// Results from background threads.
 enum Done {
-    Grab(Purpose, Result<Option<RgbaImage>, String>),
+    /// A picture, with its thumbnail when it's for history.
+    Grab(Purpose, Result<Option<(grab::Grabbed, Option<Small>)>, String>),
     Text(Vec<mac::TextLine>),
+    /// Something to say once background work finished.
+    Note(String),
+    /// A copy was saved to the user's folder (for a history entry); `announce`
+    /// says where in a toast.
+    Saved(Option<u64>, Result<PathBuf, String>, bool),
     Thumb(u64, Option<egui::ColorImage>),
     Folder(Option<PathBuf>),
     Files(PathBuf, Vec<folder::FileShot>),
@@ -76,9 +88,17 @@ struct Thumbs {
 /// Longest side of a thumbnail, in pixels.
 const THUMB_PX: u32 = 360;
 
+/// Longest side of the floating preview's picture, in pixels (sharp at 2×).
+const PREVIEW_PX: u32 = 640;
+
 fn thumb_image(img: &RgbaImage) -> egui::ColorImage {
+    scaled_image(img, THUMB_PX)
+}
+
+/// `img` shrunk so its longest side is at most `max_px`.
+pub fn scaled_image(img: &RgbaImage, max_px: u32) -> egui::ColorImage {
     let (w, h) = img.dimensions();
-    let k = (THUMB_PX as f32 / w.max(h).max(1) as f32).min(1.0);
+    let k = (max_px as f32 / w.max(h).max(1) as f32).min(1.0);
     let t = image::imageops::thumbnail(img, ((w as f32 * k) as u32).max(1), ((h as f32 * k) as u32).max(1));
     egui::ColorImage::from_rgba_unmultiplied([t.width() as usize, t.height() as usize], t.as_raw())
 }
@@ -192,8 +212,27 @@ impl Capture {
         self.ctx.request_repaint();
     }
 
-    fn copy_image(&self, img: &RgbaImage) -> bool {
-        mac::copy_png(&store::png_bytes(img))
+    /// Put a picture on the clipboard. Encoding a big capture takes a
+    /// moment, so it happens on a thread; a failure shows as a toast.
+    fn copy_image(&self, img: RgbaImage) {
+        self.in_background(move || (!mac::copy_png(&store::png_bytes(&img))).then(|| Done::Note("Couldn't copy".into())));
+    }
+
+    /// [`Capture::copy_image`] for a picture already encoded as PNG.
+    fn copy_png(&self, png: Vec<u8>) {
+        self.in_background(move || (!mac::copy_png(&png)).then(|| Done::Note("Couldn't copy".into())));
+    }
+
+    /// Run `job` on a thread; what it returns comes back to [`Capture::done`].
+    fn in_background(&self, job: impl FnOnce() -> Option<Done> + Send + 'static) {
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            if let Some(d) = job() {
+                let _ = tx.send(d);
+                ctx.request_repaint();
+            }
+        });
     }
 
     fn copy_text(&self, text: &str) {
@@ -237,8 +276,10 @@ impl Capture {
         if delay > 0 {
             self.countdown = Some(windows::Countdown { until: Instant::now() + std::time::Duration::from_secs(delay as u64), total: delay, grab: g, purpose: p });
         } else {
-            // a moment for the panel to get out of the picture
-            self.spawn_grab(g, p, if g == Grab::Screen { 250 } else { 120 });
+            // a moment for the panel or window to get out of the picture
+            // (none needed when neither is showing, e.g. from a shortcut)
+            let settle = if !crate::kit::activity::visible() { 0 } else if g == Grab::Screen { 250 } else { 120 };
+            self.spawn_grab(g, p, settle);
         }
     }
 
@@ -248,8 +289,25 @@ impl Capture {
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(settle_ms));
-            let r = grab::run(g);
-            let _ = tx.send(Done::Grab(p, r));
+            let shot = grab::shoot(g);
+            let d = match (p, shot) {
+                (_, Err(e)) => Done::Grab(p, Err(e)),
+                (_, Ok(None)) => Done::Grab(p, Ok(None)),
+                // text straight from screencapture's file: nothing decoded or encoded
+                (Purpose::Text, Ok(Some(path))) => {
+                    let _ = tx.send(Done::Note(mac::ocr_status().into()));
+                    ctx.request_repaint();
+                    let lines = mac::recognize_file(&path);
+                    let _ = std::fs::remove_file(&path);
+                    Done::Text(lines)
+                }
+                // decoding and the thumbnail happen here, not on the UI thread
+                (_, Ok(Some(path))) => Done::Grab(p, grab::load(&path).map(|g| {
+                    let small = matches!(p, Purpose::Keep(_)).then(|| Small { thumb: thumb_image(&g.img), preview: scaled_image(&g.img, PREVIEW_PX) });
+                    Some((g, small))
+                })),
+            };
+            let _ = tx.send(d);
             ctx.request_repaint();
         });
     }
@@ -272,11 +330,24 @@ impl Capture {
                 match (p, r) {
                     (_, Ok(None)) => {}
                     (_, Err(e)) => self.hud(format!("Couldn't capture: {e}")),
-                    (Purpose::Keep(kind), Ok(Some(img))) => self.keep(img, kind),
-                    (Purpose::Text, Ok(Some(img))) => self.spawn_ocr(img),
-                    (Purpose::Measure(m), Ok(Some(img))) => self.overlay = Some(windows::Overlay::new(m, img)),
+                    (Purpose::Keep(kind), Ok(Some((g, small)))) => self.keep(g, small, kind),
+                    (Purpose::Text, Ok(Some((g, _)))) => self.spawn_ocr(g.img),
+                    (Purpose::Measure(m), Ok(Some((g, _)))) => self.overlay = Some(windows::Overlay::new(m, g.img)),
                 }
             }
+            Done::Note(msg) => self.hud(msg),
+            Done::Saved(id, r, announce) => match r {
+                Ok(path) => {
+                    if let Some(id) = id {
+                        self.store.set_saved(id, path.clone());
+                    }
+                    self.files_at = None;
+                    if announce {
+                        self.hud(format!("Saved to {}", windows::short_path(&path)));
+                    }
+                }
+                Err(e) => self.hud(format!("Couldn't save: {e}")),
+            },
             Done::Text(lines) => {
                 self.busy = false;
                 if lines.is_empty() {
@@ -316,10 +387,18 @@ impl Capture {
 
     /// A fresh capture: history, then copy / save / sound, then what the
     /// user picked to happen next.
-    fn keep(&mut self, img: RgbaImage, kind: Kind) {
-        let id = match self.store.add(&img, kind, self.settings.keep) {
+    /// A new capture: into history, then the clipboard and the folder (on a
+    /// thread, from the PNG screencapture wrote, so the preview shows at once).
+    fn keep(&mut self, g: grab::Grabbed, small: Option<Small>, kind: Kind) {
+        let grab::Grabbed { png, img } = g;
+        let (thumb, preview) = match small {
+            Some(s) => (Some(s.thumb), Some(s.preview)),
+            None => (None, None),
+        };
+        let id = match self.store.add_png(&png, img.dimensions(), kind, self.settings.keep) {
             Ok(id) => {
-                self.put_thumb(id, &img);
+                let t = thumb.unwrap_or_else(|| thumb_image(&img));
+                self.thumbs.tex.insert(id, self.ctx.load_texture(format!("capture-thumb-{id}"), t, egui::TextureOptions::LINEAR));
                 Some(id)
             }
             Err(e) => {
@@ -331,19 +410,19 @@ impl Capture {
         if self.settings.sound {
             mac::play_shutter();
         }
-        let copied = self.settings.copy && self.copy_image(&img);
-        let mut saved = false;
-        if self.settings.save {
-            match store::save_copy(&img, &self.settings, chrono::Local::now()) {
-                Ok(path) => {
-                    saved = true;
-                    self.files_at = None;
-                    if let Some(id) = id {
-                        self.store.set_saved(id, path);
-                    }
+        let (copied, saved) = (self.settings.copy, self.settings.save);
+        if copied || saved {
+            let settings = self.settings.clone();
+            // JPG copies need the picture; PNG copies are the bytes as they are
+            let jpg = (saved && settings.format == settings::Format::Jpg).then(|| img.clone());
+            let t = chrono::Local::now();
+            self.in_background(move || {
+                if copied && !mac::copy_png(&png) {
+                    // rare; the save below still reports
+                    eprintln!("capture: couldn't copy to the clipboard");
                 }
-                Err(e) => self.hud(format!("Couldn't save: {e}")),
-            }
+                saved.then(|| Done::Saved(id, store::save_copy_png(&png, jpg.as_ref(), &settings, t), false))
+            });
         }
         let note = match (copied, saved) {
             (true, true) => "Copied and saved",
@@ -352,7 +431,7 @@ impl Capture {
             _ => "Captured",
         };
         match self.settings.after {
-            settings::After::Preview => self.preview = Some(windows::Preview::new(id, img, note.into())),
+            settings::After::Preview => self.preview = Some(windows::Preview::new(id, img, preview, note.into())),
             settings::After::Editor => self.open_editor(id, img),
             settings::After::Nothing => {
                 if copied || saved {
@@ -407,9 +486,18 @@ impl Capture {
     fn commit_edit(&mut self, ed: &mut Editor) -> Option<u64> {
         if ed.edited {
             let img = ed.rendered();
-            match self.store.add(&img, Kind::Edited, self.settings.keep) {
+            self.commit_rendered(ed, &img)
+        } else {
+            ed.shot
+        }
+    }
+
+    /// [`Capture::commit_edit`] with the editor's picture already rendered.
+    fn commit_rendered(&mut self, ed: &mut Editor, img: &RgbaImage) -> Option<u64> {
+        if ed.edited {
+            match self.store.add(img, Kind::Edited, self.settings.keep) {
                 Ok(id) => {
-                    self.put_thumb(id, &img);
+                    self.put_thumb(id, img);
                     self.forget_dropped_thumbs();
                     ed.shot = Some(id);
                     ed.edited = false;
@@ -456,7 +544,15 @@ impl Capture {
         }
     }
 
-    /// Save a copy to the user's folder; remembers it on the history entry.
+    /// Save a copy to the user's folder on a thread; a toast says where (or
+    /// why not) and the history entry remembers it.
+    fn save_image_later(&self, id: Option<u64>, img: RgbaImage) {
+        let settings = self.settings.clone();
+        let t = chrono::Local::now();
+        self.in_background(move || Some(Done::Saved(id, store::save_copy(&img, &settings, t), true)));
+    }
+
+    /// Save a copy to the user's folder now; remembers it on the history entry.
     fn save_image(&mut self, id: Option<u64>, img: &RgbaImage) -> Option<PathBuf> {
         match store::save_copy(img, &self.settings, chrono::Local::now()) {
             Ok(path) => {

@@ -317,9 +317,20 @@ fn load(c: &Capture, it: &Item) -> Option<image::RgbaImage> {
 
 fn run_act(c: &mut Capture, act: Act, it: &Item) {
     match (act, &it.src) {
-        (Act::Copy, _) => match load(c, it) {
-            Some(img) if c.copy_image(&img) => c.hud("Copied"),
-            _ => c.hud("Couldn't copy"),
+        // a history capture is a PNG already: onto the clipboard as it is
+        (Act::Copy, Src::Shot(id)) => match c.store.png(*id) {
+            Some(png) => {
+                c.copy_png(png);
+                c.hud("Copied");
+            }
+            None => c.hud("Couldn't copy"),
+        },
+        (Act::Copy, Src::File) => match load(c, it) {
+            Some(img) => {
+                c.copy_image(img);
+                c.hud("Copied");
+            }
+            None => c.hud("Couldn't copy"),
         },
         (Act::Edit, Src::Shot(id)) => c.open_editor_for(*id),
         (Act::Edit, Src::File) => {

@@ -41,6 +41,9 @@ pub enum Tab {
     Settings,
 }
 
+/// (filter, query, history version) and the ids they gave.
+type VisibleMemo = (Filter, String, u64, Vec<u64>);
+
 /// The history filter: everything, one kind, or pinned only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Filter {
@@ -109,6 +112,9 @@ pub struct Clipboard {
     app_tx: Sender<Option<settings::Ignored>>,
     app_rx: Receiver<Option<settings::Ignored>>,
     confirm_clear: Option<Instant>,
+    /// The last [`Clipboard::visible`] answer, keyed by its question and the
+    /// history's version: it's asked several times every frame.
+    visible_memo: std::cell::RefCell<Option<VisibleMemo>>,
     /// Shell requests made outside a ui pass.
     actions: Vec<Action>,
     /// Asked for paste but Accessibility is off: show the hint in the panel.
@@ -155,6 +161,7 @@ impl Clipboard {
             app_tx,
             app_rx,
             confirm_clear: None,
+            visible_memo: Default::default(),
             actions: Vec::new(),
             needs_access: false,
             demo_quick: None,
@@ -347,7 +354,17 @@ impl Clipboard {
 
     /// Entries that pass the filter and search, pinned first.
     fn visible(&self, filter: Filter, query: &str) -> Vec<u64> {
-        self.store.ordered().into_iter().filter(|e| filter.passes(e) && (query.trim().is_empty() || e.matches(query))).map(|e| e.id).collect()
+        let rev = self.store.rev();
+        let mut memo = self.visible_memo.borrow_mut();
+        if let Some((f, q, r, ids)) = memo.as_ref() {
+            if *f == filter && q == query && *r == rev {
+                return ids.clone();
+            }
+        }
+        let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
+        let ids: Vec<u64> = self.store.ordered().into_iter().filter(|e| filter.passes(e) && e.matches_words(&words)).map(|e| e.id).collect();
+        *memo = Some((filter, query.to_string(), rev, ids.clone()));
+        ids
     }
 }
 

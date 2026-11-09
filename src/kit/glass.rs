@@ -287,7 +287,17 @@ pub fn arc_points(center: Pos2, radius: f32, a0: f32, a1: f32, n: usize) -> Vec<
         .collect()
 }
 
-/// A spinning arc used while something is working.
+/// Frame interval for small looping animations (spinners, fan blades):
+/// smooth to the eye at a fraction of a 120 Hz display's frames.
+pub const ANIM_FRAME: std::time::Duration = std::time::Duration::from_millis(33);
+
+/// Ask for the next frame of a looping animation.
+pub fn animate(ctx: &egui::Context) {
+    ctx.request_repaint_after(ANIM_FRAME);
+}
+
+/// A spinning arc used while something is working; call [`animate`] to keep
+/// it turning.
 pub fn spinner(painter: &Painter, center: Pos2, radius: f32, t: f64, color: Color32) {
     let a0 = (t * 4.0) as f32;
     painter.add(PathShape::line(arc_points(center, radius, a0, a0 + 4.2, 40), PathStroke::new(2.5, color)));

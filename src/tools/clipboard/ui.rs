@@ -465,8 +465,13 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
                     y += 28.0;
                 }
                 Row::Item(id) => {
-                    let Some(e) = c.store.get(*id).cloned() else { continue };
                     let r = Rect::from_min_size(Pos2::new(area.left() + 4.0, y), Vec2::new(area.width() - 8.0, ROW_H));
+                    // up to a thousand rows: only those in view are drawn
+                    if !ui.is_rect_visible(r) {
+                        y += ROW_H;
+                        continue;
+                    }
+                    let Some(e) = c.store.get(*id).cloned() else { continue };
                     let resp = ui.interact(r, ui.scope_id().with(("clip-row", e.id)), Sense::click());
                     let sel = c.selected == Some(e.id);
                     if sel {

@@ -50,13 +50,20 @@ impl Shot {
 pub struct Store {
     dir: PathBuf,
     pub shots: Vec<Shot>,
+    /// [`Store::bytes_on_disk`] for the list it was measured for.
+    disk: std::cell::Cell<Option<((usize, u64), u64)>>,
 }
 
 impl Store {
     pub fn open(dir: PathBuf) -> Store {
         let shots = std::fs::read_to_string(dir.join("index.json")).ok().and_then(|s| serde_json::from_str::<Vec<Shot>>(&s).ok()).unwrap_or_default();
         let shots = shots.into_iter().filter(|s| dir.join(format!("{}.png", s.id)).exists()).collect();
-        Store { dir, shots }
+        Store { dir, shots, disk: Default::default() }
+    }
+
+    /// A capture's PNG file as it is (no decoding).
+    pub fn png(&self, id: u64) -> Option<Vec<u8>> {
+        std::fs::read(self.path(id)).ok()
     }
 
     pub fn path(&self, id: u64) -> PathBuf {
@@ -69,13 +76,18 @@ impl Store {
 
     /// Add a capture and trim to `keep`. Returns its id.
     pub fn add(&mut self, img: &RgbaImage, kind: Kind, keep: usize) -> Result<u64, String> {
+        self.add_png(&png_bytes(img), img.dimensions(), kind, keep)
+    }
+
+    /// [`Store::add`] for a picture already encoded as PNG (`size` in pixels).
+    pub fn add_png(&mut self, png: &[u8], size: (u32, u32), kind: Kind, keep: usize) -> Result<u64, String> {
         let _ = std::fs::create_dir_all(&self.dir);
         let mut id = chrono::Local::now().timestamp_millis().max(0) as u64;
         while self.shots.iter().any(|s| s.id == id) {
             id += 1;
         }
-        img.save(self.path(id)).map_err(|e| e.to_string())?;
-        self.shots.insert(0, Shot { id, kind, w: img.width(), h: img.height(), saved: None, pinned: false });
+        std::fs::write(self.path(id), png).map_err(|e| e.to_string())?;
+        self.shots.insert(0, Shot { id, kind, w: size.0, h: size.1, saved: None, pinned: false });
         self.trim(keep);
         self.write_index();
         Ok(id)
@@ -130,25 +142,54 @@ impl Store {
         image::open(self.path(id)).ok().map(|i| i.to_rgba8())
     }
 
+    /// Size of the history files. The page shows it every frame, so it is
+    /// measured again only when the list of captures changed.
     pub fn bytes_on_disk(&self) -> u64 {
-        self.shots.iter().filter_map(|s| std::fs::metadata(self.path(s.id)).ok()).map(|m| m.len()).sum()
+        let key = (self.shots.len(), self.shots.iter().map(|s| s.id).fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b)));
+        if let Some((k, b)) = self.disk.get() {
+            if k == key {
+                return b;
+            }
+        }
+        let b = self.shots.iter().filter_map(|s| std::fs::metadata(self.path(s.id)).ok()).map(|m| m.len()).sum();
+        self.disk.set(Some((key, b)));
+        b
     }
 
     fn write_index(&self) {
         if self.dir.as_os_str().is_empty() {
             return;
         }
-        if let Ok(json) = serde_json::to_string(&self.shots) {
-            let tmp = self.dir.join("index.json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(tmp, self.dir.join("index.json"));
-            }
-        }
+        // off the UI thread: the index is rewritten on every capture
+        crate::kit::fs::save_json_later(&self.dir.join("index.json"), &self.shots, false);
     }
 }
 
 /// Write the user's copy into their folder. A name that's taken gets " 2", " 3"…
 pub fn save_copy(img: &RgbaImage, settings: &Settings, t: chrono::DateTime<chrono::Local>) -> Result<PathBuf, String> {
+    let path = copy_path(settings, t)?;
+    write_image(img, &path, settings.format)?;
+    Ok(path)
+}
+
+/// [`save_copy`] for a picture already encoded as PNG: a PNG copy is those
+/// bytes as they are; `img` (decoded from `png` when missing) is only
+/// needed for JPG.
+pub fn save_copy_png(png: &[u8], img: Option<&RgbaImage>, settings: &Settings, t: chrono::DateTime<chrono::Local>) -> Result<PathBuf, String> {
+    let path = copy_path(settings, t)?;
+    match (settings.format, img) {
+        (Format::Png, _) => std::fs::write(&path, png).map_err(|e| e.to_string())?,
+        (Format::Jpg, Some(img)) => write_image(img, &path, Format::Jpg)?,
+        (Format::Jpg, None) => {
+            let img = image::load_from_memory(png).map_err(|e| e.to_string())?.to_rgba8();
+            write_image(&img, &path, Format::Jpg)?
+        }
+    }
+    Ok(path)
+}
+
+/// A free file name for a new copy in the user's folder.
+fn copy_path(settings: &Settings, t: chrono::DateTime<chrono::Local>) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&settings.folder).map_err(|e| e.to_string())?;
     let name = settings.file_name(t);
     let mut path = settings.folder.join(&name);
@@ -158,13 +199,12 @@ pub fn save_copy(img: &RgbaImage, settings: &Settings, t: chrono::DateTime<chron
         path = settings.folder.join(format!("{stem} {n}.{}", settings.format.ext()));
         n += 1;
     }
-    write_image(img, &path, settings.format)?;
     Ok(path)
 }
 
 pub fn write_image(img: &RgbaImage, path: &Path, format: Format) -> Result<(), String> {
     match format {
-        Format::Png => img.save_with_format(path, image::ImageFormat::Png).map_err(|e| e.to_string()),
+        Format::Png => std::fs::write(path, png_bytes(img)).map_err(|e| e.to_string()),
         Format::Jpg => {
             // JPEG has no alpha: flatten on white
             let rgb = image::RgbImage::from_fn(img.width(), img.height(), |x, y| {
@@ -178,11 +218,16 @@ pub fn write_image(img: &RgbaImage, path: &Path, format: Format) -> Result<(), S
     }
 }
 
-/// PNG bytes of an image (clipboard, OCR input).
+/// PNG bytes of an image (history, clipboard, OCR input). Fast compression:
+/// a full Retina screen encodes several times quicker, for files a little
+/// larger.
 pub fn png_bytes(img: &RgbaImage) -> Vec<u8> {
-    let mut out = std::io::Cursor::new(Vec::new());
-    let _ = img.write_to(&mut out, image::ImageFormat::Png);
-    out.into_inner()
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::ImageEncoder;
+    let mut out = Vec::new();
+    let enc = PngEncoder::new_with_quality(&mut out, CompressionType::Fast, FilterType::Adaptive);
+    let _ = enc.write_image(img.as_raw(), img.width(), img.height(), image::ExtendedColorType::Rgba8);
+    out
 }
 
 #[cfg(test)]
@@ -209,12 +254,14 @@ mod tests {
         assert!(st.get(first).is_some());
         assert_eq!(std::fs::read_dir(&dir).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "png")).count(), 4);
         // survives a reload
+        crate::kit::fs::flush_writes();
         let again = Store::open(dir.clone());
         assert_eq!(again.shots, st.shots);
         assert_eq!(again.load(first).unwrap().dimensions(), (4, 3));
         st.remove(first);
         assert!(st.get(first).is_none() && !st.path(first).exists());
         st.clear();
+        crate::kit::fs::flush_writes();
         assert!(Store::open(dir.clone()).shots.is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -234,6 +281,14 @@ mod tests {
         s.format = Format::Jpg;
         let c = save_copy(&img, &s, t).unwrap();
         assert_eq!(image::open(&c).unwrap().width(), 2);
+        // from PNG bytes: a PNG copy is the bytes themselves, a JPG one decodes them
+        let png = png_bytes(&img);
+        assert_eq!(image::load_from_memory(&png).unwrap().to_rgba8(), img);
+        let d = save_copy_png(&png, None, &s, t).unwrap();
+        assert_eq!(image::open(&d).unwrap().width(), 2);
+        s.format = Format::Png;
+        let e = save_copy_png(&png, None, &s, t).unwrap();
+        assert_eq!(std::fs::read(&e).unwrap(), png);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

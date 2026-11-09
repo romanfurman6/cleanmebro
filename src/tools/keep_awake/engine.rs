@@ -226,26 +226,20 @@ pub fn today_start(t: i64) -> i64 {
 }
 
 pub fn data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join("keep_awake")
+    crate::kit::fs::data_path("keep_awake")
 }
 
 fn load_settings(dir: &Path) -> Settings {
-    std::fs::read_to_string(dir.join("settings.json")).ok().and_then(|s| serde_json::from_str::<Settings>(&s).ok()).unwrap_or_default().sanitize()
+    crate::kit::fs::load_json::<Settings>(&dir.join("settings.json")).sanitize()
 }
 
 fn load_log(dir: &Path, day: i64) -> Vec<Span> {
-    let v: Vec<Span> = std::fs::read_to_string(dir.join("today.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let v: Vec<Span> = crate::kit::fs::load_json(&dir.join("today.json"));
     v.into_iter().filter(|s| s.end > day).collect()
 }
 
 fn save_json<T: Serialize>(dir: &Path, name: &str, v: &T) {
-    let _ = std::fs::create_dir_all(dir);
-    if let Ok(json) = serde_json::to_string_pretty(v) {
-        let tmp = dir.join(format!("{name}.tmp"));
-        if std::fs::write(&tmp, json).is_ok() {
-            let _ = std::fs::rename(tmp, dir.join(name));
-        }
-    }
+    crate::kit::fs::save_json(&dir.join(name), v, true);
 }
 
 #[cfg(test)]

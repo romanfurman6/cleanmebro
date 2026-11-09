@@ -764,7 +764,7 @@ impl Editor {
         }
         if self.ocr_busy {
             spinner(&p, Pos2::new(shown.right() - 16.0, shown.top() + 16.0), 7.0, ctx.input(|i| i.time), Color32::WHITE);
-            ctx.request_repaint();
+            crate::kit::glass::animate(&ctx);
         }
     }
 

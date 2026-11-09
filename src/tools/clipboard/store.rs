@@ -127,9 +127,19 @@ impl Entry {
     }
 
     /// Whether the search words all appear in the entry.
+    #[cfg(test)]
     pub fn matches(&self, query: &str) -> bool {
+        let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
+        self.matches_words(&words)
+    }
+
+    /// [`Entry::matches`] with the query already lowercased and split.
+    pub fn matches_words(&self, words: &[String]) -> bool {
+        if words.is_empty() {
+            return true;
+        }
         let hay = format!("{} {}", self.text, self.app).to_lowercase();
-        query.to_lowercase().split_whitespace().all(|w| hay.contains(w))
+        words.iter().all(|w| hay.contains(w.as_str()))
     }
 
     /// Facts for the detail view: "2 lines · 92 characters".
@@ -285,18 +295,20 @@ pub struct Store {
     pub entries: Vec<Entry>,
     /// None: sample data that never saves.
     saves: bool,
+    /// Bumped on every change, so views can keep work keyed to it.
+    rev: u64,
 }
 
 impl Store {
     pub fn open(dir: PathBuf) -> Store {
         let entries = std::fs::read_to_string(dir.join("index.json")).ok().and_then(|s| serde_json::from_str::<Vec<Entry>>(&s).ok()).unwrap_or_default();
-        Store { dir, entries, saves: true }
+        Store { dir, entries, saves: true, rev: 0 }
     }
 
     /// In memory only (tests that don't touch the disk).
     #[cfg(test)]
     pub fn memory(dir: PathBuf) -> Store {
-        Store { dir, entries: Vec::new(), saves: false }
+        Store { dir, entries: Vec::new(), saves: false, rev: 0 }
     }
 
     fn blob(&self, id: u64, ext: &str) -> PathBuf {
@@ -327,17 +339,19 @@ impl Store {
         self.entries.iter().map(|e| e.bytes).sum()
     }
 
-    fn save(&self) {
+    /// Which version of the history this is (changes on every change).
+    pub fn rev(&self) -> u64 {
+        self.rev
+    }
+
+    fn save(&mut self) {
+        self.rev += 1;
         if !self.saves {
             return;
         }
-        let _ = std::fs::create_dir_all(&self.dir);
-        if let Ok(json) = serde_json::to_string(&self.entries) {
-            let tmp = self.dir.join("index.json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(tmp, self.dir.join("index.json"));
-            }
-        }
+        // off the UI thread: the index (every clip's text) is rewritten on
+        // every copy, and it can be megabytes
+        crate::kit::fs::save_json_later(&self.dir.join("index.json"), &self.entries, false);
     }
 
     /// Add a clip copied at `now` (ms). Returns its id, or None for an empty
@@ -583,6 +597,7 @@ mod tests {
         let mut s = Store::open(dir.clone());
         let img = s.add(&Clip { png: Some(png.clone()), app: "Capture".into(), ..Default::default() }, 10, LIM).unwrap();
         let rich = s.add(&Clip { text: Some("bold".into()), rtf: Some(b"{\\rtf1 bold}".to_vec()), ..Default::default() }, 11, LIM).unwrap();
+        crate::kit::fs::flush_writes();
         let back = Store::open(dir.clone());
         assert_eq!(back.entries.len(), 2);
         assert_eq!(back.get(img).map(|e| (e.kind, e.w, e.h)), Some((Kind::Image, 4, 3)));

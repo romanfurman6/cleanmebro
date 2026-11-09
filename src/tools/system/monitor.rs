@@ -1,6 +1,7 @@
 //! Live Mac health readings for the menu panel. A background thread refreshes a
 //! shared snapshot; slow sources (system_profiler, folder sizes) run less often.
 
+use crate::kit::activity::{self, Every};
 use crate::kit::fs::dir_size;
 use crate::kit::mechanics as m;
 use serde_json::Value;
@@ -189,15 +190,54 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
     shared
 }
 
+/// How often each slow source refreshes: (while on screen, while hidden).
+/// Hidden, only what the menu-bar title and Bluetooth alerts need keeps going.
+struct Cadence {
+    shown: Duration,
+    hidden: Option<Duration>,
+}
+
+impl Cadence {
+    const fn secs(shown: u64, hidden: Option<u64>) -> Self {
+        Cadence { shown: Duration::from_secs(shown), hidden: match hidden { Some(h) => Some(Duration::from_secs(h)), None => None } }
+    }
+    /// Due now? `None` while hidden means "not until it's shown again",
+    /// except for the very first reading.
+    fn due(&self, last: &mut Every) -> bool {
+        match (activity::visible(), self.hidden) {
+            (true, _) => last.due(self.shown),
+            (false, Some(h)) => last.due(h),
+            (false, None) => last.age().is_none() && last.due(self.shown),
+        }
+    }
+}
+
+const BATTERY_EVERY: Cadence = Cadence::secs(10, Some(60));
+/// macOS's battery-health verdict changes over months.
+const BATTERY_HEALTH_EVERY: Duration = Duration::from_secs(30 * 60);
+/// Input devices (`ioreg`): batteries for the alerts and the menu-bar title.
+const HID_EVERY: Cadence = Cadence::secs(10, Some(60));
+/// The full Bluetooth report (`system_profiler`, slow).
+const BT_PROFILE_EVERY: Cadence = Cadence::secs(60, Some(10 * 60));
+/// The network's name (`ipconfig`, fast).
+const WIFI_EVERY: Cadence = Cadence::secs(60, None);
+/// Channel, signal and so on (`system_profiler`, ~10 s as it may scan).
+const WIFI_DETAILS_EVERY: Cadence = Cadence::secs(10 * 60, None);
+/// Folder sizes for the storage chart (walks whole folders).
+const SIZES_EVERY: Cadence = Cadence::secs(600, None);
+
 fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
     let mut sys = sysinfo::System::new();
     let mut nets = sysinfo::Networks::new_with_refreshed_list();
     let mut last_ticks = cpu_ticks();
     let mut last_net = Instant::now();
-    let mut tick: u64 = 0;
     // the slow Bluetooth report, refreshed from the input registry in between
     let mut bt_profile: Vec<Device> = Vec::new();
     let mut bt_alerts = devices::Alerts::default();
+    let (mut battery_at, mut health_at, mut hid_at, mut profile_at) = (Every::default(), Every::default(), Every::default(), Every::default());
+    let (mut wifi_at, mut wifi_details_at, mut sizes_at) = (Every::default(), Every::default(), Every::default());
+    let mut wifi_info = Wifi::default();
+    let mut health_text = String::new();
     // one-off facts
     {
         let (model, chip) = hardware();
@@ -209,7 +249,7 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
         s.smart_status = smart;
     }
     loop {
-        // fast readings every refresh
+        // fast readings every refresh: all plain system calls, no processes
         sys.refresh_memory();
         nets.refresh(true);
         let now_ticks = cpu_ticks();
@@ -227,29 +267,36 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
             }
         }
         let (total, free) = crate::kit::fs::volume_space("/");
-        let vm = vm_stat();
+        let vm = vm_counts();
         let (swap_used, swap_total) = swap();
         // kernel pressure level (SystemResourcesMonitor sub_9504): 1 normal, 2 warning, else critical
         let pressure_level = sysctl_u32("kern.memorystatus_vm_pressure_level").unwrap_or(1);
         let thermal = crate::kit::native::thermal_state();
         let uptime = sysinfo::System::uptime();
 
-        let slow_battery = tick.is_multiple_of(5);
-        let slow_profile = tick.is_multiple_of(30);
-        let hid_tick = tick.is_multiple_of(5);
-        let slow_sizes = tick.is_multiple_of(300);
-        let battery = if slow_battery { Some(battery()) } else { None };
-        let wifi = if slow_profile { Some(wifi()) } else { None };
+        let battery = BATTERY_EVERY.due(&mut battery_at).then(|| {
+            let mut b = parse_battery(&run_cmd("ioreg", &["-rn", "AppleSmartBattery"]));
+            if b.present {
+                if health_text.is_empty() || health_at.due(BATTERY_HEALTH_EVERY) {
+                    health_text = power_health_text();
+                }
+                b.health_text = health_text.clone();
+            }
+            b
+        });
+        if WIFI_DETAILS_EVERY.due(&mut wifi_details_at) {
+            wifi_info = wifi_details();
+        }
+        let wifi = WIFI_EVERY.due(&mut wifi_at).then(|| wifi_name(&wifi_info));
+        let slow_profile = BT_PROFILE_EVERY.due(&mut profile_at);
         if slow_profile {
             bt_profile = devices::parse_profiler(&run_cmd("system_profiler", &["SPBluetoothDataType", "-json"]));
         }
-        let devices = if slow_profile || hid_tick {
+        let devices = (HID_EVERY.due(&mut hid_at) || slow_profile).then(|| {
             let mut list = bt_profile.clone();
             devices::merge(&mut list, &devices::parse_ioreg(&run_cmd("ioreg", &["-r", "-l", "-k", "BatteryPercent"])));
-            Some(list)
-        } else {
-            None
-        };
+            list
+        });
 
         {
             let mut s = shared.lock().unwrap();
@@ -300,9 +347,9 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
                 s.wifi = w;
             }
         }
-        ctx.request_repaint();
+        activity::repaint(&ctx);
 
-        if slow_sizes {
+        if SIZES_EVERY.due(&mut sizes_at) {
             // folder sizes for the storage chart (can take a few seconds)
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
             let cats = vec![
@@ -315,10 +362,10 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
             let mut s = shared.lock().unwrap();
             s.categories = cats;
             s.trash_bytes = trash;
-            ctx.request_repaint();
+            activity::repaint(&ctx);
         }
-        tick += 1;
-        std::thread::sleep(Duration::from_millis(m::MONITOR_REFRESH_MS));
+        // the panel opening ends the nap: it shows fresh numbers right away
+        activity::nap(Duration::from_millis(m::MONITOR_REFRESH_MS), None);
     }
 }
 
@@ -387,32 +434,30 @@ fn swap() -> (u64, u64) {
     }
 }
 
-/// (app memory, wired, compressed) bytes from vm_stat, as the original's
-/// RAMService computes them (SystemResourcesMonitor sub_90b8):
-/// app memory = anonymous (internal) − purgeable pages.
-fn vm_stat() -> Option<(u64, u64, u64)> {
-    parse_vm_stat(&run_cmd("vm_stat", &[]))
+/// (app memory, wired, compressed) bytes, as `vm_stat` and the original's
+/// RAMService compute them (SystemResourcesMonitor sub_90b8):
+/// app memory = anonymous (internal) − purgeable pages. Read straight from
+/// the kernel instead of starting `vm_stat` every refresh.
+#[cfg(target_os = "macos")]
+fn vm_counts() -> Option<(u64, u64, u64)> {
+    unsafe {
+        let mut info: libc::vm_statistics64 = std::mem::zeroed();
+        let mut count = libc::HOST_VM_INFO64_COUNT;
+        #[allow(deprecated)]
+        let host = libc::mach_host_self();
+        let r = libc::host_statistics64(host, libc::HOST_VM_INFO64, &mut info as *mut _ as *mut i32, &mut count);
+        if r != 0 {
+            return None;
+        }
+        #[allow(deprecated)]
+        let page = libc::vm_page_size as u64;
+        Some(mem_split(info.internal_page_count as u64, info.purgeable_count as u64, info.wire_count as u64, info.compressor_page_count as u64, page))
+    }
 }
 
-fn parse_vm_stat(out: &str) -> Option<(u64, u64, u64)> {
-    let mut page = 16384u64;
-    let (mut internal, mut purgeable, mut wired, mut comp) = (0u64, 0u64, 0u64, 0u64);
-    for line in out.lines() {
-        if let Some(i) = line.find("page size of ") {
-            page = line[i + 13..].split_whitespace().next().and_then(|s| s.parse().ok()).unwrap_or(page);
-        }
-        let num = |l: &str| l.rsplit(':').next().map(|s| s.trim().trim_end_matches('.')).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-        if line.starts_with("Anonymous pages") {
-            internal = num(line);
-        } else if line.starts_with("Pages purgeable") {
-            purgeable = num(line);
-        } else if line.starts_with("Pages wired down") {
-            wired = num(line);
-        } else if line.starts_with("Pages occupied by compressor") {
-            comp = num(line);
-        }
-    }
-    (wired > 0).then_some((internal.saturating_sub(purgeable) * page, wired * page, comp * page))
+/// (app memory, wired, compressed) bytes from page counts.
+fn mem_split(internal: u64, purgeable: u64, wired: u64, compressed: u64, page: u64) -> (u64, u64, u64) {
+    (internal.saturating_sub(purgeable) * page, wired * page, compressed * page)
 }
 
 #[cfg(target_os = "macos")]
@@ -437,6 +482,10 @@ pub fn sysctl_u32(_name: &str) -> Option<u32> {
     None
 }
 #[cfg(not(target_os = "macos"))]
+fn vm_counts() -> Option<(u64, u64, u64)> {
+    None
+}
+#[cfg(not(target_os = "macos"))]
 fn swap() -> (u64, u64) {
     (0, 0)
 }
@@ -454,14 +503,6 @@ fn cpu_split(a: [u64; 4], b: [u64; 4]) -> (f32, f32, f32) {
     let user = ((d[0] + d[3]) / total * 100.0) as f32;
     let system = (d[1] / total * 100.0) as f32;
     (user + system, user, system)
-}
-
-fn battery() -> Battery {
-    let mut b = parse_battery(&run_cmd("ioreg", &["-rn", "AppleSmartBattery"]));
-    if b.present {
-        b.health_text = power_health_text();
-    }
-    b
 }
 
 /// Battery readings from `ioreg -rn AppleSmartBattery`.
@@ -525,7 +566,9 @@ fn power_health_text() -> String {
     String::new()
 }
 
-fn wifi() -> Wifi {
+/// Wi-Fi details from `system_profiler`. Slow: it can take ~10 s, as it
+/// may scan for networks, so it runs rarely; [`wifi_name`] fills in between.
+fn wifi_details() -> Wifi {
     let mut w = Wifi::default();
     let out = run_cmd("system_profiler", &["SPAirPortDataType", "-json"]);
     let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
@@ -546,27 +589,38 @@ fn wifi() -> Wifi {
             }
         }
     }
-    if w.name.is_empty() || w.name.contains("redacted") {
-        // macOS hides the network name without Location access
-        let ip = run_cmd("ipconfig", &["getsummary", "en0"]);
-        for line in ip.lines() {
-            let l = line.trim();
-            if let Some(v) = l.strip_prefix("SSID : ") {
-                if !v.contains("redacted") {
-                    w.name = v.to_string();
-                }
-            }
-            if let Some(v) = l.strip_prefix("Security : ") {
-                if w.security.is_empty() {
-                    w.security = v.replace('_', " ");
-                }
-            }
-        }
+    w
+}
+
+/// The network's name and security from `ipconfig` (fast), over what
+/// [`wifi_details`] last found.
+fn wifi_name(details: &Wifi) -> Wifi {
+    let mut w = details.clone();
+    if w.name.contains("redacted") {
+        w.name.clear();
     }
-    if w.name.is_empty() || w.name.contains("redacted") {
+    // macOS hides the network name without Location access
+    apply_ipconfig(&mut w, &run_cmd("ipconfig", &["getsummary", "en0"]));
+    if w.name.is_empty() {
         w.name = if w.security.is_empty() { "Network".into() } else { "Wi-Fi".into() };
     }
     w
+}
+
+fn apply_ipconfig(w: &mut Wifi, out: &str) {
+    for line in out.lines() {
+        let l = line.trim();
+        if let Some(v) = l.strip_prefix("SSID : ") {
+            if !v.contains("redacted") {
+                w.name = v.to_string();
+            }
+        }
+        if let Some(v) = l.strip_prefix("Security : ") {
+            if w.security.is_empty() {
+                w.security = v.replace('_', " ");
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------- speed test
@@ -773,18 +827,19 @@ mod tests {
     }
 
     #[test]
-    fn vm_stat_parsing() {
-        let out = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n\
-Pages free:                               12345.\n\
-Pages purgeable:                            100.\n\
-Pages wired down:                          2000.\n\
-Pages occupied by compressor:               300.\n\
-Anonymous pages:                           1100.\n";
-        let (app, wired, comp) = parse_vm_stat(out).unwrap();
-        assert_eq!(app, 1000 * 16384);
-        assert_eq!(wired, 2000 * 16384);
-        assert_eq!(comp, 300 * 16384);
-        assert_eq!(parse_vm_stat(""), None);
+    fn memory_split_from_pages() {
+        // 16 KB pages: app = anonymous − purgeable
+        assert_eq!(mem_split(1000, 200, 300, 50, 16384), (800 * 16384, 300 * 16384, 50 * 16384));
+        assert_eq!(mem_split(10, 20, 0, 0, 4096), (0, 0, 0));
+    }
+
+    #[test]
+    fn wifi_name_from_ipconfig() {
+        let mut w = Wifi::default();
+        apply_ipconfig(&mut w, "  SSID : <redacted>\n  Security : WPA2_Personal\n");
+        assert_eq!((w.name.as_str(), w.security.as_str()), ("", "WPA2 Personal"));
+        apply_ipconfig(&mut w, "  SSID : Home\n");
+        assert_eq!(w.name, "Home");
     }
 
     #[test]

@@ -5,6 +5,7 @@
 use crate::kit::mechanics as m;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use crate::kit::activity::Kick;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::SystemTime;
 
@@ -14,8 +15,9 @@ use std::time::SystemTime;
 static TOOL_ON: AtomicBool = AtomicBool::new(true);
 /// What `claude auth status` last said: 0 unknown, 1 signed in, 2 signed out.
 static SIGNED_IN: AtomicU8 = AtomicU8::new(0);
-/// Someone asked to look for Claude Code again (install, sign-in, limits).
-static RECHECK: AtomicBool = AtomicBool::new(false);
+/// Someone asked to look for Claude Code again (install, sign-in, limits),
+/// or the tool was switched on or off.
+static RECHECK: Kick = Kick::new();
 
 /// Whether Claude can be used right now, and if not, why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +81,7 @@ pub fn tool_on() -> bool {
 
 pub fn set_tool_on(on: bool) {
     TOOL_ON.store(on, Ordering::Relaxed);
+    RECHECK.kick();
 }
 
 /// Record what `claude auth status` said (`None`: it couldn't tell).
@@ -95,12 +98,12 @@ pub fn set_signed_in(v: Option<bool>) {
 
 /// Ask the Claude tool to look for Claude Code again soon.
 pub fn request_recheck() {
-    RECHECK.store(true, Ordering::SeqCst);
+    RECHECK.kick();
 }
 
-/// Take a pending recheck request.
-pub fn take_recheck() -> bool {
-    RECHECK.swap(false, Ordering::SeqCst)
+/// The recheck request, for the loop that waits on it.
+pub fn recheck() -> &'static Kick {
+    &RECHECK
 }
 
 /// Open the Claude Code download page.

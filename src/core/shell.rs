@@ -16,6 +16,8 @@ use std::time::Instant;
 pub const CORE: &str = "core";
 /// "Today's Recommendation", fed by every tool.
 pub const RECOMMENDATION: &str = "recommendation";
+/// How often the app wakes while nothing is on screen.
+const HIDDEN_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -465,6 +467,15 @@ impl eframe::App for App {
         if (self.app_open || tools_need_frames) && !self.visible {
             ctx.send_viewport_cmd(ViewportCommand::RequestPaintWhileHidden);
         }
+        // background work slows down and stops asking for frames while
+        // neither the panel nor the window is on screen (a tool's own small
+        // windows, like a pinned capture, show none of it); this heartbeat
+        // still runs the ticks and keeps the menu-bar title current
+        let on_screen = self.visible || self.app_open;
+        crate::kit::activity::set_visible(on_screen);
+        if !on_screen {
+            ctx.request_repaint_after(HIDDEN_HEARTBEAT);
+        }
         self.handle_tray(ctx);
         self.update_tray_title();
         if self.pending_shape {
@@ -488,6 +499,11 @@ impl eframe::App for App {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.save_widgets(storage);
+    }
+
+    fn on_exit(&mut self) {
+        // tools save some files in the background; let them land
+        crate::kit::fs::flush_writes();
     }
 
     fn clear_color(&self, _v: &egui::Visuals) -> [f32; 4] {

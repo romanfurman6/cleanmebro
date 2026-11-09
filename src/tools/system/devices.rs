@@ -320,21 +320,15 @@ impl Default for Prefs {
 }
 
 fn prefs_path() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join("devices.json")
+    crate::kit::fs::data_path("devices.json")
 }
 
 impl Prefs {
     pub fn load() -> Prefs {
-        std::fs::read_to_string(prefs_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        crate::kit::fs::load_json(&prefs_path())
     }
     pub fn save(&self) {
-        let p = prefs_path();
-        if let Some(dir) = p.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(p, json);
-        }
+        crate::kit::fs::save_json(&prefs_path(), self, true);
     }
 }
 

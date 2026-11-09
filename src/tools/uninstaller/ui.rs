@@ -166,7 +166,12 @@ fn files_in(ctx: &egui::Context, dropped: bool) -> Vec<PathBuf> {
 pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
-    if u.st.lock().unwrap().phase == Phase::Idle {
+    let idle = {
+        let mut g = u.st.lock().unwrap();
+        g.page_seen = true;
+        g.phase == Phase::Idle
+    };
+    if idle {
         u.rescan();
     }
     let (n_apps, total, phase, orphan_bytes, jobs) = {

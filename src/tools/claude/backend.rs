@@ -2,6 +2,7 @@
 //! (`claude auth status`, `claude -p /usage`, which spends no tokens), local
 //! activity comes from counting usage fields in ~/.claude/projects logs.
 
+use crate::kit::activity::{self, Every, Wake};
 use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd, projects_dir, scan_projects, Project};
 use crate::kit::mechanics as m;
 use chrono::{DateTime, Local, Utc};
@@ -9,7 +10,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 #[derive(Clone, Debug, Default)]
 pub struct Limit {
@@ -90,8 +91,21 @@ pub type Shared = Arc<Mutex<ClaudeInfo>>;
 
 /// One assistant reply: (unix time, counted tokens, output tokens).
 type UsageEntry = (i64, u64, u64);
-/// Parsed log files by path, with the modification time and length they were read at.
-type UsageCache = HashMap<PathBuf, (SystemTime, u64, Vec<UsageEntry>)>;
+/// Parsed log files by path.
+type UsageCache = HashMap<PathBuf, LogUsage>;
+
+/// What one session log held so far. Logs only grow, so a longer log is
+/// read on from where the last read stopped instead of from the start.
+#[derive(Default)]
+struct LogUsage {
+    /// Modification time at the last read.
+    mtime: Option<SystemTime>,
+    /// Bytes read so far (whole lines only).
+    read: u64,
+    entries: Vec<UsageEntry>,
+    /// Message ids seen, so a reply logged over several lines counts once.
+    ids: std::collections::HashSet<Vec<u8>>,
+}
 
 pub fn start(ctx: egui::Context, demo: bool) -> Shared {
     let shared: Shared = Arc::new(Mutex::new(ClaudeInfo { loading: true, ..Default::default() }));
@@ -104,49 +118,54 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
         .name("claude".into())
         .spawn(move || {
             let mut cache: UsageCache = HashMap::new();
-            // None = fetch now. (Subtracting from Instant::now() would panic
-            // shortly after boot, when the monotonic clock is still small.)
-            let mut last_limits: Option<Instant> = None;
+            // due right away the first time
+            let mut limits_at = Every::default();
+            let mut local_at = Every::default();
+            let mut size_at = Every::default();
             loop {
                 // turned off in Settings: no CLI calls, no log reading
                 if !cc::tool_on() {
-                    std::thread::sleep(Duration::from_millis(500));
-                    last_limits = None;
+                    activity::nap(Duration::from_secs(3600), Some(cc::recheck()));
+                    limits_at.reset();
                     continue;
                 }
-                let since = last_limits.map(|t| t.elapsed().as_secs());
-                let want_limits = since.is_none_or(|s| s >= m::CLAUDE_LIMITS_REFRESH_SECS)
-                    || s.lock().unwrap().limits.is_empty() && since.is_some_and(|s| s > 60);
-                if want_limits {
+                // the limits also feed the menu-bar title, so they refresh hidden too
+                let retry_empty = s.lock().unwrap().limits.is_empty() && limits_at.age().is_some_and(|a| a.as_secs() > 60);
+                if retry_empty || limits_at.due(Duration::from_secs(m::CLAUDE_LIMITS_REFRESH_SECS)) {
+                    limits_at.mark();
                     s.lock().unwrap().loading = true;
-                    ctx.request_repaint();
+                    activity::repaint(&ctx);
                     fetch_cli(&s);
-                    last_limits = Some(Instant::now());
                 }
-                let projects = scan_projects();
-                let local = local_usage(&mut cache);
-                let data = crate::kit::fs::dir_size(&dirs::home_dir().unwrap_or_default().join(".claude"));
-                {
+                // the rest is only shown in the panel and the window: hidden,
+                // it waits until they open (the nap below ends then)
+                if (activity::visible() || local_at.age().is_none()) && local_at.due(Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS)) {
+                    let projects = scan_projects();
+                    let local = local_usage(&mut cache);
+                    let data = size_at.due(Duration::from_secs(CLAUDE_DATA_SIZE_SECS)).then(|| crate::kit::fs::dir_size(&dirs::home_dir().unwrap_or_default().join(".claude")));
                     let mut g = s.lock().unwrap();
                     g.projects = projects;
                     g.local = local;
-                    g.data_bytes = data;
-                    g.loading = false;
-                }
-                ctx.request_repaint();
-                // wait, but wake early when someone asks for a refresh
-                for _ in 0..(m::CLAUDE_LOCAL_REFRESH_SECS * 2) {
-                    std::thread::sleep(Duration::from_millis(500));
-                    if cc::take_recheck() || !cc::tool_on() {
-                        last_limits = None;
-                        break;
+                    if let Some(d) = data {
+                        g.data_bytes = d;
                     }
+                }
+                s.lock().unwrap().loading = false;
+                activity::repaint(&ctx);
+                // wait, but wake early when someone asks for a refresh or the
+                // panel opens
+                if activity::nap(Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS), Some(cc::recheck())) == Wake::Kicked {
+                    limits_at.reset();
+                    local_at.reset();
                 }
             }
         })
         .ok();
     shared
 }
+
+/// How often the size of `~/.claude` is measured (it walks every file).
+const CLAUDE_DATA_SIZE_SECS: u64 = 600;
 
 pub fn request_refresh() {
     cc::request_recheck();
@@ -275,10 +294,10 @@ fn local_usage(cache: &mut UsageCache) -> Local7 {
                     continue;
                 }
                 seen.insert(p.clone());
-                let fresh = cache.get(&p).map(|(t, len, _)| *t == mt && *len == md.len()).unwrap_or(false);
-                if !fresh {
-                    let entries = read_usage(&p);
-                    cache.insert(p, (mt, md.len(), entries));
+                let log = cache.entry(p).or_default();
+                if log.mtime != Some(mt) || log.read != md.len() {
+                    read_usage(&f.path(), md.len(), log);
+                    log.mtime = Some(mt);
                 }
             }
         }
@@ -286,8 +305,8 @@ fn local_usage(cache: &mut UsageCache) -> Local7 {
     cache.retain(|k, _| seen.contains(k));
     let today_start = Local::now().date_naive().and_hms_opt(0, 0, 0).and_then(|d| d.and_local_timezone(Local).single()).map(|d| d.timestamp()).unwrap_or(now - 86_400);
     let mut l = Local7 { daily: vec![0; 7], ..Default::default() };
-    for (_, _, entries) in cache.values() {
-        for &(ts, tokens, out) in entries {
+    for log in cache.values() {
+        for &(ts, tokens, out) in &log.entries {
             if ts < week {
                 continue;
             }
@@ -308,35 +327,58 @@ fn local_usage(cache: &mut UsageCache) -> Local7 {
     l
 }
 
-/// (timestamp, input+output+cache-write tokens, output tokens) for each assistant reply.
-fn read_usage(p: &Path) -> Vec<UsageEntry> {
-    use std::io::{BufRead, BufReader};
-    let mut out = Vec::new();
-    let Ok(f) = std::fs::File::open(p) else { return out };
-    let mut seen_ids = std::collections::HashSet::new();
-    for line in BufReader::with_capacity(1 << 20, f).split(b'\n').map_while(Result::ok) {
-        let Some(ui) = find(&line, b"\"usage\":{") else { continue };
-        let Some(ti) = find(&line, b"\"timestamp\":\"") else { continue };
-        let ts_bytes = &line[ti + 13..];
-        let Some(te) = ts_bytes.iter().position(|&b| b == b'"') else { continue };
-        let ts = std::str::from_utf8(&ts_bytes[..te]).ok().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|d| d.timestamp());
-        let Some(ts) = ts else { continue };
-        // one reply can be logged in several lines; count each message id once
-        if let Some(mi) = find(&line, b"\"id\":\"msg_") {
-            let rest = &line[mi + 6..];
-            if let Some(e) = rest.iter().position(|&b| b == b'"') {
-                if !seen_ids.insert(rest[..e].to_vec()) {
-                    continue;
-                }
+/// Read on in a session log of `len` bytes from where `log` stopped,
+/// adding (timestamp, input+output+cache-write tokens, output tokens) for
+/// each assistant reply. A log that got shorter is read again from the start.
+fn read_usage(p: &Path, len: u64, log: &mut LogUsage) {
+    use std::io::{BufRead, BufReader, Seek, SeekFrom};
+    if len < log.read {
+        *log = LogUsage::default();
+    }
+    let Ok(mut f) = std::fs::File::open(p) else { return };
+    if f.seek(SeekFrom::Start(log.read)).is_err() {
+        return;
+    }
+    let mut r = BufReader::with_capacity(1 << 20, f);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match r.read_until(b'\n', &mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        // a line still being written is read next time, whole
+        if line.last() != Some(&b'\n') {
+            break;
+        }
+        log.read += line.len() as u64;
+        if let Some(e) = usage_entry(&line, &mut log.ids) {
+            log.entries.push(e);
+        }
+    }
+}
+
+/// The usage in one log line, unless its message was counted already.
+fn usage_entry(line: &[u8], ids: &mut std::collections::HashSet<Vec<u8>>) -> Option<UsageEntry> {
+    let ui = find(line, b"\"usage\":{")?;
+    let ti = find(line, b"\"timestamp\":\"")?;
+    let ts_bytes = &line[ti + 13..];
+    let te = ts_bytes.iter().position(|&b| b == b'"')?;
+    let ts = std::str::from_utf8(&ts_bytes[..te]).ok().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|d| d.timestamp())?;
+    // one reply can be logged in several lines; count each message id once
+    if let Some(mi) = find(line, b"\"id\":\"msg_") {
+        let rest = &line[mi + 6..];
+        if let Some(e) = rest.iter().position(|&b| b == b'"') {
+            if !ids.insert(rest[..e].to_vec()) {
+                return None;
             }
         }
-        let obj = balanced(&line[ui + 8..]);
-        let v: Value = serde_json::from_slice(obj).unwrap_or(Value::Null);
-        let g = |k: &str| v[k].as_u64().unwrap_or(0);
-        let tokens = g("input_tokens") + g("output_tokens") + g("cache_creation_input_tokens");
-        out.push((ts, tokens, g("output_tokens")));
     }
-    out
+    let obj = balanced(&line[ui + 8..]);
+    let v: Value = serde_json::from_slice(obj).unwrap_or(Value::Null);
+    let g = |k: &str| v[k].as_u64().unwrap_or(0);
+    let tokens = g("input_tokens") + g("output_tokens") + g("cache_creation_input_tokens");
+    Some((ts, tokens, g("output_tokens")))
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -449,14 +491,27 @@ mod tests {
             "{{\"cwd\":\"/tmp/proj\",\"timestamp\":\"2026-11-08T10:00:00Z\",\"message\":{{\"id\":\"{id}\",\"usage\":{{\"input_tokens\":10,\"output_tokens\":5,\"cache_creation_input_tokens\":100,\"cache_read_input_tokens\":9999}}}}}}\n"
         );
         let body = line("msg_1") + &line("msg_1") + &line("msg_2") + "{\"type\":\"user\"}\n";
-        std::fs::write(&f, body).unwrap();
-        let entries = read_usage(&f);
+        // a half-written last line waits for the next read
+        let partial = line("msg_3");
+        std::fs::write(&f, body.clone() + &partial[..40]).unwrap();
+        let mut log = LogUsage::default();
+        let len = |f: &Path| std::fs::metadata(f).unwrap().len();
+        read_usage(&f, len(&f), &mut log);
         let cwd = crate::kit::claude_code::first_cwd(&f);
-        std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(entries.len(), 2);
+        assert_eq!(log.entries.len(), 2);
+        assert_eq!(log.read, body.len() as u64);
         // cache reads are not counted
-        assert_eq!(entries[0].1, 115);
-        assert_eq!(entries[0].2, 5);
+        assert_eq!(log.entries[0].1, 115);
+        assert_eq!(log.entries[0].2, 5);
         assert_eq!(cwd, Some(PathBuf::from("/tmp/proj")));
+        // the log grows: only the new lines are read, repeats still count once
+        std::fs::write(&f, body.clone() + &partial + &line("msg_2")).unwrap();
+        read_usage(&f, len(&f), &mut log);
+        assert_eq!(log.entries.len(), 3);
+        // the log was replaced by a shorter one: read again from the start
+        std::fs::write(&f, line("msg_9")).unwrap();
+        read_usage(&f, len(&f), &mut log);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(log.entries.len(), 1);
     }
 }
