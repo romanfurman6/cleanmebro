@@ -228,14 +228,24 @@ mod imp {
             if w.title().to_string() != title {
                 continue;
             }
-            w.setLevel(if cover.is_some() { 1000 } else { 25 });
-            w.setCollectionBehavior(NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::FullScreenAuxiliary);
+            // called every frame: only touch the window when it differs,
+            // each change makes the window server redo its stacking
+            let level = if cover.is_some() { 1000 } else { 25 };
+            if w.level() != level {
+                w.setLevel(level);
+            }
+            let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::FullScreenAuxiliary;
+            if w.collectionBehavior() != behavior {
+                w.setCollectionBehavior(behavior);
+            }
             if let Some(id) = cover {
                 let screen = NSScreen::screens(mtm).iter().find(|s| {
                     s.deviceDescription().objectForKey(&NSString::from_str("NSScreenNumber")).and_then(|n| n.downcast::<NSNumber>().ok()).map(|n| n.unsignedIntValue()) == Some(id)
                 });
                 if let Some(s) = screen {
-                    w.setFrame_display(s.frame(), true);
+                    if w.frame() != s.frame() {
+                        w.setFrame_display(s.frame(), true);
+                    }
                 }
             }
         }

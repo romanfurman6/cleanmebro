@@ -295,7 +295,8 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
         } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) || vctx.input(|i| i.viewport().close_requested()) {
             todo.push(Do::Cancel);
         }
-        if matches!(pick.source, Source::Window | Source::Area) || devs.level.is_some() {
+        // the mouse repaints on its own; only the mic meter moves by itself
+        if devs.level.is_some() {
             vctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         let _ = (&mut todo, &cam_name, &mic_name);
@@ -522,11 +523,15 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
     let title = &plain("capture-rec-countdown");
     let mut skip = false;
     let mut cancel = false;
-    crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), floating(title, pos, size).with_active(true), |ui, _| {
+    // no system shadow: macOS would redo it on every frame of the ring
+    crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), floating(title, pos, size).with_active(true).with_has_shadow(false), |ui, _| {
         sys::lift(title, None);
         let r = ui.max_rect();
         let p = ui.painter();
         let c0 = r.center();
+        for (k, a) in [(84.0, 10u8), (78.0, 22), (74.0, 40)] {
+            p.circle_filled(c0 + Vec2::new(0.0, 3.0), k, Color32::from_black_alpha(a));
+        }
         p.circle_filled(c0, 70.0, Color32::from_rgba_unmultiplied(22, 22, 24, 235));
         p.circle_stroke(c0, 66.0, Stroke::new(5.0, white(30)));
         let frac = (left / total.max(0.1)).clamp(0.0, 1.0);
@@ -540,7 +545,8 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
             cancel = true;
         }
     });
-    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    // a smooth ring: every display frame, not every 50 ms
+    ctx.request_repaint_after(std::time::Duration::from_millis(16));
     if cancel {
         c.rec.cancel();
     } else if skip {
