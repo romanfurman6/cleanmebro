@@ -800,11 +800,12 @@ impl Tool for Uninstaller {
     fn tick(&mut self, ctx: &egui::Context) -> bool {
         let g = self.st.lock().unwrap();
         let busy = g.working.is_some() || matches!(g.phase, Phase::Listing | Phase::Sizing { .. });
-        if busy && crate::kit::activity::visible() {
+        // our own floating windows need frames while the shell is hidden
+        let windows = self.on && (!g.drag.apps.is_empty() || g.notice.is_some() || !matches!(g.drop, Drop::Idle) || g.last.as_ref().is_some_and(|(_, t)| t.elapsed() < Duration::from_secs(8)));
+        if busy && (windows || crate::kit::activity::visible()) {
             ctx.request_repaint_after(Duration::from_millis(250));
         }
-        // our own floating windows need frames while the shell is hidden
-        self.on && (!g.drag.apps.is_empty() || g.notice.is_some() || !matches!(g.drop, Drop::Idle) || g.last.as_ref().is_some_and(|(_, t)| t.elapsed() < Duration::from_secs(8)))
+        windows
     }
     fn windows(&mut self, ctx: &egui::Context, cx: &mut Cx) {
         ui::windows(self, ctx, cx);

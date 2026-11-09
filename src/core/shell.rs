@@ -468,9 +468,10 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(ViewportCommand::RequestPaintWhileHidden);
         }
         // background work slows down and stops asking for frames while
-        // nothing is on screen; this heartbeat still runs the ticks and
-        // keeps the menu-bar title current
-        let on_screen = self.visible || self.app_open || tools_need_frames;
+        // neither the panel nor the window is on screen (a tool's own small
+        // windows, like a pinned capture, show none of it); this heartbeat
+        // still runs the ticks and keeps the menu-bar title current
+        let on_screen = self.visible || self.app_open;
         crate::kit::activity::set_visible(on_screen);
         if !on_screen {
             ctx.request_repaint_after(HIDDEN_HEARTBEAT);
