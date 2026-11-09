@@ -157,7 +157,7 @@ impl App {
             return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", span: 4, default_on: true, group: None }));
         }
         if tool == CORE && id == PLANNED {
-            return Some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span: 2, default_on: true, group: None }));
+            return Some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span: super::panel::planned_span(self), default_on: true, group: None }));
         }
         let i = self.tools.iter().position(|t| t.id() == tool)?;
         let spec = self.tools[i].widgets().into_iter().find(|w| w.id == id)?;
@@ -384,7 +384,8 @@ impl App {
 
     fn update_tray_title(&mut self) {
         let Some(tray) = &self.tray else { return };
-        let title = self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).find_map(|(_, t)| t.tray_title()).unwrap_or_default();
+        // every tool's title, in tool order ("19% ☕︎")
+        let title = self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).filter_map(|(_, t)| t.tray_title()).collect::<Vec<_>>().join(" ");
         if title != self.tray_title {
             tray.set_title(if title.is_empty() { None } else { Some(&title) });
             self.tray_title = title;
