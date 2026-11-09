@@ -21,8 +21,9 @@ pub const PAD: f32 = 12.0;
 pub const GAP: f32 = 10.0;
 /// Padding above and below the rows inside a group card.
 const GROUP_PAD: f32 = 4.0;
-/// Planned tools shown as dashed tiles: (icon, label).
-const PLANNED_TILES: [(Icon, &str); 2] = [(Icon::Cup, "Awake"), (Icon::Fan, "Fans")];
+/// Planned tools shown as dashed tiles until a tool of that name is
+/// installed: (icon, label, tool name).
+const PLANNED_TILES: [(Icon, &str, &str); 2] = [(Icon::Cup, "Awake", "Keep Awake"), (Icon::Fan, "Fans", "Fan Control")];
 
 pub fn inner_width() -> f32 {
     m::PANEL_WIDTH - 2.0 * PAD
@@ -107,7 +108,7 @@ pub fn draw_widget(app: &mut App, ui: &mut Ui, w: &Placed, r: Rect, cx: &mut Cx)
             let mut child = ui.new_child(UiBuilder::new().max_rect(r).id_salt((app.tools[i].id(), w.id)));
             app.tools[i].widget_ui(w.id, &mut child, r, cx);
         }
-        None if w.id == PLANNED => planned(ui, r),
+        None if w.id == PLANNED => planned(app, ui, r),
         None if w.id == RECOMMENDATION => recommendation(app, ui, r, cx),
         None => {}
     }
@@ -187,11 +188,22 @@ fn widgets(app: &mut App, ui: &mut Ui, origin: Rect, cx: &mut Cx) {
     }
 }
 
+/// The planned tiles whose tool isn't installed yet.
+fn planned_tiles(app: &App) -> Vec<&'static (Icon, &'static str, &'static str)> {
+    PLANNED_TILES.iter().filter(|(_, _, tool)| !app.tools.iter().any(|t| t.name() == *tool)).collect()
+}
+
+/// Columns the planned tiles take: one each.
+pub fn planned_span(app: &App) -> u8 {
+    planned_tiles(app).len().clamp(1, crate::core::tool::GRID_COLUMNS as usize) as u8
+}
+
 /// Dashed tiles for tools that are planned but not built yet.
-fn planned(ui: &mut Ui, rect: Rect) {
-    let n = PLANNED_TILES.len() as f32;
+fn planned(app: &App, ui: &mut Ui, rect: Rect) {
+    let tiles = planned_tiles(app);
+    let n = tiles.len().max(1) as f32;
     let w = (rect.width() - GAP * (n - 1.0)) / n;
-    for (k, (glyph, label)) in PLANNED_TILES.iter().enumerate() {
+    for (k, (glyph, label, _)) in tiles.iter().enumerate() {
         let r = Rect::from_min_size(Pos2::new(rect.left() + k as f32 * (w + GAP), rect.top()), Vec2::new(w, rect.height()));
         quick_tile(ui, r, ui.scope_id().with(("planned", k)), *glyph, tint::NEUTRAL, label, "planned", false);
     }

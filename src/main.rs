@@ -4,7 +4,8 @@
 //! `--screenshot <file.png>` draws ~120 frames with sample data, saves the
 //! window as a PNG and exits. `--view <name>` picks what it shows: panel,
 //! storage (default), memory, battery, cpu, network, devices, claude-detail,
-//! cleanup, results, lens, lens-live, claude, health, customize, settings-tools.
+//! cleanup, cleanup-no-claude, results, lens, lens-live, claude, claude-missing,
+//! health, customize, settings-tools.
 
 mod core;
 mod kit;

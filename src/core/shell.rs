@@ -157,7 +157,7 @@ impl App {
             return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", span: 4, default_on: true, group: None }));
         }
         if tool == CORE && id == PLANNED {
-            return Some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span: 2, default_on: true, group: None }));
+            return Some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span: super::panel::planned_span(self), default_on: true, group: None }));
         }
         let i = self.tools.iter().position(|t| t.id() == tool)?;
         let spec = self.tools[i].widgets().into_iter().find(|w| w.id == id)?;
@@ -264,6 +264,7 @@ impl App {
                     self.detail = None;
                     self.reshape(ctx);
                 }
+                Action::OpenSettings { tools } => self.open_settings(ctx, tools),
                 Action::HidePanel => {
                     if self.mode == Mode::Panel && self.visible && self.screenshot.is_none() {
                         self.hide(ctx);

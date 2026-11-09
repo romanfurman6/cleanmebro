@@ -5,7 +5,113 @@
 use crate::kit::mechanics as m;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::SystemTime;
+
+// ---------------------------------------------------------------- availability
+
+/// Whether the Claude tool is on in Settings → Tools.
+static TOOL_ON: AtomicBool = AtomicBool::new(true);
+/// What `claude auth status` last said: 0 unknown, 1 signed in, 2 signed out.
+static SIGNED_IN: AtomicU8 = AtomicU8::new(0);
+/// Someone asked to look for Claude Code again (install, sign-in, limits).
+static RECHECK: AtomicBool = AtomicBool::new(false);
+
+/// Whether Claude can be used right now, and if not, why.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Availability {
+    Ready,
+    /// The person turned the Claude tool off in Settings → Tools.
+    Off,
+    NotInstalled,
+    SignedOut,
+}
+
+impl Availability {
+    pub fn ready(self) -> bool {
+        self == Availability::Ready
+    }
+    /// One line saying what's missing.
+    pub fn title(self) -> &'static str {
+        match self {
+            Availability::Ready => "Claude is ready",
+            Availability::Off => "Claude is turned off",
+            Availability::NotInstalled => "Claude Code isn't installed",
+            Availability::SignedOut => "Claude Code isn't signed in",
+        }
+    }
+    /// How to enable it.
+    pub fn how(self) -> &'static str {
+        match self {
+            Availability::Ready => "",
+            Availability::Off => "Turn Claude on in Settings → Tools.",
+            Availability::NotInstalled => "Install Claude Code from claude.com/claude-code, then run claude in Terminal once to sign in.",
+            Availability::SignedOut => "Run claude in Terminal and sign in with your Claude account.",
+        }
+    }
+    /// A few words for a subtitle.
+    pub fn short(self) -> &'static str {
+        match self {
+            Availability::Ready => "",
+            Availability::Off => "Claude is off",
+            Availability::NotInstalled => "Claude Code not installed",
+            Availability::SignedOut => "Claude Code signed out",
+        }
+    }
+}
+
+/// Can Claude be used? The tool switch, the CLI on disk, then the last sign-in check.
+pub fn availability() -> Availability {
+    if !tool_on() {
+        Availability::Off
+    } else if claude_bin().is_none() {
+        Availability::NotInstalled
+    } else if SIGNED_IN.load(Ordering::Relaxed) == 2 {
+        Availability::SignedOut
+    } else {
+        Availability::Ready
+    }
+}
+
+pub fn tool_on() -> bool {
+    TOOL_ON.load(Ordering::Relaxed)
+}
+
+pub fn set_tool_on(on: bool) {
+    TOOL_ON.store(on, Ordering::Relaxed);
+}
+
+/// Record what `claude auth status` said (`None`: it couldn't tell).
+pub fn set_signed_in(v: Option<bool>) {
+    SIGNED_IN.store(
+        match v {
+            None => 0,
+            Some(true) => 1,
+            Some(false) => 2,
+        },
+        Ordering::Relaxed,
+    );
+}
+
+/// Ask the Claude tool to look for Claude Code again soon.
+pub fn request_recheck() {
+    RECHECK.store(true, Ordering::SeqCst);
+}
+
+/// Take a pending recheck request.
+pub fn take_recheck() -> bool {
+    RECHECK.swap(false, Ordering::SeqCst)
+}
+
+/// Open the Claude Code download page.
+pub fn open_download_page() {
+    let _ = Command::new("open").arg("https://claude.com/claude-code").spawn();
+}
+
+/// Open Terminal (to install or sign in).
+pub fn open_terminal() {
+    let _ = Command::new("open").args(["-a", "Terminal"]).spawn();
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Project {
@@ -162,6 +268,20 @@ pub fn first_cwd(p: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn availability_follows_switch_and_sign_in() {
+        set_tool_on(false);
+        assert_eq!(availability(), Availability::Off);
+        set_tool_on(true);
+        set_signed_in(Some(false));
+        let a = availability();
+        assert!(a == Availability::SignedOut || a == Availability::NotInstalled);
+        set_signed_in(None);
+        assert_ne!(availability(), Availability::SignedOut);
+        assert!(Availability::Ready.how().is_empty());
+        assert!(!Availability::Off.how().is_empty());
+    }
 
     #[test]
     fn project_folder_names() {

@@ -28,6 +28,12 @@ const MORPH_SECS: f64 = 0.35;
 const HEADER_H: f32 = 57.0;
 const FOOTER_H: f32 = 42.0;
 const ASIDE_W: f32 = 260.0;
+/// Smallest block worth drawing on its own (about 64 × 46 points); smaller
+/// items fold into one block.
+const MIN_BLOCK_PX: f64 = 64.0 * 46.0;
+const MAX_BLOCKS: usize = 60;
+/// A block narrower or shorter than this can't show its name.
+const MIN_LABEL: Vec2 = Vec2::new(68.0, 50.0);
 
 pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let shared = app.lens.clone();
@@ -59,10 +65,18 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     app.lens_live = None;
     let guard = shared.result.lock().unwrap();
     let Some(root) = guard.as_ref() else {
-        // nothing to choose: opening Disk Map maps the whole disk
         drop(guard);
-        begin(app, ui.ctx());
-        start(app, ui, r);
+        // show the last map if there is one (even from a previous run);
+        // map the disk only the very first time
+        scan::load(&shared, ui.ctx());
+        if shared.loading.load(Ordering::SeqCst) {
+            page_header(&ui.painter().clone(), r, "Disk Map", "Opening the last map…", TEXT_DIM);
+            return;
+        }
+        if shared.result.lock().unwrap().is_none() {
+            begin(app, ui.ctx());
+            start(app, ui, r);
+        }
         return;
     };
     let act = results(app, ui, r, root, None);
@@ -142,7 +156,20 @@ fn begin(app: &mut App, ctx: &egui::Context) {
     app.lens_msg = None;
     app.lens_morph = None;
     app.lens_hues.clear();
+    app.lens_skip = 0;
     scan::start(app.lens.clone(), app.lens_root.clone(), ctx.clone());
+}
+
+/// "just now", "5 min ago", "3 h ago", "2 days ago".
+fn ago(when: i64) -> String {
+    let s = (chrono::Utc::now().timestamp() - when).max(0);
+    match s {
+        0..60 => "just now".into(),
+        60..3600 => format!("{} min ago", s / 60),
+        3600..86400 => format!("{} h ago", s / 3600),
+        _ if s < 2 * 86400 => "yesterday".into(),
+        _ => format!("{} days ago", s / 86400),
+    }
 }
 
 fn group_digits(n: u64) -> String {
@@ -379,19 +406,28 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         app.lens_path = root.path.clone();
     }
     let node = scan::find(root, &app.lens_path).unwrap_or(root);
+    // inside "Other": the folder minus its biggest items
+    let skip = app.lens_skip.min(node.children.len());
+    let all = &node.children[skip..];
+    let total = if skip == 0 { node.bytes } else { node.other + all.iter().map(|c| c.bytes).sum::<u64>() };
     let mut go_to: Option<PathBuf> = None;
+    let mut unskip = false;
     let root_label = if root.path == home() { "Home".to_string() } else { root.name.clone() };
 
     // header: up, breadcrumbs, size, then the hint and New map, or progress and Stop
     let hr = Rect::from_min_size(r.min, Vec2::new(r.width(), HEADER_H));
     hairline(&p, hr.left_bottom(), hr.right_bottom());
     let up = Rect::from_min_size(Pos2::new(hr.left() + 20.0, hr.center().y - 14.0), Vec2::splat(28.0));
-    let can_up = node.path != root.path;
+    let can_up = node.path != root.path || skip > 0;
     let ur = ui.interact(up, ui.scope_id().with("map-up"), if can_up { Sense::click() } else { Sense::hover() });
     p.rect_filled(up, R_SMALL, white(if !can_up { 8 } else if ur.hovered() { 32 } else { 20 }));
     icon(&p, Icon::Back, up.shrink(7.0), if can_up { TEXT_SOFT } else { TEXT_MUTED });
     if ur.on_hover_text("Up one level").clicked() && can_up {
-        go_to = node.path.parent().map(Path::to_path_buf);
+        if skip > 0 {
+            unskip = true;
+        } else {
+            go_to = node.path.parent().map(Path::to_path_buf);
+        }
     }
     let mut crumbs: Vec<(String, PathBuf)> = vec![(root_label.clone(), root.path.clone())];
     if let Ok(rel) = node.path.strip_prefix(&root.path) {
@@ -401,13 +437,19 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             crumbs.push((c.as_os_str().to_string_lossy().into_owned(), acc.clone()));
         }
     }
-    let (btn, kind) = if live { ("Stop", BTN_SECONDARY) } else { ("Map again", BTN_SECONDARY) };
+    if skip > 0 {
+        crumbs.push(("Other".to_string(), node.path.join("\u{0}other")));
+    }
+    let (btn, kind) = if live { ("Stop", BTN_SECONDARY) } else { ("Start over", BTN_SECONDARY) };
     let nb = button_width(&p, btn, kind);
     let new_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
     let hint_text = if live {
         format!("Mapping · {} · {} files", human_bytes(app.lens.bytes.load(Ordering::Relaxed)), group_digits(app.lens.files.load(Ordering::Relaxed)))
     } else {
-        "Click a folder to zoom in · tick a corner to select".to_string()
+        match *app.lens.when.lock().unwrap() {
+            Some(w) => format!("Mapped {} · click to zoom in, tick to select", ago(w)),
+            None => "Click a folder to zoom in · tick a corner to select".to_string(),
+        }
     };
     let hint = p.text(Pos2::new(new_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, hint_text, font(12.0), if live { TEXT_DIM } else { TEXT_FAINT });
     if live {
@@ -444,7 +486,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             x += 10.0;
         }
     }
-    p.text(Pos2::new(x + 8.0, hr.center().y), Align2::LEFT_CENTER, human_bytes(node.bytes), font(13.0), TEXT_FAINT);
+    p.text(Pos2::new(x + 8.0, hr.center().y), Align2::LEFT_CENTER, human_bytes(total), font(13.0), TEXT_FAINT);
     if pill_button(ui, new_r, btn, kind, true).clicked() {
         act = if live { Act::Stop } else { Act::NewMap };
     }
@@ -461,11 +503,27 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
     let fr = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - FOOTER_H), r.max);
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, fr.top() - 12.0));
     let area = Rect::from_min_max(body.min, Pos2::new(body.right() - ASIDE_W - 16.0, body.bottom()));
-    let mut vals: Vec<f64> = node.children.iter().map(|c| c.bytes as f64).collect();
-    if node.other > 0 {
-        vals.push(node.other as f64);
-    }
-    let rects = scan::squarify(&vals, area);
+    // only blocks big enough to read get their own place; the rest fold
+    // into one "smaller items" block (children are sorted biggest first)
+    let px = (area.width() * area.height()) as f64;
+    let whole = total.max(1) as f64;
+    let readable = |b: u64| b as f64 / whole * px >= MIN_BLOCK_PX;
+    let mut keep = all.iter().take(MAX_BLOCKS).take_while(|c| readable(c.bytes)).count();
+    // a block can be big enough yet too thin for its name: fold it (and
+    // everything smaller) too, and lay out again
+    let (folded, other_bytes, vals, rects) = loop {
+        let folded = all.len() - keep;
+        let other_bytes = node.other + all[keep..].iter().map(|c| c.bytes).sum::<u64>();
+        let mut vals: Vec<f64> = all[..keep].iter().map(|c| c.bytes as f64).collect();
+        if other_bytes > 0 && (readable(other_bytes) || keep == 0) {
+            vals.push(other_bytes as f64);
+        }
+        let rects = scan::squarify(&vals, area);
+        match rects[..keep].iter().position(|b| b.width() < MIN_LABEL.x || b.height() < MIN_LABEL.y) {
+            Some(k) => keep = k,
+            None => break (folded, other_bytes, vals, rects),
+        }
+    };
     let now = ctx.input(|i| i.time);
     let morph = app.lens_morph.clone().and_then(|(into, focus, start)| {
         let t = ((now - start) / MORPH_SECS).clamp(0.0, 1.0) as f32;
@@ -476,7 +534,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         let (from, to) = match into {
             Some(clicked) => (area, clicked),
             None => {
-                let k = node.children.iter().position(|c| focus.starts_with(&c.path))?;
+                let k = all[..keep].iter().position(|c| focus.starts_with(&c.path))?;
                 (rects[k], area)
             }
         };
@@ -500,7 +558,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
     let mut toggle: Option<(PathBuf, u64)> = None;
     for k in 0..n {
         let base = rects[k];
-        let child = node.children.get(k);
+        let child = all[..keep].get(k);
         let key = child.map(|c| c.path.clone()).unwrap_or_else(|| node.path.join("\u{0}other"));
         let target = match morph {
             Some((from, to, e)) => lerp_rect(affine(base, from, to), base, e),
@@ -514,7 +572,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         }
         let (name, bytes, path) = match child {
             Some(c) => (c.name.clone(), c.bytes, Some(c.path.clone())),
-            None => ("Other items".to_string(), node.other, None),
+            None => ("Other".to_string(), other_bytes, None),
         };
         let measuring = path.as_ref().is_some_and(|pa| pending.is_some_and(|q| q.contains(pa)));
         let hue = match &path {
@@ -523,8 +581,9 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         };
         let shade = if depth == 0 { 0.75 } else { 0.45 + 0.4 * (1.0 - k as f32 / (n.max(2) - 1) as f32) };
         let id = ui.scope_id().with(("blk", &name, k));
-        let kids = child.map(|c| c.children.len()).unwrap_or(0);
-        let clickable = path.is_some() && morph.is_none() && !measuring;
+        // "Other" opens to show the items folded into it
+        let kids = child.map(|c| c.children.len()).unwrap_or(folded);
+        let clickable = (path.is_some() || folded > 0) && morph.is_none() && !measuring;
         let resp = ui.interact(br, id, if clickable { Sense::click() } else { Sense::hover() });
         let hov = resp.hovered();
         let mut fill = lerp_color(BG, hue, if measuring { shade * 0.55 } else { shade });
@@ -550,7 +609,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             let tw = br.width() - 20.0 - if selectable { 22.0 } else { 0.0 };
             let mut ty = br.top() + 10.0;
             ty += text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &name, bold(fs), Color32::WHITE, tw).height() + 3.0;
-            let size = if measuring { format!("{} so far", human_bytes(bytes)) } else { format!("{} · {}%", human_bytes(bytes), pct(bytes, node.bytes)) };
+            let size = if measuring { format!("{} so far", human_bytes(bytes)) } else { format!("{} · {}%", human_bytes(bytes), pct(bytes, total)) };
             ty += text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &size, font(12.0), white(217), br.width() - 20.0).height() + 3.0;
             let more = if measuring {
                 Some("measuring…".to_string())
@@ -565,7 +624,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         }
         // selection box in the corner
         let mut box_clicked = false;
-        if selectable && morph.is_none() && br.width() > 30.0 && br.height() > 30.0 {
+        if selectable && morph.is_none() && br.width() > 64.0 && br.height() > 46.0 {
             let bx = Rect::from_min_size(Pos2::new(br.right() - 24.0, br.top() + 6.0), Vec2::splat(18.0));
             let bresp = ui.interact(bx, id.with("box"), Sense::click());
             if on {
@@ -579,7 +638,17 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             box_clicked = bresp.on_hover_text(if on { "Remove from the list" } else { "Add to the list" }).clicked();
         }
         if hov || (morph.is_none() && ui.rect_contains_pointer(br)) {
-            hovered = Some((path.as_ref().map(|pa| tilde(pa)).unwrap_or_else(|| format!("{} · small files", tilde(&node.path))), hue, bytes, (kids > 0 && !measuring).then_some(kids)));
+            hovered = Some((path.as_ref().map(|pa| tilde(pa)).unwrap_or_else(|| if folded > 0 { format!("{} · {folded} smaller items and small files", tilde(&node.path)) } else { format!("{} · small files", tilde(&node.path)) }), hue, bytes, (kids > 0 && !measuring).then_some(kids)));
+        }
+        if path.is_none() && clickable {
+            if resp.clicked() {
+                app.lens_morph = Some((Some(base), PathBuf::new(), now));
+                app.lens_skip = skip + keep;
+                ctx.request_repaint();
+            }
+            if hov {
+                ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
+            }
         }
         if let Some(pa) = &path {
             if box_clicked {
@@ -626,6 +695,10 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             app.lens_morph = Some((None, app.lens_path.clone(), now));
         }
         app.lens_path = target;
+        app.lens_skip = 0;
+        ctx.request_repaint();
+    } else if unskip {
+        app.lens_skip = 0;
         ctx.request_repaint();
     }
 
@@ -683,8 +756,11 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
     match hovered {
         Some((path, hue, bytes, kids)) => {
             p.rect_filled(Rect::from_center_size(Pos2::new(fr.left() + 25.0, fr.center().y), Vec2::splat(10.0)), 3.0, hue);
-            let parent = if depth == 0 { root_label.clone() } else { node.name.clone() };
-            let info = format!("{} · {}% of {}{}", human_bytes(bytes), pct(bytes, node.bytes), parent, kids.map(|k| format!(" · {k} items")).unwrap_or_default());
+            let mut parent = if depth == 0 { root_label.clone() } else { node.name.clone() };
+            if skip > 0 {
+                parent = format!("Other in {parent}");
+            }
+            let info = format!("{} · {}% of {}{}", human_bytes(bytes), pct(bytes, total), parent, kids.map(|k| format!(" · {k} items")).unwrap_or_default());
             let ir = p.text(Pos2::new(fr.right() - 20.0, fr.center().y), Align2::RIGHT_CENTER, info, font(13.0), TEXT_DIM);
             text_fit(&p, Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, &path, mono(12.0), TEXT_SOFT, ir.left() - fr.left() - 56.0);
         }
@@ -760,6 +836,7 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         if let Some(root) = app.lens.result.lock().unwrap().as_mut() {
             scan::prune(root, &removed);
         }
+        scan::save_later(&app.lens);
         app.lens_review = false;
         let msg = if failed == 0 { format!("Moved {} to the Trash", human_bytes(freed)) } else { format!("Moved {} to the Trash · {failed} items couldn't be removed", human_bytes(freed)) };
         cx.toast(msg);

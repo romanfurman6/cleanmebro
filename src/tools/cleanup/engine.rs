@@ -128,6 +128,8 @@ pub struct State {
     pub progress: f32,
     pub items: Vec<Item>,
     pub ai_status: String,
+    /// This scan asks Claude after looking (step 2 of 2).
+    pub with_ai: bool,
     pub ai_used: bool,
     pub ai_error: Option<String>,
     pub cleaned_bytes: u64,
@@ -298,7 +300,7 @@ const CHROMIUM_CACHES: [&str; 9] = [
 pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
     {
         let mut g = shared.lock().unwrap();
-        *g = State { phase: Phase::Scanning, ..Default::default() };
+        *g = State { phase: Phase::Scanning, with_ai: use_ai, ..Default::default() };
     }
     std::thread::spawn(move || {
         let (running_ids, running_names) = running_apps();
@@ -656,9 +658,9 @@ fn scan_trash(c: &mut Ctx) {
 // ---------------------------------------------------------------- AI judge
 
 fn judge(shared: &Shared, ctx: &egui::Context) {
-    let Some(bin) = claude_code::claude_bin() else {
+    let Some(bin) = claude_code::claude_bin().filter(|_| claude_code::availability().ready()) else {
         let mut g = shared.lock().unwrap();
-        g.ai_error = Some("Claude Code isn't installed, so only the built-in rules were used.".into());
+        g.ai_error = Some(format!("{}, so only the built-in rules were used.", claude_code::availability().short()));
         return;
     };
     let h = home().display().to_string();

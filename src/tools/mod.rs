@@ -7,6 +7,7 @@ pub mod capture;
 pub mod claude;
 pub mod clipboard;
 pub mod cleanup;
+pub mod keep_awake;
 pub mod lens;
 pub mod system;
 
@@ -21,6 +22,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
         Box::new(capture::Capture::new(env)),
         Box::new(clipboard::Clipboard::new(env)),
         Box::new(claude::Claude::new(env)),
+        Box::new(keep_awake::KeepAwake::new(env)),
     ]
 }
 
@@ -29,8 +31,10 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
 pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "cleanup/clean",
     "capture/tile",
+    "keep_awake/tile",
     "core/planned",
     "capture/capture",
+    "keep_awake/card",
     "clipboard/recent",
     "system/storage",
     "system/memory",
