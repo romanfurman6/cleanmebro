@@ -80,7 +80,23 @@ impl Tool for Cleanup {
         let resp = match size {
             Size::S11 => tile::small(ui, rect, id, Icon::Broom, col, "Clean", &value, false),
             Size::S12 => tile::wide(ui, rect, id, Icon::Broom, col, "Clean", &value, bar, false),
-            Size::S14 => tile::row(ui, rect, id, Icon::Broom, col, "Clean", &value, bar, false),
+            Size::S14 => {
+                let (resp, right) = tile::row_split(ui, rect, id, Icon::Broom, col, "Clean", &value, &sub, false);
+                let p = ui.painter();
+                let lines: Vec<(String, Option<(f32, egui::Color32)>, String)> = match g.phase {
+                    engine::Phase::Results => {
+                        let tot = g.total().max(1) as f32;
+                        let mut groups: Vec<(engine::Group, u64)> = engine::Group::ALL.iter().map(|k| (*k, g.group_bytes(*k))).filter(|(_, b)| *b > 0).collect();
+                        groups.sort_by_key(|g| std::cmp::Reverse(g.1));
+                        groups.iter().take(3).map(|(grp, b)| (grp.title().to_string(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), human_bytes(*b))).collect()
+                    }
+                    engine::Phase::Scanning | engine::Phase::Judging | engine::Phase::Cleaning => vec![("Progress".into(), frac.map(|f| (f.clamp(0.01, 1.0), ACCENT)), format!("{:.0}%", frac.unwrap_or(0.0) * 100.0))],
+                    _ => Vec::new(),
+                };
+                let empty = if g.phase == engine::Phase::Done { "All clean" } else { "Click to scan" };
+                tile::lines(p, right, &lines, empty);
+                resp
+            }
             _ => {
                 let resp = tile::card(ui, rect, id, false);
                 let p = ui.painter();

@@ -1,26 +1,20 @@
 //! The menu-bar panel (design A, "Control Center"): a title line with the
 //! window and settings buttons, the user's widgets on a 4-column grid of
-//! square cells (scrolling when they don't fit), an "Edit widgets…" link,
-//! and the sheet that opens beside the panel. In edit mode the widgets
-//! wobble: drag to move, "−" to remove, tap to pick a size; "+" opens the
-//! gallery (see `gallery.rs`).
+//! square cells (scrolling when they don't fit), an "Edit widgets…" link
+//! that opens the widget editor in the full window (see `editor.rs`), and
+//! the sheet that opens beside the panel.
 
-use super::editor::Drag;
 use super::layout;
-use super::settings::{add_entry, hide_entry, place_entry, set_size};
-use super::shell::{App, Gallery, RECOMMENDATION};
+use super::shell::{App, RECOMMENDATION};
 use super::tool::{Cx, Recommendation, Size, GRID_COLUMNS};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
-use crate::kit::tile;
-use egui::{Align2, Color32, Id, LayerId, Order, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
+use egui::{Align2, Color32, Id, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 /// Height of the title line above the widgets.
 pub const HEADER: f32 = 60.0;
 /// Space below the widgets: a gap plus the "Edit widgets…" link.
 pub const FOOTER: f32 = 40.0;
-/// In edit mode: the size bar of the selected widget.
-pub const EDIT_FOOTER: f32 = 72.0;
 /// Side padding of the widget grid.
 pub const PAD: f32 = 12.0;
 /// Gap between grid cells.
@@ -40,10 +34,6 @@ pub fn size_px(size: Size, width: f32) -> Vec2 {
     let c = cell(width);
     let (r, k) = size.dims();
     Vec2::new(k as f32 * c + (k as f32 - 1.0) * GAP, r as f32 * c + (r as f32 - 1.0) * GAP)
-}
-
-pub fn footer_height(app: &App) -> f32 {
-    if app.editing { EDIT_FOOTER } else { FOOTER }
 }
 
 /// A shown widget and where it goes, relative to the grid's origin.
@@ -102,42 +92,22 @@ pub fn content_height(app: &App) -> f32 {
 }
 
 pub fn panel(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-    if app.editing {
-        edit_header(app, ui, rect);
-    } else {
-        header(app, ui, rect);
-    }
-    let area = Rect::from_min_max(Pos2::new(rect.left() + PAD, rect.top() + HEADER), Pos2::new(rect.right() - PAD, rect.bottom() - footer_height(app)));
+    header(app, ui, rect);
+    let area = Rect::from_min_max(Pos2::new(rect.left() + PAD, rect.top() + HEADER), Pos2::new(rect.right() - PAD, rect.bottom() - FOOTER));
     let need = content_height(app);
-    let mut target: Option<Option<String>> = None;
     if need > area.height() + 0.5 {
         let mut child = ui.new_child(UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
         child.set_clip_rect(area.expand2(Vec2::new(PAD, 8.0)));
         ScrollArea::vertical().id_salt("panel-widgets").auto_shrink([false, false]).show(&mut child, |ui| {
             let (origin, _) = ui.allocate_exact_size(Vec2::new(area.width(), need), Sense::hover());
-            let clip = ui.clip_rect();
-            target = grid(app, ui, origin, clip, cx);
+            widgets(app, ui, origin, cx);
         });
     } else {
-        target = grid(app, ui, Rect::from_min_size(area.min, Vec2::new(area.width(), need)), area.expand2(Vec2::new(PAD, 8.0)), cx);
+        widgets(app, ui, Rect::from_min_size(area.min, Vec2::new(area.width(), need)), cx);
     }
-    if app.editing {
-        size_bar(app, ui, rect);
-        drop_drag(app, ui, target);
-    } else {
-        footer(app, ui, rect);
-    }
+    footer(app, ui, rect);
     if app.gear_open {
         gear_menu(app, ui, rect, cx);
-    }
-}
-
-fn grid(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, cx: &mut Cx) -> Option<Option<String>> {
-    if app.editing {
-        edit_widgets(app, ui, origin, clip)
-    } else {
-        widgets(app, ui, origin, cx);
-        None
     }
 }
 
@@ -184,224 +154,6 @@ fn widgets(app: &mut App, ui: &mut Ui, origin: Rect, cx: &mut Cx) {
     }
     for w in &placed {
         draw_widget(app, ui, w, w.rect.translate(origin.min.to_vec2()), cx);
-    }
-}
-
-// ---------------------------------------------------------------- edit mode
-
-/// "+" (gallery), the title and Done.
-fn edit_header(app: &mut App, ui: &mut Ui, rect: Rect) {
-    let ctx = ui.ctx().clone();
-    let p = ui.painter().clone();
-    let cy = rect.top() + 31.0;
-    let plus_r = Rect::from_center_size(Pos2::new(rect.left() + 16.0 + 15.0, cy), Vec2::splat(30.0));
-    let resp = ui.interact(plus_r, ui.scope_id().with("edit-plus"), Sense::click());
-    let open = app.gallery.is_some();
-    p.circle_filled(plus_r.center(), 15.0, if open { BLUE } else { white(if resp.hovered() { 46 } else { 28 }) });
-    plus(&p, plus_r.center(), 6.0, TEXT);
-    if resp.on_hover_text("Add a widget").clicked() {
-        app.gallery = if open { None } else { Some(Gallery::default()) };
-        app.reshape(&ctx);
-    }
-    p.text(Pos2::new(rect.center().x, cy), Align2::CENTER_CENTER, "Edit widgets", bold(15.0), TEXT);
-    let dw = button_width(&p, "Done", BTN_PRIMARY).max(64.0);
-    let done = Rect::from_min_size(Pos2::new(rect.right() - 14.0 - dw, cy - 15.0), Vec2::new(dw, 30.0));
-    if pill_button(ui, done, "Done", BTN_PRIMARY, true).clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        app.stop_editing();
-        app.reshape(&ctx);
-    }
-}
-
-pub fn plus(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
-    p.line_segment([c - Vec2::new(s, 0.0), c + Vec2::new(s, 0.0)], Stroke::new(1.8, col));
-    p.line_segment([c - Vec2::new(0.0, s), c + Vec2::new(0.0, s)], Stroke::new(1.8, col));
-}
-
-/// The widgets in edit mode: drawn for real but quiet (their clicks select
-/// them instead), wobbling, with a "−" badge and, on the selected one, a
-/// handle that steps to the next size. Returns where a drag would drop:
-/// `Some(before)` while something is dragged over the grid.
-fn edit_widgets(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect) -> Option<Option<String>> {
-    let ctx = ui.ctx().clone();
-    let p = ui.painter().clone();
-    let t = ctx.input(|i| i.time) as f32;
-    let (placed, _) = place(app, origin.width());
-    let mut quiet = Cx::new(None);
-    let dragged = app.drag.as_ref().map(|d| d.key.clone());
-    let mut keys = Vec::with_capacity(placed.len());
-    let mut rects = Vec::with_capacity(placed.len());
-    let (mut hide, mut select, mut grow) = (None, None, None);
-    for (n, w) in placed.iter().enumerate() {
-        let key = app.widgets[w.entry].key.clone();
-        let base = w.rect.translate(origin.min.to_vec2());
-        let phase = n as f32 * 1.7;
-        let jig = if app.drag.is_some() { Vec2::ZERO } else { Vec2::new((t * 17.0 + phase).sin() * 0.7, (t * 21.0 + phase).cos() * 0.4) };
-        draw_widget(app, ui, w, base.translate(jig), &mut quiet);
-        let id = ui.scope_id().with(("edit", &key));
-        let resp = ui.interact(base, id, Sense::click_and_drag());
-        let selected = app.edit_sel.as_deref() == Some(key.as_str());
-        if dragged.as_deref() == Some(key.as_str()) {
-            p.rect_filled(base, tile::R_TILE, with_alpha(BG, 0.7));
-        } else if selected {
-            p.rect_stroke(base.expand(2.0), tile::R_TILE + 2.0, Stroke::new(2.0, ACCENT), StrokeKind::Outside);
-        } else if resp.hovered() && app.drag.is_none() {
-            p.rect_stroke(base, tile::R_TILE, Stroke::new(1.0, white(60)), StrokeKind::Inside);
-        }
-        if resp.hovered() && app.drag.is_none() {
-            ctx.set_cursor_icon(egui::CursorIcon::Grab);
-        }
-        if resp.clicked() {
-            select = Some(key.clone());
-        }
-        if resp.drag_started() && app.drag.is_none() {
-            let label = app.widget_spec(&key).map(|(_, s)| s.title.to_string()).unwrap_or_default();
-            let grab = resp.interact_pointer_pos().map(|q| q - base.min).unwrap_or(Vec2::splat(12.0));
-            app.drag = Some(Drag { key: key.clone(), from_gallery: false, label, size: base.size(), grab });
-        }
-        if app.drag.is_none() {
-            // "−" removes it from the panel
-            let mb = Rect::from_center_size(base.left_top() + Vec2::new(3.0, 3.0), Vec2::splat(20.0));
-            if clip.contains(mb.center()) {
-                let b = ui.interact(mb, id.with("hide"), Sense::click());
-                p.circle_filled(mb.center() + Vec2::new(0.0, 1.5), 10.5, Color32::from_black_alpha(90));
-                p.circle_filled(mb.center(), 10.0, if b.hovered() { Color32::from_rgb(0x8E, 0x8E, 0x93) } else { Color32::from_rgb(0x58, 0x58, 0x5D) });
-                p.line_segment([mb.center() - Vec2::new(4.5, 0.0), mb.center() + Vec2::new(4.5, 0.0)], Stroke::new(1.8, Color32::WHITE));
-                if b.on_hover_text("Remove").clicked() {
-                    hide = Some(key.clone());
-                }
-            }
-            // the handle: next size
-            if selected {
-                let hb = Rect::from_center_size(base.right_bottom() - Vec2::new(2.0, 2.0), Vec2::splat(22.0));
-                let b = ui.interact(hb, id.with("grow"), Sense::click());
-                p.circle_filled(hb.center(), 11.0, BG);
-                p.circle_filled(hb.center(), 9.0, if b.hovered() { lerp_color(ACCENT, Color32::WHITE, 0.2) } else { ACCENT });
-                resize_glyph(&p, hb.center(), 4.0, Color32::WHITE);
-                if b.hovered() {
-                    ctx.set_cursor_icon(egui::CursorIcon::ResizeNwSe);
-                }
-                if b.on_hover_text("Next size").clicked() {
-                    grow = Some(key.clone());
-                }
-            }
-        }
-        keys.push(key);
-        rects.push(base);
-    }
-    if let Some(k) = hide {
-        hide_entry(&mut app.widgets, &k);
-        if app.edit_sel.as_deref() == Some(k.as_str()) {
-            app.edit_sel = None;
-        }
-    } else if let Some(k) = grow {
-        step_size(app, &k);
-    } else if let Some(k) = select {
-        app.edit_sel = if app.edit_sel.as_deref() == Some(k.as_str()) { None } else { Some(k) };
-    }
-    ctx.request_repaint_after(std::time::Duration::from_millis(33));
-
-    // where a drop would land: before the nearest widget, or at the end
-    let d = app.drag.as_ref()?;
-    let q = ctx.pointer_latest_pos()?;
-    if !clip.contains(q) {
-        return None;
-    }
-    let others: Vec<usize> = (0..keys.len()).filter(|k| keys[*k] != d.key).collect();
-    let nearest = others.iter().copied().min_by(|a, b| dist(rects[*a], q).total_cmp(&dist(rects[*b], q)));
-    let Some(k) = nearest else { return Some(None) };
-    let r = rects[k];
-    let full = r.width() > origin.width() * 0.9;
-    let before = if full { q.y < r.center().y } else { q.x < r.center().x };
-    let (target, line) = if before {
-        (Some(keys[k].clone()), if full { [Pos2::new(r.left(), r.top() - 4.0), Pos2::new(r.right(), r.top() - 4.0)] } else { [Pos2::new(r.left() - 4.0, r.top()), Pos2::new(r.left() - 4.0, r.bottom())] })
-    } else {
-        let next = others.iter().find(|j| **j > k).map(|j| keys[*j].clone());
-        (next, if full { [Pos2::new(r.left(), r.bottom() + 4.0), Pos2::new(r.right(), r.bottom() + 4.0)] } else { [Pos2::new(r.right() + 4.0, r.top()), Pos2::new(r.right() + 4.0, r.bottom())] })
-    };
-    p.line_segment(line, Stroke::new(3.0, ACCENT));
-    Some(target)
-}
-
-/// Two little arrows pointing apart, corner to corner.
-fn resize_glyph(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
-    let st = Stroke::new(1.6, col);
-    p.line_segment([c - Vec2::splat(s), c + Vec2::splat(s)], st);
-    for (tip, dir) in [(c - Vec2::splat(s), 1.0), (c + Vec2::splat(s), -1.0)] {
-        p.line_segment([tip, tip + Vec2::new(3.0 * dir, 0.0)], st);
-        p.line_segment([tip, tip + Vec2::new(0.0, 3.0 * dir)], st);
-    }
-}
-
-fn dist(r: Rect, q: Pos2) -> f32 {
-    let dx = (r.left() - q.x).max(q.x - r.right()).max(0.0);
-    let dy = (r.top() - q.y).max(q.y - r.bottom()).max(0.0);
-    dx * dx + dy * dy
-}
-
-/// The widget's next size it offers (wrapping around).
-fn step_size(app: &mut App, key: &str) {
-    let Some((_, spec)) = app.widget_spec(key) else { return };
-    let Some(cur) = app.widgets.iter().find(|e| e.key == key).map(|e| spec.fit(e.size)) else { return };
-    let i = spec.sizes.iter().position(|z| *z == cur).unwrap_or(0);
-    set_size(&mut app.widgets, key, spec.sizes[(i + 1) % spec.sizes.len()]);
-}
-
-/// The ghost under the pointer while dragging, and the drop itself.
-fn drop_drag(app: &mut App, ui: &mut Ui, target: Option<Option<String>>) {
-    let ctx = ui.ctx().clone();
-    let Some(d) = app.drag.clone() else { return };
-    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-    if let Some(q) = ctx.pointer_latest_pos() {
-        let gp = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("panel-drag")));
-        let size = Vec2::new(d.size.x.min(220.0), 40.0);
-        let gr = Rect::from_min_size(q - Vec2::new(d.grab.x.min(size.x - 12.0), 20.0), size);
-        gp.rect_filled(gr.translate(Vec2::new(0.0, 8.0)).expand(2.0), tile::R_TILE + 2.0, Color32::from_black_alpha(80));
-        gp.rect_filled(gr, tile::R_TILE, with_alpha(RAISED, 0.94));
-        gp.rect_stroke(gr, tile::R_TILE, Stroke::new(1.0, if target.is_some() { ACCENT } else { white(40) }), StrokeKind::Inside);
-        text_fit(&gp, Pos2::new(gr.left() + 12.0, gr.center().y), Align2::LEFT_CENTER, &d.label, bold(13.0), TEXT, gr.width() - 24.0);
-    }
-    if !ctx.input(|i| i.pointer.primary_down()) {
-        if let Some(before) = target {
-            if d.from_gallery {
-                let size = app.gallery.as_ref().and_then(|g| g.size).or_else(|| app.widget_spec(&d.key).map(|(_, s)| s.size));
-                if let Some(z) = size {
-                    add_entry(&mut app.widgets, &d.key, z, before.as_deref());
-                    app.edit_sel = Some(d.key.clone());
-                    app.gallery = None;
-                    app.reshape(&ctx);
-                }
-            } else if before.as_deref() != Some(d.key.as_str()) {
-                place_entry(&mut app.widgets, &d.key, before.as_deref());
-            }
-        }
-        app.drag = None;
-    }
-    ctx.request_repaint();
-}
-
-/// Edit mode's footer: the selected widget's sizes, or a hint.
-fn size_bar(app: &mut App, ui: &mut Ui, rect: Rect) {
-    let p = ui.painter().clone();
-    let bar_r = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - EDIT_FOOTER), rect.max);
-    hairline(&p, bar_r.left_top() + Vec2::new(12.0, 0.0), bar_r.right_top() - Vec2::new(12.0, 0.0));
-    let x0 = rect.left() + PAD;
-    let x1 = rect.right() - PAD;
-    let sel = app.edit_sel.clone().and_then(|k| {
-        let (_, spec) = app.widget_spec(&k)?;
-        let cur = spec.fit(app.widgets.iter().find(|e| e.key == k && e.on)?.size);
-        Some((k, spec, cur))
-    });
-    let Some((key, spec, cur)) = sel else {
-        text_fit(&p, bar_r.center(), Align2::CENTER_CENTER, "Tap a widget to resize it · drag to move · − to remove", font(12.0), TEXT_FAINT, bar_r.width() - 24.0);
-        return;
-    };
-    let ty = bar_r.top() + 18.0;
-    let tr = p.text(Pos2::new(x0, ty), Align2::LEFT_CENTER, spec.title, bold(12.0), TEXT);
-    p.text(Pos2::new(tr.right() + 6.0, ty), Align2::LEFT_CENTER, "size", font(12.0), TEXT_FAINT);
-    p.text(Pos2::new(x1, ty), Align2::RIGHT_CENTER, format!("{} · {}", cur.name(), cur.label()), font(12.0), TEXT_FAINT);
-    let chips = Rect::from_min_max(Pos2::new(x0, ty + 12.0), Pos2::new(x1, ty + 42.0));
-    if let Some(z) = size_chips(ui, chips, ui.scope_id().with(("sizes", &key)), spec.sizes, cur) {
-        set_size(&mut app.widgets, &key, z);
     }
 }
 
@@ -476,9 +228,9 @@ fn footer(app: &mut App, ui: &mut Ui, rect: Rect) {
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    if resp.clicked() {
+    if resp.on_hover_text("Edit the panel's widgets in the CleanMeBro window").clicked() {
         let ctx = ui.ctx().clone();
-        app.start_editing(&ctx);
+        app.open_settings(&ctx, false);
     }
 }
 
@@ -523,7 +275,7 @@ fn gear_menu(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         match rows[k].0 {
             Row::Customize => {
                 let ctx = ui.ctx().clone();
-                app.start_editing(&ctx);
+                app.open_settings(&ctx, false);
             }
             Row::Tool(i, id) => app.tools[i].menu_action(id, cx),
             Row::Quit => cx.quit(),

@@ -5,7 +5,7 @@
 
 use super::settings::Layout;
 use super::store::{parse_color, Entry, Kind};
-use super::ui::{app_color, chips, cover_image, entry_thumb, kind_glyph, pin_glyph, preview, search_field};
+use super::ui::{app_color, chips, cover_image, entry_thumb, kind_glyph, pin_glyph, preview};
 use super::{Clipboard, Filter, TINT};
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2, ViewportBuilder, ViewportCommand, ViewportId};

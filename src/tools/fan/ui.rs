@@ -194,14 +194,23 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
             resp
         }
         Size::S12 => tile::wide(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, if rpm.is_some() { Ok((frac.max(0.02), LINE)) } else { Err(hot.as_str()) }, sel),
-        _ => tile::row(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, if hot.is_empty() { Err("") } else { Err(hot.as_str()) }, sel),
+        _ => {
+            let (resp, right) = tile::row_split(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, &hot, sel);
+            let mut lines: Vec<(String, Option<(f32, Color32)>, String)> = s.fans.iter().take(2).enumerate().map(|(i, f)| (fan_name(i, s.fans.len()), Some((f.frac().max(0.02), LINE)), format!("{:.0} rpm", f.rpm))).collect();
+            if let Some((g, c)) = hottest_text(s) {
+                lines.push((g, None, format!("{c:.0} °C")));
+            }
+            let empty = if !s.loaded { "Reading…" } else if s.has_smc { "No fans · cools passively" } else { "Fan speed unavailable" };
+            tile::lines(ui.painter(), right, &lines, empty);
+            resp
+        }
     };
     // spinning blades over the chip
     if let Some(r) = rpm {
         let p = ui.painter();
         let chip = match size {
             Size::S12 => Some(Rect::from_min_size(Pos2::new(rect.left() + tile::PAD, rect.top() + 9.0), Vec2::splat(18.0))),
-            Size::S14 => Some(Rect::from_min_size(Pos2::new(rect.left() + 12.0, rect.center().y - 17.0), Vec2::splat(34.0))),
+            Size::S14 => Some(tile::row_chip(rect)),
             _ => None,
         };
         if let Some(chip) = chip {

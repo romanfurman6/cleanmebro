@@ -972,3 +972,18 @@ mod tests {
         assert_eq!(middle_ellipsis("ааааааааааббббббббб", 10).chars().count(), 10);
     }
 }
+
+/// A single-line search field with a magnifier, painted into `r`.
+pub fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, focus: bool, size: f32) -> egui::Response {
+    let p = ui.painter().clone();
+    p.rect_filled(r, 7.0, white(15));
+    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(size)), TEXT_FAINT);
+    let tr = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top()), Pos2::new(r.right() - 8.0, r.bottom()));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT)).frame(egui::Frame::NONE).font(font(size)).text_color(TEXT).desired_width(tr.width());
+    let resp = child.add(te);
+    if focus && !resp.has_focus() {
+        resp.request_focus();
+    }
+    resp
+}
