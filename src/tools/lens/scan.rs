@@ -16,12 +16,22 @@ pub struct Node {
     pub other: u64, // small files folded together ("Other items")
 }
 
-/// A top-level folder while mapping: its live byte count, then its finished tree.
+/// A top-level folder while mapping: its live byte count, and whether it's
+/// finished.
 pub struct LiveChild {
     pub name: String,
     pub path: PathBuf,
     pub bytes: Arc<AtomicU64>,
-    pub done: Option<Node>,
+    pub done: bool,
+}
+
+/// One row of the live list while mapping (cheap to copy: no subtree).
+#[derive(Clone, Debug)]
+pub struct LiveRow {
+    pub name: String,
+    pub path: PathBuf,
+    pub bytes: u64,
+    pub done: bool,
 }
 
 #[derive(Default)]
@@ -43,28 +53,41 @@ pub fn display_name(p: &Path) -> String {
     p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| "Macintosh HD".into())
 }
 
-/// The map so far while mapping: finished folders in full, the rest as
-/// single blocks with what's been counted. Also returns the folders still
-/// being measured.
-pub fn partial(s: &Scan) -> Option<(Node, Vec<PathBuf>)> {
+/// The root's folders so far while mapping, with what's been counted in
+/// each. Only sizes are copied, never the finished trees, so this stays cheap
+/// however big the disk is.
+pub fn partial(s: &Scan) -> Option<(PathBuf, Vec<LiveRow>)> {
     let g = s.live.lock().unwrap();
     let (root, kids) = g.as_ref()?;
-    let mut pending = Vec::new();
-    let mut children: Vec<Node> = kids
+    let rows = kids
         .iter()
-        .map(|k| match &k.done {
-            Some(n) => n.clone(),
-            None => {
-                pending.push(k.path.clone());
-                Node { name: k.name.clone(), path: k.path.clone(), bytes: k.bytes.load(Ordering::Relaxed), ..Default::default() }
-            }
-        })
-        .filter(|n| n.bytes > 0)
+        .map(|k| LiveRow { name: k.name.clone(), path: k.path.clone(), bytes: k.bytes.load(Ordering::Relaxed), done: k.done })
+        .filter(|r| r.bytes > 0)
         .collect();
-    children.sort_by_key(|c| std::cmp::Reverse(c.bytes));
-    let bytes = children.iter().map(|c| c.bytes).sum();
-    let items = children.iter().map(|c| c.items + 1).sum();
-    Some((Node { name: display_name(root), path: root.clone(), bytes, items, children, other: 0 }, pending))
+    Some((root.clone(), rows))
+}
+
+/// Folders macOS guards behind their own permission prompt (Music and TV
+/// media libraries, Contacts, Calendars, Reminders). Reading inside them
+/// pops a system dialog even with Full Disk Access, so the map never
+/// enters them.
+pub fn asks_permission(p: &Path) -> bool {
+    if p.extension().is_some_and(|e| e == "musiclibrary" || e == "tvlibrary") {
+        return true;
+    }
+    let Some(home) = dirs::home_dir() else { return false };
+    ["Music/Music", "Music/iTunes", "Movies/TV", "Library/Calendars", "Library/Reminders", "Library/Application Support/AddressBook", "Library/Application Support/CallHistoryDB"]
+        .iter()
+        .any(|x| p == home.join(x))
+}
+
+/// Run the current thread just below the UI, so mapping never makes the
+/// window stutter.
+fn below_ui() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INITIATED, 0);
+    }
 }
 
 /// Folders that the system needs; they can be browsed but not selected.
@@ -94,6 +117,7 @@ pub fn start(shared: Shared, root: PathBuf, ctx: egui::Context) {
     *shared.result.lock().unwrap() = None;
     *shared.live.lock().unwrap() = None;
     std::thread::spawn(move || {
+        below_ui();
         let w = Walker::new(&root, &shared, &ctx);
         let node = w.root(&root);
         *shared.result.lock().unwrap() = Some(node);
@@ -129,7 +153,8 @@ impl<'a> Walker<'a> {
             skip.push(PathBuf::from("/Volumes"));
         }
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) as u64;
-        Walker { s, ctx, devs, skip, free: AtomicU64::new(cores.saturating_sub(1).max(1) * 2), last: Mutex::new(std::time::Instant::now()) }
+        // leave a core for the window
+        Walker { s, ctx, devs, skip, free: AtomicU64::new(cores.saturating_sub(2).max(1)), last: Mutex::new(std::time::Instant::now()) }
     }
 
     fn stay(&self, md: &std::fs::Metadata, p: &Path) -> bool {
@@ -149,24 +174,26 @@ impl<'a> Walker<'a> {
         self.add_files(&mut node, files, None);
         let live: Vec<LiveChild> = dirs
             .iter()
-            .map(|d| LiveChild { name: d.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(), path: d.clone(), bytes: Arc::new(AtomicU64::new(0)), done: None })
+            .map(|d| LiveChild { name: d.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(), path: d.clone(), bytes: Arc::new(AtomicU64::new(0)), done: false })
             .collect();
         let counters: Vec<Arc<AtomicU64>> = live.iter().map(|l| l.bytes.clone()).collect();
         *self.s.live.lock().unwrap() = Some((root.to_path_buf(), live));
         let next = AtomicU64::new(0);
         // every core pulls the next top-level folder; inside one, free threads help
-        let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(dirs.len().max(1));
+        let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).saturating_sub(1).max(1).min(dirs.len().max(1));
         let results: Mutex<Vec<(usize, Node)>> = Mutex::new(Vec::new());
         std::thread::scope(|sc| {
             for _ in 0..workers {
                 sc.spawn(|| loop {
+                    below_ui();
                     let k = next.fetch_add(1, Ordering::SeqCst) as usize;
                     if k >= dirs.len() {
                         break;
                     }
                     let child = self.walk(&dirs[k], 1, Some(&counters[k]));
+                    counters[k].store(child.bytes, Ordering::Relaxed);
                     if let Some((_, live)) = self.s.live.lock().unwrap().as_mut() {
-                        live[k].done = Some(child.clone());
+                        live[k].done = true;
                     }
                     self.ctx.request_repaint();
                     results.lock().unwrap().push((k, child));
@@ -189,6 +216,9 @@ impl<'a> Walker<'a> {
         let Ok(rd) = std::fs::read_dir(p) else { return (dirs, files) };
         for e in rd.flatten() {
             let cp = e.path();
+            if asks_permission(&cp) {
+                continue; // never touch folders behind a permission prompt
+            }
             let Ok(cm) = cp.symlink_metadata() else { continue };
             if !self.stay(&cm, &cp) {
                 continue; // other volumes (network mounts, backups) and the Data mount point
@@ -242,6 +272,7 @@ impl<'a> Walker<'a> {
             for d in &dirs {
                 if self.try_thread() {
                     handles.push(sc.spawn(move || {
+                        below_ui();
                         let n = self.walk(d, depth + 1, top);
                         self.free.fetch_add(1, Ordering::AcqRel);
                         n
@@ -395,6 +426,16 @@ mod tests {
         assert_eq!(t.bytes, 10);
         assert_eq!(find(&t, Path::new("/r/a")).unwrap().bytes, 10);
         assert!(find(&t, Path::new("/r/a/x")).is_none());
+    }
+
+    #[test]
+    fn permission_folders_are_skipped() {
+        let h = dirs::home_dir().unwrap();
+        assert!(asks_permission(&h.join("Music/Music")));
+        assert!(asks_permission(Path::new("/Volumes/X/Old.musiclibrary")));
+        assert!(asks_permission(&h.join("Library/Calendars")));
+        assert!(!asks_permission(&h.join("Music")));
+        assert!(!asks_permission(&h.join("Downloads")));
     }
 
     #[test]
