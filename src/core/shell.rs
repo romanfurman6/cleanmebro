@@ -95,7 +95,8 @@ impl App {
         // screenshots always use the default widgets
         let prefs: WidgetPrefs = if demo { None } else { cc.storage.and_then(|s| eframe::get_value(s, super::settings::STORAGE_KEY)) }.unwrap_or_default();
         let tools_off: Vec<String> = if demo { None } else { cc.storage.and_then(|s| eframe::get_value(s, super::settings::TOOLS_KEY)) }.unwrap_or_default();
-        let page = tools.iter().position(|t| t.has_page()).unwrap_or(0);
+        // the window opens on the sidebar's first page (Clean section first)
+        let page = tools.iter().position(|t| t.has_page() && t.section() == "Clean").or_else(|| tools.iter().position(|t| t.has_page())).unwrap_or(0);
         let mut app = App {
             tools,
             mode: Mode::Panel,

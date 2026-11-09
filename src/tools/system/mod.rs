@@ -2,6 +2,7 @@
 //! Bluetooth devices, shown as panel widgets with a detail sheet each.
 
 pub mod monitor;
+mod page;
 mod sheets;
 mod ui;
 
@@ -67,6 +68,15 @@ impl Tool for System {
         ui::detail(&self.mon, detail, ui, rect, cx);
     }
 
+    fn has_page(&self) -> bool {
+        true
+    }
+    fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        let mut recs = self.recommendations();
+        recs.sort_by(|a, b| b.priority.cmp(&a.priority));
+        page::page(&self.mon, &recs, ui, rect, cx);
+    }
+
     /// Ranked like the original's health recommendations (AssistantDomain:
     /// drive health 100, battery health 80, out of disk space 20, Trash
     /// overfill 5); memory and restart are slotted in by us.
@@ -98,6 +108,9 @@ impl Tool for System {
     }
 
     fn demo_view(&mut self, view: &str) -> Option<View> {
+        if view == "health" {
+            return Some(View::Page);
+        }
         WIDGETS.iter().find(|w| w.id == view).map(|w| View::Detail(w.id))
     }
 }
