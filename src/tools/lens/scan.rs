@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Node {
     pub name: String,
     pub path: PathBuf,
@@ -42,6 +42,12 @@ pub struct Scan {
     pub bytes: AtomicU64,
     pub current: Mutex<String>,
     pub result: Mutex<Option<Node>>,
+    /// When the map in `result` was made (Unix seconds).
+    pub when: Mutex<Option<i64>>,
+    /// The saved map is being read back from disk.
+    pub loading: AtomicBool,
+    /// Reading the saved map was already tried this run.
+    pub loaded: AtomicBool,
     /// The root's folders while mapping, so the map can grow live.
     pub live: Mutex<Option<(PathBuf, Vec<LiveChild>)>>,
 }
@@ -120,11 +126,89 @@ pub fn start(shared: Shared, root: PathBuf, ctx: egui::Context) {
         below_ui();
         let w = Walker::new(&root, &shared, &ctx);
         let node = w.root(&root);
+        let now = chrono::Utc::now().timestamp();
+        if root == Path::new("/") {
+            save(&node, now);
+        }
+        *shared.when.lock().unwrap() = Some(now);
         *shared.result.lock().unwrap() = Some(node);
         *shared.live.lock().unwrap() = None;
         shared.running.store(false, Ordering::SeqCst);
         ctx.request_repaint();
     });
+}
+
+// ---------------------------------------------------------------- saved map
+
+/// Where the last map of the disk is kept between runs.
+fn saved_path() -> PathBuf {
+    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join("diskmap.json")
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Saved {
+    when: i64,
+    root: Node,
+}
+
+/// Keep `root` as the last map (written to a temp file, then moved in place).
+pub fn save(root: &Node, when: i64) {
+    let path = saved_path();
+    let _ = std::fs::create_dir_all(path.parent().unwrap());
+    let tmp = path.with_extension("json.tmp");
+    let ok = std::fs::File::create(&tmp).ok().is_some_and(|f| {
+        #[derive(serde::Serialize)]
+        struct SavedRef<'a> {
+            when: i64,
+            root: &'a Node,
+        }
+        serde_json::to_writer(std::io::BufWriter::new(f), &SavedRef { when, root }).is_ok()
+    });
+    if ok {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// Save the current map in the background (after items were removed from it).
+pub fn save_later(shared: &Shared) {
+    let s = shared.clone();
+    std::thread::spawn(move || {
+        let node = s.result.lock().unwrap().clone();
+        let when = *s.when.lock().unwrap();
+        if let (Some(node), Some(when)) = (node, when) {
+            if node.path == Path::new("/") {
+                save(&node, when);
+            }
+        }
+    });
+}
+
+/// Read the last map back, once per run, in the background. Returns false
+/// when there's no saved map (so the caller can start one).
+pub fn load(shared: &Shared, ctx: &egui::Context) -> bool {
+    if shared.loaded.swap(true, Ordering::SeqCst) {
+        return true;
+    }
+    let path = saved_path();
+    if !path.exists() {
+        return false;
+    }
+    shared.loading.store(true, Ordering::SeqCst);
+    let (s, ctx) = (shared.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        below_ui();
+        let saved: Option<Saved> = std::fs::File::open(&path).ok().and_then(|f| serde_json::from_reader(std::io::BufReader::new(f)).ok());
+        if let Some(saved) = saved {
+            let mut r = s.result.lock().unwrap();
+            if r.is_none() && !s.running.load(Ordering::SeqCst) {
+                *r = Some(saved.root);
+                *s.when.lock().unwrap() = Some(saved.when);
+            }
+        }
+        s.loading.store(false, Ordering::SeqCst);
+        ctx.request_repaint();
+    });
+    true
 }
 
 /// Volumes and folders a walk stays inside, and the threads it may use.
@@ -436,6 +520,15 @@ mod tests {
         assert!(asks_permission(&h.join("Library/Calendars")));
         assert!(!asks_permission(&h.join("Music")));
         assert!(!asks_permission(&h.join("Downloads")));
+    }
+
+    #[test]
+    fn saved_map_round_trips() {
+        let t = tree();
+        let json = serde_json::to_string(&Saved { when: 7, root: t.clone() }).unwrap();
+        let back: Saved = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.when, 7);
+        assert_eq!(find(&back.root, Path::new("/r/a/x")).unwrap().bytes, 50);
     }
 
     #[test]

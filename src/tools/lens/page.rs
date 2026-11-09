@@ -59,10 +59,18 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     app.lens_live = None;
     let guard = shared.result.lock().unwrap();
     let Some(root) = guard.as_ref() else {
-        // nothing to choose: opening Disk Map maps the whole disk
         drop(guard);
-        begin(app, ui.ctx());
-        start(app, ui, r);
+        // show the last map if there is one (even from a previous run);
+        // map the disk only the very first time
+        scan::load(&shared, ui.ctx());
+        if shared.loading.load(Ordering::SeqCst) {
+            page_header(&ui.painter().clone(), r, "Disk Map", "Opening the last map…", TEXT_DIM);
+            return;
+        }
+        if shared.result.lock().unwrap().is_none() {
+            begin(app, ui.ctx());
+            start(app, ui, r);
+        }
         return;
     };
     let act = results(app, ui, r, root, None);
@@ -143,6 +151,18 @@ fn begin(app: &mut App, ctx: &egui::Context) {
     app.lens_morph = None;
     app.lens_hues.clear();
     scan::start(app.lens.clone(), app.lens_root.clone(), ctx.clone());
+}
+
+/// "just now", "5 min ago", "3 h ago", "2 days ago".
+fn ago(when: i64) -> String {
+    let s = (chrono::Utc::now().timestamp() - when).max(0);
+    match s {
+        0..60 => "just now".into(),
+        60..3600 => format!("{} min ago", s / 60),
+        3600..86400 => format!("{} h ago", s / 3600),
+        _ if s < 2 * 86400 => "yesterday".into(),
+        _ => format!("{} days ago", s / 86400),
+    }
 }
 
 fn group_digits(n: u64) -> String {
@@ -401,13 +421,16 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             crumbs.push((c.as_os_str().to_string_lossy().into_owned(), acc.clone()));
         }
     }
-    let (btn, kind) = if live { ("Stop", BTN_SECONDARY) } else { ("Map again", BTN_SECONDARY) };
+    let (btn, kind) = if live { ("Stop", BTN_SECONDARY) } else { ("Start over", BTN_SECONDARY) };
     let nb = button_width(&p, btn, kind);
     let new_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
     let hint_text = if live {
         format!("Mapping · {} · {} files", human_bytes(app.lens.bytes.load(Ordering::Relaxed)), group_digits(app.lens.files.load(Ordering::Relaxed)))
     } else {
-        "Click a folder to zoom in · tick a corner to select".to_string()
+        match *app.lens.when.lock().unwrap() {
+            Some(w) => format!("Mapped {} · click to zoom in, tick to select", ago(w)),
+            None => "Click a folder to zoom in · tick a corner to select".to_string(),
+        }
     };
     let hint = p.text(Pos2::new(new_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, hint_text, font(12.0), if live { TEXT_DIM } else { TEXT_FAINT });
     if live {
@@ -760,6 +783,7 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         if let Some(root) = app.lens.result.lock().unwrap().as_mut() {
             scan::prune(root, &removed);
         }
+        scan::save_later(&app.lens);
         app.lens_review = false;
         let msg = if failed == 0 { format!("Moved {} to the Trash", human_bytes(freed)) } else { format!("Moved {} to the Trash · {failed} items couldn't be removed", human_bytes(freed)) };
         cx.toast(msg);
