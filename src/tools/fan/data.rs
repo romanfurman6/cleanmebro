@@ -205,6 +205,7 @@ impl Snapshot {
 /// Group sensors from the HID hub and fill gaps from SMC keys: a group
 /// that HID already covers is taken from HID only.
 pub fn merge(hid: Vec<Sensor>, smc: Vec<Sensor>) -> Vec<Sensor> {
+    let hid = dedupe(hid);
     let has = |g: Group| hid.iter().any(|s| s.group == g);
     let cores_known = has(Group::PCores) || has(Group::ECores);
     let extra: Vec<Sensor> = smc
@@ -216,6 +217,23 @@ pub fn merge(hid: Vec<Sensor>, smc: Vec<Sensor>) -> Vec<Sensor> {
     all.extend(extra);
     all.retain(|s| plausible(s.celsius));
     all
+}
+
+/// The HID hub lists some sensors several times under one name (each
+/// `PMU tdieN` three times on M5, the battery six times): keep one per name,
+/// averaging the readings that are believable.
+pub fn dedupe(sensors: Vec<Sensor>) -> Vec<Sensor> {
+    let mut out: Vec<(Sensor, u32)> = Vec::new();
+    for s in sensors.into_iter().filter(|s| plausible(s.celsius)) {
+        match out.iter_mut().find(|(o, _)| o.name == s.name) {
+            Some((o, n)) => {
+                o.celsius = (o.celsius * *n as f32 + s.celsius) / (*n + 1) as f32;
+                *n += 1;
+            }
+            None => out.push((s, 1)),
+        }
+    }
+    out.into_iter().map(|(s, _)| s).collect()
 }
 
 // ---------------------------------------------------------------- colours
@@ -346,7 +364,7 @@ mod tests {
 
     #[test]
     fn merge_prefers_hid_and_drops_junk() {
-        let s = |g, c| Sensor { name: String::new(), group: g, celsius: c };
+        let s = |g, c| Sensor { name: format!("{g:?}{c}"), group: g, celsius: c };
         let hid = vec![s(Group::PCores, 70.0), s(Group::Soc, 0.0), s(Group::Soc, 55.0)];
         let smc = vec![s(Group::Cpu, 71.0), s(Group::Gpu, 60.0), s(Group::Soc, 99.0), s(Group::Gpu, 300.0)];
         let m = merge(hid, smc);
@@ -355,6 +373,15 @@ mod tests {
         // no HID cores: SMC CPU readings are used
         let m = merge(vec![s(Group::Soc, 50.0)], vec![s(Group::Cpu, 71.0)]);
         assert!(m.iter().any(|s| s.group == Group::Cpu));
+    }
+
+    #[test]
+    fn same_name_hid_sensors_are_averaged() {
+        let s = |n: &str, c| Sensor { name: n.into(), group: Group::Soc, celsius: c };
+        let d = dedupe(vec![s("PMU tdie1", 74.0), s("PMU tdie2", 72.0), s("PMU tdie1", 76.0), s("PMU tdie1", 0.0)]);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].celsius, 75.0);
+        assert_eq!(d[1].celsius, 72.0);
     }
 
     #[test]
