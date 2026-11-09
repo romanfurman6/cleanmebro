@@ -13,6 +13,10 @@ pub const TRASH_SIZE_THRESHOLD: u64 = TRASH_SIZE_LIMITS[2];
 /// HealthIssuesController sub_a308: a Bluetooth device is ignored when its
 /// battery is above 19% (cmp #0x13); Apple mobile devices are skipped.
 pub const BT_LOW_BATTERY_MAX_PCT: u8 = 19;
+/// Ours: a device at or below this is almost empty (red, second alert).
+pub const BT_CRITICAL_BATTERY_MAX_PCT: u8 = 9;
+/// Ours: a device charged to this forgets its earlier low-battery alerts.
+pub const BT_ALERT_RESET_PCT: u8 = 30;
 /// AssistantDomain sub_20544 arguments: recommendation priorities.
 pub const PRIORITY_DRIVE_HEALTH: u32 = 100;
 pub const PRIORITY_BATTERY_HEALTH: u32 = 80;

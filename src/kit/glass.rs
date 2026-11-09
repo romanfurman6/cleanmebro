@@ -608,6 +608,11 @@ pub enum Icon {
     Refresh,
     Search,
     Grip,
+    // Bluetooth devices
+    Earbuds,
+    Mouse,
+    Keyboard,
+    Trackpad,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -660,6 +665,10 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Refresh => "arrow.clockwise",
         Icon::Search => "magnifyingglass",
         Icon::Grip => "circle.grid.2x3.fill",
+        Icon::Earbuds => "airpodspro",
+        Icon::Mouse => "magicmouse",
+        Icon::Keyboard => "keyboard",
+        Icon::Trackpad => "rectangle.and.hand.point.up.left",
     })
 }
 
@@ -907,6 +916,28 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             for (x, y) in [(8.0, 6.0), (16.0, 6.0), (8.0, 12.0), (16.0, 12.0), (8.0, 18.0), (16.0, 18.0)] {
                 dot(x, y, 1.6);
             }
+        }
+        Icon::Earbuds => {
+            boxr(5.0, 4.0, 10.0, 11.0, 2.5);
+            open(&[(8.0, 11.0), (8.0, 20.0)]);
+            boxr(14.0, 4.0, 19.0, 11.0, 2.5);
+            open(&[(16.0, 11.0), (16.0, 20.0)]);
+        }
+        Icon::Mouse => {
+            boxr(6.0, 3.0, 18.0, 21.0, 6.0);
+            open(&[(12.0, 6.5), (12.0, 9.5)]);
+        }
+        Icon::Keyboard => {
+            boxr(3.0, 7.0, 21.0, 17.0, 2.0);
+            for x in [7.0, 11.0, 15.0] {
+                dot(x, 10.5, 0.9);
+            }
+            open(&[(7.0, 14.0), (17.0, 14.0)]);
+        }
+        Icon::Trackpad => {
+            boxr(4.0, 5.0, 20.0, 19.0, 2.5);
+            open(&[(4.0, 15.0), (20.0, 15.0)]);
+            open(&[(12.0, 15.0), (12.0, 19.0)]);
         }
     }
 }

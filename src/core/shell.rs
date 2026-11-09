@@ -229,6 +229,16 @@ impl App {
                 }
                 return;
             }
+            // one widget alone at one size: "widget-system/devices@4:4"
+            v if v.starts_with("widget-") => {
+                if let Some((key, z)) = v["widget-".len()..].split_once('@').and_then(|(k, z)| Size::parse(z).map(|z| (k.to_string(), z))) {
+                    for e in &mut self.widgets {
+                        e.on = false;
+                    }
+                    super::settings::add_entry(&mut self.widgets, &key, z, None);
+                }
+                return;
+            }
             // showcases of the sizes: the new tools, then the monitors
             "sizes" | "sizes2" => {
                 for t in &mut self.tools {
