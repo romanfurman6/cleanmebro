@@ -92,6 +92,65 @@ impl Tool {
     }
 }
 
+// ---------------------------------------------------------------- toolbar layout
+//
+// Two rows. The main bar has the tools on the left and undo/redo + Pin, Copy,
+// Save on the right; the sub bar under it holds only the current tool's
+// options. The main bar is laid out from both ends with known widths, so the
+// sides never meet: when space runs short the right buttons drop their
+// labels, then the tool buttons tighten. EDITOR_MIN_WIDTH fits the tightest form.
+
+const BAR_PAD: f32 = 14.0;
+/// Least space kept between the left and right groups.
+const BAR_GAP: f32 = 16.0;
+/// Undo + redo.
+const UNDO_W: f32 = 30.0 + 2.0 + 30.0;
+/// Between undo/redo and the Pin/Copy/Save buttons.
+const UNDO_GAP: f32 = 12.0;
+/// Pin, Copy and Save as icons, with the gaps between them.
+const RIGHT_ICONS_W: f32 = 3.0 * 34.0 + 2.0 * 8.0;
+const SUB_BAR_H: f32 = 36.0;
+
+/// Width of the two tool plates (10 drawing tools, 2 measuring tools).
+const fn tools_w(button: f32, gap: f32) -> f32 {
+    (10.0 * button + 4.0) + gap + (2.0 * button + 4.0)
+}
+
+/// Narrowest editor window: tight tool buttons and icon-only right buttons.
+pub const EDITOR_MIN_WIDTH: f32 = BAR_PAD + tools_w(28.0, 6.0) + BAR_GAP + UNDO_W + UNDO_GAP + RIGHT_ICONS_W + BAR_PAD;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarLayout {
+    /// Pin, Copy and Save without their labels.
+    pub icons_only: bool,
+    /// Tool button width and the gap between the two tool plates.
+    pub button: f32,
+    pub group_gap: f32,
+}
+
+impl BarLayout {
+    /// Pick the roomiest form that fits `width`; `labeled_w` is Pin + Copy +
+    /// Save with labels and gaps, as measured with the current font.
+    pub fn fit(width: f32, labeled_w: f32) -> BarLayout {
+        let right = |buttons: f32| UNDO_W + UNDO_GAP + buttons + BAR_PAD;
+        let roomy = BAR_PAD + tools_w(32.0, 10.0) + BAR_GAP;
+        if roomy + right(labeled_w) <= width {
+            BarLayout { icons_only: false, button: 32.0, group_gap: 10.0 }
+        } else if roomy + right(RIGHT_ICONS_W) <= width {
+            BarLayout { icons_only: true, button: 32.0, group_gap: 10.0 }
+        } else {
+            BarLayout { icons_only: true, button: 28.0, group_gap: 6.0 }
+        }
+    }
+
+    /// Where the tools end and where the right group starts, for `width`.
+    #[cfg(test)]
+    pub fn spans(&self, width: f32, labeled_w: f32) -> (f32, f32) {
+        let buttons = if self.icons_only { RIGHT_ICONS_W } else { labeled_w };
+        (BAR_PAD + tools_w(self.button, self.group_gap), width - BAR_PAD - buttons - UNDO_GAP - UNDO_W)
+    }
+}
+
 pub const COLORS: [(&str, Rgba8); 6] = [
     ("Red", [255, 69, 58, 255]),
     ("Amber", [255, 179, 64, 255]),
@@ -114,14 +173,6 @@ pub enum Request {
     Pin,
     Close,
     CopyText(String),
-}
-
-/// The "Copied N lines" popup under a Copy-text box.
-struct Copied {
-    rect: Rect,
-    lines: Vec<TextLine>,
-    text: String,
-    keep_breaks: bool,
 }
 
 enum Ocr {
@@ -157,7 +208,8 @@ pub struct Editor {
     ocr_tx: Sender<(Ocr, Vec<TextLine>)>,
     ocr_rx: Receiver<(Ocr, Vec<TextLine>)>,
     ocr_busy: bool,
-    copied: Option<Copied>,
+    /// A crop area picked with the Crop tool, applied on Enter.
+    crop_pending: Option<Rect>,
     status: Option<(String, Instant)>,
     pub requests: Vec<Request>,
     /// The doc changed since it was opened (closing keeps the edit in history).
@@ -174,7 +226,7 @@ impl Editor {
             doc: Doc::default(),
             undo: Vec::new(),
             redo: Vec::new(),
-            tool: Tool::Arrow,
+            tool: Tool::Crop,
             color: 0,
             stroke: 1,
             blur,
@@ -191,7 +243,7 @@ impl Editor {
             ocr_tx,
             ocr_rx,
             ocr_busy: false,
-            copied: None,
+            crop_pending: None,
             status: None,
             requests: Vec::new(),
             edited: false,
@@ -299,14 +351,12 @@ impl Editor {
 
         let bar = Rect::from_min_size(title.left_bottom(), Vec2::new(full.width(), 46.0));
         self.toolbar(ui, bar);
-        let mut top = bar.bottom();
+        hairline(&p, bar.left_bottom(), bar.right_bottom());
+        // the sub bar is always there, so the canvas never jumps between tools
+        let strip = Rect::from_min_size(bar.left_bottom(), Vec2::new(full.width(), SUB_BAR_H));
+        self.options(ui, strip);
+        let top = strip.bottom();
         hairline(&p, Pos2::new(full.left(), top), Pos2::new(full.right(), top));
-        if matches!(self.tool, Tool::Blur | Tool::Eraser | Tool::CopyText | Tool::Picker | Tool::Ruler | Tool::Crop) {
-            let strip = Rect::from_min_size(Pos2::new(full.left(), top), Vec2::new(full.width(), 36.0));
-            self.options(ui, strip);
-            top = strip.bottom();
-            hairline(&p, Pos2::new(full.left(), top), Pos2::new(full.right(), top));
-        }
         let foot = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 32.0), full.max);
         hairline(&p, foot.left_top(), foot.right_top());
         let marks = self.doc.marks.len();
@@ -317,6 +367,10 @@ impl Editor {
         p.rect_filled(canvas, 0.0, Color32::from_rgb(0x12, 0x12, 0x14));
         self.canvas(ui, canvas);
         self.keys(ui);
+        if self.ocr_busy {
+            // stays up while Vision works; the first run loads its model
+            self.status = Some((mac::ocr_status().into(), Instant::now()));
+        }
         if let Some((msg, at)) = &self.status {
             if at.elapsed().as_secs_f32() < 2.5 {
                 let g = p.layout_no_wrap(msg.clone(), font(13.0), TEXT);
@@ -334,18 +388,28 @@ impl Editor {
     fn toolbar(&mut self, ui: &mut Ui, bar: Rect) {
         let p = ui.painter().clone();
         let y = bar.center().y;
-        let mut x = bar.left() + 14.0;
-        // a group of icon buttons on a quiet plate
+        const RIGHT: [(&str, u8, Ico, &str); 3] = [
+            ("Save  ⌘S", BTN_PRIMARY, Ico::Save, "Save to your captures folder (⌘S)"),
+            ("Copy  ⌘C", BTN_SECONDARY, Ico::Copy, "Copy the picture with your marks (⌘C)"),
+            ("Pin", BTN_SECONDARY, Ico::Pin, "Pin: keep it floating on top"),
+        ];
+        let labeled_w = |p: &egui::Painter, (label, kind, ic, _): (&str, u8, Ico, &str)| button_width(p, label, kind) - 6.0 + if ic == Ico::Pin { 18.0 } else { 0.0 };
+        let labeled_total: f32 = RIGHT.iter().map(|b| labeled_w(&p, *b)).sum::<f32>() + 2.0 * 8.0;
+        let lay = BarLayout::fit(bar.width(), labeled_total);
+
+        // left: the tools
+        let mut x = bar.left() + BAR_PAD;
+        let bw = lay.button;
         let group = |ui: &mut Ui, x: &mut f32, tools: &[Tool], cur: &mut Tool| {
-            let plate = Rect::from_min_size(Pos2::new(*x, y - 16.0), Vec2::new(tools.len() as f32 * 32.0 + 4.0, 32.0));
+            let plate = Rect::from_min_size(Pos2::new(*x, y - 16.0), Vec2::new(tools.len() as f32 * bw + 4.0, 32.0));
             p.rect_filled(plate, R_BUTTON, white(13));
             for (k, t) in tools.iter().enumerate() {
-                let r = Rect::from_min_size(Pos2::new(plate.left() + 2.0 + 32.0 * k as f32, plate.top() + 2.0), Vec2::new(32.0, 28.0));
+                let r = Rect::from_min_size(Pos2::new(plate.left() + 2.0 + bw * k as f32, plate.top() + 2.0), Vec2::new(bw, 28.0));
                 if icon_toggle(ui, r, t.icon(), t.tip(), *cur == *t).clicked() {
                     *cur = *t;
                 }
             }
-            *x = plate.right() + 10.0;
+            *x = plate.right() + lay.group_gap;
         };
         let mut tool = self.tool;
         group(ui, &mut x, &Tool::DRAW, &mut tool);
@@ -353,94 +417,100 @@ impl Editor {
         if tool != self.tool {
             self.set_tool(tool);
         }
-        p.line_segment([Pos2::new(x, y - 10.0), Pos2::new(x, y + 10.0)], Stroke::new(1.0, white(26)));
-        x += 10.0;
-        for (k, (name, c)) in COLORS.iter().enumerate() {
-            let r = Rect::from_center_size(Pos2::new(x + 9.0, y), Vec2::splat(18.0));
-            let resp = ui.interact(r.expand(3.0), ui.scope_id().with(("color", k)), Sense::click()).on_hover_text(*name);
-            if self.color == k {
-                p.circle_stroke(r.center(), 11.5, Stroke::new(2.0, BLUE));
-            }
-            p.circle_filled(r.center(), 9.0, Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
-            p.circle_stroke(r.center(), 9.0, Stroke::new(1.0, if self.color == k { Color32::WHITE } else { white(64) }));
-            if resp.clicked() {
-                self.color = k;
-                self.recolor_selected();
-            }
-            x += 26.0;
-        }
-        p.line_segment([Pos2::new(x + 2.0, y - 10.0), Pos2::new(x + 2.0, y + 10.0)], Stroke::new(1.0, white(26)));
-        x += 12.0;
-        let plate = Rect::from_min_size(Pos2::new(x, y - 16.0), Vec2::new(3.0 * 30.0 + 4.0, 32.0));
-        p.rect_filled(plate, R_BUTTON, white(13));
-        for k in 0..3 {
-            let r = Rect::from_min_size(Pos2::new(plate.left() + 2.0 + 30.0 * k as f32, plate.top() + 2.0), Vec2::new(30.0, 28.0));
-            let resp = ui.interact(r, ui.scope_id().with(("stroke", k)), Sense::click()).on_hover_text(["Thin", "Medium", "Thick"][k]);
-            if self.stroke == k {
-                p.rect_filled(r, 6.0, Color32::from_rgb(0x48, 0x48, 0x4E));
-            }
-            let t = [2.0, 4.0, 6.0][k];
-            p.rect_filled(Rect::from_center_size(r.center(), Vec2::new(14.0, t)), t / 2.0, if self.stroke == k { TEXT } else { TEXT_SOFT });
-            if resp.clicked() {
-                self.stroke = k;
+
+        // right: Save, Copy, Pin (from the right edge), then undo/redo
+        let mut rx = bar.right() - BAR_PAD;
+        for (k, b) in RIGHT.iter().enumerate() {
+            let (label, kind, ic, tip) = *b;
+            let w = if lay.icons_only { 34.0 } else { labeled_w(&p, *b) };
+            let r = Rect::from_min_max(Pos2::new(rx - w, y - 14.0), Pos2::new(rx, y + 14.0));
+            rx = r.left() - 8.0;
+            let resp = if lay.icons_only {
+                let resp = pill_button(ui, r, "", kind, true);
+                icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(14.0)), TEXT);
+                resp
+            } else if ic == Ico::Pin {
+                let resp = pill_button(ui, r, "", kind, true);
+                icons::draw(ui.painter(), ic, Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(14.0)), TEXT);
+                ui.painter().text(Pos2::new(r.left() + 28.0, y), Align2::LEFT_CENTER, label, font(12.0), TEXT);
+                resp
+            } else {
+                pill_button(ui, r, label, kind, true)
+            };
+            if resp.on_hover_text(tip).clicked() {
+                self.requests.push([Request::Save, Request::Copy, Request::Pin][k].clone());
             }
         }
-        x = plate.right() + 8.0;
-        let ur = Rect::from_min_size(Pos2::new(x, y - 14.0), Vec2::new(30.0, 28.0));
+        let rr = Rect::from_min_size(Pos2::new(rx + 8.0 - UNDO_GAP - 30.0, y - 14.0), Vec2::new(30.0, 28.0));
+        let ur = rr.translate(Vec2::new(-32.0, 0.0));
         if plain_icon(ui, ur, Ico::Undo, "Undo (⌘Z)", !self.undo.is_empty()).clicked() {
             self.undo();
         }
-        let rr = ur.translate(Vec2::new(32.0, 0.0));
         if plain_icon(ui, rr, Ico::Redo, "Redo (⇧⌘Z)", !self.redo.is_empty()).clicked() {
             self.redo();
         }
-        // right side: Pin, Copy, Save
-        let mut rx = bar.right() - 14.0;
-        let mut right_btn = |ui: &mut Ui, label: &str, kind: u8, icon: Option<Ico>| {
-            let w = button_width(ui.painter(), label, kind) - 6.0 + if icon.is_some() { 18.0 } else { 0.0 };
-            let r = Rect::from_min_max(Pos2::new(rx - w, y - 14.0), Pos2::new(rx, y + 14.0));
-            rx = r.left() - 8.0;
-            let resp = pill_button(ui, r, if icon.is_some() { "" } else { label }, kind, true);
-            if let Some(ic) = icon {
-                icons::draw(ui.painter(), ic, Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(14.0)), TEXT);
-                ui.painter().text(Pos2::new(r.left() + 28.0, y), Align2::LEFT_CENTER, label, font(12.0), TEXT);
-            }
-            resp
-        };
-        if right_btn(ui, "Save", BTN_PRIMARY, None).clicked() {
-            self.requests.push(Request::Save);
-        }
-        if right_btn(ui, "Copy", BTN_SECONDARY, None).clicked() {
-            self.requests.push(Request::Copy);
-        }
-        if right_btn(ui, "Pin", BTN_SECONDARY, Some(Ico::Pin)).on_hover_text("Keep it floating on top").clicked() {
-            self.requests.push(Request::Pin);
-        }
     }
 
-    /// The strip under the toolbar: options or a hint for the current tool.
+    /// The sub bar: only the current tool's options, or a short hint.
     fn options(&mut self, ui: &mut Ui, strip: Rect) {
         let p = ui.painter().clone();
         p.rect_filled(strip, 0.0, Color32::from_rgb(0x20, 0x20, 0x24));
         let y = strip.center().y;
-        let mut x = strip.left() + 14.0;
+        let mut x = strip.left() + BAR_PAD;
         let name = match self.tool {
+            Tool::Select => "Select",
+            Tool::Arrow => "Arrow",
+            Tool::Rect => "Box",
+            Tool::Text => "Label",
+            Tool::Highlight => "Highlighter",
             Tool::Blur => "Blur",
             Tool::Eraser => "Eraser",
+            Tool::Steps => "Steps",
+            Tool::Crop => "Crop",
             Tool::CopyText => "Copy text",
             Tool::Picker => "Pick a color",
             Tool::Ruler => "Ruler",
-            _ => "Crop",
         };
         x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, name, bold(12.0), TEXT).right() + 16.0;
-        let hint = match self.tool {
-            Tool::Blur | Tool::Eraser => {
-                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Cover", font(12.0), TEXT_DIM).right() + 8.0;
-                let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(170.0, 26.0));
-                if let Some(i) = segmented(ui, r, ui.scope_id().with("cover"), &["Whole box", "Only text"], (self.cover == Cover::Text) as usize) {
-                    self.cover = if i == 1 { Cover::Text } else { Cover::Box };
+        let hint: String = match self.tool {
+            Tool::Arrow | Tool::Rect | Tool::Highlight | Tool::Steps | Tool::Text => {
+                for (k, (cname, c)) in COLORS.iter().enumerate() {
+                    let r = Rect::from_center_size(Pos2::new(x + 9.0, y), Vec2::splat(18.0));
+                    let resp = ui.interact(r.expand(3.0), ui.scope_id().with(("color", k)), Sense::click()).on_hover_text(*cname);
+                    if self.color == k {
+                        p.circle_stroke(r.center(), 11.5, Stroke::new(2.0, BLUE));
+                    }
+                    p.circle_filled(r.center(), 9.0, Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
+                    p.circle_stroke(r.center(), 9.0, Stroke::new(1.0, if self.color == k { Color32::WHITE } else { white(64) }));
+                    if resp.clicked() {
+                        self.color = k;
+                        self.recolor_selected();
+                    }
+                    x += 26.0;
                 }
-                x = r.right() + 16.0;
+                p.line_segment([Pos2::new(x + 4.0, y - 9.0), Pos2::new(x + 4.0, y + 9.0)], Stroke::new(1.0, white(26)));
+                x += 14.0;
+                let sized = matches!(self.tool, Tool::Text | Tool::Steps);
+                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, if sized { "Size" } else { "Width" }, font(12.0), TEXT_DIM).right() + 8.0;
+                let plate = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(3.0 * 30.0 + 4.0, 26.0));
+                p.rect_filled(plate, R_BUTTON, white(13));
+                for k in 0..3 {
+                    let r = Rect::from_min_size(Pos2::new(plate.left() + 2.0 + 30.0 * k as f32, plate.top() + 2.0), Vec2::new(30.0, 22.0));
+                    let tip = if sized { ["Small", "Medium", "Large"][k] } else { ["Thin", "Medium", "Thick"][k] };
+                    let resp = ui.interact(r, ui.scope_id().with(("stroke", k)), Sense::click()).on_hover_text(tip);
+                    if self.stroke == k {
+                        p.rect_filled(r, 6.0, Color32::from_rgb(0x48, 0x48, 0x4E));
+                    }
+                    let t = [2.0, 4.0, 6.0][k];
+                    p.rect_filled(Rect::from_center_size(r.center(), Vec2::new(14.0, t)), t / 2.0, if self.stroke == k { TEXT } else { TEXT_SOFT });
+                    if resp.clicked() {
+                        self.stroke = k;
+                    }
+                }
+                x = plate.right() + 16.0;
+                String::new()
+            }
+            Tool::Blur | Tool::Eraser => {
                 if self.tool == Tool::Blur {
                     x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Style", font(12.0), TEXT_DIM).right() + 8.0;
                     let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(200.0, 26.0));
@@ -452,19 +522,28 @@ impl Editor {
                     if let Some(i) = segmented(ui, r, ui.scope_id().with("style"), &["Pixelate", "Blur", "Solid"], cur) {
                         self.blur = [BlurStyle::Pixelate, BlurStyle::Blur, BlurStyle::Solid][i];
                     }
-                    "Only text finds the words in your box and covers just them."
-                } else {
-                    "Fills with the color around the text."
+                    x = r.right() + 16.0;
                 }
+                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Cover", font(12.0), TEXT_DIM).right() + 8.0;
+                let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(170.0, 26.0));
+                if let Some(i) = segmented(ui, r, ui.scope_id().with("cover"), &["Whole box", "Only text"], (self.cover == Cover::Text) as usize) {
+                    self.cover = if i == 1 { Cover::Text } else { Cover::Box };
+                }
+                x = r.right() + 16.0;
+                if self.tool == Tool::Eraser { "Fills with the color around the text.".into() } else { String::new() }
             }
-            Tool::CopyText => "Drag a box over any text; it's copied right away. Recognition runs on this Mac.",
-            Tool::Picker => "Click to copy the color's hex code.",
-            Tool::Ruler => "Hover to measure to the nearest edges; drag to measure a box. Click copies the size.",
-            _ => "Drag the part to keep. Undo brings the rest back.",
+            Tool::Crop => match self.crop_pending {
+                Some(c) => format!("{:.0} × {:.0} · Enter to crop · Esc to cancel", c.width().round(), c.height().round()),
+                None => "Drag an area · Enter to crop".into(),
+            },
+            Tool::CopyText => "Drag over text, it's copied".into(),
+            Tool::Picker => "Click to copy a color's hex code".into(),
+            Tool::Ruler => "Hover to measure, drag for a box, click to copy".into(),
+            Tool::Select => "Click a mark to select, drag to move, ⌫ deletes".into(),
         };
-        let hint_x = if matches!(self.tool, Tool::Blur | Tool::Eraser) { strip.right() - 14.0 } else { x };
-        let align = if matches!(self.tool, Tool::Blur | Tool::Eraser) { Align2::RIGHT_CENTER } else { Align2::LEFT_CENTER };
-        text_fit(&p, Pos2::new(hint_x, y), align, hint, font(12.0), TEXT_FAINT, (strip.right() - 14.0 - x).max(40.0));
+        if !hint.is_empty() {
+            text_fit(&p, Pos2::new(x, y), Align2::LEFT_CENTER, &hint, font(12.0), TEXT_FAINT, (strip.right() - BAR_PAD - x).max(40.0));
+        }
     }
 
     fn set_tool(&mut self, t: Tool) {
@@ -472,6 +551,16 @@ impl Editor {
         self.tool = t;
         self.selected = None;
         self.drag = None;
+        self.crop_pending = None;
+    }
+
+    /// Crop to the picked area (Enter).
+    fn apply_crop(&mut self) {
+        let Some(r) = self.crop_pending.take() else { return };
+        self.push_undo();
+        self.doc.crop = Some(r);
+        self.tool = Tool::Select;
+        self.flash("Cropped. Undo to bring it back.");
     }
 
     fn recolor_selected(&mut self) {
@@ -525,10 +614,29 @@ impl Editor {
                 p.rect_stroke(Rect::from_min_max(to_screen(b.min), to_screen(b.max)).expand(3.0), 3.0, Stroke::new(1.5, ACCENT), StrokeKind::Outside);
             }
         }
-        if let (Some(c), Tool::Crop) = (self.doc.crop, self.tool) {
-            let cr = Rect::from_min_max(to_screen(c.min), to_screen(c.max));
-            shade_outside(&p, shown, cr);
-            p.rect_stroke(cr, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
+        if self.tool == Tool::Crop && self.drag.is_none() {
+            if let Some(c) = self.crop_pending {
+                let cr = Rect::from_min_max(to_screen(c.min), to_screen(c.max));
+                shade_outside(&p, shown, cr);
+                let corners = [cr.left_top(), cr.right_top(), cr.right_bottom(), cr.left_bottom(), cr.left_top()];
+                p.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.5, Color32::WHITE), 6.0, 4.0));
+                tag(&p, cr.right_bottom() + Vec2::new(6.0, 6.0), &format!("{:.0} × {:.0}", c.width().round(), c.height().round()));
+                let hint = "Enter to crop · Esc to cancel";
+                let g = p.layout_no_wrap(hint.to_string(), font(12.0), TEXT);
+                let mut at = Pos2::new(cr.center().x - g.size().x / 2.0 - 12.0, cr.top() - g.size().y - 22.0);
+                if at.y < area.top() + 4.0 {
+                    at.y = cr.bottom() + 10.0;
+                }
+                at.x = at.x.clamp(area.left() + 4.0, area.right() - g.size().x - 28.0);
+                let hr = Rect::from_min_size(at, g.size() + Vec2::new(24.0, 12.0));
+                p.rect_filled(hr, hr.height() / 2.0, RAISED);
+                p.rect_stroke(hr, hr.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
+                p.galley(hr.center() - g.size() / 2.0, g, TEXT);
+            } else if let Some(c) = self.doc.crop {
+                let cr = Rect::from_min_max(to_screen(c.min), to_screen(c.max));
+                shade_outside(&p, shown, cr);
+                p.rect_stroke(cr, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
+            }
         }
 
         let resp = ui.interact(area, ui.scope_id().with("canvas"), Sense::click_and_drag());
@@ -542,7 +650,6 @@ impl Editor {
         if self.tool.drags() {
             if resp.drag_started() {
                 if let Some(s) = resp.interact_pointer_pos() {
-                    self.copied = None;
                     let q = at_img(s);
                     self.drag = Some((q, q));
                 }
@@ -659,7 +766,6 @@ impl Editor {
             spinner(&p, Pos2::new(shown.right() - 16.0, shown.top() + 16.0), 7.0, ctx.input(|i| i.time), Color32::WHITE);
             ctx.request_repaint();
         }
-        self.copied_popup(ui, &to_screen, area);
     }
 
     fn draw_drag_preview(&self, p: &egui::Painter, a: Pos2, b: Pos2, to_screen: &dyn Fn(Pos2) -> Pos2, scale: f32, shown: Rect) {
@@ -707,12 +813,8 @@ impl Editor {
                     self.add(m);
                 }
             }
-            Tool::Crop => {
-                self.push_undo();
-                self.doc.crop = Some(r);
-                self.tool = Tool::Select;
-                self.flash("Cropped. Undo to bring it back.");
-            }
+            // picked, not applied: Enter crops, Esc or another drag replaces it
+            Tool::Crop => self.crop_pending = Some(r),
             Tool::Blur | Tool::Eraser => {
                 let m = if self.tool == Tool::Blur { Mark::Blur { r, style: self.blur, boxes: vec![] } } else { Mark::Erase { r, boxes: vec![] } };
                 if self.cover == Cover::Text {
@@ -752,9 +854,11 @@ impl Editor {
                         self.flash("No text found in that box");
                         continue;
                     }
+                    let _ = r;
                     let text = mac::join_lines(&lines, self.keep_breaks);
-                    self.requests.push(Request::CopyText(text.clone()));
-                    self.copied = Some(Copied { rect: r, lines, text, keep_breaks: self.keep_breaks });
+                    self.requests.push(Request::CopyText(text));
+                    let n = lines.len();
+                    self.flash(format!("Copied {n} line{}", if n == 1 { "" } else { "s" }));
                 }
                 Ocr::Mark(mut m) => {
                     let boxes: Vec<Rect> = lines.iter().map(|l| l.rect).collect();
@@ -768,46 +872,6 @@ impl Editor {
                     self.add(m);
                 }
             }
-        }
-    }
-
-    fn copied_popup(&mut self, ui: &mut Ui, to_screen: &dyn Fn(Pos2) -> Pos2, area: Rect) {
-        let Some(cp) = &mut self.copied else { return };
-        let box_r = Rect::from_min_max(to_screen(cp.rect.min), to_screen(cp.rect.max));
-        let p = ui.painter_at(area);
-        p.rect_filled(box_r, 3.0, with_alpha(BLUE, 0.16));
-        p.rect_stroke(box_r, 3.0, Stroke::new(1.5, ACCENT), StrokeKind::Middle);
-        let w = 400.0f32.min(area.width() - 24.0);
-        let h = 132.0;
-        let mut pos = Pos2::new(box_r.left(), box_r.bottom() + 10.0);
-        if pos.y + h > area.bottom() - 8.0 {
-            pos.y = (box_r.top() - h - 10.0).max(area.top() + 8.0);
-        }
-        pos.x = pos.x.clamp(area.left() + 8.0, area.right() - w - 8.0);
-        let r = Rect::from_min_size(pos, Vec2::new(w, h));
-        p.rect_filled(r, 10.0, RAISED);
-        p.rect_stroke(r, 10.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
-        icons::draw(&p, Ico::Check, Rect::from_center_size(r.min + Vec2::new(18.0, 18.0), Vec2::splat(14.0)), GREEN);
-        let n = cp.lines.len();
-        p.text(r.min + Vec2::new(32.0, 18.0), Align2::LEFT_CENTER, format!("Copied {n} line{}", if n == 1 { "" } else { "s" }), bold(12.0), TEXT);
-        p.text(Pos2::new(r.right() - 12.0, r.top() + 18.0), Align2::RIGHT_CENTER, "Esc to close", font(12.0), TEXT_FAINT);
-        let tr = Rect::from_min_max(r.min + Vec2::new(10.0, 32.0), Pos2::new(r.right() - 10.0, r.top() + 90.0));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(tr));
-        egui::ScrollArea::vertical().max_height(tr.height()).show(&mut child, |ui| {
-            ui.add(egui::TextEdit::multiline(&mut cp.text).font(egui::FontId::monospace(12.0)).desired_width(tr.width() - 8.0).desired_rows(3));
-        });
-        let sw = Rect::from_min_size(Pos2::new(r.left() + 12.0, r.bottom() - 30.0), Vec2::new(26.0, 16.0));
-        if switch(ui, sw, ui.scope_id().with("breaks"), cp.keep_breaks, true).clicked() {
-            cp.keep_breaks = !cp.keep_breaks;
-            cp.text = mac::join_lines(&cp.lines, cp.keep_breaks);
-            self.keep_breaks = cp.keep_breaks;
-        }
-        p.text(Pos2::new(sw.right() + 8.0, sw.center().y), Align2::LEFT_CENTER, "Keep line breaks", font(12.0), TEXT_DIM);
-        let br = Rect::from_min_max(Pos2::new(r.right() - 112.0, r.bottom() - 36.0), Pos2::new(r.right() - 10.0, r.bottom() - 10.0));
-        if pill_button(ui, br, "Copy edited", BTN_PRIMARY, true).clicked() {
-            let t = cp.text.clone();
-            self.requests.push(Request::CopyText(t));
-            self.flash("Copied");
         }
     }
 
@@ -857,7 +921,6 @@ impl Editor {
         if self.text.is_some() || ui.ctx().egui_wants_keyboard_input() {
             if ui.input(|i| i.key_pressed(Key::Escape)) {
                 self.text = None;
-                self.copied = None;
             }
             return;
         }
@@ -873,9 +936,11 @@ impl Editor {
             self.requests.push(Request::Copy);
         } else if cmd && pressed(Key::S) {
             self.requests.push(Request::Save);
+        } else if pressed(Key::Enter) && self.crop_pending.is_some() {
+            self.apply_crop();
         } else if pressed(Key::Escape) {
-            if self.copied.is_some() {
-                self.copied = None;
+            if self.crop_pending.is_some() {
+                self.crop_pending = None;
             } else if self.drag.is_some() || self.selected.is_some() {
                 self.drag = None;
                 self.selected = None;
@@ -1005,6 +1070,22 @@ fn plain_icon(ui: &mut Ui, r: Rect, ic: Ico, tip: &str, enabled: bool) -> egui::
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn toolbar_sides_never_meet() {
+        // generous guess at the labeled Pin/Copy/Save width
+        let labeled = 240.0;
+        for w in [EDITOR_MIN_WIDTH, 640.0, 700.0, 760.0, 800.0, 1000.0, 1600.0] {
+            if w < EDITOR_MIN_WIDTH {
+                continue;
+            }
+            let lay = BarLayout::fit(w, labeled);
+            let (left_end, right_start) = lay.spans(w, labeled);
+            assert!(left_end + BAR_GAP <= right_start + 0.01, "overlap at {w}: {lay:?} {left_end} {right_start}");
+        }
+        assert!(BarLayout::fit(EDITOR_MIN_WIDTH, labeled).icons_only);
+        assert!(!BarLayout::fit(1200.0, labeled).icons_only);
+    }
+
     use super::*;
 
     fn ed() -> Editor {
@@ -1040,6 +1121,8 @@ mod tests {
         assert!(matches!(&e.doc.marks[1], Mark::Blur { boxes, .. } if boxes.is_empty()));
         e.tool = Tool::Crop;
         e.finish_drag(Pos2::new(150.0, 80.0), Pos2::new(50.0, 20.0), &ctx);
+        assert_eq!(e.doc.crop, None, "a crop drag only picks the area");
+        e.apply_crop();
         assert_eq!(e.doc.crop, Some(Rect::from_min_max(Pos2::new(50.0, 20.0), Pos2::new(150.0, 80.0))));
         assert_eq!(e.rendered().dimensions(), (100, 60));
         // a click without a drag adds nothing

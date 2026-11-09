@@ -3,14 +3,15 @@
 #
 #   scripts/bundle-mac.sh              # native arch
 #   UNIVERSAL=1 scripts/bundle-mac.sh  # Apple silicon + Intel in one binary
+#   SIGN_ID=... APP_NAME=... BUNDLE_ID=... PROFILE=debug override the defaults
 #
 # Output: target/bundle/CleanMeBro.app and target/bundle/CleanMeBro-<version>-macos.zip
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-APP_NAME="CleanMeBro"
+APP_NAME="${APP_NAME:-CleanMeBro}"
 BIN="cleanmebro"
-BUNDLE_ID="com.romanfurman6.cleanmebro"
+BUNDLE_ID="${BUNDLE_ID:-com.romanfurman6.cleanmebro}"
 VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
 OUT="target/bundle"
 APP="$OUT/$APP_NAME.app"
@@ -23,13 +24,17 @@ if [[ "${UNIVERSAL:-0}" == "1" ]]; then
   lipo -create -output "target/release/$BIN" \
     "target/aarch64-apple-darwin/release/$BIN" \
     "target/x86_64-apple-darwin/release/$BIN"
+elif [[ "${PROFILE:-release}" == "debug" ]]; then
+  cargo build
 else
   cargo build --release
 fi
+BUILD_DIR="target/${PROFILE:-release}"
+[[ "${UNIVERSAL:-0}" == "1" ]] && BUILD_DIR="target/release"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "target/release/$BIN" "$APP/Contents/MacOS/$BIN"
+cp "$BUILD_DIR/$BIN" "$APP/Contents/MacOS/$BIN"
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -56,8 +61,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature so Apple silicon runs it; not notarized.
-codesign --force --deep --sign - "$APP"
+# Ad-hoc signature by default so Apple silicon runs it; SIGN_ID signs with a
+# real identity instead. Not notarized.
+codesign --force --deep --sign "${SIGN_ID:--}" "$APP"
 
 ZIP="$OUT/$APP_NAME-$VERSION-macos.zip"
 rm -f "$ZIP"

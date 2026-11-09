@@ -49,12 +49,40 @@ pub struct Pin {
     /// Where and how big it opened; later moves and resizes are the window's own.
     start: Option<(Pos2, Vec2)>,
     frames: u32,
+    /// A resize drag in progress: which handle, the scale and pointer at its start.
+    resize: Option<(Grip, f32, Pos2)>,
+}
+
+/// Where a pin is being resized from. The top-left corner stays put, so a
+/// resize only changes the window's size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Grip {
+    Right,
+    Bottom,
+    Corner,
+}
+
+pub const PIN_MIN_SCALE: f32 = 0.1;
+pub const PIN_MAX_SCALE: f32 = 4.0;
+
+/// The pin scale after dragging `grip` by `delta` points, keeping the
+/// picture's aspect ratio. `base` is the true size, `start` the scale when
+/// the drag began. The corner follows whichever side moved further.
+pub fn drag_scale(base: Vec2, start: f32, grip: Grip, delta: Vec2) -> f32 {
+    let w = (base.x * start + delta.x) / base.x.max(1.0);
+    let h = (base.y * start + delta.y) / base.y.max(1.0);
+    let s = match grip {
+        Grip::Right => w,
+        Grip::Bottom => h,
+        Grip::Corner => if (w - start).abs() >= (h - start).abs() { w } else { h },
+    };
+    s.clamp(PIN_MIN_SCALE, PIN_MAX_SCALE)
 }
 
 impl Pin {
     pub fn new(n: u64, id: Option<u64>, img: RgbaImage, ppp: f32, offset: f32) -> Pin {
         let base = Vec2::new(img.width() as f32, img.height() as f32) / ppp.max(1.0);
-        Pin { n, id, img, tex: None, base, scale: 1.0, offset, start: None, frames: 0 }
+        Pin { n, id, img, tex: None, base, scale: 1.0, offset, start: None, frames: 0, resize: None }
     }
 }
 
@@ -363,18 +391,62 @@ fn pins(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
             p.image(tex, r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
             let resp = ui.interact(r, ui.scope_id().with("pin"), Sense::click_and_drag());
             let hovered = ui.rect_contains_pointer(r);
+            // resize handles (added after the body, so they win where they overlap)
+            let band = 8.0;
+            let handles = [
+                (Grip::Corner, Rect::from_min_max(r.max - Vec2::splat(18.0), r.max), egui::CursorIcon::ResizeNwSe),
+                (Grip::Right, Rect::from_min_max(Pos2::new(r.right() - band, r.top() + 36.0), Pos2::new(r.right(), r.bottom() - 18.0)), egui::CursorIcon::ResizeHorizontal),
+                (Grip::Bottom, Rect::from_min_max(Pos2::new(r.left(), r.bottom() - band), Pos2::new(r.right() - 18.0, r.bottom())), egui::CursorIcon::ResizeVertical),
+            ];
+            let mut resized = None;
+            for (grip, hr, cursor) in handles {
+                let h = ui.interact(hr, ui.scope_id().with(("pin-grip", grip as u8)), Sense::drag());
+                if h.hovered() || h.dragged() {
+                    vctx.set_cursor_icon(cursor);
+                }
+                if h.drag_started() {
+                    if let Some(at) = h.interact_pointer_pos() {
+                        pin.resize = Some((grip, pin.scale, at));
+                    }
+                }
+                if h.dragged() {
+                    if let (Some((g, s0, at)), Some(now)) = (pin.resize, h.interact_pointer_pos()) {
+                        if g == grip {
+                            resized = Some(drag_scale(pin.base, s0, g, now - at));
+                        }
+                    }
+                }
+                if h.drag_stopped() {
+                    pin.resize = None;
+                }
+            }
             p.rect_stroke(r, 0.0, Stroke::new(1.0, if hovered { with_alpha(ACCENT, 0.8) } else { white(40) }), StrokeKind::Inside);
-            if resp.drag_started() {
+            if resp.drag_started() && pin.resize.is_none() {
                 vctx.send_viewport_cmd(ViewportCommand::StartDrag);
             }
             if resp.double_clicked() {
                 edit.push(k);
             }
-            if hovered {
-                let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+            if hovered || pin.resize.is_some() {
+                // scroll wheel or trackpad pinch zooms; edge/corner drags resize
+                let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+                let mut scale = resized.unwrap_or(pin.scale);
                 if scroll.abs() > 0.1 {
-                    pin.scale = (pin.scale * (1.0 + scroll * 0.003)).clamp(0.1, 4.0);
+                    scale *= 1.0 + scroll * 0.003;
+                }
+                if (pinch - 1.0).abs() > 1e-4 {
+                    scale *= pinch;
+                }
+                let scale = scale.clamp(PIN_MIN_SCALE, PIN_MAX_SCALE);
+                if (scale - pin.scale).abs() > 1e-4 {
+                    pin.scale = scale;
                     vctx.send_viewport_cmd(ViewportCommand::InnerSize(pin.base * pin.scale));
+                }
+                // corner grip
+                let c = r.max - Vec2::splat(5.0);
+                for k in 1..=3 {
+                    let d = 4.0 * k as f32;
+                    p.line_segment([c - Vec2::new(d, 0.0), c - Vec2::new(0.0, d)], Stroke::new(1.5, Color32::from_white_alpha(200)));
                 }
                 let cr = Rect::from_center_size(Pos2::new(r.right() - 16.0, r.top() + 16.0), Vec2::splat(22.0));
                 let b = ui.interact(cr, ui.scope_id().with("close"), Sense::click());
@@ -430,7 +502,7 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         .with_title(title)
         .with_inner_size(size)
         .with_position(pos)
-        .with_min_inner_size([760.0, 460.0])
+        .with_min_inner_size([super::editor::EDITOR_MIN_WIDTH, 460.0])
         .with_transparent(true)
         .with_fullsize_content_view(true)
         .with_titlebar_shown(false)
@@ -454,16 +526,22 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     });
     for r in std::mem::take(&mut ew.ed.requests) {
         match r {
+            // Copy and Save finish the job: the editor closes and a toast confirms
             Request::Copy => {
                 let img = ew.ed.rendered();
-                let ok = c.copy_image(&img);
-                ew.ed.flash(if ok { "Copied" } else { "Couldn't copy" });
+                if c.copy_image(&img) {
+                    c.hud("Copied to clipboard");
+                    closed = true;
+                } else {
+                    ew.ed.flash("Couldn't copy");
+                }
             }
             Request::Save => {
                 let id = c.commit_edit(&mut ew.ed);
                 let img = ew.ed.rendered();
                 if let Some(p) = c.save_image(id, &img) {
-                    ew.ed.flash(format!("Saved to {}", short_path(&p)));
+                    c.hud(format!("Saved to {}", short_path(&p)));
+                    closed = true;
                 }
             }
             Request::Pin => {
@@ -626,3 +704,19 @@ fn hud(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     });
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pin_drag_keeps_aspect_and_clamps() {
+        let base = Vec2::new(400.0, 200.0);
+        assert!((drag_scale(base, 1.0, Grip::Right, Vec2::new(200.0, 0.0)) - 1.5).abs() < 1e-5);
+        assert!((drag_scale(base, 1.0, Grip::Bottom, Vec2::new(0.0, -100.0)) - 0.5).abs() < 1e-5);
+        // the corner follows the side that moved further, relative to its length
+        assert!((drag_scale(base, 1.0, Grip::Corner, Vec2::new(40.0, 60.0)) - 1.3).abs() < 1e-5);
+        assert_eq!(drag_scale(base, 1.0, Grip::Right, Vec2::new(-1000.0, 0.0)), PIN_MIN_SCALE);
+        assert_eq!(drag_scale(base, 1.0, Grip::Corner, Vec2::new(5000.0, 0.0)), PIN_MAX_SCALE);
+    }
+}
