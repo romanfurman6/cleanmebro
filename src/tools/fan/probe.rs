@@ -1,0 +1,405 @@
+//! Reads the hardware: fan speeds from the SMC (AppleSMC user client) and
+//! temperatures from the HID sensor hub, with SMC temperature keys filling
+//! the parts the hub doesn't name. Reading needs no admin rights. Elsewhere
+//! than macOS there is nothing to read.
+
+use super::data::Fan;
+#[cfg(target_os = "macos")]
+use super::data::Sensor;
+
+/// One reading of the hardware.
+#[derive(Default)]
+pub struct Reading {
+    pub has_smc: bool,
+    pub fans: Vec<Fan>,
+    pub hid: Vec<super::data::Sensor>,
+    pub smc_temps: Vec<super::data::Sensor>,
+}
+
+/// An open connection to the sensors, kept between readings.
+pub struct Probe {
+    #[cfg(target_os = "macos")]
+    smc: Option<mac::Smc>,
+    #[cfg(target_os = "macos")]
+    hid: Option<mac::Hid>,
+    /// SMC temperature keys found once at start.
+    #[cfg(target_os = "macos")]
+    temp_keys: Vec<(String, mac::KeyInfo)>,
+}
+
+impl Probe {
+    #[cfg(target_os = "macos")]
+    pub fn open() -> Self {
+        let smc = mac::Smc::open();
+        let temp_keys = smc.as_ref().map(|s| s.temperature_keys()).unwrap_or_default();
+        Probe { smc, hid: mac::Hid::open(), temp_keys }
+    }
+    #[cfg(not(target_os = "macos"))]
+    pub fn open() -> Self {
+        Probe {}
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn read(&mut self) -> Reading {
+        let mut r = Reading::default();
+        if let Some(smc) = &self.smc {
+            r.has_smc = true;
+            r.fans = smc.fans();
+            for (k, info) in &self.temp_keys {
+                if let (Some(g), Some(c)) = (super::data::group_of_smc(k), smc.read_with(k, *info)) {
+                    r.smc_temps.push(Sensor { name: k.clone(), group: g, celsius: c });
+                }
+            }
+        }
+        if let Some(hid) = &self.hid {
+            r.hid = hid.temperatures();
+        }
+        r
+    }
+    #[cfg(not(target_os = "macos"))]
+    pub fn read(&mut self) -> Reading {
+        Reading::default()
+    }
+}
+
+/// Print every fan and sensor this Mac reports (`--fan-report`), to check
+/// the readings on a new chip.
+pub fn report() {
+    let mut p = Probe::open();
+    let r = p.read();
+    println!("SMC: {}", if r.has_smc { "open" } else { "not available" });
+    println!("Fans: {}", r.fans.len());
+    for (i, f) in r.fans.iter().enumerate() {
+        println!("  fan {i}: {:.0} rpm (min {:.0}, max {:.0})", f.rpm, f.min, f.max);
+    }
+    println!("HID temperature sensors: {}", r.hid.len());
+    for s in &r.hid {
+        println!("  {:<32} {:>6.1} °C  {:?}", s.name, s.celsius, s.group);
+    }
+    println!("SMC temperature keys: {}", r.smc_temps.len());
+    for s in &r.smc_temps {
+        println!("  {:<6} {:>6.1} °C  {:?}", s.name, s.celsius, s.group);
+    }
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn fourcc(s: &str) -> u32 {
+    s.bytes().take(4).fold(0u32, |a, b| (a << 8) | b as u32)
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn fourcc_str(v: u32) -> String {
+    v.to_be_bytes().iter().map(|b| *b as char).collect()
+}
+
+/// Decode SMC bytes of a numeric type.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn decode(kind: u32, b: &[u8]) -> Option<f32> {
+    let t = fourcc_str(kind);
+    Some(match t.as_str() {
+        "flt " if b.len() >= 4 => f32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+        "fpe2" if b.len() >= 2 => u16::from_be_bytes([b[0], b[1]]) as f32 / 4.0,
+        "sp78" if b.len() >= 2 => i16::from_be_bytes([b[0], b[1]]) as f32 / 256.0,
+        "ui8 " if !b.is_empty() => b[0] as f32,
+        "ui16" if b.len() >= 2 => u16::from_be_bytes([b[0], b[1]]) as f32,
+        "ui32" if b.len() >= 4 => u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as f32,
+        _ => return None,
+    })
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::super::data::{group_of_hid, plausible, Fan, Sensor};
+    use super::{decode, fourcc, fourcc_str};
+    use std::ffi::{c_char, c_void, CStr, CString};
+
+    // ------------------------------------------------------------ IOKit / CF
+
+    #[repr(C)]
+    pub struct CFDictionaryCallBacks {
+        _private: [u8; 0],
+    }
+
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" {
+        fn IOServiceMatching(name: *const c_char) -> *mut c_void;
+        fn IOServiceGetMatchingService(main_port: u32, matching: *mut c_void) -> u32;
+        fn IOServiceOpen(service: u32, owning_task: u32, kind: u32, connect: *mut u32) -> i32;
+        fn IOServiceClose(connect: u32) -> i32;
+        fn IOObjectRelease(obj: u32) -> i32;
+        fn IOConnectCallStructMethod(conn: u32, selector: u32, input: *const c_void, in_size: usize, output: *mut c_void, out_size: *mut usize) -> i32;
+
+        fn IOHIDEventSystemClientCreate(alloc: *const c_void) -> *mut c_void;
+        fn IOHIDEventSystemClientSetMatching(client: *mut c_void, matching: *const c_void) -> i32;
+        fn IOHIDEventSystemClientCopyServices(client: *mut c_void) -> *const c_void;
+        fn IOHIDServiceClientCopyProperty(service: *const c_void, key: *const c_void) -> *const c_void;
+        fn IOHIDServiceClientCopyEvent(service: *const c_void, kind: i64, options: i32, timestamp: i64) -> *const c_void;
+        fn IOHIDEventGetFloatValue(event: *const c_void, field: i32) -> f64;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFTypeDictionaryKeyCallBacks: CFDictionaryCallBacks;
+        static kCFTypeDictionaryValueCallBacks: CFDictionaryCallBacks;
+        fn CFDictionaryCreate(alloc: *const c_void, keys: *const *const c_void, values: *const *const c_void, n: isize, kcb: *const CFDictionaryCallBacks, vcb: *const CFDictionaryCallBacks) -> *const c_void;
+        fn CFNumberCreate(alloc: *const c_void, kind: isize, value: *const c_void) -> *const c_void;
+        fn CFStringCreateWithCString(alloc: *const c_void, s: *const c_char, encoding: u32) -> *const c_void;
+        fn CFStringGetCString(s: *const c_void, buf: *mut c_char, len: isize, encoding: u32) -> u8;
+        fn CFGetTypeID(cf: *const c_void) -> usize;
+        fn CFStringGetTypeID() -> usize;
+        fn CFArrayGetCount(a: *const c_void) -> isize;
+        fn CFArrayGetValueAtIndex(a: *const c_void, i: isize) -> *const c_void;
+        fn CFRelease(cf: *const c_void);
+    }
+
+    const UTF8: u32 = 0x0800_0100;
+    const CF_NUMBER_SINT32: isize = 3;
+
+    fn cfstr(s: &str) -> *const c_void {
+        let c = CString::new(s).unwrap();
+        unsafe { CFStringCreateWithCString(std::ptr::null(), c.as_ptr(), UTF8) }
+    }
+
+    fn cfnum(v: i32) -> *const c_void {
+        unsafe { CFNumberCreate(std::ptr::null(), CF_NUMBER_SINT32, &v as *const i32 as *const c_void) }
+    }
+
+    fn string_of(cf: *const c_void) -> Option<String> {
+        if cf.is_null() || unsafe { CFGetTypeID(cf) != CFStringGetTypeID() } {
+            return None;
+        }
+        let mut buf = [0 as c_char; 256];
+        if unsafe { CFStringGetCString(cf, buf.as_mut_ptr(), buf.len() as isize, UTF8) } == 0 {
+            return None;
+        }
+        Some(unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned())
+    }
+
+    // ------------------------------------------------------------ SMC
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Vers {
+        major: u8,
+        minor: u8,
+        build: u8,
+        reserved: u8,
+        release: u16,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct PLimit {
+        version: u16,
+        length: u16,
+        cpu: u32,
+        gpu: u32,
+        mem: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default, Debug)]
+    pub struct KeyInfo {
+        size: u32,
+        kind: u32,
+        attributes: u8,
+    }
+
+    /// `SMCKeyData_t` from Apple's SMC user client.
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct KeyData {
+        key: u32,
+        vers: Vers,
+        plimit: PLimit,
+        info: KeyInfo,
+        result: u8,
+        status: u8,
+        data8: u8,
+        data32: u32,
+        bytes: [u8; 32],
+    }
+
+    const _: () = assert!(std::mem::size_of::<KeyData>() == 80);
+
+    const KERNEL_INDEX_SMC: u32 = 2;
+    const CMD_READ_BYTES: u8 = 5;
+    const CMD_READ_INDEX: u8 = 8;
+    const CMD_READ_KEYINFO: u8 = 9;
+
+    pub struct Smc {
+        conn: u32,
+    }
+
+    impl Smc {
+        pub fn open() -> Option<Smc> {
+            unsafe {
+                let name = CString::new("AppleSMC").unwrap();
+                let matching = IOServiceMatching(name.as_ptr());
+                if matching.is_null() {
+                    return None;
+                }
+                let service = IOServiceGetMatchingService(0, matching);
+                if service == 0 {
+                    return None;
+                }
+                let mut conn = 0u32;
+                #[allow(deprecated)]
+                let task = libc::mach_task_self();
+                let kr = IOServiceOpen(service, task, 0, &mut conn);
+                IOObjectRelease(service);
+                (kr == 0 && conn != 0).then_some(Smc { conn })
+            }
+        }
+
+        fn call(&self, input: &KeyData) -> Option<KeyData> {
+            let mut out = KeyData::default();
+            let mut size = std::mem::size_of::<KeyData>();
+            let kr = unsafe { IOConnectCallStructMethod(self.conn, KERNEL_INDEX_SMC, input as *const KeyData as *const c_void, std::mem::size_of::<KeyData>(), &mut out as *mut KeyData as *mut c_void, &mut size) };
+            (kr == 0 && out.result == 0).then_some(out)
+        }
+
+        fn info(&self, key: &str) -> Option<KeyInfo> {
+            let input = KeyData { key: fourcc(key), data8: CMD_READ_KEYINFO, ..Default::default() };
+            self.call(&input).map(|o| o.info).filter(|i| i.size > 0 && i.size <= 32)
+        }
+
+        pub fn read_with(&self, key: &str, info: KeyInfo) -> Option<f32> {
+            let input = KeyData { key: fourcc(key), info, data8: CMD_READ_BYTES, ..Default::default() };
+            let out = self.call(&input)?;
+            decode(info.kind, &out.bytes[..info.size as usize])
+        }
+
+        pub fn read(&self, key: &str) -> Option<f32> {
+            self.read_with(key, self.info(key)?)
+        }
+
+        pub fn fans(&self) -> Vec<Fan> {
+            let n = self.read("FNum").unwrap_or(0.0) as usize;
+            (0..n.min(4))
+                .filter_map(|i| {
+                    let rpm = self.read(&format!("F{i}Ac"))?;
+                    let min = self.read(&format!("F{i}Mn")).unwrap_or(0.0);
+                    let max = self.read(&format!("F{i}Mx")).unwrap_or(0.0);
+                    Some(Fan { rpm: rpm.max(0.0), min, max: max.max(min) })
+                })
+                .collect()
+        }
+
+        /// Every `T…` key with a float or fixed-point type that reads as a
+        /// believable temperature now.
+        pub fn temperature_keys(&self) -> Vec<(String, KeyInfo)> {
+            let count = self.read("#KEY").unwrap_or(0.0) as u32;
+            let mut out = Vec::new();
+            for i in 0..count.min(4000) {
+                let input = KeyData { data8: CMD_READ_INDEX, data32: i, ..Default::default() };
+                let Some(k) = self.call(&input) else { continue };
+                let name = fourcc_str(k.key);
+                if super::super::data::group_of_smc(&name).is_none() {
+                    continue;
+                }
+                let Some(info) = self.info(&name) else { continue };
+                if !matches!(fourcc_str(info.kind).as_str(), "flt " | "sp78") {
+                    continue;
+                }
+                if self.read_with(&name, info).is_some_and(plausible) {
+                    out.push((name, info));
+                }
+            }
+            out
+        }
+    }
+
+    impl Drop for Smc {
+        fn drop(&mut self) {
+            unsafe {
+                IOServiceClose(self.conn);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ HID sensors
+
+    const HID_TEMPERATURE: i64 = 15;
+
+    pub struct Hid {
+        client: *mut c_void,
+        product: *const c_void,
+    }
+
+    impl Hid {
+        pub fn open() -> Option<Hid> {
+            unsafe {
+                let client = IOHIDEventSystemClientCreate(std::ptr::null());
+                if client.is_null() {
+                    return None;
+                }
+                // Apple's vendor page 0xff00, usage 5 = temperature sensors.
+                let keys = [cfstr("PrimaryUsagePage"), cfstr("PrimaryUsage")];
+                let vals = [cfnum(0xff00), cfnum(5)];
+                let dict = CFDictionaryCreate(std::ptr::null(), keys.as_ptr(), vals.as_ptr(), 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+                IOHIDEventSystemClientSetMatching(client, dict);
+                for c in keys.iter().chain(vals.iter()) {
+                    CFRelease(*c);
+                }
+                CFRelease(dict);
+                Some(Hid { client, product: cfstr("Product") })
+            }
+        }
+
+        pub fn temperatures(&self) -> Vec<Sensor> {
+            let mut out = Vec::new();
+            unsafe {
+                let services = IOHIDEventSystemClientCopyServices(self.client);
+                if services.is_null() {
+                    return out;
+                }
+                for i in 0..CFArrayGetCount(services) {
+                    let sc = CFArrayGetValueAtIndex(services, i);
+                    let name_cf = IOHIDServiceClientCopyProperty(sc, self.product);
+                    let name = string_of(name_cf);
+                    if !name_cf.is_null() {
+                        CFRelease(name_cf);
+                    }
+                    let Some(name) = name else { continue };
+                    let Some(group) = group_of_hid(&name) else { continue };
+                    let ev = IOHIDServiceClientCopyEvent(sc, HID_TEMPERATURE, 0, 0);
+                    if ev.is_null() {
+                        continue;
+                    }
+                    let c = IOHIDEventGetFloatValue(ev, (HID_TEMPERATURE << 16) as i32) as f32;
+                    CFRelease(ev);
+                    if plausible(c) {
+                        out.push(Sensor { name, group, celsius: c });
+                    }
+                }
+                CFRelease(services);
+            }
+            out.sort_by(|a, b| a.name.cmp(&b.name));
+            out
+        }
+    }
+
+    impl Drop for Hid {
+        fn drop(&mut self) {
+            unsafe {
+                CFRelease(self.product);
+                CFRelease(self.client);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode, fourcc};
+
+    #[test]
+    fn decodes_smc_types() {
+        assert_eq!(decode(fourcc("flt "), &2140.0f32.to_le_bytes()), Some(2140.0));
+        assert_eq!(decode(fourcc("fpe2"), &[0x21, 0x70]), Some(2140.0));
+        assert_eq!(decode(fourcc("sp78"), &[0x40, 0x80]), Some(64.5));
+        assert_eq!(decode(fourcc("ui8 "), &[2]), Some(2.0));
+        assert_eq!(decode(fourcc("ch8*"), &[1]), None);
+    }
+}

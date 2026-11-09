@@ -53,6 +53,7 @@ pub mod tint {
     pub const HEALTH: Color32 = Color32::from_rgb(0x30, 0xA1, 0x4E);
     pub const CLAUDE: Color32 = Color32::from_rgb(0xC9, 0x64, 0x3E);
     pub const CAPTURE: Color32 = Color32::from_rgb(0x6E, 0x56, 0xCF);
+    pub const FAN: Color32 = Color32::from_rgb(0x0E, 0x8F, 0xB0);
     pub const NEUTRAL: Color32 = Color32::from_rgb(0x63, 0x63, 0x66);
 }
 

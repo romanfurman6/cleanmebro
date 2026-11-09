@@ -6,6 +6,7 @@
 pub mod capture;
 pub mod claude;
 pub mod cleanup;
+pub mod fan;
 pub mod lens;
 pub mod system;
 
@@ -19,6 +20,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
         Box::new(lens::Lens::new(env)),
         Box::new(capture::Capture::new(env)),
         Box::new(claude::Claude::new(env)),
+        Box::new(fan::FanControl::new(env)),
     ]
 }
 
@@ -27,6 +29,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
 pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "cleanup/clean",
     "capture/tile",
+    "fan/tile",
     "core/planned",
     "capture/capture",
     "system/storage",
@@ -36,6 +39,7 @@ pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "system/network",
     "system/devices",
     "claude/limits",
+    "fan/fans",
     "core/recommendation",
 ];
 
