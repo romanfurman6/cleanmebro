@@ -2,6 +2,7 @@
 //! helpers, Claude Code discovery and the numbers from docs/MECHANICS.md.
 //! Nothing here knows about any tool.
 
+pub mod activity;
 pub mod claude_code;
 pub mod fs;
 pub mod glass;

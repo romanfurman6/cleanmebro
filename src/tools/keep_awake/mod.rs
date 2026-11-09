@@ -79,7 +79,7 @@ fn watch(engine: Shared, ctx: egui::Context) {
             e.sessions = found;
             e.step(t);
             if before != (e.state(t), e.sessions.clone()) {
-                ctx.request_repaint();
+                crate::kit::activity::repaint(&ctx);
             }
         }
         std::thread::sleep(POLL);
@@ -175,8 +175,9 @@ impl Tool for KeepAwake {
         self.engine.lock().unwrap().set_enabled(on, t);
     }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
-        // steam and countdowns move while awake; the watcher thread does the rest
-        if self.state().awake() {
+        // steam and countdowns move while awake and on screen; the watcher
+        // thread does the rest (hidden, these frames would only burn CPU)
+        if crate::kit::activity::visible() && self.state().awake() {
             ctx.request_repaint_after(Duration::from_millis(80));
         }
         false
