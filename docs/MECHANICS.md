@@ -49,7 +49,7 @@ Thresholds and rules — **decompiled** (menu helper frameworks):
 | Battery health warning | < 80 % | string `Monitor_Battery_Chart_Cycles_Title_Tooltip` ("retain up to 80%") |
 | Temperature words | macOS thermal state Nominal/Fair → Cool/Warm, Serious → Hot, Critical | estimated: the original reads CPU temperature through private IOHID sensors (`SystemResourcesMonitor` `-[CMIOHIDProcessorTemperature getCPUTemperature:]`), which this rebuild doesn't use |
 | Battery temperature "not optimal" | ≥ 35 °C | estimated |
-| Refresh | every 2 s (battery 10 s, devices/Wi-Fi 60 s, folder sizes 10 min) | estimated |
+| Refresh | every 2 s, system calls only (battery and input devices 10 s, Bluetooth report and Wi-Fi name 60 s, Wi-Fi details and folder sizes 10 min, battery health 30 min). With the panel and window closed: battery and input devices 60 s, Bluetooth report 10 min, Wi-Fi and folder sizes wait until the panel opens | estimated |
 | Speed test | 25 MB download, 8 MB upload ("downloads a small test file") | string `Monitor_Detailed_Network_TestSpeed_Legend_Description`; sizes estimated |
 | Good for (Mbps) | Messaging 0.5, Audio calls 1, Music 2, Video calls 4, Video streaming 10, Online gaming 25 | labels from `Monitor_Detailed_Network_TestSpeed_Legend_*`; speeds estimated |
 
@@ -66,7 +66,8 @@ pressure warning or worse (15, ours), restart after 7 days (10, ours), Trash > 2
   bars; `Last 24h · …` blocks become "What uses your limits". Refreshed every 5 min
   and on demand. The session % is also shown as the menu bar title.
 * Local activity: `usage` fields of assistant messages in `~/.claude/projects/*/*.jsonl`
-  from the last 7 days (counts only; message ids de-duplicated).
+  from the last 7 days (counts only; message ids de-duplicated). Logs are read on from
+  where the last read stopped; refreshed every minute while the panel or window is open.
 
 ## Cleanup
 
