@@ -384,8 +384,7 @@ impl App {
 
     fn update_tray_title(&mut self) {
         let Some(tray) = &self.tray else { return };
-        // every tool's title, in tool order ("19% ☕︎")
-        let title = self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).filter_map(|(_, t)| t.tray_title()).collect::<Vec<_>>().join(" ");
+        let title = self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).find_map(|(_, t)| t.tray_title()).unwrap_or_default();
         if title != self.tray_title {
             tray.set_title(if title.is_empty() { None } else { Some(&title) });
             self.tray_title = title;

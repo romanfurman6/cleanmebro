@@ -177,10 +177,6 @@ impl Tool for KeepAwake {
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, _cx: &mut Cx) {
         ui::page(self, ui, rect);
     }
-    fn tray_title(&self) -> Option<String> {
-        // a text-style cup next to the menu-bar icon while awake
-        self.state().awake().then(|| "\u{2615}\u{FE0E}".to_string())
-    }
     fn menu_items(&self) -> Vec<MenuItem> {
         let on = self.engine.lock().unwrap().manual_since.is_some();
         vec![MenuItem { id: MENU_TOGGLE, label: if on { "Let the Mac sleep" } else { "Keep the Mac awake" }.into() }]

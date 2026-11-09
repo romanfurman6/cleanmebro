@@ -182,7 +182,7 @@ pub trait Tool {
     fn recommendations(&self) -> Vec<Recommendation> {
         Vec::new()
     }
-    /// Text next to the menu-bar icon. Titles of all tools are shown, in tool order.
+    /// Text next to the menu-bar icon. The first tool that returns one wins.
     fn tray_title(&self) -> Option<String> {
         None
     }
