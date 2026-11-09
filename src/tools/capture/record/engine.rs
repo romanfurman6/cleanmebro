@@ -68,6 +68,9 @@ impl Session {
     pub fn failure(&self) -> Option<String> {
         None
     }
+    pub fn mic_silent(&self) -> bool {
+        false
+    }
     pub fn stop(self, done: Reply<Stopped>) {
         done(Err("Screen recording needs macOS".into()));
     }
@@ -646,6 +649,12 @@ mod imp {
         /// Why the recording broke off, if it did.
         pub fn failure(&self) -> Option<String> {
             self.shared.lock().ok().and_then(|s| s.failed.clone())
+        }
+
+        /// The microphone has sent a good while of pure digital silence
+        /// (a closed lid, AirPods not worn): no real mic is ever that quiet.
+        pub fn mic_silent(&self) -> bool {
+            self.shared.lock().map(|s| s.stats.mic_in >= 200 && s.stats.mic_peak == 0.0).unwrap_or(false)
         }
 
         /// Stop and finish the file; `done` runs on a background thread.
