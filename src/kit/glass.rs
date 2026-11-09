@@ -452,6 +452,44 @@ pub const QUICK_TILE_H: f32 = 84.0;
 pub const METRIC_ROW_H: f32 = 44.0;
 pub const METRIC_ROW_H_FLAT: f32 = 34.0;
 
+/// Height of a [`metric_tile`].
+pub const METRIC_TILE_H: f32 = 82.0;
+
+/// A half-width metric tile for the panel: icon and label on top, a big
+/// number with its unit, then a thin bar or a caption line. Click opens the
+/// reading's sheet; `selected` outlines the tile while its sheet is open.
+#[allow(clippy::too_many_arguments)]
+pub fn metric_tile(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, label: &str, big: &str, unit: &str, caption: &str, caption_col: Color32, bar_frac: Option<(f32, Color32)>, selected: bool) -> Response {
+    let resp = card(ui, rect, id, R_CARD, selected);
+    let p = ui.painter();
+    let x0 = rect.left() + 12.0;
+    let x1 = rect.right() - 12.0;
+    let top = rect.top() + 11.0;
+    icon(p, glyph, Rect::from_min_size(Pos2::new(x0, top), Vec2::splat(14.0)), TEXT_DIM);
+    text_fit(p, Pos2::new(x0 + 20.0, top + 7.0), Align2::LEFT_CENTER, label, font(12.0), TEXT_DIM, x1 - x0 - 20.0);
+    let g = p.layout_no_wrap(big.to_owned(), bold(22.0), TEXT);
+    let (gw, gh) = (g.size().x, g.size().y);
+    let gy = top + 20.0;
+    p.galley(Pos2::new(x0, gy), g, TEXT);
+    if !unit.is_empty() {
+        text_fit(p, Pos2::new(x0 + gw + 4.0, gy + gh * 0.80), Align2::LEFT_BOTTOM, unit, bold(12.0), TEXT_SOFT, (x1 - x0 - gw - 4.0).max(10.0));
+    }
+    let by = rect.bottom() - 12.0;
+    match bar_frac {
+        Some((f, c)) => {
+            bar(p, Rect::from_min_max(Pos2::new(x0, by - 4.0), Pos2::new(x1, by)), f, c);
+            text_fit(p, Pos2::new(x1, gy + gh * 0.80), Align2::RIGHT_BOTTOM, caption, font(11.0), caption_col, (x1 - x0 - gw - 40.0).max(30.0));
+        }
+        None => {
+            text_fit(p, Pos2::new(x0, by), Align2::LEFT_BOTTOM, caption, font(11.0), caption_col, x1 - x0);
+        }
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
+}
+
 /// A compact metric row for a group card: icon, label, value on the right,
 /// an optional thin bar under them and a chevron. Hover/selected tint the row.
 pub fn metric_row(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, label: &str, value: &str, value_col: Color32, bar_frac: Option<(f32, Color32)>, selected: bool) -> Response {

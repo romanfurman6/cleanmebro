@@ -97,7 +97,10 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     y += ch + 16.0;
 
     // projects
-    let pr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, r.bottom() - PAGE_FOOTER_H - 18.0));
+    // the card fits its rows (no tall empty box), up to the footer
+    let max_bottom = r.bottom() - PAGE_FOOTER_H - 18.0;
+    let rows_h = if cl.projects.is_empty() { 64.0 } else { cl.projects.len() as f32 * 44.0 };
+    let pr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, (y + 72.0 + rows_h + 6.0).min(max_bottom)));
     glass_card(&p, pr, R_CARD, 0.0, false);
     p.text(pr.min + Vec2::new(14.0, 13.0), Align2::LEFT_TOP, "Claude Code projects", bold(13.0), TEXT);
     let used = cl.projects.iter().filter(|p| p.in_use()).count();
@@ -118,11 +121,12 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     ScrollArea::vertical().id_salt("claude-projects").auto_shrink([false, false]).show(&mut child, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         if cl.projects.is_empty() {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.add_space(14.0);
-                ui.label(egui::RichText::new(if demo { "Projects appear here." } else { "Looking for Claude Code projects…" }).font(font(13.0)).color(TEXT_DIM));
-            });
+            let (row, _) = ui.allocate_exact_size(Vec2::new(list.width(), 64.0), Sense::hover());
+            let pp = ui.painter();
+            pp.line_segment([Pos2::new(row.left() + 14.0, row.top()), Pos2::new(row.right() - 14.0, row.top())], egui::Stroke::new(1.0, white(10)));
+            let msg = if demo { "No Claude Code projects on this Mac yet." } else { "Looking for Claude Code projects…" };
+            pp.text(Pos2::new(row.left() + 14.0, row.top() + 14.0), Align2::LEFT_TOP, msg, font(13.0), TEXT_SOFT);
+            pp.text(Pos2::new(row.left() + 14.0, row.top() + 34.0), Align2::LEFT_TOP, "Each folder where you run Claude Code shows up here with its size and last use.", font(12.0), TEXT_FAINT);
         }
         for pj in &cl.projects {
             let (row, _) = ui.allocate_exact_size(Vec2::new(list.width(), 44.0), Sense::hover());

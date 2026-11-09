@@ -29,7 +29,9 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
         traffic_lights(ui, &p, full);
     }
     // one entry per tool page, grouped by section
-    let pages = app.page_tools();
+    let mut pages = app.page_tools();
+    // group by section in the sidebar's order (tools keep their order inside)
+    pages.sort_by_key(|&i| section_rank(app.tools[i].section()));
     if !pages.contains(&app.page) {
         if let Some(&first) = pages.first() {
             app.page = first;
@@ -96,6 +98,11 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
     };
     let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt(("page", tool.id())));
     tool.page_ui(&mut child, content, cx);
+}
+
+/// Sidebar order of the tool sections; unknown sections go last.
+fn section_rank(section: &str) -> usize {
+    ["Clean", "Monitor", "Create"].iter().position(|s| *s == section).unwrap_or(3)
 }
 
 fn traffic_lights(ui: &mut Ui, p: &egui::Painter, full: Rect) {

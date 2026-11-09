@@ -2,6 +2,7 @@
 //! Bluetooth devices, shown as panel widgets with a detail sheet each.
 
 pub mod monitor;
+mod page;
 mod sheets;
 mod ui;
 
@@ -25,14 +26,13 @@ impl System {
     }
 }
 
-const METRICS: Option<&str> = Some("metrics");
 const WIDGETS: [WidgetSpec; 6] = [
-    WidgetSpec { id: "storage", title: "Storage", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "memory", title: "Memory", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "cpu", title: "CPU", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "battery", title: "Battery", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "network", title: "Network", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "devices", title: "Connected Devices", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "storage", title: "Storage", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "memory", title: "Memory", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "cpu", title: "CPU", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "battery", title: "Battery", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "network", title: "Network", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "devices", title: "Connected Devices", span: 2, default_on: true, group: None },
 ];
 
 impl Tool for System {
@@ -67,6 +67,15 @@ impl Tool for System {
         ui::detail(&self.mon, detail, ui, rect, cx);
     }
 
+    fn has_page(&self) -> bool {
+        true
+    }
+    fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        let mut recs = self.recommendations();
+        recs.sort_by(|a, b| b.priority.cmp(&a.priority));
+        page::page(&self.mon, &recs, ui, rect, cx);
+    }
+
     /// Ranked like the original's health recommendations (AssistantDomain:
     /// drive health 100, battery health 80, out of disk space 20, Trash
     /// overfill 5); memory and restart are slotted in by us.
@@ -98,6 +107,9 @@ impl Tool for System {
     }
 
     fn demo_view(&mut self, view: &str) -> Option<View> {
+        if view == "health" {
+            return Some(View::Page);
+        }
         WIDGETS.iter().find(|w| w.id == view).map(|w| View::Detail(w.id))
     }
 }

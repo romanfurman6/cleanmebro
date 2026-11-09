@@ -276,21 +276,96 @@ pub fn sheet(ui: &mut Ui, rect: Rect, kind: Sheet, s: &Snapshot) -> Action {
     let p = ui.painter().clone();
     let x0 = rect.left() + 16.0;
     let x1 = rect.right() - 16.0;
-    let w = x1 - x0;
-    let mut y = rect.top() + SHEET_HEADER_H + 16.0;
+    body(&p, ui.ctx(), &sp, kind, s, x0, x1 - x0, rect.top() + SHEET_HEADER_H + 16.0);
+    let a = buttons(ui, &sp, s, x1, rect.bottom() - 16.0);
+    if a != Action::None {
+        action = a;
+    }
+    action
+}
 
+/// One section of the Mac Health page: the sheet's content without the
+/// sheet frame. Its header (chip, title, subtitle, buttons on the right)
+/// sits on one line above the cards.
+pub struct Section {
+    sp: Spec,
+    kind: Sheet,
+}
+
+/// Height of a section's header line on the page.
+pub const SECTION_HEAD_H: f32 = 46.0;
+
+impl Section {
+    pub fn new(kind: Sheet, s: &Snapshot) -> Self {
+        Section { sp: spec(kind, s), kind }
+    }
+
+    /// Total height at width `w` (header + content), measured off-screen.
+    pub fn height(&self, p: &egui::Painter, ctx: &egui::Context, s: &Snapshot, w: f32) -> f32 {
+        let hidden = p.with_clip_rect(Rect::NOTHING);
+        SECTION_HEAD_H + body(&hidden, ctx, &self.sp, self.kind, s, 0.0, w, 0.0)
+    }
+
+    /// Draw the section at `r` (its width and top; the height comes from
+    /// [`Section::height`]) and report what was clicked.
+    pub fn show(&self, ui: &mut Ui, r: Rect, s: &Snapshot) -> Action {
+        let p = ui.painter().clone();
+        tool_chip(&p, Rect::from_min_size(r.min + Vec2::new(0.0, 2.0), Vec2::splat(30.0)), self.sp.icon, self.sp.chip);
+        let right = r.right();
+        // buttons first so the titles can stop short of them
+        let mut bx = right;
+        let mut action = Action::None;
+        for (label, kind_, act) in self.sp.buttons.iter().rev() {
+            let bw = button_width(&p, label, *kind_);
+            let br = Rect::from_min_size(Pos2::new(bx - bw, r.top() + 2.0), Vec2::new(bw, 28.0));
+            let enabled = !(*act == Action::SpeedTest && s.speed.running);
+            if pill_button(ui, br, if enabled { label } else { "Testing…" }, *kind_, enabled).clicked() {
+                action = *act;
+            }
+            bx -= bw + 8.0;
+        }
+        let tw = (bx - r.left() - 40.0 - 8.0).max(60.0);
+        text_fit(&p, r.min + Vec2::new(40.0, 0.0), Align2::LEFT_TOP, &self.sp.title, bold(15.0), TEXT, tw);
+        text_fit(&p, r.min + Vec2::new(40.0, 19.0), Align2::LEFT_TOP, &self.sp.sub, font(12.0), TEXT_DIM, tw);
+        body(&p, ui.ctx(), &self.sp, self.kind, s, r.left(), r.width(), r.top() + SECTION_HEAD_H);
+        action
+    }
+}
+
+/// Legends this wide get two columns.
+const LEGEND_TWO_COLUMNS_MIN: f32 = 400.0;
+
+/// The content under a header: hero number with its bar or sparkline, the
+/// legend card, the speed test card and the facts card. Returns the height.
+fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snapshot, x0: f32, w: f32, top: f32) -> f32 {
+    let mut y = top;
     // hero
     if let Some((big, unit, cap)) = &sp.hero {
-        y += hero_number(&p, Pos2::new(x0, y), big, unit, cap) + 10.0;
+        y += hero_number(p, Pos2::new(x0, y), big, unit, cap) + 10.0;
         if !sp.segs.is_empty() {
-            stacked_bar(&p, Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 10.0)), &sp.segs);
+            stacked_bar(p, Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 10.0)), &sp.segs);
             y += 10.0 + 14.0;
         } else if sp.spark.len() > 1 {
             let hr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 48.0));
             let n = sp.spark.len();
-            let pts: Vec<Pos2> = sp.spark.iter().enumerate().map(|(i, v)| Pos2::new(hr.left() + hr.width() * i as f32 / (n - 1) as f32, hr.bottom() - 2.0 - (hr.height() - 4.0) * (v / 100.0).clamp(0.0, 1.0))).collect();
+            // scale to the recent peak (at least 25%) so a calm CPU still shows its shape
+            let top_v = (sp.spark.iter().copied().fold(0.0, f32::max) * 1.25).clamp(25.0, 100.0);
+            let pts: Vec<Pos2> = sp.spark.iter().enumerate().map(|(i, v)| Pos2::new(hr.left() + hr.width() * i as f32 / (n - 1) as f32, hr.bottom() - 2.0 - (hr.height() - 4.0) * (v / top_v).clamp(0.0, 1.0))).collect();
+            // soft fill under the line, then the line
+            let mut mesh = egui::epaint::Mesh::default();
+            let fill = with_alpha(ACCENT, 0.14);
+            for (i, q) in pts.iter().enumerate() {
+                mesh.colored_vertex(*q, fill);
+                mesh.colored_vertex(Pos2::new(q.x, hr.bottom()), with_alpha(ACCENT, 0.0));
+                if i > 0 {
+                    let k = (i as u32) * 2;
+                    mesh.add_triangle(k - 2, k - 1, k);
+                    mesh.add_triangle(k - 1, k + 1, k);
+                }
+            }
+            p.add(mesh);
             p.add(egui::epaint::PathShape::line(pts, egui::epaint::PathStroke::new(1.6, ACCENT)));
-            hairline(&p, hr.left_bottom(), hr.right_bottom());
+            hairline(p, hr.left_bottom(), hr.right_bottom());
             y += 48.0 + 14.0;
         } else {
             y += 4.0;
@@ -299,24 +374,31 @@ pub fn sheet(ui: &mut Ui, rect: Rect, kind: Sheet, s: &Snapshot) -> Action {
 
     // legend card
     if !sp.legend.is_empty() {
-        let h = 8.0 + sp.legend.len() as f32 * 30.0;
+        // wide enough (the window page): two columns, split by a hairline
+        let cols = if w >= LEGEND_TWO_COLUMNS_MIN && sp.legend.len() >= 4 { 2 } else { 1 };
+        let rows = sp.legend.len().div_ceil(cols);
+        let h = 8.0 + rows as f32 * 30.0;
         let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h));
-        glass_card(&p, lr, R_CARD, 0.0, false);
+        glass_card(p, lr, R_CARD, 0.0, false);
+        let cw = w / cols as f32;
+        if cols == 2 {
+            hairline(p, Pos2::new(x0 + cw, y + 10.0), Pos2::new(x0 + cw, y + h - 10.0));
+        }
         for (i, l) in sp.legend.iter().enumerate() {
-            let rr = Rect::from_min_size(Pos2::new(x0, y + 4.0 + i as f32 * 30.0), Vec2::new(w, 30.0));
-            legend_row(&p, rr, l.color, &l.label, &l.value, l.value_col);
+            let (c, r) = (i / rows, i % rows);
+            let rr = Rect::from_min_size(Pos2::new(x0 + c as f32 * cw, y + 4.0 + r as f32 * 30.0), Vec2::new(cw, 30.0));
+            legend_row(p, rr, l.color, &l.label, &l.value, l.value_col);
         }
         y += h + 14.0;
     } else if kind == Sheet::Devices {
-        paragraph(&p, Pos2::new(x0, y), "Connect wireless or wired devices to your Mac and they appear here.", font(13.0), TEXT_DIM, w);
-        y += 40.0;
+        y += paragraph(p, Pos2::new(x0, y), "Connect wireless or wired devices to your Mac and they appear here.", font(13.0), TEXT_DIM, w) + 14.0;
     }
 
     // speed test card
     if sp.speed {
         let sp_ = &s.speed;
         let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 120.0));
-        glass_card(&p, lr, R_CARD, 0.0, false);
+        glass_card(p, lr, R_CARD, 0.0, false);
         p.text(lr.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "Speed test", bold(13.0), TEXT);
         if let Some(l) = sp_.latency_ms {
             p.text(Pos2::new(lr.right() - 12.0, lr.top() + 13.0), Align2::RIGHT_TOP, format!("Latency {l:.0} ms"), font(12.0), TEXT_FAINT);
@@ -332,16 +414,16 @@ pub fn sheet(ui: &mut Ui, rect: Rect, kind: Sheet, s: &Snapshot) -> Action {
         }
         let note_y = lr.top() + 92.0;
         if sp_.running {
-            bar(&p, Rect::from_min_size(Pos2::new(lr.left() + 12.0, note_y + 4.0), Vec2::new(w - 24.0, 4.0)), sp_.progress, ACCENT);
-            ui.ctx().request_repaint();
+            bar(p, Rect::from_min_size(Pos2::new(lr.left() + 12.0, note_y + 4.0), Vec2::new(w - 24.0, 4.0)), sp_.progress, ACCENT);
+            ctx.request_repaint();
         } else if let Some(e) = &sp_.error {
-            text_fit(&p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &format!("{e}. Check the connection and try again."), font(12.0), AMBER, w - 24.0);
+            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &format!("{e}. Check the connection and try again."), font(12.0), AMBER, w - 24.0);
         } else if let Some(d) = sp_.down_mbps {
             let good = monitor::good_for(d);
             let txt = if good.is_empty() { "Very slow. Try reconnecting to Wi-Fi.".to_string() } else { format!("Good for {}.", good.join(", ").to_lowercase()) };
-            text_fit(&p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &txt, font(12.0), TEXT_DIM, w - 24.0);
+            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &txt, font(12.0), TEXT_DIM, w - 24.0);
         } else {
-            text_fit(&p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, "Downloads a small test file to measure your connection.", font(12.0), TEXT_DIM, w - 24.0);
+            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, "Downloads a small test file to measure your connection.", font(12.0), TEXT_DIM, w - 24.0);
         }
         y += 120.0 + 14.0;
     }
@@ -351,16 +433,22 @@ pub fn sheet(ui: &mut Ui, rect: Rect, kind: Sheet, s: &Snapshot) -> Action {
         let measure = |f: &Fact| if f.hint.is_empty() { 32.0 } else { 27.0 + p.layout(f.hint.clone(), font(12.0), TEXT_FAINT, w - 24.0).size().y + 8.0 };
         let h: f32 = 8.0 + sp.facts.iter().map(measure).sum::<f32>();
         let fr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h));
-        glass_card(&p, fr, R_CARD, 0.0, false);
+        glass_card(p, fr, R_CARD, 0.0, false);
         let mut fy = y + 4.0;
         for f in &sp.facts {
-            fy += fact_row(&p, Rect::from_min_size(Pos2::new(x0, fy), Vec2::new(w, 40.0)), &f.label, &f.value, f.col, &f.hint);
+            fy += fact_row(p, Rect::from_min_size(Pos2::new(x0, fy), Vec2::new(w, 40.0)), &f.label, &f.value, f.col, &f.hint);
         }
+        y += h;
     }
+    y - top
+}
 
-    // buttons, bottom right
-    let mut bx = x1;
-    let by = rect.bottom() - 16.0 - 30.0;
+/// A sheet's buttons in a row ending at `right`, sitting on `bottom`.
+fn buttons(ui: &mut Ui, sp: &Spec, s: &Snapshot, right: f32, bottom: f32) -> Action {
+    let p = ui.painter().clone();
+    let mut action = Action::None;
+    let mut bx = right;
+    let by = bottom - 30.0;
     for (label, kind_, act) in sp.buttons.iter().rev() {
         let bw = button_width(&p, label, *kind_);
         let br = Rect::from_min_size(Pos2::new(bx - bw, by), Vec2::new(bw, 30.0));
