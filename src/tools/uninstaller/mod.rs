@@ -161,6 +161,11 @@ pub struct State {
     pub again: bool,
     /// Bundle ids we removed ourselves (the watcher stays quiet about those).
     pub removed_by_us: HashSet<String>,
+    /// The tool is off in Settings: the background watchers idle.
+    pub off: bool,
+    /// The page was shown. Until then scans only list the apps (enough to
+    /// notice one being thrown away) and leave measuring them for later.
+    pub page_seen: bool,
 }
 
 
@@ -531,23 +536,26 @@ fn start_scan(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Cont
     std::thread::Builder::new()
         .name("uninstaller-scan".into())
         .spawn(move || loop {
-            scan(&st, &app_roots, &roots, &ctx);
+            let full = scan(&st, &app_roots, &roots, &ctx);
             let mut g = st.lock().unwrap();
             if g.again {
                 g.again = false;
                 g.phase = Phase::Listing;
                 continue;
             }
-            g.phase = Phase::Ready;
+            // listed only: the page measures everything when it opens
+            g.phase = if full { Phase::Ready } else { Phase::Idle };
             ctx.request_repaint();
             break;
         })
         .ok();
 }
 
-/// One full scan: list apps, then fill in files and sizes app by app (the
-/// list shows right away and fills in), then find orphans.
-fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) {
+/// One scan: list apps, then (once the page was seen) fill in files and
+/// sizes app by app (the list shows right away and fills in), then find
+/// orphans. Returns whether it went that far.
+fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) -> bool {
+    let full = st.lock().unwrap().page_seen;
     let bundles = apps::find_bundles(app_roots);
     let casks = apps::cask_apps();
     let used = apps::last_used(&bundles);
@@ -569,8 +577,11 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
             g.settings.known.insert(r.id.clone(), r.name.clone());
         }
         g.settings.save();
-        g.phase = Phase::Sizing { done: 0, total: rows.len() };
         g.apps = rows.clone();
+        if !full {
+            return false;
+        }
+        g.phase = Phase::Sizing { done: 0, total: rows.len() };
     }
     ctx.request_repaint();
     let index = Index::build(roots);
@@ -620,6 +631,7 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
         }
     }
     g.orphans = orphans;
+    true
 }
 
 fn mtime(p: &Path) -> Option<i64> {
@@ -697,8 +709,12 @@ fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) {
         .spawn(move || {
             let mut last = mac::drag_change_count();
             loop {
-                std::thread::sleep(Duration::from_millis(150));
-                let on = st.lock().unwrap().settings.drop_zone;
+                let on = {
+                    let g = st.lock().unwrap();
+                    g.settings.drop_zone && !g.off
+                };
+                // a drag lasts long enough for a relaxed look when the zone is off
+                std::thread::sleep(Duration::from_millis(if on { 150 } else { 1000 }));
                 let n = mac::drag_change_count();
                 let down = mac::mouse_down();
                 let mut g = st.lock().unwrap();
@@ -779,6 +795,7 @@ impl Tool for Uninstaller {
     }
     fn set_on(&mut self, on: bool) {
         self.on = on;
+        self.st.lock().unwrap().off = !on;
         if !on {
             let mut g = self.st.lock().unwrap();
             g.drag = Drag::default();
@@ -788,7 +805,7 @@ impl Tool for Uninstaller {
     fn tick(&mut self, ctx: &egui::Context) -> bool {
         let g = self.st.lock().unwrap();
         let busy = g.working.is_some() || matches!(g.phase, Phase::Listing | Phase::Sizing { .. });
-        if busy {
+        if busy && crate::kit::activity::visible() {
             ctx.request_repaint_after(Duration::from_millis(250));
         }
         // our own floating windows need frames while the shell is hidden
