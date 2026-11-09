@@ -143,7 +143,38 @@ pub use imp::{ask_to_record_screen, can_record_screen, copy_png, copy_text, floa
 
 /// Recognize text in an image (written to a temp file for Vision), lines in
 /// reading order.
+static OCR_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static OCR_WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// What to tell the user while text recognition runs. The first run of the
+/// process loads Vision's model, which takes a few seconds.
+pub fn ocr_status() -> &'static str {
+    if OCR_READY.load(std::sync::atomic::Ordering::Relaxed) {
+        "Recognizing text…"
+    } else {
+        "Preparing text recognition (first time only)…"
+    }
+}
+
+/// Load the OCR model in the background so the first Copy text is quick.
+pub fn warm_ocr() {
+    use std::sync::atomic::Ordering;
+    if OCR_READY.load(Ordering::Relaxed) || OCR_WARMING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let img = image::RgbaImage::from_pixel(64, 24, image::Rgba([255, 255, 255, 255]));
+        let _ = recognize_image(&img);
+    });
+}
+
 pub fn recognize_image(img: &image::RgbaImage) -> Vec<TextLine> {
+    let lines = recognize_image_inner(img);
+    OCR_READY.store(true, std::sync::atomic::Ordering::Relaxed);
+    lines
+}
+
+fn recognize_image_inner(img: &image::RgbaImage) -> Vec<TextLine> {
     let path = std::env::temp_dir().join(format!("cleanmebro-ocr-{}-{}.png", std::process::id(), rand_id()));
     if img.save(&path).is_err() {
         return Vec::new();

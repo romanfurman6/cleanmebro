@@ -257,6 +257,7 @@ impl Capture {
 
     fn spawn_ocr(&mut self, img: RgbaImage) {
         self.busy = true;
+        self.hud(mac::ocr_status());
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
@@ -428,6 +429,7 @@ impl Capture {
         let title = self.title_for(id);
         let s = &self.settings;
         let ed = Editor::new(id, title, img, self.ppp, s.blur, s.cover, s.keep_breaks);
+        mac::warm_ocr();
         self.editor = Some(windows::EditorWin::new(ed));
     }
 
@@ -638,7 +640,10 @@ impl Tool for Capture {
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         if let Some(ed) = &mut self.demo_editor {
-            ed.ui(ui, rect, false);
+            // screenshots only: CMB_DEMO_EDITOR_W draws the editor at that width
+            let w = std::env::var("CMB_DEMO_EDITOR_W").ok().and_then(|v| v.parse::<f32>().ok());
+            let r = w.map(|w| Rect::from_min_size(rect.min, egui::Vec2::new(w.min(rect.width()), rect.height()))).unwrap_or(rect);
+            ed.ui(ui, r, false);
             return;
         }
         ui::page(self, ui, rect, cx);
@@ -713,6 +718,13 @@ impl Tool for Capture {
             "capture-editor" => {
                 let mut ed = Editor::new(None, "Capture from 5:41 pm".into(), grab::sample(1588, 892), 2.0, self.settings.blur, self.settings.cover, true);
                 ed.demo_marks();
+                // screenshots only: CMB_DEMO_EDITOR_TOOL picks the tool shown
+                ed.tool = match std::env::var("CMB_DEMO_EDITOR_TOOL").unwrap_or_default().as_str() {
+                    "arrow" => editor::Tool::Arrow,
+                    "blur" => editor::Tool::Blur,
+                    "crop" => editor::Tool::Crop,
+                    _ => ed.tool,
+                };
                 self.demo_editor = Some(ed);
                 Some(View::Page)
             }
