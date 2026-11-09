@@ -3,10 +3,11 @@
 
 use super::monitor::{self, Level, Snapshot};
 use super::ID;
-use crate::core::tool::{Cx, PanelHeader};
+use crate::core::tool::{Cx, PanelHeader, Size};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
-use egui::{Color32, Rect, Ui};
+use crate::kit::tile;
+use egui::{Align2, Color32, Pos2, Rect, Ui};
 
 fn level_color(l: Level) -> Color32 {
     match l {
@@ -31,13 +32,6 @@ pub fn header(s: &Snapshot) -> PanelHeader {
     PanelHeader { title, status: status.into(), dot: level_color(health) }
 }
 
-pub fn widget_height(id: &str) -> f32 {
-    match id {
-        "storage" | "memory" | "cpu" | "battery" | "network" | "devices" => METRIC_TILE_H,
-        _ => 0.0,
-    }
-}
-
 /// "1.44 TB" -> ("1.44", "TB")
 fn split_num(s: &str) -> (String, String) {
     match s.split_once(' ') {
@@ -46,11 +40,24 @@ fn split_num(s: &str) -> (String, String) {
     }
 }
 
-/// One half-width metric tile; a click opens its sheet.
-pub fn widget(mon: &monitor::Shared, id: &str, ui: &mut Ui, r: Rect, cx: &mut Cx) {
-    let s = mon.lock().unwrap().clone();
+/// One reading, ready for any widget size.
+struct Metric {
+    glyph: Icon,
+    label: String,
+    big: String,
+    unit: String,
+    caption: String,
+    bar: Option<(f32, Color32)>,
+}
+
+impl Metric {
+    fn value(&self) -> String {
+        if self.unit.is_empty() || self.unit == "%" { format!("{}{}", self.big, self.unit) } else { format!("{} {}", self.big, self.unit) }
+    }
+}
+
+fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
     let pct = |f: f32| (f / 100.0).clamp(0.01, 1.0);
-    let mut cap_col = TEXT_FAINT;
     let (glyph, label, (big, unit), caption, bar_) = match id {
         "storage" => {
             let used = if s.disk_total > 0 { 1.0 - s.disk_free as f32 / s.disk_total as f32 } else { 0.0 };
@@ -77,7 +84,7 @@ pub fn widget(mon: &monitor::Shared, id: &str, ui: &mut Ui, r: Rect, cx: &mut Cx
             if s.battery.present {
                 let c = if s.battery.percent <= 20 { RED } else { GREEN };
                 let frac = (s.battery.percent as f32 / 100.0).clamp(0.01, 1.0);
-                (Icon::Battery(s.battery.percent), "Battery".into(), (s.battery.percent.to_string(), "%".into()), battery_status(&s).to_lowercase(), Some((frac, c)))
+                (Icon::Battery(s.battery.percent), "Battery".into(), (s.battery.percent.to_string(), "%".into()), battery_status(s).to_lowercase(), Some((frac, c)))
             } else {
                 (Icon::Battery(100), "Power".into(), ("AC".to_string(), String::new()), "Power adapter".to_string(), None)
             }
@@ -93,16 +100,119 @@ pub fn widget(mon: &monitor::Shared, id: &str, ui: &mut Ui, r: Rect, cx: &mut Cx
             } else {
                 s.devices.iter().take(2).map(|d| match d.battery { Some(b) => format!("{} {b}%", d.name), None => d.name.clone() }).collect::<Vec<_>>().join(" · ")
             };
-            if s.devices.iter().any(|d| d.battery.is_some_and(|b| b <= m::BT_LOW_BATTERY_MAX_PCT)) {
-                cap_col = AMBER;
-            }
             let glyph = if s.devices.iter().any(|d| d.kind.contains("Head")) { Icon::Headphones } else { Icon::Bluetooth };
             (glyph, "Devices".into(), (n.to_string(), "connected".into()), caption, None)
         }
-        _ => return,
+        _ => return None,
     };
-    if metric_tile(ui, r, ui.scope_id().with(("metric", id)), glyph, &label, &big, &unit, &caption, cap_col, bar_, cx.is_detail_open(ID, id)).clicked() {
+    Some(Metric { glyph, label, big, unit, caption, bar: bar_ })
+}
+
+/// The six readings, in panel order.
+const METRICS: [&str; 6] = ["storage", "memory", "cpu", "battery", "network", "devices"];
+
+/// A Mac Health widget at `size`; a click opens its sheet (the overview
+/// opens the Mac Health page).
+pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+    let s = mon.lock().unwrap().clone();
+    let wid = ui.scope_id().with(("metric", id));
+    if id == "health" {
+        if tile::card(ui, r, wid, false).clicked() {
+            cx.open_page(ID, "");
+        }
+        overview(&s, size, ui.painter(), r);
+        return;
+    }
+    let Some(mt) = metric(&s, id) else { return };
+    let sel = cx.is_detail_open(ID, id);
+    let col = tint::HEALTH;
+    let resp = match size {
+        Size::S11 => match mt.bar {
+            Some((f, c)) => tile::small_ring(ui, r, wid, mt.glyph, f, c, &mt.value(), sel),
+            None => tile::small(ui, r, wid, mt.glyph, col, &mt.big, &mt.label, sel),
+        },
+        Size::S12 => tile::wide(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), mt.bar.ok_or(mt.caption.as_str()), sel),
+        Size::S14 => tile::row(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), mt.bar.ok_or(mt.caption.as_str()), sel),
+        _ => {
+            let resp = tile::card(ui, r, wid, sel);
+            let p = ui.painter();
+            let body = tile::head(p, r, mt.glyph, col, &mt.label, &mt.caption);
+            medium_body(&s, id, &mt, p, body);
+            resp
+        }
+    };
+    if resp.clicked() {
         cx.toggle_detail(ID, id);
+    }
+}
+
+/// A list line: label, optional bar, value.
+type Line = (String, Option<(f32, Color32)>, String);
+
+/// The body of a Medium metric: a big value and the reading's breakdown.
+fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rect) {
+    let big = p.text(body.left_top(), Align2::LEFT_TOP, &mt.big, bold(26.0), TEXT);
+    p.text(Pos2::new(big.right() + 4.0, big.bottom() - 5.0), Align2::LEFT_BOTTOM, &mt.unit, font(13.0), TEXT_DIM);
+    let list = Rect::from_min_max(Pos2::new(body.left(), big.bottom() + 8.0), body.max);
+    let lines: Vec<Line> = match id {
+        "storage" => {
+            let tot = s.disk_total.max(1) as f32;
+            s.categories.iter().take(3).map(|(n, b)| (n.clone(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), human_bytes(*b))).collect()
+        }
+        "memory" => {
+            let tot = s.mem_total.max(1) as f32;
+            [("App memory", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / tot).clamp(0.01, 1.0), PURPLE)), human_bytes(b))).collect()
+        }
+        "cpu" => {
+            tile::spark(p, list.shrink2(egui::Vec2::new(0.0, 2.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(GREEN), Some(with_alpha(GREEN, 0.12)));
+            Vec::new()
+        }
+        "network" => vec![("Download".into(), None, human_rate(s.net_down)), ("Upload".into(), None, human_rate(s.net_up)), ("Received today".into(), None, human_bytes(s.net_recv_total))],
+        "devices" => s.devices.iter().take(3).map(|d| (d.name.clone(), d.battery.map(|b| (b as f32 / 100.0, if b <= m::BT_LOW_BATTERY_MAX_PCT { AMBER } else { GREEN })), d.battery.map(|b| format!("{b}%")).unwrap_or_default())).collect(),
+        _ => vec![(mt.caption.clone(), mt.bar, String::new())],
+    };
+    if id == "devices" && s.devices.is_empty() {
+        tile::empty_note(p, list, "No Bluetooth devices connected");
+    }
+    let lh = (list.height() / 3.0).min(22.0);
+    for (k, (label, frac, value)) in lines.iter().enumerate() {
+        let lr = Rect::from_min_size(Pos2::new(list.left(), list.top() + k as f32 * lh), egui::Vec2::new(list.width(), lh));
+        tile::bar_line(p, lr, label, *frac, value);
+    }
+}
+
+/// The Mac Health overview: a ring per reading (Medium) or a line per
+/// reading with the CPU history (Large).
+fn overview(s: &Snapshot, size: Size, p: &egui::Painter, r: Rect) {
+    let status = header(s);
+    let body = tile::head(p, r, Icon::Pulse, tint::HEALTH, "Mac Health", &status.status);
+    let ms: Vec<Metric> = METRICS.iter().filter_map(|id| metric(s, id)).collect();
+    if size == Size::S44 {
+        let lh = 30.0;
+        for (k, mt) in ms.iter().enumerate() {
+            let lr = Rect::from_min_size(Pos2::new(body.left(), body.top() + k as f32 * lh), egui::Vec2::new(body.width(), lh));
+            icon(p, mt.glyph, Rect::from_center_size(Pos2::new(lr.left() + 9.0, lr.center().y), egui::Vec2::splat(16.0)), TEXT_SOFT);
+            tile::bar_line(p, Rect::from_min_max(Pos2::new(lr.left() + 26.0, lr.top()), lr.max), &mt.label, mt.bar, &mt.value());
+            if k > 0 {
+                hairline(p, Pos2::new(lr.left() + 26.0, lr.top()), Pos2::new(lr.right(), lr.top()));
+            }
+        }
+        let sr = Rect::from_min_max(Pos2::new(body.left(), body.top() + ms.len() as f32 * lh + 14.0), body.max);
+        p.text(sr.left_top(), Align2::LEFT_TOP, "CPU · last minute", font(11.0), TEXT_FAINT);
+        tile::spark(p, Rect::from_min_max(sr.left_top() + egui::Vec2::new(0.0, 18.0), sr.max), &s.cpu_history, GREEN, Some(with_alpha(GREEN, 0.12)));
+        return;
+    }
+    // Medium: three across, two down
+    let cw = body.width() / 3.0;
+    let ch = body.height() / 2.0;
+    for (k, mt) in ms.iter().enumerate() {
+        let c = Pos2::new(body.left() + cw * ((k % 3) as f32 + 0.5), body.top() + ch * ((k / 3) as f32) + 18.0);
+        let (f, col) = mt.bar.unwrap_or((0.0, TEXT_FAINT));
+        tile::ring(p, Pos2::new(body.left() + cw * (k % 3) as f32 + 18.0, c.y), 14.0, 3.5, f, col);
+        icon(p, mt.glyph, Rect::from_center_size(Pos2::new(body.left() + cw * (k % 3) as f32 + 18.0, c.y), egui::Vec2::splat(13.0)), TEXT_SOFT);
+        let x = body.left() + cw * (k % 3) as f32 + 38.0;
+        text_fit(p, Pos2::new(x, c.y - 7.0), Align2::LEFT_CENTER, &mt.value(), bold(12.0), TEXT, cw - 40.0);
+        text_fit(p, Pos2::new(x, c.y + 8.0), Align2::LEFT_CENTER, &mt.label, font(10.0), TEXT_FAINT, cw - 40.0);
     }
 }
 

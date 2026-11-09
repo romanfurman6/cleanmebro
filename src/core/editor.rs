@@ -5,7 +5,7 @@
 
 use super::panel::{self, Placed};
 use super::settings::{hide_entry, place_entry, widget_key};
-use super::shell::{App, CORE, PLANNED, RECOMMENDATION};
+use super::shell::{App, CORE, RECOMMENDATION};
 use super::tool::{Cx, GRID_COLUMNS};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
@@ -28,10 +28,6 @@ const GALLERY_W: f32 = 330.0;
 const CARD_H: f32 = 48.0;
 const CARD_GAP: f32 = 8.0;
 const END_SLOT_H: f32 = 40.0;
-/// Planned tools' widgets, shown dashed in the gallery: (icon, widget, tool).
-const PLANNED_WIDGETS: [(Icon, &str, &str); 4] = [(Icon::Cup, "Keep awake", "Keep Awake"), (Icon::Fan, "Fan speed", "Fan Control"), (Icon::Crop, "Capture", "Capture"), (Icon::Clipboard, "Recent clipboard", "Clipboard")];
-/// Planned tools in the Tools tab: (icon, name).
-const PLANNED_TOOLS: [(Icon, &str); 4] = [(Icon::Crop, "Capture"), (Icon::Clipboard, "Clipboard"), (Icon::Fan, "Fan Control"), (Icon::Cup, "Keep Awake")];
 
 /// What a drop would do right now.
 #[derive(Clone, Debug, PartialEq)]
@@ -84,8 +80,7 @@ fn gallery(app: &App) -> Vec<(String, Vec<Item>)> {
             .into_iter()
             .map(|w| {
                 let key = widget_key(t.id(), w.id);
-                // rows of a group (the Mac metrics) are small on their own
-                let span = if w.group.is_some() || w.span <= 2 { 2 } else { GRID_COLUMNS };
+                let span = if w.size.cols() <= 2 { 2 } else { GRID_COLUMNS };
                 Item { added: added(&key), key: Some(key), title: w.title.into(), span, glyph: b.icon, color: b.color }
             })
             .collect();
@@ -93,7 +88,7 @@ fn gallery(app: &App) -> Vec<(String, Vec<Item>)> {
             groups.push((t.name().to_uppercase(), items));
         }
     }
-    let core = [(PLANNED, "Planned tools", Icon::Crop), (RECOMMENDATION, "Recommendation", Icon::Sparkle)]
+    let core = [(RECOMMENDATION, "Recommendation", Icon::Sparkle)]
         .into_iter()
         .map(|(id, title, glyph)| {
             let key = widget_key(CORE, id);
@@ -101,14 +96,6 @@ fn gallery(app: &App) -> Vec<(String, Vec<Item>)> {
         })
         .collect();
     groups.push(("CORE".into(), core));
-    let planned: Vec<Item> = PLANNED_WIDGETS
-        .iter()
-        .filter(|(_, _, tool)| !app.tools.iter().any(|t| t.name() == *tool))
-        .map(|(glyph, title, _)| Item { key: None, title: (*title).into(), span: 2, glyph: *glyph, color: Color32::TRANSPARENT, added: false })
-        .collect();
-    if !planned.is_empty() {
-        groups.push(("PLANNED TOOLS".into(), planned));
-    }
     groups
 }
 
@@ -205,7 +192,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     panel::title_line(app, &p, boxr.left() + 16.0, boxr.top(), pw - 32.0);
 
     let area = Rect::from_min_max(Pos2::new(boxr.left() + panel::PAD, boxr.top() + panel::HEADER - 8.0), Pos2::new(boxr.right() - panel::PAD, boxr.bottom() - 10.0));
-    let (placed, cards, content_h) = panel::place(app, area.width());
+    let (placed, content_h) = panel::place(app, area.width());
     let need = content_h + panel::GAP + END_SLOT_H + 8.0;
     let mut target = Target::Nothing;
     let mut hide: Option<String> = None;
@@ -216,7 +203,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
         ui.add_space(8.0);
         let (origin, _) = ui.allocate_exact_size(Vec2::new(area.width(), need.max(area.height() - 8.0)), Sense::hover());
         let clip = ui.clip_rect();
-        let (t, h) = preview(app, ui, origin, clip, &placed, &cards, content_h, pointer);
+        let (t, h) = preview(app, ui, origin, clip, &placed, content_h, pointer);
         target = t;
         hide = h;
     });
@@ -331,7 +318,7 @@ fn plus(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
 /// instead. Returns the drop target under the pointer and a widget whose
 /// "−" was clicked.
 #[allow(clippy::too_many_arguments)]
-fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Placed], cards: &[Rect], content_h: f32, pointer: Option<Pos2>) -> (Target, Option<String>) {
+fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Placed], content_h: f32, pointer: Option<Pos2>) -> (Target, Option<String>) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time) as f32;
@@ -340,9 +327,6 @@ fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Place
     // tools' widgets may ask for things (open a sheet…): ignore it here
     let mut quiet = Cx::new(None);
     let mut hide = None;
-    for c in cards {
-        glass_card(&p, at(*c), R_CARD, 0.0, false);
-    }
     let mut keys: Vec<String> = Vec::with_capacity(placed.len());
     for (n, w) in placed.iter().enumerate() {
         let key = app.widgets[w.entry].key.clone();
@@ -433,8 +417,7 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Tools", bold(15.0), TEXT);
     p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, "Each tool is separate. Turning one off hides its widgets and its page.", font(12.0), TEXT_DIM);
     y += 50.0;
-    let planned: Vec<_> = PLANNED_TOOLS.iter().filter(|(_, n)| !app.tools.iter().any(|t| t.name() == *n)).collect();
-    let rows = app.tools.len() + planned.len();
+    let rows = app.tools.len();
     let row_h = 46.0;
     let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, rows as f32 * row_h + 8.0));
     glass_card(&p, card, R_CARD, 0.0, false);
@@ -447,7 +430,8 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
         let chip = Rect::from_min_size(Pos2::new(rr.left(), rr.center().y - 13.0), Vec2::splat(26.0));
         let sw = Rect::from_min_size(Pos2::new(rr.right() - 30.0, rr.center().y - 9.0), Vec2::new(30.0, 18.0));
         let tw = sw.left() - chip.right() - 24.0;
-        if let Some(t) = app.tools.get(k) {
+        let t = &app.tools[k];
+        {
             let b = t.badge();
             tool_chip(&p, chip, b.icon, b.color);
             text_fit(&p, Pos2::new(chip.right() + 12.0, rr.top() + 8.0), Align2::LEFT_TOP, t.name(), font(13.0), TEXT, tw);
@@ -457,12 +441,6 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
             if switch(ui, sw, id, on, true).on_hover_text(if on { "Turn off" } else { "Turn on" }).clicked() {
                 flip = Some((k, !on));
             }
-        } else {
-            let (glyph, name) = planned[k - app.tools.len()];
-            planned_chip(&p, chip, *glyph);
-            p.text(Pos2::new(chip.right() + 12.0, rr.top() + 8.0), Align2::LEFT_TOP, *name, font(13.0), TEXT_DIM);
-            p.text(Pos2::new(chip.right() + 12.0, rr.top() + 26.0), Align2::LEFT_TOP, "Planned", font(11.0), TEXT_FAINT);
-            switch(ui, sw, ui.scope_id().with(("tool-planned", k)), false, false);
         }
     }
     if let Some((i, on)) = flip {

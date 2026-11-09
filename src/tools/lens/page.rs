@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 
 /// Block colours, one per top-level folder (biggest first); the rest share
 /// the last, neutral one.
-const HUES: [Color32; 9] = [
+pub(crate) const HUES: [Color32; 9] = [
     Color32::from_rgb(0x2E, 0x9E, 0x8F),
     Color32::from_rgb(0x2F, 0x6F, 0xD0),
     Color32::from_rgb(0xC7, 0x78, 0x2A),

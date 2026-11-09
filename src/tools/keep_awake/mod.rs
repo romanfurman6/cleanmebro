@@ -10,7 +10,7 @@ mod power;
 mod sessions;
 mod ui;
 
-use crate::core::tool::{Badge, Cx, MenuItem, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::core::tool::{Badge, Cx, MenuItem, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
 use crate::kit::glass::{tint, Icon};
 use egui::{Rect, Ui};
 use engine::{now, Engine, State};
@@ -18,7 +18,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const ID: ToolId = "keep_awake";
-const TILE: &str = "tile";
 const CARD: &str = "card";
 const MENU_TOGGLE: &str = "toggle";
 
@@ -151,25 +150,10 @@ impl Tool for KeepAwake {
         ui::short_state(self.state()).into()
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![
-            WidgetSpec { id: TILE, title: "Keep Awake (quick switch)", span: 1, default_on: true, group: None },
-            WidgetSpec { id: CARD, title: "Keep Awake", span: 4, default_on: true, group: None },
-        ]
+        vec![WidgetSpec { id: CARD, title: "Keep Awake", about: "The switch, and what keeps your Mac up.", sizes: ALL_SIZES, size: Size::S11, default_on: true }]
     }
-    fn widget_height(&self, widget: &str, _width: f32) -> f32 {
-        if widget == TILE {
-            crate::kit::glass::QUICK_TILE_H
-        } else {
-            let e = self.engine.lock().unwrap();
-            ui::card_height(&e, self.now())
-        }
-    }
-    fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        if widget == TILE {
-            ui::tile(self, ui, rect);
-        } else {
-            ui::card(self, ui, rect, cx);
-        }
+    fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        ui::widget(self, size, ui, rect, cx);
     }
     fn has_page(&self) -> bool {
         true

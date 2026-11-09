@@ -32,10 +32,6 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
 /// listed follow in tool order. The user can change this in the panel.
 pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "cleanup/clean",
-    "capture/tile",
-    "keep_awake/tile",
-    "fan/tile",
-    "core/planned",
     "capture/capture",
     "keep_awake/card",
     "clipboard/recent",
@@ -48,6 +44,8 @@ pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "claude/limits",
     "fan/fans",
     "core/recommendation",
+    "system/health",
+    "lens/map",
 ];
 
 #[cfg(test)]
@@ -68,8 +66,10 @@ mod tests {
             w.dedup();
             assert_eq!(w.len(), n, "duplicate widget id in {}", t.id());
             for spec in t.widgets() {
-                assert!((1..=crate::core::tool::GRID_COLUMNS).contains(&spec.span));
-                assert!(t.widget_height(spec.id, 200.0) > 0.0, "{}/{} has no height", t.id(), spec.id);
+                assert!(!spec.sizes.is_empty(), "{}/{} offers no size", t.id(), spec.id);
+                assert!(spec.sizes.contains(&spec.size), "{}/{} default size not offered", t.id(), spec.id);
+                assert!(spec.sizes.windows(2).all(|w| w[0].dims() < w[1].dims()), "{}/{} sizes not smallest first", t.id(), spec.id);
+                assert!(!spec.about.is_empty());
             }
         }
     }

@@ -17,7 +17,7 @@ mod store;
 mod ui;
 mod windows;
 
-use crate::core::tool::{Action, Badge, Cx, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::glass::{tint, Icon};
 use editor::Editor;
 use egui::{Rect, Ui};
@@ -31,7 +31,6 @@ use std::time::Instant;
 use store::{Kind, Store};
 
 pub const ID: ToolId = "capture";
-const TILE: &str = "tile";
 const CARD: &str = "capture";
 
 /// What a grab is for.
@@ -612,20 +611,10 @@ impl Tool for Capture {
         self.settings.shortcut(Command::Area).map(|s| s.display()).unwrap_or_default()
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![
-            WidgetSpec { id: TILE, title: "Capture (quick action)", span: 1, default_on: true, group: None },
-            WidgetSpec { id: CARD, title: "Capture", span: 4, default_on: true, group: None },
-        ]
+        vec![WidgetSpec { id: CARD, title: "Capture", about: "Take a screenshot; recent captures at the bigger sizes.", sizes: UP_TO_MEDIUM, size: Size::S11, default_on: true }]
     }
-    fn widget_height(&self, widget: &str, _width: f32) -> f32 {
-        if widget == TILE { crate::kit::glass::QUICK_TILE_H } else { ui::CARD_H }
-    }
-    fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        if widget == TILE {
-            ui::tile(self, ui, rect);
-        } else {
-            ui::card(self, ui, rect, cx);
-        }
+    fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        ui::widget(self, size, ui, rect, cx);
     }
     fn has_page(&self) -> bool {
         true

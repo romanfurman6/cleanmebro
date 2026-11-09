@@ -6,13 +6,13 @@ use super::settings::{After, Command, Format, Shortcut, DELAYS, KEEP_MAX, KEEP_M
 use super::folder::FileShot;
 use super::store::{Kind, Shot};
 use super::{mac, Capture, Tab, ID};
-use crate::core::tool::Cx;
+use crate::core::tool::{Cx, Size};
+use crate::kit::tile;
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
 use std::path::PathBuf;
 use std::time::Instant;
 
-pub const CARD_H: f32 = 222.0;
 const ROW_H: f32 = 36.0;
 const HOVER_BTN: Color32 = Color32::from_rgb(0x2C, 0x2C, 0x31);
 
@@ -35,60 +35,105 @@ fn key_label(c: &Capture, cmd: Command) -> String {
 
 // ---------------------------------------------------------------- panel
 
-pub fn tile(c: &mut Capture, ui: &mut Ui, rect: Rect) {
-    let sub = if c.busy { "Capturing…".to_string() } else { key_label(c, Command::Area) };
-    let sub = if sub.is_empty() { "Area".to_string() } else { sub };
-    if quick_tile(ui, rect, ui.scope_id().with("q-capture"), Icon::Crop, tint::CAPTURE, "Capture", &sub, true).clicked() {
-        c.queue.push((Command::Area, c.settings.delay));
+const MODES: [(Command, &str); 4] = [(Command::Area, "Area"), (Command::Window, "Window"), (Command::Screen, "Screen"), (Command::Text, "Text")];
+
+/// The Capture widget at `size`.
+pub fn widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+    let id = ui.scope_id().with("w-capture");
+    match size {
+        Size::S11 => {
+            let sub = if c.busy { "Capturing…".to_string() } else { key_label(c, Command::Area) };
+            let sub = if sub.is_empty() { "Area".to_string() } else { sub };
+            if tile::small(ui, rect, id, Icon::Crop, tint::CAPTURE, "Capture", &sub, false).on_hover_text("Capture an area").clicked() {
+                c.queue.push((Command::Area, c.settings.delay));
+            }
+        }
+        Size::S12 | Size::S14 => {
+            let _ = tile::card(ui, rect, id, false);
+            let p = ui.painter().clone();
+            let mut x0 = rect.left() + 8.0;
+            if size == Size::S12 {
+                tool_chip(&p, Rect::from_min_size(Pos2::new(x0 + 2.0, rect.top() + 9.0), Vec2::splat(18.0)), Icon::Crop, tint::CAPTURE);
+                p.text(Pos2::new(x0 + 26.0, rect.top() + 18.0), Align2::LEFT_CENTER, "Capture", font(11.0), TEXT_DIM);
+                let r = Rect::from_min_max(Pos2::new(x0, rect.top() + 32.0), Pos2::new(rect.right() - 8.0, rect.bottom() - 8.0));
+                modes(c, ui, &p, id, r, &MODES[..2], false);
+            } else {
+                let chip = Rect::from_min_size(Pos2::new(rect.left() + 12.0, rect.center().y - 17.0), Vec2::splat(34.0));
+                tool_chip(&p, chip, Icon::Crop, tint::CAPTURE);
+                x0 = chip.right() + 10.0;
+                modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, rect.top() + 9.0), Pos2::new(rect.right() - 9.0, rect.bottom() - 9.0)), &MODES, true);
+            }
+        }
+        _ => card(c, ui, rect, cx),
     }
 }
 
-/// The panel card: four capture buttons, the delay and the latest captures.
+/// Capture buttons side by side in `r`: icon, name and (`keys`) shortcut.
+fn modes(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, id: egui::Id, r: Rect, list: &[(Command, &str)], keys: bool) {
+    let gap = 6.0;
+    let n = list.len() as f32;
+    let bw = (r.width() - (n - 1.0) * gap) / n;
+    let tall = r.height() >= 48.0;
+    for (k, (cmd, label)) in list.iter().enumerate() {
+        let b = Rect::from_min_size(Pos2::new(r.left() + k as f32 * (bw + gap), r.top()), Vec2::new(bw, r.height()));
+        let resp = ui.interact(b, id.with(("mode", k)), Sense::click());
+        let h = ui.ctx().animate_bool(id.with(("mode-h", k)), resp.hovered());
+        p.rect_filled(b, R_BUTTON, lerp_color(HOVER_BTN, Color32::from_rgb(0x36, 0x36, 0x3C), h));
+        p.rect_stroke(b, R_BUTTON, Stroke::new(1.0, white(20)), StrokeKind::Inside);
+        if tall {
+            let top = b.top() + if keys { 15.0 } else { 18.0 };
+            icons::draw(p, command_icon(*cmd), Rect::from_center_size(Pos2::new(b.center().x, top), Vec2::splat(17.0)), TEXT);
+            p.text(Pos2::new(b.center().x, top + 17.0), Align2::CENTER_CENTER, *label, font(11.0), TEXT);
+            if keys {
+                p.text(Pos2::new(b.center().x, top + 29.0), Align2::CENTER_CENTER, key_label(c, *cmd), font(10.0), TEXT_FAINT);
+            }
+        } else {
+            let g = p.layout_no_wrap(label.to_string(), font(11.0), TEXT);
+            let w = 15.0 + 5.0 + g.size().x;
+            let x = b.center().x - w / 2.0;
+            icons::draw(p, command_icon(*cmd), Rect::from_center_size(Pos2::new(x + 7.5, b.center().y), Vec2::splat(14.0)), TEXT);
+            p.galley(Pos2::new(x + 20.0, b.center().y - g.size().y / 2.0), g, TEXT);
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let tip = key_label(c, *cmd);
+        if resp.on_hover_text(if tip.is_empty() { label.to_string() } else { format!("{label} · {tip}") }).clicked() {
+            let delay = if *cmd == Command::Text { 0 } else { c.settings.delay };
+            c.queue.push((*cmd, delay));
+        }
+    }
+}
+
+/// The Medium widget: the delay, four capture buttons and the latest captures.
 pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
     let id = ui.scope_id().with("capture-card");
-    glass_card(&p, rect, R_CARD, 0.0, false);
+    tile::paint_card(&p, rect, 0.0, false);
     let x0 = rect.left() + 12.0;
     let x1 = rect.right() - 12.0;
     let mut y = rect.top() + 10.0;
     tool_chip(&p, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(20.0)), Icon::Crop, tint::CAPTURE);
     p.text(Pos2::new(x0 + 28.0, y + 10.0), Align2::LEFT_CENTER, "Capture", bold(13.0), TEXT);
-    if link(ui, Pos2::new(x1, y + 10.0), Align2::RIGHT_CENTER, "History", 12.0).clicked() {
+    let hl = link(ui, Pos2::new(x1, y + 10.0), Align2::RIGHT_CENTER, "History", 12.0);
+    let h_left = hl.rect.left();
+    if hl.clicked() {
         c.tab = Tab::History;
         cx.open_page(ID, "history");
     }
-    y += 30.0;
-
-    let gap = 6.0;
-    let bw = (x1 - x0 - 3.0 * gap) / 4.0;
-    let modes = [(Command::Area, "Area"), (Command::Window, "Window"), (Command::Screen, "Screen"), (Command::Text, "Text")];
-    for (k, (cmd, label)) in modes.iter().enumerate() {
-        let r = Rect::from_min_size(Pos2::new(x0 + k as f32 * (bw + gap), y), Vec2::new(bw, 52.0));
-        let resp = ui.interact(r, id.with(("mode", k)), Sense::click());
-        let h = ui.ctx().animate_bool(id.with(("mode-h", k)), resp.hovered());
-        p.rect_filled(r, R_BUTTON, lerp_color(HOVER_BTN, Color32::from_rgb(0x36, 0x36, 0x3C), h));
-        p.rect_stroke(r, R_BUTTON, Stroke::new(1.0, white(20)), StrokeKind::Inside);
-        icons::draw(&p, command_icon(*cmd), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 15.0), Vec2::splat(17.0)), TEXT);
-        p.text(Pos2::new(r.center().x, r.top() + 32.0), Align2::CENTER_CENTER, *label, font(11.0), TEXT);
-        p.text(Pos2::new(r.center().x, r.top() + 44.0), Align2::CENTER_CENTER, key_label(c, *cmd), font(10.0), TEXT_FAINT);
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        if resp.clicked() {
-            let delay = if *cmd == Command::Text { 0 } else { c.settings.delay };
-            c.queue.push((*cmd, delay));
-        }
-    }
-    y += 52.0 + 10.0;
-
-    p.text(Pos2::new(x0, y + 13.0), Align2::LEFT_CENTER, "Delay", font(12.0), TEXT_DIM);
-    let sr = Rect::from_min_size(Pos2::new(x1 - 180.0, y), Vec2::new(180.0, 26.0));
+    // the delay, in the header
+    let sr = Rect::from_min_size(Pos2::new(h_left - 12.0 - 150.0, y - 1.0), Vec2::new(150.0, 22.0));
     let cur = DELAYS.iter().position(|d| *d == c.settings.delay).unwrap_or(0);
     if let Some(i) = segmented(ui, sr, id.with("delay"), &["Off", "3 s", "5 s", "10 s"], cur) {
         c.settings.delay = DELAYS[i];
         c.save_settings();
     }
-    y += 26.0 + 12.0;
+    y += 30.0;
+
+    let gap = 6.0;
+    let bw = (x1 - x0 - 3.0 * gap) / 4.0;
+    modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 52.0)), &MODES, true);
+    y += 52.0 + 10.0;
 
     // the newest images in the screenshot folder; history when it has none
     c.refresh_files();

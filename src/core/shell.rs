@@ -2,8 +2,8 @@
 //! detail sheet to its left), and a full window with a page per tool. It knows
 //! tools only through the [`Tool`] trait.
 
-use super::settings::{widget_key, Entry, WidgetPrefs};
-use super::tool::{Action, Cx, Tool, ToolEnv, View, WidgetSpec};
+use super::settings::{widget_key, Avail, Entry, WidgetPrefs};
+use super::tool::{Action, Cx, Size, Tool, ToolEnv, View, WidgetSpec};
 use crate::kit::glass::{self, *};
 use crate::kit::mechanics as m;
 use egui::{Color32, Pos2, Rect, Vec2, ViewportCommand};
@@ -16,8 +16,14 @@ use std::time::Instant;
 pub const CORE: &str = "core";
 /// "Today's Recommendation", fed by every tool.
 pub const RECOMMENDATION: &str = "recommendation";
-/// Shell widget: dashed tiles for the tools that are planned but not built.
-pub const PLANNED: &str = "planned";
+
+/// The widget gallery beside the panel while editing.
+#[derive(Clone, Debug, Default)]
+pub struct Gallery {
+    /// The widget whose sizes are shown (`tool/widget`); `None` = the list.
+    pub pick: Option<String>,
+    pub size: Option<Size>,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -49,6 +55,13 @@ pub struct App {
     pub settings_tab: usize,
     /// A widget being dragged in the editor.
     pub drag: Option<super::editor::Drag>,
+    /// The panel is in edit mode: widgets wobble, can be moved, resized and
+    /// removed.
+    pub editing: bool,
+    /// The widget selected in edit mode (its size bar shows).
+    pub edit_sel: Option<String>,
+    /// The gallery sheet beside the panel, while editing.
+    pub gallery: Option<Gallery>,
     // window/tray state
     tray: Option<tray_icon::TrayIcon>,
     tray_rx: Receiver<tray_icon::TrayIconEvent>,
@@ -108,6 +121,9 @@ impl App {
             settings_open: false,
             settings_tab: 0,
             drag: None,
+            editing: false,
+            edit_sel: None,
+            gallery: None,
             tray,
             tray_rx,
             tray_title: String::new(),
@@ -134,19 +150,19 @@ impl App {
         app
     }
 
-    /// Every widget any tool (or the shell) offers, as (key, shown by default).
-    pub fn available_widgets(&self) -> Vec<(String, bool)> {
-        let mut v: Vec<(String, bool)> = Vec::new();
+    /// Every widget any tool (or the shell) offers, as (key, shown by
+    /// default, default size).
+    pub fn available_widgets(&self) -> Vec<Avail> {
+        let mut v: Vec<Avail> = Vec::new();
         for t in &self.tools {
             for w in t.widgets() {
-                v.push((widget_key(t.id(), w.id), w.default_on));
+                v.push((widget_key(t.id(), w.id), w.default_on, w.size));
             }
         }
-        v.push((widget_key(CORE, PLANNED), true));
-        v.push((widget_key(CORE, RECOMMENDATION), true));
+        v.push((widget_key(CORE, RECOMMENDATION), true, Size::S14));
         // the registry's preferred order first, the rest as the tools list them
         let rank = |k: &str| crate::tools::DEFAULT_WIDGET_ORDER.iter().position(|o| *o == k).unwrap_or(usize::MAX);
-        v.sort_by_key(|(k, _)| rank(k));
+        v.sort_by_key(|(k, _, _)| rank(k));
         v
     }
 
@@ -154,12 +170,7 @@ impl App {
     pub fn widget_spec(&self, key: &str) -> Option<(Option<usize>, WidgetSpec)> {
         let (tool, id) = key.split_once('/')?;
         if tool == CORE && id == RECOMMENDATION {
-            return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", span: 4, default_on: true, group: None }));
-        }
-        if tool == CORE && id == PLANNED {
-            // one column per planned tool still missing; gone once all exist
-            let span = super::panel::planned_count(self) as u8;
-            return (span > 0).then_some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span, default_on: true, group: None }));
+            return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", about: "The most useful thing to do now, from every tool.", sizes: &[Size::S14], size: Size::S14, default_on: true }));
         }
         let i = self.tools.iter().position(|t| t.id() == tool)?;
         let spec = self.tools[i].widgets().into_iter().find(|w| w.id == id)?;
@@ -207,6 +218,35 @@ impl App {
     fn apply_view(&mut self, view: &str) {
         match view {
             "panel" => return,
+            // edit mode, with a widget selected / the gallery open
+            "edit" | "gallery" | "gallery-pick" => {
+                self.editing = true;
+                self.edit_sel = Some("fan/fans".into());
+                if view != "edit" {
+                    self.edit_sel = None;
+                    let pick = (view == "gallery-pick").then(|| "clipboard/recent".to_string());
+                    self.gallery = Some(Gallery { pick, size: Some(Size::S24) });
+                }
+                return;
+            }
+            // showcases of the sizes: the new tools, then the monitors
+            "sizes" | "sizes2" => {
+                for t in &mut self.tools {
+                    t.demo_view("sizes");
+                }
+                let show: &[(&str, Size)] = if view == "sizes" {
+                    &[("cleanup/clean", Size::S11), ("system/cpu", Size::S11), ("system/memory", Size::S12), ("fan/fans", Size::S14), ("capture/capture", Size::S14), ("keep_awake/card", Size::S24), ("clipboard/recent", Size::S24)]
+                } else {
+                    &[("system/health", Size::S24), ("lens/map", Size::S24), ("claude/limits", Size::S24), ("system/storage", Size::S11), ("system/memory", Size::S11), ("system/battery", Size::S12), ("fan/fans", Size::S44)]
+                };
+                for e in &mut self.widgets {
+                    e.on = false;
+                }
+                for (k, z) in show {
+                    super::settings::add_entry(&mut self.widgets, k, *z, None);
+                }
+                return;
+            }
             "customize" | "settings-tools" => {
                 self.mode = Mode::Window;
                 self.settings_open = true;
@@ -278,11 +318,32 @@ impl App {
         }
     }
 
+    /// Start editing the panel's widgets (closes any sheet).
+    pub fn start_editing(&mut self, ctx: &egui::Context) {
+        self.editing = true;
+        self.edit_sel = None;
+        self.detail = None;
+        self.gear_open = false;
+        self.reshape(ctx);
+    }
+
+    pub fn stop_editing(&mut self) {
+        self.editing = false;
+        self.edit_sel = None;
+        self.gallery = None;
+        self.drag = None;
+    }
+
+    /// Whether a sheet (a tool's detail or the gallery) sits beside the panel.
+    pub fn sheet_open(&self) -> bool {
+        self.detail.is_some() || self.gallery.is_some()
+    }
+
     /// The panel's height for its current widgets, before the screen limit.
     fn panel_height(&self) -> f32 {
         let content = super::panel::content_height(self);
-        let h = super::panel::HEADER + content + super::panel::FOOTER;
-        if self.detail.is_some() {
+        let h = super::panel::HEADER + content + super::panel::footer_height(self);
+        if self.sheet_open() {
             h.max(m::PANEL_HEIGHT)
         } else {
             h
@@ -297,7 +358,7 @@ impl App {
     pub fn window_size(&self, ctx: &egui::Context) -> Vec2 {
         match self.mode {
             Mode::Panel => {
-                let w = m::PANEL_WIDTH + if self.detail.is_some() { m::DETAIL_WIDTH + 12.0 } else { 0.0 };
+                let w = m::PANEL_WIDTH + if self.sheet_open() { m::DETAIL_WIDTH + 12.0 } else { 0.0 };
                 Vec2::new(w, self.panel_height().min(self.max_panel_height(ctx)))
             }
             Mode::Window => Vec2::new(m::APP_WIDTH, m::APP_HEIGHT),
@@ -341,6 +402,7 @@ impl App {
     pub fn hide(&mut self, ctx: &egui::Context) {
         self.visible = false;
         self.gear_open = false;
+        self.stop_editing();
         self.last_hide = Instant::now();
         ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Visible(false));
     }
@@ -472,11 +534,15 @@ impl eframe::App for App {
                 // one glass sheet; the detail opens on its left behind a hairline
                 glass::backdrop(ui.painter(), full, m::CARD_RADIUS + 2.0, opaque, t);
                 let panel = Rect::from_min_size(Pos2::new(full.right() - m::PANEL_WIDTH, full.top()), Vec2::new(m::PANEL_WIDTH, full.height()));
-                if self.detail.is_some() {
+                if self.sheet_open() {
                     let sheet = Rect::from_min_size(full.left_top(), Vec2::new(m::DETAIL_WIDTH, full.height()));
                     let x = panel.left() - 6.0;
                     ui.painter().line_segment([Pos2::new(x, full.top() + 18.0), Pos2::new(x, full.bottom() - 18.0)], egui::Stroke::new(1.0, white(30)));
-                    super::panel::detail(self, ui, sheet, &mut cx);
+                    if self.gallery.is_some() {
+                        super::gallery::sheet(self, ui, sheet);
+                    } else {
+                        super::panel::detail(self, ui, sheet, &mut cx);
+                    }
                 }
                 let before = self.widgets.clone();
                 super::panel::panel(self, ui, panel, &mut cx);

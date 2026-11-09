@@ -143,14 +143,6 @@ pub fn glass_card(painter: &Painter, rect: Rect, r: f32, hover: f32, selected: b
     }
 }
 
-/// A card that reacts to the mouse. Returns its response.
-pub fn card(ui: &mut Ui, rect: Rect, id: egui::Id, r: f32, selected: bool) -> Response {
-    let resp = ui.interact(rect, id, Sense::click());
-    let hover = ui.ctx().animate_bool(id.with("hover"), resp.hovered());
-    glass_card(ui.painter(), rect, r, hover, selected);
-    resp
-}
-
 /// Button kinds for [`pill_button`].
 pub const BTN_SECONDARY: u8 = 0;
 pub const BTN_PRIMARY: u8 = 1;
@@ -420,106 +412,6 @@ pub fn sheet_header(ui: &mut Ui, rect: Rect, glyph: Icon, color: Color32, title:
 
 // ---------------------------------------------------------------- panel widgets
 
-/// A quarter-width quick-action tile: tint chip, label, one line under it.
-/// Planned tiles are dashed and don't react.
-pub fn quick_tile(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, label: &str, sub: &str, live: bool) -> Response {
-    let resp = ui.interact(rect, id, if live { Sense::click() } else { Sense::hover() });
-    let h = ui.ctx().animate_bool(id.with("h"), resp.hovered() && live);
-    let p = ui.painter();
-    let chip_r = Rect::from_min_size(rect.min + Vec2::new(8.0, 10.0), Vec2::splat(28.0));
-    if live {
-        p.rect_filled(rect, R_CARD, lerp_color(RAISED, Color32::from_rgb(0x32, 0x32, 0x37), h));
-        p.rect_stroke(rect, R_CARD, Stroke::new(1.0, white(20)), StrokeKind::Inside);
-        p.rect_filled(chip_r, 8.0, color);
-        icon(p, glyph, Rect::from_center_size(chip_r.center(), Vec2::splat(17.0)), Color32::WHITE);
-    } else {
-        dashed_rect(p, rect, R_CARD, white(56));
-        p.rect_filled(chip_r, 8.0, white(15));
-        icon(p, glyph, Rect::from_center_size(chip_r.center(), Vec2::splat(17.0)), TEXT_DIM);
-    }
-    text_fit(p, Pos2::new(rect.left() + 8.0, chip_r.bottom() + 6.0), Align2::LEFT_TOP, label, bold(12.0), TEXT, rect.width() - 14.0);
-    text_fit(p, Pos2::new(rect.left() + 8.0, chip_r.bottom() + 23.0), Align2::LEFT_TOP, sub, font(11.0), TEXT_DIM, rect.width() - 14.0);
-    if live && resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    if !live {
-        return resp.on_hover_text("Planned: not built yet");
-    }
-    resp
-}
-
-/// Height of a [`quick_tile`].
-pub const QUICK_TILE_H: f32 = 84.0;
-/// Height of a [`metric_row`] with a bar / without one.
-pub const METRIC_ROW_H: f32 = 44.0;
-pub const METRIC_ROW_H_FLAT: f32 = 34.0;
-
-/// Height of a [`metric_tile`].
-pub const METRIC_TILE_H: f32 = 82.0;
-
-/// A half-width metric tile for the panel: icon and label on top, a big
-/// number with its unit, then a thin bar or a caption line. Click opens the
-/// reading's sheet; `selected` outlines the tile while its sheet is open.
-#[allow(clippy::too_many_arguments)]
-pub fn metric_tile(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, label: &str, big: &str, unit: &str, caption: &str, caption_col: Color32, bar_frac: Option<(f32, Color32)>, selected: bool) -> Response {
-    let resp = card(ui, rect, id, R_CARD, selected);
-    let p = ui.painter();
-    let x0 = rect.left() + 12.0;
-    let x1 = rect.right() - 12.0;
-    let top = rect.top() + 11.0;
-    icon(p, glyph, Rect::from_min_size(Pos2::new(x0, top), Vec2::splat(14.0)), TEXT_DIM);
-    text_fit(p, Pos2::new(x0 + 20.0, top + 7.0), Align2::LEFT_CENTER, label, font(12.0), TEXT_DIM, x1 - x0 - 20.0);
-    let g = p.layout_no_wrap(big.to_owned(), bold(22.0), TEXT);
-    let (gw, gh) = (g.size().x, g.size().y);
-    let gy = top + 20.0;
-    p.galley(Pos2::new(x0, gy), g, TEXT);
-    if !unit.is_empty() {
-        text_fit(p, Pos2::new(x0 + gw + 4.0, gy + gh * 0.80), Align2::LEFT_BOTTOM, unit, bold(12.0), TEXT_SOFT, (x1 - x0 - gw - 4.0).max(10.0));
-    }
-    let by = rect.bottom() - 12.0;
-    match bar_frac {
-        Some((f, c)) => {
-            bar(p, Rect::from_min_max(Pos2::new(x0, by - 4.0), Pos2::new(x1, by)), f, c);
-            text_fit(p, Pos2::new(x1, gy + gh * 0.80), Align2::RIGHT_BOTTOM, caption, font(11.0), caption_col, (x1 - x0 - gw - 40.0).max(30.0));
-        }
-        None => {
-            text_fit(p, Pos2::new(x0, by), Align2::LEFT_BOTTOM, caption, font(11.0), caption_col, x1 - x0);
-        }
-    }
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    resp
-}
-
-/// A compact metric row for a group card: icon, label, value on the right,
-/// an optional thin bar under them and a chevron. Hover/selected tint the row.
-pub fn metric_row(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, label: &str, value: &str, value_col: Color32, bar_frac: Option<(f32, Color32)>, selected: bool) -> Response {
-    let resp = ui.interact(rect, id, Sense::click());
-    let h = ui.ctx().animate_bool(id.with("h"), resp.hovered());
-    let p = ui.painter();
-    if selected {
-        p.rect_filled(rect.shrink2(Vec2::new(4.0, 0.0)), R_BUTTON, with_alpha(BLUE, 0.22));
-    } else if h > 0.0 {
-        p.rect_filled(rect.shrink2(Vec2::new(4.0, 0.0)), R_BUTTON, white((10.0 * h) as u8));
-    }
-    let cy = if bar_frac.is_some() { rect.top() + 15.0 } else { rect.center().y };
-    icon(p, glyph, Rect::from_center_size(Pos2::new(rect.left() + 20.5, rect.center().y), Vec2::splat(17.0)), TEXT_DIM);
-    let chev = Rect::from_center_size(Pos2::new(rect.right() - 19.0, rect.center().y), Vec2::splat(13.0));
-    icon(p, Icon::Forward, chev, TEXT_MUTED);
-    let x0 = rect.left() + 39.0;
-    let x1 = chev.left() - 8.0;
-    let vr = text_fit(p, Pos2::new(x1, cy), Align2::RIGHT_CENTER, value, font(12.0), value_col, (x1 - x0) * 0.62);
-    text_fit(p, Pos2::new(x0, cy), Align2::LEFT_CENTER, label, font(13.0), TEXT, vr.left() - x0 - 8.0);
-    if let Some((f, c)) = bar_frac {
-        bar(p, Rect::from_min_max(Pos2::new(x0, cy + 11.0), Pos2::new(x1, cy + 15.0)), f, c);
-    }
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    resp
-}
-
 /// The blue recommendation banner at the bottom of the panel. Returns its response.
 pub fn banner(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, title: &str, sub: &str, action: &str) -> Response {
     let resp = ui.interact(rect, id, Sense::click());
@@ -539,8 +431,6 @@ pub fn banner(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, title: &str, s
     resp
 }
 
-/// Height of a [`banner`].
-pub const BANNER_H: f32 = 56.0;
 
 /// A sheet's big number: "1.44 TB free of 2 TB". Returns the height used.
 pub fn hero_number(p: &Painter, pos: Pos2, big: &str, unit: &str, caption: &str) -> f32 {
