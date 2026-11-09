@@ -124,20 +124,6 @@ mod imp {
         reserved: u32,
     }
 
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct AudioBuf {
-        channels: u32,
-        size: u32,
-        data: *mut c_void,
-    }
-
-    #[repr(C)]
-    struct BufList {
-        n: u32,
-        bufs: [AudioBuf; 8],
-    }
-
     const LPCM: u32 = u32::from_be_bytes(*b"lpcm");
     const AAC: u32 = u32::from_be_bytes(*b"aac ");
     const FLAG_FLOAT: u32 = 1;
@@ -154,16 +140,10 @@ mod imp {
         fn CMSampleBufferGetFormatDescription(sb: *const c_void) -> *const c_void;
         fn CMSampleBufferIsValid(sb: *const c_void) -> u8;
         fn CMAudioFormatDescriptionGetStreamBasicDescription(desc: *const c_void) -> *const Asbd;
-        fn CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sb: *const c_void,
-            size_needed: *mut usize,
-            list: *mut BufList,
-            list_size: usize,
-            alloc: *const c_void,
-            block_alloc: *const c_void,
-            flags: u32,
-            block_out: *mut *mut c_void,
-        ) -> i32;
+        fn CMSampleBufferGetDataBuffer(sb: *const c_void) -> *const c_void;
+        fn CMSampleBufferGetNumSamples(sb: *const c_void) -> isize;
+        fn CMBlockBufferGetDataLength(b: *const c_void) -> usize;
+        fn CMBlockBufferCopyDataBytes(b: *const c_void, offset: usize, len: usize, dest: *mut c_void) -> i32;
         fn CMAudioFormatDescriptionCreate(
             alloc: *const c_void,
             asbd: *const Asbd,
@@ -374,9 +354,15 @@ mod imp {
                 self.stats.audio_unmapped += 1;
                 return;
             };
-            let Some(stereo) = read_pcm(raw) else {
-                self.stats.audio_unreadable += 1;
-                return;
+            let stereo = match read_pcm(raw) {
+                Ok(v) => v,
+                Err(why) => {
+                    if self.stats.audio_unreadable == 0 {
+                        rlog!("can't read {src:?} audio: {why}");
+                    }
+                    self.stats.audio_unreadable += 1;
+                    return;
+                }
             };
             let at = (vt * mixer::RATE as f64).round() as i64;
             self.mixer.push(src, at, &stereo);
@@ -459,44 +445,51 @@ mod imp {
     }
 
     /// The audio in a sample buffer as interleaved stereo at the mixer's rate.
-    fn read_pcm(raw: *const c_void) -> Option<Vec<f32>> {
+    fn read_pcm(raw: *const c_void) -> Result<Vec<f32>, String> {
         unsafe {
             let desc = CMSampleBufferGetFormatDescription(raw);
             if desc.is_null() {
-                return None;
+                return Err("no format".into());
             }
-            let asbd = *CMAudioFormatDescriptionGetStreamBasicDescription(desc).as_ref()?;
-            if asbd.format_id != LPCM || asbd.channels_per_frame == 0 {
-                return None;
+            let asbd = *CMAudioFormatDescriptionGetStreamBasicDescription(desc).as_ref().ok_or("no stream description")?;
+            let ch = asbd.channels_per_frame as usize;
+            if asbd.format_id != LPCM || ch == 0 {
+                return Err(format!("not linear PCM ({:08x}, {ch} ch)", asbd.format_id));
             }
-            let mut list: BufList = std::mem::zeroed();
-            let mut block = std::ptr::null_mut();
-            // kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment
-            let st = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(raw, std::ptr::null_mut(), &mut list, std::mem::size_of::<BufList>(), std::ptr::null(), std::ptr::null(), 1, &mut block);
-            if st != 0 {
-                return None;
-            }
-            let float = asbd.format_flags & FLAG_FLOAT != 0;
+            let float = asbd.format_flags & FLAG_FLOAT != 0 && asbd.bits_per_channel == 32;
             let int16 = !float && asbd.format_flags & FLAG_SIGNED != 0 && asbd.bits_per_channel == 16;
-            let planar = asbd.format_flags & FLAG_PLANAR != 0;
-            let n = (list.n as usize).min(8);
-            let mut owned: Vec<Vec<f32>> = Vec::with_capacity(n);
-            for b in &list.bufs[..n] {
-                if b.data.is_null() {
-                    owned.push(Vec::new());
-                } else if float && asbd.bits_per_channel == 32 {
-                    owned.push(std::slice::from_raw_parts(b.data as *const f32, b.size as usize / 4).to_vec());
-                } else if int16 {
-                    owned.push(std::slice::from_raw_parts(b.data as *const i16, b.size as usize / 2).iter().map(|&v| v as f32 / 32768.0).collect());
-                } else {
-                    owned.push(Vec::new());
+            if !float && !int16 {
+                return Err(format!("unsupported samples (flags {:x}, {} bits)", asbd.format_flags, asbd.bits_per_channel));
+            }
+            // the bytes as they are: one run of interleaved frames, or one
+            // plane per channel back to back
+            let data = CMSampleBufferGetDataBuffer(raw);
+            if data.is_null() {
+                return Err("no data buffer".into());
+            }
+            let len = CMBlockBufferGetDataLength(data);
+            let mut bytes = vec![0u8; len];
+            if len > 0 {
+                let st = CMBlockBufferCopyDataBytes(data, 0, len, bytes.as_mut_ptr() as *mut c_void);
+                if st != 0 {
+                    return Err(format!("copying the samples failed ({st})"));
                 }
             }
-            if !block.is_null() {
-                CFRelease(block);
-            }
-            let pcm = Pcm { rate: asbd.sample_rate, channels: asbd.channels_per_frame as usize, planes: owned.iter().map(|v| v.as_slice()).collect(), interleaved: !planar };
-            Some(mixer::to_stereo(&pcm))
+            let samples: Vec<f32> = if float {
+                bytes.chunks_exact(4).map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])).collect()
+            } else {
+                bytes.chunks_exact(2).map(|b| i16::from_ne_bytes([b[0], b[1]]) as f32 / 32768.0).collect()
+            };
+            let planar = asbd.format_flags & FLAG_PLANAR != 0 && ch > 1;
+            let planes: Vec<&[f32]> = if planar {
+                let stride = samples.len() / ch;
+                let frames = (CMSampleBufferGetNumSamples(raw).max(0) as usize).min(stride);
+                (0..ch).map(|c| &samples[c * stride..c * stride + frames]).collect()
+            } else {
+                vec![&samples[..]]
+            };
+            let pcm = Pcm { rate: asbd.sample_rate, channels: ch, planes, interleaved: !planar };
+            Ok(mixer::to_stereo(&pcm))
         }
     }
 

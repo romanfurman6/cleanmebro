@@ -50,6 +50,68 @@ fn icon_button(ui: &mut Ui, r: Rect, id: egui::Id, ico: Ico, tip: &str, color: C
     resp.on_hover_text(tip).clicked()
 }
 
+/// The camera and microphone lists, for the picker's menus.
+struct Devs {
+    menu: Option<Media>,
+    cams: Vec<sys::Device>,
+    mics: Vec<sys::Device>,
+    cam: Option<String>,
+    mic: Option<String>,
+}
+
+impl Devs {
+    fn of(&self, m: Media) -> (&[sys::Device], Option<&str>) {
+        match m {
+            Media::Camera => (&self.cams, self.cam.as_deref()),
+            Media::Mic => (&self.mics, self.mic.as_deref()),
+        }
+    }
+}
+
+const MENU_ROW: f32 = 30.0;
+
+/// A list of devices under `at` (top left), the one in use ticked. Picks
+/// push `Do::Use`; a click anywhere else closes it. Returns its rect.
+fn device_menu(ui: &mut Ui, p: &egui::Painter, at: Pos2, w: f32, m: Media, devs: &Devs, todo: &mut Vec<Do>) -> Rect {
+    let (list, cur) = devs.of(m);
+    let rows = list.len().max(1);
+    let r = Rect::from_min_size(at, Vec2::new(w, rows as f32 * MENU_ROW + 8.0));
+    p.rect_filled(r.translate(Vec2::new(0.0, 4.0)), 10.0, Color32::from_black_alpha(70));
+    p.rect_filled(r, 10.0, CARD);
+    p.rect_stroke(r, 10.0, Stroke::new(1.0, white(36)), StrokeKind::Inside);
+    let id = ui.scope_id().with(("dev-menu", m == Media::Mic));
+    // swallow clicks on the card itself
+    let _ = ui.interact(r, id, Sense::click());
+    if list.is_empty() {
+        let none = if m == Media::Mic { "No microphone found" } else { "No camera found" };
+        p.text(Pos2::new(r.left() + 14.0, r.top() + 4.0 + MENU_ROW / 2.0), Align2::LEFT_CENTER, none, font(12.0), TEXT_DIM);
+    }
+    for (i, dev) in list.iter().enumerate() {
+        let rr = Rect::from_min_size(Pos2::new(r.left() + 4.0, r.top() + 4.0 + i as f32 * MENU_ROW), Vec2::new(w - 8.0, MENU_ROW));
+        let resp = ui.interact(rr, id.with(i), Sense::click());
+        if resp.hovered() {
+            p.rect_filled(rr, 6.0, white(26));
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if cur == Some(dev.id.as_str()) {
+            p.text(Pos2::new(rr.left() + 12.0, rr.center().y), Align2::CENTER_CENTER, "✓", bold(12.0), TEXT);
+        }
+        text_fit(p, Pos2::new(rr.left() + 26.0, rr.center().y), Align2::LEFT_CENTER, &dev.name, font(12.5), TEXT, rr.width() - 34.0);
+        if resp.clicked() {
+            todo.push(Do::Use(m, dev.id.clone()));
+        }
+    }
+    if ui.input(|i| i.pointer.any_click()) && !ui.input(|i| i.pointer.interact_pos()).is_some_and(|q| r.contains(q)) && !todo.iter().any(|t| matches!(t, Do::Menu(_))) {
+        todo.push(Do::Menu(None));
+    }
+    r
+}
+
+/// A small ▾ after a device name, so it reads as a menu.
+fn chevron(p: &egui::Painter, c: Pos2, color: Color32) {
+    p.add(egui::Shape::convex_polygon(vec![c + Vec2::new(-3.5, -1.5), c + Vec2::new(3.5, -1.5), c + Vec2::new(0.0, 2.5)], color, Stroke::NONE));
+}
+
 fn small_switch(ui: &mut Ui, r: Rect, id: egui::Id, on: bool) -> bool {
     let resp = ui.interact(r, id, Sense::click());
     let t = ui.ctx().animate_bool(id.with("t"), on);
@@ -62,6 +124,20 @@ fn small_switch(ui: &mut Ui, r: Rect, id: egui::Id, on: bool) -> bool {
 }
 
 // ---------------------------------------------------------------- picker
+
+enum Do {
+    Cancel,
+    Source(Source),
+    Display,
+    Start(Chosen),
+    Camera,
+    Mic,
+    System,
+    /// Open (or close) a device list.
+    Menu(Option<Media>),
+    Use(Media, String),
+    Settings,
+}
 
 fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
     let Phase::Pick(pick) = &c.rec.phase else { return };
@@ -83,21 +159,11 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
         .with_taskbar(false)
         .with_has_shadow(false)
         .with_active(true);
-    enum Do {
-        Cancel,
-        Source(Source),
-        Display,
-        Start(Chosen),
-        Camera,
-        Mic,
-        System,
-        Device(Media),
-        Settings,
-    }
     let mut todo: Vec<Do> = Vec::new();
     let s = c.settings.rec.clone();
     let cam_name = c.rec.device_name(Media::Camera, &s);
     let mic_name = c.rec.device_name(Media::Mic, &s);
+    let devs = Devs { menu: c.rec.menu, cams: c.rec.cams.clone(), mics: c.rec.mics.clone(), cam: c.rec.device_id(Media::Camera, &s), mic: c.rec.device_id(Media::Mic, &s) };
     let many = c.rec.displays.len() > 1;
     let shown = crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), builder, |ui, _| {
         let vctx = ui.ctx().clone();
@@ -119,8 +185,8 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
                 p.rect_filled(r, 0.0, DIM);
                 p.rect_stroke(r, 0.0, Stroke::new(3.0, tint::CAPTURE), StrokeKind::Inside);
                 let card = Rect::from_center_size(r.center(), Vec2::new(440.0, 440.0));
-                display_card(ui, &p, card, &d, &s, many, &cam_name, &mic_name, &mut todo);
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                display_card(ui, &p, card, &d, &s, many, &cam_name, &mic_name, &devs, &mut todo);
+                if devs.menu.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     todo.push(Do::Start(super::chose_display(&d, &s)));
                 }
             }
@@ -145,10 +211,10 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
                         p.rect_filled(r, 0.0, DIM);
                     }
                 }
-                let bar = top_bar(ui, &p, r, pick.source, &s, &mut todo);
                 let resp = ui.interact(r, ui.scope_id().with("win-pick"), Sense::click());
                 vctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-                if resp.clicked() && !resp.interact_pointer_pos().is_some_and(|q| bar.contains(q)) {
+                let bar = top_bar(ui, &p, r, pick.source, &s, &devs, &mut todo);
+                if resp.clicked() && devs.menu.is_none() && !resp.interact_pointer_pos().is_some_and(|q| bar.contains(q)) {
                     if let Some(w) = win {
                         todo.push(Do::Start(super::chose_window(&d, &w, &s)));
                     }
@@ -205,10 +271,12 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
                         p.galley(r.center() - g.size() / 2.0, g, TEXT);
                     }
                 }
-                let _ = top_bar(ui, &p, r, pick.source, &s, &mut todo);
+                let _ = top_bar(ui, &p, r, pick.source, &s, &devs, &mut todo);
             }
         }
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || vctx.input(|i| i.viewport().close_requested()) {
+        if devs.menu.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            todo.push(Do::Menu(None));
+        } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) || vctx.input(|i| i.viewport().close_requested()) {
             todo.push(Do::Cancel);
         }
         if matches!(pick.source, Source::Window | Source::Area) {
@@ -236,7 +304,15 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
                 c.settings.rec.system_audio = !c.settings.rec.system_audio;
                 c.save_settings();
             }
-            Do::Device(m) => c.rec.next_device(m, &mut c.settings.rec),
+            Do::Menu(m) => {
+                if m.is_some() {
+                    // fresh lists, in case something was plugged in
+                    c.rec.mics = sys::devices(Media::Mic);
+                    c.rec.cams = sys::devices(Media::Camera);
+                }
+                c.rec.menu = m;
+            }
+            Do::Use(m, id) => c.rec.use_device(m, id, &mut c.settings.rec),
             Do::Settings => {
                 c.rec.cancel();
                 c.tab = super::super::Tab::Settings;
@@ -247,7 +323,7 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
 
     // the big card for a whole display
     #[allow(clippy::too_many_arguments)]
-    fn display_card(ui: &mut Ui, p: &egui::Painter, card: Rect, d: &sys::Display, s: &crate::tools::capture::settings::RecSettings, many: bool, cam: &str, mic: &str, todo: &mut Vec<Do>) {
+    fn display_card(ui: &mut Ui, p: &egui::Painter, card: Rect, d: &sys::Display, s: &crate::tools::capture::settings::RecSettings, many: bool, cam: &str, mic: &str, devs: &Devs, todo: &mut Vec<Do>) {
         p.rect_filled(card, 16.0, CARD);
         p.rect_stroke(card, 16.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
         let id = ui.scope_id().with("rec-card");
@@ -305,14 +381,16 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
             }
             icons::draw(p, ico, Rect::from_center_size(Pos2::new(rr.left() + 22.0, rr.center().y), Vec2::splat(18.0)), TEXT_SOFT);
             p.text(Pos2::new(rr.left() + 44.0, rr.center().y - 8.0), Align2::LEFT_CENTER, label, font(13.0), TEXT);
-            let dr = text_fit(p, Pos2::new(rr.left() + 44.0, rr.center().y + 9.0), Align2::LEFT_CENTER, &dev, font(11.0), TEXT_DIM, rr.width() - 120.0);
+            let dr = text_fit(p, Pos2::new(rr.left() + 44.0, rr.center().y + 9.0), Align2::LEFT_CENTER, &dev, font(11.0), TEXT_DIM, rr.width() - 134.0);
             if let Some(m) = media {
-                let dresp = ui.interact(dr.expand(3.0), id.with(("dev", k)), Sense::click());
+                chevron(p, Pos2::new(dr.right() + 9.0, dr.center().y), TEXT_DIM);
+                let dresp = ui.interact(dr.with_max_x(dr.right() + 16.0).expand(4.0), id.with(("dev", k)), Sense::click());
                 if dresp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    p.rect_stroke(dr.with_max_x(dr.right() + 16.0).expand(4.0), 5.0, Stroke::new(1.0, white(36)), StrokeKind::Inside);
                 }
-                if dresp.on_hover_text("Use the next device").clicked() {
-                    todo.push(Do::Device(m));
+                if dresp.on_hover_text("Choose the device").clicked() {
+                    todo.push(Do::Menu(if devs.menu == Some(m) { None } else { Some(m) }));
                 }
             }
             let sw = Rect::from_min_size(Pos2::new(rr.right() - 52.0, rr.center().y - 11.0), Vec2::new(38.0, 22.0));
@@ -330,11 +408,16 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
         if icon_button(ui, gr, id.with("gear"), Ico::Gear, "Recording settings", TEXT_SOFT, true) {
             todo.push(Do::Settings);
         }
+        if let Some(m) = devs.menu {
+            let k = if m == Media::Camera { 0.0 } else { 1.0 };
+            let top = rows.top() + k * 48.0 + 44.0;
+            device_menu(ui, p, Pos2::new(x0 + 36.0, top), x1 - x0 - 72.0, m, devs, todo);
+        }
     }
 
     // the compact bar for Window and Area; returns its rect
-    fn top_bar(ui: &mut Ui, p: &egui::Painter, r: Rect, src: Source, s: &crate::tools::capture::settings::RecSettings, todo: &mut Vec<Do>) -> Rect {
-        let br = Rect::from_center_size(Pos2::new(r.center().x, r.top() + 64.0), Vec2::new(470.0, 48.0));
+    fn top_bar(ui: &mut Ui, p: &egui::Painter, r: Rect, src: Source, s: &crate::tools::capture::settings::RecSettings, devs: &Devs, todo: &mut Vec<Do>) -> Rect {
+        let br = Rect::from_center_size(Pos2::new(r.center().x, r.top() + 64.0), Vec2::new(500.0, 48.0));
         p.rect_filled(br, 24.0, CARD);
         p.rect_stroke(br, 24.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
         let id = ui.scope_id().with("rec-top");
@@ -356,7 +439,28 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
                     _ => Do::System,
                 });
             }
-            x += 38.0;
+            x += 34.0;
+            if k < 2 {
+                // the device list
+                let m = if k == 0 { Media::Camera } else { Media::Mic };
+                let cr = Rect::from_min_size(Pos2::new(x, br.top() + 12.0), Vec2::new(16.0, 24.0));
+                let resp = ui.interact(cr, id.with(("menu", k)), Sense::click());
+                if resp.hovered() || devs.menu == Some(m) {
+                    p.rect_filled(cr, 5.0, white(30));
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                chevron(p, cr.center(), TEXT_SOFT);
+                let tip = if k == 0 { "Choose the camera" } else { "Choose the microphone" };
+                if resp.on_hover_text(tip).clicked() {
+                    todo.push(Do::Menu(if devs.menu == Some(m) { None } else { Some(m) }));
+                }
+                if devs.menu == Some(m) {
+                    device_menu(ui, p, Pos2::new(b.left() - 8.0, br.bottom() + 8.0), 260.0, m, devs, todo);
+                }
+                x += 22.0;
+            } else {
+                x += 4.0;
+            }
         }
         p.text(Pos2::new(br.right() - 16.0, br.center().y), Align2::RIGHT_CENTER, "Esc", font(12.0), TEXT_FAINT);
         br
