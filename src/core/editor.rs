@@ -228,7 +228,12 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let mut target = Target::Nothing;
     let mut hide: Option<String> = None;
     let mut pick: Option<Pick> = None;
-    let mut child = ui.new_child(UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
+    // the scroll area reaches into the right padding, so its bar runs beside
+    // the widgets (and the selection ring and handle) rather than over them
+    let scroll_r = Rect::from_min_max(area.min, Pos2::new(area.right() + panel::PAD - 2.0, area.bottom()));
+    let mut child = ui.new_child(UiBuilder::new().max_rect(scroll_r).layout(egui::Layout::top_down(egui::Align::Min)));
+    // a slim bar, so even hovered it stays clear of the widgets
+    child.spacing_mut().scroll.bar_width = 6.0;
     child.set_clip_rect(area.expand2(Vec2::new(panel::PAD, 10.0)));
     ScrollArea::vertical().id_salt("preview").auto_shrink([false, false]).show(&mut child, |ui| {
         // room above the first row for its "−" badges
@@ -460,7 +465,7 @@ fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Place
             }
         }
         // the selected one's corner handle: next size
-        let hb = Rect::from_center_size(base.right_bottom() - Vec2::new(2.0, 2.0), Vec2::splat(22.0));
+        let hb = Rect::from_center_size(base.right_bottom() - Vec2::new(9.0, 9.0), Vec2::splat(22.0));
         if selected && app.drag.is_none() && clip.contains(hb.center()) {
             let b = ui.interact(hb, id.with("grow"), Sense::click());
             p.circle_filled(hb.center(), 11.0, BG);
