@@ -22,9 +22,15 @@ pub struct Lens {
     pub(crate) lens_selected: Vec<(PathBuf, u64)>,
     pub(crate) lens_review: bool,
     pub(crate) lens_msg: Option<String>,
-    /// The map while mapping, refreshed a few times a second: (when, map,
-    /// folders still being measured).
-    pub(crate) lens_live: Option<(f64, scan::Node, Vec<PathBuf>)>,
+    /// The folder list while mapping, refreshed a few times a second:
+    /// (when, root, rows).
+    pub(crate) lens_live: Option<(f64, PathBuf, Vec<scan::LiveRow>)>,
+    /// Row order of the live list; re-sorted by size only now and then so
+    /// rows don't keep swapping places.
+    pub(crate) lens_order: Vec<PathBuf>,
+    pub(crate) lens_order_at: f64,
+    /// Where each live row and its bar were drawn last frame: (row, bar fill).
+    pub(crate) lens_rows: std::collections::HashMap<PathBuf, (egui::Rect, f32)>,
     /// Top-level folders in the order they got their colour, so a folder
     /// keeps its colour while the map grows.
     pub(crate) lens_hues: Vec<PathBuf>,
@@ -45,6 +51,9 @@ impl Lens {
             lens_review: false,
             lens_msg: None,
             lens_live: None,
+            lens_order: vec![],
+            lens_order_at: 0.0,
+            lens_rows: Default::default(),
             lens_hues: vec![],
             lens_anim: Default::default(),
             lens_anim_area: egui::Rect::NOTHING,

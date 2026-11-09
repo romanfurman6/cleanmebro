@@ -33,28 +33,36 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let shared = app.lens.clone();
     let now = ui.ctx().input(|i| i.time);
     if shared.running.load(Ordering::SeqCst) {
-        // the map grows while mapping; rebuild it a few times a second
+        // while mapping: a calm list of folders that grows in place; the
+        // treemap is drawn once, when the sizes are final
         if app.lens_live.as_ref().is_none_or(|l| now - l.0 > 0.25) {
-            app.lens_live = scan::partial(&shared).map(|(n, pending)| (now, n, pending));
+            app.lens_live = scan::partial(&shared).map(|(root, rows)| (now, root, rows));
         }
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(120));
         match app.lens_live.take() {
             Some(live) => {
-                let act = results(app, ui, r, &live.1, Some(&live.2));
+                let act = mapping(app, ui, r, &live.1, &live.2);
                 app.lens_live = Some(live);
                 if act == Act::Stop {
                     shared.stop.store(true, Ordering::SeqCst);
                 }
             }
-            None => start(app, ui, r, true),
+            None => start(app, ui, r),
         }
         return;
+    }
+    if app.lens_live.is_some() || !app.lens_order.is_empty() {
+        // mapping just finished: the treemap starts fresh, no glide from the list
+        app.lens_order.clear();
+        app.lens_rows.clear();
+        app.lens_anim.clear();
     }
     app.lens_live = None;
     let guard = shared.result.lock().unwrap();
     let Some(root) = guard.as_ref() else {
+        // nothing to choose: opening Disk Map maps the whole disk
         drop(guard);
-        start(app, ui, r, false);
+        begin(app, ui.ctx());
+        start(app, ui, r);
         return;
     };
     let act = results(app, ui, r, root, None);
@@ -64,6 +72,7 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         app.lens_selected.clear();
         app.lens_morph = None;
         app.lens_anim.clear();
+        begin(app, ui.ctx());
     } else if app.lens_review {
         review(app, ui, r, cx);
     }
@@ -92,104 +101,48 @@ fn tilde(p: &Path) -> String {
 
 // ---------------------------------------------------------------- start
 
-fn start(app: &mut App, ui: &mut Ui, r: Rect, running: bool) {
+/// The first moments of a map, before the disk's top folders are listed:
+/// what's being measured, with Stop. There is nothing to choose: Disk Map
+/// always maps the whole startup disk.
+fn start(app: &mut App, ui: &mut Ui, r: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     page_header(&p, r, "Disk Map", "See what takes space and remove it by hand", TEXT_DIM);
-    let top = r.top() + PAGE_HEADER_H + 28.0;
-    let col_w = (r.width() - 48.0 - 24.0) / 2.0;
-    let lx = r.left() + 24.0;
-    let rx = lx + col_w + 24.0;
-
-    // left: choose what to map
-    section_header(&p, Pos2::new(lx, top), Align2::LEFT_TOP, "START · CHOOSE WHAT TO MAP");
-    let h = home();
-    let places = [
-        (Icon::Home, "Home folder", h.clone()),
-        (Icon::Disk, "Macintosh HD", PathBuf::from("/")),
-        (Icon::Map, "Applications", PathBuf::from("/Applications")),
-        (Icon::Folder, "Library", h.join("Library")),
-        (Icon::Down, "Downloads", h.join("Downloads")),
-    ];
-    let row_h = 46.0;
-    let card = Rect::from_min_size(Pos2::new(lx, top + 22.0), Vec2::new(col_w, places.len() as f32 * row_h + 8.0));
-    glass_card(&p, card, R_CARD, 0.0, false);
-    let mut label = "Home folder";
-    for (k, (glyph, name, path)) in places.iter().enumerate() {
-        let rr = Rect::from_min_size(Pos2::new(card.left() + 4.0, card.top() + 4.0 + k as f32 * row_h), Vec2::new(card.width() - 8.0, row_h));
-        let on = app.lens_root == *path;
-        if on {
-            label = name;
-        }
-        let resp = ui.interact(rr, ui.scope_id().with(("place", k)), if running { Sense::hover() } else { Sense::click() });
-        if on {
-            p.rect_filled(rr, R_BUTTON, with_alpha(BLUE, 0.16));
-        } else if resp.hovered() && !running {
-            p.rect_filled(rr, R_BUTTON, white(10));
-        }
-        let rc = Pos2::new(rr.left() + 20.0, rr.center().y);
-        if on {
-            p.circle_filled(rc, 8.0, BLUE);
-            p.circle_filled(rc, 3.0, Color32::WHITE);
-        } else {
-            p.circle_stroke(rc, 7.25, Stroke::new(1.5, white(76)));
-        }
-        icon(&p, *glyph, Rect::from_center_size(Pos2::new(rr.left() + 48.0, rr.center().y), Vec2::splat(17.0)), ACCENT);
-        p.text(Pos2::new(rr.left() + 68.0, rr.top() + 7.0), Align2::LEFT_TOP, *name, font(13.0), TEXT);
-        p.text(Pos2::new(rr.left() + 68.0, rr.top() + 25.0), Align2::LEFT_TOP, tilde(path), mono(11.0), TEXT_FAINT);
-        if resp.clicked() && !running {
-            app.lens_root = path.clone();
-        }
-    }
-    let mut y = card.bottom() + 12.0;
-    let note = if app.lens_root == Path::new("/") {
-        "Mapping the whole disk takes a few minutes. Give CleanMeBro Full Disk Access in System Settings for complete results."
-    } else {
-        "Folders the system needs can be browsed but not selected."
-    };
-    y += paragraph(&p, Pos2::new(lx, y), note, font(12.0), TEXT_FAINT, col_w) + 14.0;
-    let bl = format!("Map {}", label);
-    let bw = button_width(&p, &bl, BTN_PRIMARY).max(140.0);
-    if pill_button(ui, Rect::from_min_size(Pos2::new(lx, y), Vec2::new(bw, 34.0)), &bl, BTN_PRIMARY, !running).clicked() {
-        app.lens_path = app.lens_root.clone();
-        app.lens_selected.clear();
-        app.lens_msg = None;
-        app.lens_morph = None;
-        scan::start(app.lens.clone(), app.lens_root.clone(), ctx.clone());
-    }
-    if let Some(msg) = &app.lens_msg {
-        text_fit(&p, Pos2::new(lx, y + 48.0), Align2::LEFT_TOP, msg, font(12.0), GREEN, col_w);
-    }
-
-    // right: progress while mapping
-    section_header(&p, Pos2::new(rx, top), Align2::LEFT_TOP, "WHILE MAPPING");
-    let pr = Rect::from_min_size(Pos2::new(rx, top + 22.0), Vec2::new(col_w, if running { 150.0 } else { 86.0 }));
+    let w = (r.width() - 48.0).min(520.0);
+    let pr = Rect::from_center_size(Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + 28.0 + 90.0), Vec2::new(w, 180.0));
     glass_card(&p, pr, R_CARD, 0.0, false);
-    if running {
-        let bytes = app.lens.bytes.load(Ordering::Relaxed);
-        let files = app.lens.files.load(Ordering::Relaxed);
-        let g = p.layout_no_wrap(human_bytes(bytes), bold(26.0), TEXT);
-        let gw = g.size().x;
-        p.galley(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), g, TEXT);
-        p.text(Pos2::new(pr.left() + 24.0 + gw, pr.top() + 33.0), Align2::LEFT_CENTER, format!("measured · {} files", group_digits(files)), font(13.0), TEXT_DIM);
-        // indeterminate bar: a segment sliding across the track
-        let track = Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.top() + 62.0), Vec2::new(pr.width() - 32.0, 6.0));
-        p.rect_filled(track, 3.0, white(20));
-        let t = ctx.input(|i| i.time);
-        let f = ((t * 0.6).fract() as f32) * 1.35 - 0.35;
-        let seg = Rect::from_min_max(Pos2::new(track.left() + track.width() * f.max(0.0), track.top()), Pos2::new(track.left() + track.width() * (f + 0.35).min(1.0), track.bottom()));
-        p.with_clip_rect(track).rect_filled(seg, 3.0, tint::DISK_MAP);
-        let cur = app.lens.current.lock().unwrap().clone();
-        text_fit(&p, Pos2::new(pr.left() + 16.0, pr.top() + 80.0), Align2::LEFT_TOP, &tilde(Path::new(&cur)), mono(11.0), TEXT_FAINT, pr.width() - 32.0);
-        let sw = button_width(&p, "Stop", BTN_SECONDARY);
-        if pill_button(ui, Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 44.0), Vec2::new(sw, 28.0)), "Stop", BTN_SECONDARY, true).clicked() {
-            app.lens.stop.store(true, Ordering::SeqCst);
-        }
-        ctx.request_repaint();
-    } else {
-        p.text(Pos2::new(pr.left() + 16.0, pr.top() + 16.0), Align2::LEFT_TOP, "Not started", bold(13.0), TEXT_DIM);
-        paragraph(&p, Pos2::new(pr.left() + 16.0, pr.top() + 38.0), "The map shows every folder as a block sized by what it holds. Click a folder to zoom in, tick a corner to pick it for removal.", font(12.0), TEXT_FAINT, pr.width() - 32.0);
+    let bytes = app.lens.bytes.load(Ordering::Relaxed);
+    let files = app.lens.files.load(Ordering::Relaxed);
+    p.text(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), Align2::LEFT_TOP, "Mapping Macintosh HD", bold(13.0), TEXT_DIM);
+    let g = p.layout_no_wrap(human_bytes(bytes), bold(26.0), TEXT);
+    let gw = g.size().x;
+    p.galley(Pos2::new(pr.left() + 16.0, pr.top() + 36.0), g, TEXT);
+    p.text(Pos2::new(pr.left() + 24.0 + gw, pr.top() + 55.0), Align2::LEFT_CENTER, format!("measured · {} files", group_digits(files)), font(13.0), TEXT_DIM);
+    let track = Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.top() + 84.0), Vec2::new(pr.width() - 32.0, 6.0));
+    p.rect_filled(track, 3.0, white(20));
+    let t = ctx.input(|i| i.time);
+    let f = ((t * 0.6).fract() as f32) * 1.35 - 0.35;
+    let seg = Rect::from_min_max(Pos2::new(track.left() + track.width() * f.max(0.0), track.top()), Pos2::new(track.left() + track.width() * (f + 0.35).min(1.0), track.bottom()));
+    p.with_clip_rect(track).rect_filled(seg, 3.0, tint::DISK_MAP);
+    let cur = app.lens.current.lock().unwrap().clone();
+    text_fit(&p, Pos2::new(pr.left() + 16.0, pr.top() + 102.0), Align2::LEFT_TOP, &tilde(Path::new(&cur)), mono(11.0), TEXT_FAINT, pr.width() - 32.0);
+    let sw = button_width(&p, "Stop", BTN_SECONDARY);
+    if pill_button(ui, Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 44.0), Vec2::new(sw, 28.0)), "Stop", BTN_SECONDARY, true).clicked() {
+        app.lens.stop.store(true, Ordering::SeqCst);
     }
+    paragraph(&p, Pos2::new(pr.left(), pr.bottom() + 14.0), "Mapping the whole disk takes a few minutes. Give CleanMeBro Full Disk Access in System Settings for complete results.", font(12.0), TEXT_FAINT, pr.width());
+    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+}
+
+/// Map the whole startup disk from scratch.
+fn begin(app: &mut App, ctx: &egui::Context) {
+    app.lens_root = PathBuf::from("/");
+    app.lens_path = app.lens_root.clone();
+    app.lens_selected.clear();
+    app.lens_msg = None;
+    app.lens_morph = None;
+    app.lens_hues.clear();
+    scan::start(app.lens.clone(), app.lens_root.clone(), ctx.clone());
 }
 
 fn group_digits(n: u64) -> String {
@@ -258,6 +211,163 @@ fn lerp_rect(a: Rect, b: Rect, t: f32) -> Rect {
     Rect::from_min_max(a.min + (b.min - a.min) * t, a.max + (b.max - a.max) * t)
 }
 
+/// The screen while mapping: the root's folders as rows with a size bar,
+/// biggest first. Rows are re-sorted at most once a second and glide to
+/// their new places; bars grow smoothly. Nothing jumps.
+fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveRow]) -> Act {
+    let ctx = ui.ctx().clone();
+    let p = ui.painter().clone();
+    let now = ctx.input(|i| i.time);
+    let mut act = Act::None;
+    let root_label = if root == home() { "Home".to_string() } else { scan::display_name(root) };
+    let measured = app.lens.bytes.load(Ordering::Relaxed);
+
+    // header: what's mapped and how much so far; progress and Stop
+    let hr = Rect::from_min_size(r.min, Vec2::new(r.width(), HEADER_H));
+    hairline(&p, hr.left_bottom(), hr.right_bottom());
+    let g = p.layout_no_wrap(root_label, bold(13.0), TEXT);
+    let tw = g.size().x;
+    p.galley(Pos2::new(hr.left() + 24.0, hr.center().y - g.size().y / 2.0), g, TEXT);
+    p.text(Pos2::new(hr.left() + 32.0 + tw, hr.center().y), Align2::LEFT_CENTER, human_bytes(measured), font(13.0), TEXT_FAINT);
+    let nb = button_width(&p, "Stop", BTN_SECONDARY);
+    let stop_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
+    let done = rows.iter().filter(|x| x.done).count();
+    let hint_text = format!("Mapping · {} of {} folders done · {} files", done, rows.len(), group_digits(app.lens.files.load(Ordering::Relaxed)));
+    let hint = p.text(Pos2::new(stop_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, hint_text, font(12.0), TEXT_DIM);
+    let t = now as f32;
+    let c = Pos2::new(hint.left() - 12.0, hr.center().y);
+    p.circle_stroke(c, 5.0, Stroke::new(1.5, white(40)));
+    let pts: Vec<Pos2> = (0..=12).map(|i| t * 5.0 + i as f32 * 0.15).map(|a| c + Vec2::angled(a) * 5.0).collect();
+    p.add(egui::Shape::line(pts, Stroke::new(1.5, tint::DISK_MAP)));
+    if pill_button(ui, stop_r, "Stop", BTN_SECONDARY, true).clicked() {
+        act = Act::Stop;
+    }
+    let track = Rect::from_min_size(Pos2::new(hr.left(), hr.bottom() - 2.0), Vec2::new(hr.width(), 2.0));
+    let f = ((now * 0.5).fract() as f32) * 1.4 - 0.4;
+    let seg = Rect::from_min_max(Pos2::new(track.left() + track.width() * f.max(0.0), track.top()), Pos2::new(track.left() + track.width() * (f + 0.4).min(1.0), track.bottom()));
+    p.with_clip_rect(track).rect_filled(seg, 1.0, tint::DISK_MAP);
+
+    // order: new folders join at the end; a full re-sort by size at most once a second
+    for row in rows {
+        if !app.lens_order.contains(&row.path) {
+            app.lens_order.push(row.path.clone());
+        }
+    }
+    if now - app.lens_order_at > 1.0 {
+        let size = |pa: &PathBuf| rows.iter().find(|x| &x.path == pa).map(|x| x.bytes).unwrap_or(0);
+        app.lens_order.sort_by_key(|pa| std::cmp::Reverse(size(pa)));
+        app.lens_order_at = now;
+    }
+
+    // the list
+    let fr = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - FOOTER_H), r.max);
+    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, fr.top() - 12.0));
+    let area = Rect::from_min_max(body.min, Pos2::new(body.right() - ASIDE_W - 16.0, body.bottom()));
+    const ROW_H: f32 = 44.0;
+    const GAP: f32 = 4.0;
+    let fit = (((area.height() + GAP) / (ROW_H + GAP)).floor() as usize).max(1);
+    let max_bytes = rows.iter().map(|x| x.bytes).max().unwrap_or(1).max(1);
+    let ordered: Vec<&scan::LiveRow> = app.lens_order.iter().filter_map(|pa| rows.iter().find(|x| &x.path == pa)).collect();
+    let (shown_rows, rest) = if ordered.len() > fit { (&ordered[..fit - 1], &ordered[fit - 1..]) } else { (&ordered[..], &ordered[..0]) };
+    let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.1);
+    let k = 1.0 - (-dt * 8.0).exp();
+    let mut drawn = std::collections::HashMap::new();
+    let lp = p.with_clip_rect(area.expand(2.0));
+    let name_w = (area.width() * 0.32).clamp(140.0, 240.0);
+    let size_w = 90.0;
+    let pointer = ctx.pointer_hover_pos();
+    let mut hovered: Option<(&scan::LiveRow, Color32)> = None;
+    for (i, row) in shown_rows.iter().enumerate() {
+        let target = Rect::from_min_size(Pos2::new(area.left(), area.top() + i as f32 * (ROW_H + GAP)), Vec2::new(area.width(), ROW_H));
+        let frac = row.bytes as f32 / max_bytes as f32;
+        // glide from last frame; a new row slides in from just below with an empty bar
+        let (prev, pf) = app.lens_rows.get(&row.path).copied().unwrap_or((target.translate(Vec2::new(0.0, 12.0)), 0.0));
+        let rr = lerp_rect(prev, target, k);
+        let fr_ = pf + (frac - pf) * k;
+        drawn.insert(row.path.clone(), (rr, fr_));
+        let hue = hue_of(app, root, &row.path);
+        let hov = pointer.is_some_and(|q| rr.contains(q));
+        p_row(&lp, rr, row, hue, fr_, hov, name_w, size_w, now, i);
+        if hov {
+            hovered = Some((row, hue));
+        }
+    }
+    if !rest.is_empty() {
+        let i = shown_rows.len();
+        let rr = Rect::from_min_size(Pos2::new(area.left(), area.top() + i as f32 * (ROW_H + GAP)), Vec2::new(area.width(), ROW_H));
+        let bytes: u64 = rest.iter().map(|x| x.bytes).sum();
+        lp.rect_filled(rr, R_SMALL, white(8));
+        lp.text(Pos2::new(rr.left() + 30.0, rr.center().y), Align2::LEFT_CENTER, format!("{} more folders", rest.len()), font(13.0), TEXT_DIM);
+        lp.text(Pos2::new(rr.right() - 14.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(bytes), font(13.0), TEXT_FAINT);
+    }
+    if rows.is_empty() {
+        lp.text(area.center(), Align2::CENTER_CENTER, "Looking inside…", font(13.0), TEXT_FAINT);
+    }
+    // keep animating only while something is still gliding
+    let moving = drawn.iter().any(|(pa, (rr, f))| {
+        app.lens_rows.get(pa).is_none_or(|(a, b)| (a.min - rr.min).length() > 0.3 || (b - f).abs() > 0.001)
+    });
+    app.lens_rows = drawn;
+    if moving {
+        ctx.request_repaint();
+    } else {
+        // the spinner and progress strip only need a calm frame rate
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    }
+
+    // aside
+    let ar = Rect::from_min_max(Pos2::new(area.right() + 16.0, body.top()), body.max);
+    section_header(&p, ar.min, Align2::LEFT_TOP, "TO REMOVE");
+    paragraph(&p, Pos2::new(ar.left(), ar.top() + 24.0), "The map opens when mapping finishes. Then click a folder to zoom in and tick a corner to pick it for removal.", font(12.0), TEXT_FAINT, ar.width());
+    let rb = Rect::from_min_max(Pos2::new(ar.left(), ar.bottom() - 34.0), ar.max);
+    pill_button(ui, rb, "Review and remove", BTN_PRIMARY, false);
+
+    // footer: what's under the pointer, or what's being measured
+    p.rect_filled(fr, CornerRadius { se: 12, ..Default::default() }, FOOTER);
+    hairline(&p, fr.left_top(), fr.right_top());
+    match hovered {
+        Some((row, hue)) => {
+            p.rect_filled(Rect::from_center_size(Pos2::new(fr.left() + 25.0, fr.center().y), Vec2::splat(10.0)), 3.0, hue);
+            let info = if row.done { format!("{} · {}% of what's measured", human_bytes(row.bytes), pct(row.bytes, measured)) } else { format!("{} so far · still measuring", human_bytes(row.bytes)) };
+            let ir = p.text(Pos2::new(fr.right() - 20.0, fr.center().y), Align2::RIGHT_CENTER, info, font(13.0), TEXT_DIM);
+            text_fit(&p, Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, &tilde(&row.path), mono(12.0), TEXT_SOFT, ir.left() - fr.left() - 56.0);
+        }
+        None => {
+            let cur = app.lens.current.lock().unwrap().clone();
+            p.text(Pos2::new(fr.left() + 20.0, fr.center().y), Align2::LEFT_CENTER, "Measuring", font(12.0), TEXT_FAINT);
+            text_fit(&p, Pos2::new(fr.left() + 92.0, fr.center().y), Align2::LEFT_CENTER, &tilde(Path::new(&cur)), mono(12.0), TEXT_SOFT, fr.width() - 112.0);
+        }
+    }
+    act
+}
+
+/// One folder row of the live list: colour, name and state, a size bar, the size.
+#[allow(clippy::too_many_arguments)]
+fn p_row(p: &egui::Painter, rr: Rect, row: &scan::LiveRow, hue: Color32, frac: f32, hov: bool, name_w: f32, size_w: f32, now: f64, i: usize) {
+    p.rect_filled(rr, R_SMALL, white(if hov { 18 } else { 10 }));
+    p.rect_filled(Rect::from_center_size(Pos2::new(rr.left() + 16.0, rr.center().y), Vec2::splat(10.0)), 3.0, hue);
+    let nx = rr.left() + 32.0;
+    text_fit(p, Pos2::new(nx, rr.top() + 6.0), Align2::LEFT_TOP, &row.name, bold(13.0), TEXT, name_w - 40.0);
+    let (state, sc) = if row.done { ("done", TEXT_FAINT) } else { ("measuring…", TEXT_MUTED) };
+    p.text(Pos2::new(nx, rr.top() + 24.0), Align2::LEFT_TOP, state, font(11.0), sc);
+    let track = Rect::from_min_max(Pos2::new(rr.left() + name_w, rr.center().y - 4.0), Pos2::new(rr.right() - size_w - 14.0, rr.center().y + 4.0));
+    if track.width() > 20.0 {
+        p.rect_filled(track, 4.0, white(14));
+        let fill = Rect::from_min_size(track.min, Vec2::new((track.width() * frac.clamp(0.0, 1.0)).max(4.0), track.height()));
+        let col = if row.done { lerp_color(BG, hue, 0.9) } else { lerp_color(BG, hue, 0.55) };
+        p.rect_filled(fill, 4.0, col);
+        if !row.done {
+            // a slow, faint shimmer along bars still growing
+            let w = 60.0;
+            let f = ((now * 0.45 + i as f64 * 0.17).fract() as f32) * (fill.width() + w) - w;
+            let sheen = Rect::from_min_size(Pos2::new(fill.left() + f, fill.top()), Vec2::new(w, fill.height()));
+            p.with_clip_rect(fill.intersect(p.clip_rect())).rect_filled(sheen, 0.0, white(22));
+        }
+    }
+    let size = human_bytes(row.bytes);
+    p.text(Pos2::new(rr.right() - 14.0, rr.center().y), Align2::RIGHT_CENTER, size, font(13.0), if row.done { TEXT_SOFT } else { TEXT_DIM });
+}
+
 /// The treemap screen. `pending` is set while mapping: those folders are
 /// still being measured and the header shows progress with Stop.
 fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[PathBuf]>) -> Act {
@@ -291,7 +401,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             crumbs.push((c.as_os_str().to_string_lossy().into_owned(), acc.clone()));
         }
     }
-    let (btn, kind) = if live { ("Stop", BTN_SECONDARY) } else { ("New map", BTN_SECONDARY) };
+    let (btn, kind) = if live { ("Stop", BTN_SECONDARY) } else { ("Map again", BTN_SECONDARY) };
     let nb = button_width(&p, btn, kind);
     let new_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
     let hint_text = if live {
@@ -705,7 +815,7 @@ pub fn demo_live(app: &mut App) {
         .map(|(k, c)| {
             let done = matches!(k, 1 | 3 | 5 | 7);
             let part = if done { c.bytes } else { (c.bytes as f64 * [0.55, 0.0, 0.8, 0.0, 0.35, 0.0, 0.6][k.min(6)]) as u64 };
-            scan::LiveChild { name: c.name.clone(), path: c.path.clone(), bytes: Arc::new(AtomicU64::new(part)), done: done.then(|| c.clone()) }
+            scan::LiveChild { name: c.name.clone(), path: c.path.clone(), bytes: Arc::new(AtomicU64::new(part)), done }
         })
         .collect();
     app.lens.bytes.store(live.iter().map(|l| l.bytes.load(Ordering::Relaxed)).sum(), Ordering::Relaxed);
