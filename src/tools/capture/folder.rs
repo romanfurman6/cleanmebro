@@ -28,6 +28,10 @@ impl FileShot {
     }
 }
 
+pub fn is_video(p: &Path) -> bool {
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "mp4" | "mov"))
+}
+
 pub fn is_image(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg"))
 }
@@ -39,12 +43,12 @@ fn key(path: &Path, modified: SystemTime) -> u64 {
     h.finish() | (1 << 63)
 }
 
-/// PNG and JPG files directly in `dir`, newest first.
+/// PNG, JPG and video files directly in `dir`, newest first.
 pub fn scan(dir: &Path) -> Vec<FileShot> {
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut found: Vec<(PathBuf, SystemTime)> = rd
         .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()) && is_image(&e.path()) && !e.file_name().to_string_lossy().starts_with('.'))
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()) && (is_image(&e.path()) || is_video(&e.path())) && !e.file_name().to_string_lossy().starts_with('.'))
         .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
         .collect();
     found.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
@@ -52,7 +56,7 @@ pub fn scan(dir: &Path) -> Vec<FileShot> {
     found
         .into_iter()
         .map(|(path, modified)| {
-            let (w, h) = image::image_dimensions(&path).unwrap_or((0, 0));
+            let (w, h) = if is_video(&path) { (0, 0) } else { image::image_dimensions(&path).unwrap_or((0, 0)) };
             FileShot { key: key(&path, modified), path, modified, w, h }
         })
         .collect()

@@ -17,10 +17,11 @@ pub enum Command {
     Color,
     Ruler,
     History,
+    Record,
 }
 
 impl Command {
-    pub const ALL: [Command; 8] = [Command::Area, Command::Window, Command::Screen, Command::Delayed, Command::Text, Command::Color, Command::Ruler, Command::History];
+    pub const ALL: [Command; 9] = [Command::Area, Command::Window, Command::Screen, Command::Delayed, Command::Text, Command::Color, Command::Ruler, Command::History, Command::Record];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -32,6 +33,7 @@ impl Command {
             Command::Color => "Pick a color",
             Command::Ruler => "Measure (ruler)",
             Command::History => "Open history",
+            Command::Record => "Record the screen",
         }
     }
 
@@ -44,6 +46,7 @@ impl Command {
             Command::Text => "7",
             Command::Color => "8",
             Command::Ruler => "9",
+            Command::Record => "0",
             Command::Delayed | Command::History => return None,
         };
         Some(Shortcut { cmd: true, shift: true, alt: false, ctrl: false, key: key.into() })
@@ -113,6 +116,73 @@ pub struct Settings {
     pub blur: BlurStyle,
     pub cover: Cover,
     pub keep_breaks: bool,
+    /// Screen recording.
+    pub rec: RecSettings,
+}
+
+/// Frame rates the recorder offers.
+pub const RECORD_FPS: [u32; 2] = [30, 60];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecQuality {
+    /// Up to 1080p, smaller files.
+    Smaller,
+    /// Up to 4K.
+    High,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CameraSize {
+    S,
+    M,
+    L,
+}
+
+impl CameraSize {
+    /// Diameter of the camera bubble, in points.
+    pub fn points(self) -> f32 {
+        match self {
+            CameraSize::S => 120.0,
+            CameraSize::M => 180.0,
+            CameraSize::L => 260.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RecSettings {
+    pub camera: bool,
+    pub mic: bool,
+    pub system_audio: bool,
+    /// Device unique ids; None = the system default.
+    pub camera_device: Option<String>,
+    pub mic_device: Option<String>,
+    pub fps: u32,
+    pub quality: RecQuality,
+    pub camera_size: CameraSize,
+    pub cursor: bool,
+    pub clicks: bool,
+    /// Seconds of 3-2-1 before recording (0 = none).
+    pub countdown: u32,
+}
+
+impl Default for RecSettings {
+    fn default() -> Self {
+        RecSettings {
+            camera: false,
+            mic: false,
+            system_audio: true,
+            camera_device: None,
+            mic_device: None,
+            fps: 60,
+            quality: RecQuality::High,
+            camera_size: CameraSize::M,
+            cursor: true,
+            clicks: false,
+            countdown: 3,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -131,6 +201,7 @@ impl Default for Settings {
             blur: BlurStyle::Pixelate,
             cover: Cover::Box,
             keep_breaks: true,
+            rec: RecSettings::default(),
         }
     }
 }
@@ -166,6 +237,11 @@ impl Settings {
         format!("Capture {}.{}", t.format("%Y-%m-%d at %H.%M.%S"), self.format.ext())
     }
 
+    /// File name for a recording that started at `t`: "Recording 2026-11-09 at 17.26.12.mp4".
+    pub fn recording_name(t: chrono::DateTime<chrono::Local>) -> String {
+        format!("Recording {}.mp4", t.format("%Y-%m-%d at %H.%M.%S"))
+    }
+
     /// Keep values in range after loading a file someone edited by hand.
     fn sanitize(mut self) -> Self {
         self.keep = self.keep.clamp(KEEP_MIN, KEEP_MAX);
@@ -174,8 +250,14 @@ impl Settings {
         }
         for c in Command::ALL {
             if !self.shortcuts.iter().any(|(k, _)| *k == c) {
-                self.shortcuts.push((c, None));
+                // a command added in an update gets its default keys unless
+                // the user already gave them to something else
+                let free = c.default_shortcut().filter(|d| !self.shortcuts.iter().any(|(_, s)| s.as_ref() == Some(d)));
+                self.shortcuts.push((c, free));
             }
+        }
+        if !RECORD_FPS.contains(&self.rec.fps) {
+            self.rec.fps = 60;
         }
         self
     }
@@ -262,5 +344,19 @@ mod tests {
         use chrono::TimeZone;
         let t = chrono::Local.with_ymd_and_hms(2026, 11, 8, 17, 41, 12).unwrap();
         assert_eq!(Settings::default().file_name(t), "Capture 2026-11-08 at 17.41.12.png");
+        assert_eq!(Settings::recording_name(t), "Recording 2026-11-08 at 17.41.12.mp4");
+    }
+
+    #[test]
+    fn a_command_added_later_gets_its_default_keys_when_free() {
+        let mut s = Settings::default();
+        s.shortcuts.retain(|(c, _)| *c != Command::Record);
+        assert_eq!(s.clone().sanitize().shortcut(Command::Record), Some(&sc("0")));
+        // keys already taken by something else stay there
+        s.shortcuts.retain(|(c, _)| *c != Command::Ruler);
+        s.shortcuts.push((Command::Ruler, Some(sc("0"))));
+        let back = s.sanitize();
+        assert!(back.shortcut(Command::Record).is_none());
+        assert_eq!(back.shortcut(Command::Ruler), Some(&sc("0")));
     }
 }

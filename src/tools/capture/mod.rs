@@ -3,6 +3,9 @@
 //! pinned captures, text recognition, a color picker and a ruler, plus a
 //! History and a Settings page.
 //!
+//! Screen recording (mp4, with system sound, microphone and camera) lives
+//! in [`record`].
+//!
 //! Page routes: "" (as left), "history", "settings".
 
 pub mod editor;
@@ -11,6 +14,7 @@ mod grab;
 mod hotkeys;
 mod icons;
 mod mac;
+pub mod record;
 mod render;
 mod settings;
 mod store;
@@ -144,6 +148,7 @@ pub struct Capture {
     demo_editor: Option<Editor>,
     ctx: egui::Context,
     next_pin: u64,
+    rec: record::Recorder,
 }
 
 impl Capture {
@@ -189,6 +194,7 @@ impl Capture {
             demo_editor: None,
             ctx: env.ctx.clone(),
             next_pin: 1,
+            rec: record::Recorder::new(env.ctx.clone()),
         };
         c.apply_keys();
         c
@@ -258,6 +264,53 @@ impl Capture {
             Command::History => {
                 self.tab = Tab::History;
                 cx.open_page(ID, "history");
+            }
+            Command::Record => {
+                if self.rec.idle() {
+                    cx.push(Action::HidePanel);
+                    self.preview = None;
+                    if !mac::can_record_screen() {
+                        self.perm_needed = true;
+                        mac::ask_to_record_screen();
+                        self.hud("Allow Screen Recording for CleanMeBro, then try again");
+                        return;
+                    }
+                }
+                self.rec.folder = self.settings.folder.clone();
+                self.rec.begin(&self.settings.rec);
+            }
+        }
+    }
+
+    /// A recording is saved: into history (a frame as its picture), then
+    /// the card in the corner.
+    fn keep_recording(&mut self, st: record::engine::Stopped) {
+        let thumb = st.thumb.unwrap_or_else(|| image::RgbaImage::from_pixel(640, 360, image::Rgba([40, 40, 46, 255])));
+        let id = match self.store.add(&thumb, Kind::Recording, self.settings.keep) {
+            Ok(id) => {
+                self.store.set_video(id, st.path.clone(), st.secs as f32);
+                self.put_thumb(id, &thumb);
+                self.forget_dropped_thumbs();
+                Some(id)
+            }
+            Err(e) => {
+                self.hud(format!("Couldn't keep it in history: {e}"));
+                None
+            }
+        };
+        self.files_at = None;
+        let bytes = std::fs::metadata(&st.path).map(|m| m.len()).unwrap_or(0);
+        let display = self.rec.last_display;
+        self.rec.saved = Some(record::Saved { path: st.path, secs: st.secs, size: st.size, bytes, thumb: Some(thumb), tex: None, history: id, display, born: Instant::now(), key: Instant::now() });
+    }
+
+    /// Hand what the recorder asked for to the rest of Capture.
+    fn recorder_out(&mut self) {
+        for o in std::mem::take(&mut self.rec.out) {
+            match o {
+                record::Out::Hud(m) => self.hud(m),
+                record::Out::SaveSettings => self.save_settings(),
+                record::Out::Saved(st) => self.keep_recording(st),
             }
         }
     }
@@ -645,7 +698,7 @@ fn demo_store() -> Store {
         let id = now - h * hour - i as u64;
         let img = grab::sample(*w, *ht);
         if img.save(st.path(id)).is_ok() {
-            st.shots.push(store::Shot { id, kind: *kind, w: *w, h: *ht, saved: None, pinned: i == 2 });
+            st.shots.push(store::Shot { id, kind: *kind, w: *w, h: *ht, saved: None, pinned: i == 2, secs: None });
         }
     }
     st
@@ -698,6 +751,11 @@ impl Tool for Capture {
             self.pins.clear();
             self.overlay = None;
             self.perm_card = None;
+            if self.rec.live().is_some() {
+                self.rec.stop();
+            } else if !matches!(self.rec.phase, record::Phase::Saving) {
+                self.rec.cancel();
+            }
             if let Some(mut ew) = self.editor.take() {
                 self.commit_edit(&mut ew.ed);
             }
@@ -746,6 +804,9 @@ impl Tool for Capture {
             go: Action::OpenPage { tool: ID.into(), route: "settings".into() },
         }]
     }
+    fn tray_title(&self) -> Option<String> {
+        self.rec.tray()
+    }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
         if let Some(k) = &self.keys {
             if self.recording.is_none() {
@@ -764,14 +825,20 @@ impl Tool for Capture {
                 self.spawn_grab(g, p, 220);
             }
         }
-        let timed = self.countdown.is_some() || self.hud.is_some() || self.preview.is_some();
+        self.rec.tick(&mut self.settings.rec);
+        self.recorder_out();
+        if self.rec.live().is_some() {
+            // the timer in the menu bar
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
+        let timed = self.countdown.is_some() || self.hud.is_some() || self.preview.is_some() || self.rec.busy();
         if timed {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         if !self.queue.is_empty() || !self.actions.is_empty() {
             ctx.request_repaint();
         }
-        let windows = !self.pins.is_empty() || self.editor.is_some() || self.overlay.is_some() || self.perm_card.is_some();
+        let windows = !self.pins.is_empty() || self.editor.is_some() || self.overlay.is_some() || self.perm_card.is_some() || self.rec.busy();
         timed || windows || !self.queue.is_empty() || !self.actions.is_empty()
     }
     fn windows(&mut self, ctx: &egui::Context, cx: &mut Cx) {
@@ -785,6 +852,8 @@ impl Tool for Capture {
             self.run(c, d, cx);
         }
         windows::show(self, ctx, cx);
+        record::ui::show(self, ctx, cx);
+        self.recorder_out();
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {
         match view {
