@@ -26,14 +26,13 @@ impl System {
     }
 }
 
-const METRICS: Option<&str> = Some("metrics");
 const WIDGETS: [WidgetSpec; 6] = [
-    WidgetSpec { id: "storage", title: "Storage", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "memory", title: "Memory", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "cpu", title: "CPU", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "battery", title: "Battery", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "network", title: "Network", span: 4, default_on: true, group: METRICS },
-    WidgetSpec { id: "devices", title: "Connected Devices", span: 4, default_on: true, group: METRICS },
+    WidgetSpec { id: "storage", title: "Storage", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "memory", title: "Memory", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "cpu", title: "CPU", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "battery", title: "Battery", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "network", title: "Network", span: 2, default_on: true, group: None },
+    WidgetSpec { id: "devices", title: "Connected Devices", span: 2, default_on: true, group: None },
 ];
 
 impl Tool for System {
