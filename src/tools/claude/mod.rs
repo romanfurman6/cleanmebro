@@ -108,9 +108,8 @@ impl Tool for Claude {
             "claude-detail" => Some(View::Detail(LIMITS)),
             "claude" => Some(View::Page),
             "claude-missing" => {
-                let mut g = self.info.lock().unwrap();
-                *g = backend::ClaudeInfo { loading: false, installed: false, fetched: Some(chrono::Local::now()), ..Default::default() };
-                g.error = Some(format!("Claude Code isn't installed on this Mac. {}", crate::kit::claude_code::Availability::NotInstalled.how()));
+                let error = Some(format!("Claude Code isn't installed on this Mac. {}", crate::kit::claude_code::Availability::NotInstalled.how()));
+                *self.info.lock().unwrap() = backend::ClaudeInfo { loading: false, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
                 Some(View::Page)
             }
             _ => None,
