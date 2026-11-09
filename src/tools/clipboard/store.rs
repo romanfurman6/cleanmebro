@@ -331,13 +331,9 @@ impl Store {
         if !self.saves {
             return;
         }
-        let _ = std::fs::create_dir_all(&self.dir);
-        if let Ok(json) = serde_json::to_string(&self.entries) {
-            let tmp = self.dir.join("index.json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(tmp, self.dir.join("index.json"));
-            }
-        }
+        // off the UI thread: the index (every clip's text) is rewritten on
+        // every copy, and it can be megabytes
+        crate::kit::fs::save_json_later(&self.dir.join("index.json"), &self.entries, false);
     }
 
     /// Add a clip copied at `now` (ms). Returns its id, or None for an empty
@@ -583,6 +579,7 @@ mod tests {
         let mut s = Store::open(dir.clone());
         let img = s.add(&Clip { png: Some(png.clone()), app: "Capture".into(), ..Default::default() }, 10, LIM).unwrap();
         let rich = s.add(&Clip { text: Some("bold".into()), rtf: Some(b"{\\rtf1 bold}".to_vec()), ..Default::default() }, 11, LIM).unwrap();
+        crate::kit::fs::flush_writes();
         let back = Store::open(dir.clone());
         assert_eq!(back.entries.len(), 2);
         assert_eq!(back.get(img).map(|e| (e.kind, e.w, e.h)), Some((Kind::Image, 4, 3)));

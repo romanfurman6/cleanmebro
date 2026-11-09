@@ -188,21 +188,16 @@ impl Default for Settings {
     }
 }
 
-fn data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join("uninstaller")
+fn settings_path() -> PathBuf {
+    crate::kit::fs::data_path("uninstaller").join("settings.json")
 }
 
 impl Settings {
     fn load() -> Settings {
-        std::fs::read_to_string(data_dir().join("settings.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        crate::kit::fs::load_json(&settings_path())
     }
     pub fn save(&self) {
-        let dir = data_dir();
-        if std::fs::create_dir_all(&dir).is_ok() {
-            if let Ok(s) = serde_json::to_string_pretty(self) {
-                let _ = std::fs::write(dir.join("settings.json"), s);
-            }
-        }
+        crate::kit::fs::save_json(&settings_path(), self, true);
     }
 }
 

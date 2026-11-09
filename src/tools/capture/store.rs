@@ -138,12 +138,8 @@ impl Store {
         if self.dir.as_os_str().is_empty() {
             return;
         }
-        if let Ok(json) = serde_json::to_string(&self.shots) {
-            let tmp = self.dir.join("index.json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(tmp, self.dir.join("index.json"));
-            }
-        }
+        // off the UI thread: the index is rewritten on every capture
+        crate::kit::fs::save_json_later(&self.dir.join("index.json"), &self.shots, false);
     }
 }
 
@@ -209,12 +205,14 @@ mod tests {
         assert!(st.get(first).is_some());
         assert_eq!(std::fs::read_dir(&dir).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "png")).count(), 4);
         // survives a reload
+        crate::kit::fs::flush_writes();
         let again = Store::open(dir.clone());
         assert_eq!(again.shots, st.shots);
         assert_eq!(again.load(first).unwrap().dimensions(), (4, 3));
         st.remove(first);
         assert!(st.get(first).is_none() && !st.path(first).exists());
         st.clear();
+        crate::kit::fs::flush_writes();
         assert!(Store::open(dir.clone()).shots.is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }

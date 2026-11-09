@@ -183,21 +183,15 @@ impl Settings {
 
 /// `~/Library/Application Support/cleanmebro/capture` (the platform's data dir elsewhere).
 pub fn data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join("capture")
+    crate::kit::fs::data_path("capture")
 }
 
 pub fn load(dir: &Path) -> Settings {
-    std::fs::read_to_string(dir.join("settings.json")).ok().and_then(|s| serde_json::from_str::<Settings>(&s).ok()).unwrap_or_default().sanitize()
+    crate::kit::fs::load_json::<Settings>(&dir.join("settings.json")).sanitize()
 }
 
 pub fn save(dir: &Path, s: &Settings) {
-    let _ = std::fs::create_dir_all(dir);
-    if let Ok(json) = serde_json::to_string_pretty(s) {
-        let tmp = dir.join("settings.json.tmp");
-        if std::fs::write(&tmp, json).is_ok() {
-            let _ = std::fs::rename(tmp, dir.join("settings.json"));
-        }
-    }
+    crate::kit::fs::save_json(&dir.join("settings.json"), s, true);
 }
 
 #[cfg(test)]

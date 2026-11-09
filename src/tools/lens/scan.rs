@@ -142,7 +142,7 @@ pub fn start(shared: Shared, root: PathBuf, ctx: egui::Context) {
 
 /// Where the last map of the disk is kept between runs.
 fn saved_path() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join("diskmap.json")
+    crate::kit::fs::data_path("diskmap.json")
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

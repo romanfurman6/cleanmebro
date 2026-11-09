@@ -500,6 +500,11 @@ impl eframe::App for App {
         self.save_widgets(storage);
     }
 
+    fn on_exit(&mut self) {
+        // tools save some files in the background; let them land
+        crate::kit::fs::flush_writes();
+    }
+
     fn clear_color(&self, _v: &egui::Visuals) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
     }

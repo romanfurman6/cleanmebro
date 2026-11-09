@@ -221,24 +221,15 @@ pub fn hottest(s: &Snapshot) -> Option<f32> {
 }
 
 fn path() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join("fan.json")
+    crate::kit::fs::data_path("fan.json")
 }
 
 pub fn load() -> Settings {
-    std::fs::read_to_string(path()).ok().and_then(|s| serde_json::from_str::<Settings>(&s).ok()).unwrap_or_default().sanitize()
+    crate::kit::fs::load_json::<Settings>(&path()).sanitize()
 }
 
 pub fn save(s: &Settings) {
-    let p = path();
-    if let Some(dir) = p.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Ok(json) = serde_json::to_string_pretty(s) {
-        let tmp = p.with_extension("json.tmp");
-        if std::fs::write(&tmp, json).is_ok() {
-            let _ = std::fs::rename(tmp, p);
-        }
-    }
+    crate::kit::fs::save_json(&path(), s, true);
 }
 
 #[cfg(test)]
