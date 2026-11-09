@@ -654,10 +654,8 @@ pub fn probe(path: &std::path::Path, download: bool) {
             None
         }
     };
-    let d = {
-        let a = sound::read_audio(path, sound::Track::Mix, 8_000, 1).map(|s| s.len() as f64 / 8_000.0).unwrap_or(0.0);
-        if a > 0.0 { a } else { 4.0 }
-    };
+    let d = media::duration(path);
+    eprintln!("[video] length {d:.2} s");
     let mut edl = Edl::new(d);
     edl.cut(d * 0.25, d * 0.5);
     let dest = media::copy_name(path);

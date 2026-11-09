@@ -100,34 +100,36 @@ mod imp {
         NSURL::fileURLWithPath(&NSString::from_str(&p.to_string_lossy()))
     }
 
+    /// The file's audio tracks, with the asset: a track only points weakly
+    /// at its asset, so the asset has to be kept while they're used.
     #[allow(deprecated)]
-    pub(crate) fn audio_list(path: &Path) -> Vec<Retained<AVAssetTrack>> {
+    fn audio_list(path: &Path) -> (Retained<AVURLAsset>, Vec<Retained<AVAssetTrack>>) {
         unsafe {
             let a = AVURLAsset::URLAssetWithURL_options(&url(path), None);
-            let Some(m) = AVMediaTypeAudio else { return Vec::new() };
+            let Some(m) = AVMediaTypeAudio else { return (a, Vec::new()) };
             let list: Retained<NSArray<AVAssetTrack>> = a.tracksWithMediaType(m);
-            list.iter().collect()
+            let tracks = list.iter().collect();
+            (a, tracks)
         }
     }
 
     /// How many audio tracks the file has.
     pub fn audio_tracks(path: &Path) -> usize {
-        audio_list(path).len()
+        audio_list(path).1.len()
     }
 
     /// `which` track as float samples at `rate`, `channels` interleaved.
     /// Slow for long files: call it off the UI thread.
     pub fn read_audio(path: &Path, which: Track, rate: u32, channels: u32) -> Result<Vec<f32>, String> {
-        let n = audio_list(path).len();
+        let n = audio_list(path).1.len();
         read_nth(path, which.index(n).ok_or("This video has no sound")?, rate, channels)
     }
 
     /// The `index`th audio track as float samples (see [`read_audio`]).
     pub fn read_nth(path: &Path, index: usize, rate: u32, channels: u32) -> Result<Vec<f32>, String> {
-        let tracks = audio_list(path);
+        let (asset, tracks) = audio_list(path);
         let track = tracks.get(index).ok_or("This video has no sound")?;
         unsafe {
-            let asset = track.asset().ok_or("The file went away")?;
             let reader = AVAssetReader::assetReaderWithAsset_error(&asset).map_err(|e| e.localizedDescription().to_string())?;
             let n = |v: f64| NSNumber::new_f64(v);
             let (fmt, sr, ch, bits) = (NSNumber::new_u32(LPCM), n(rate as f64), n(channels as f64), n(32.0));

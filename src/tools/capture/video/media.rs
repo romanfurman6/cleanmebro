@@ -280,6 +280,11 @@ mod imp {
         }
     }
 
+    /// The file's length in seconds.
+    pub fn duration(path: &Path) -> f64 {
+        unsafe { secs(asset(path).duration()) }
+    }
+
     /// `n` small frames spread over the file, `height` px tall. Slow: call
     /// it off the UI thread.
     #[allow(deprecated)]
@@ -376,6 +381,10 @@ mod other {
         pub fn frame(&self) -> Option<Frame> {
             None
         }
+    }
+
+    pub fn duration(_path: &Path) -> f64 {
+        0.0
     }
 
     pub fn strip(_path: &Path, _n: usize, _height: f64) -> Vec<image::RgbaImage> {
