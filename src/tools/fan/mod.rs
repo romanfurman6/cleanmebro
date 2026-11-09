@@ -1,17 +1,21 @@
-//! Fan Control tool: fan speeds and chip temperatures, live. A quick tile and
-//! a card for the panel, a detail sheet and a page in the full window.
-//! Reading needs no admin rights; changing fan speed (a later step) will
-//! need a privileged helper.
+//! Fan Control tool: fan speeds and chip temperatures, live, and the fan
+//! mode (Auto, Quiet, Fixed, Curve, Max). A card for the panel, a detail
+//! sheet and a page in the full window. Reading needs no admin rights;
+//! changing fan speed goes through the root helper in [`helper`].
 
+pub mod control;
 pub mod data;
+pub mod helper;
 mod page;
 pub mod probe;
 mod ui;
 
 use crate::core::tool::{Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
 use crate::kit::glass::{tint, Icon};
+use control::{Guard, Mode, Settings};
 use data::Snapshot;
 use egui::{Rect, Ui};
+use helper::{ask, Request};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,22 +26,121 @@ const SHEET: &str = "fans";
 
 pub type Shared = Arc<Mutex<Snapshot>>;
 
+/// Whether the helper is there to take orders.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HelperState {
+    #[default]
+    Unknown,
+    Missing,
+    /// Running, but from an older CleanMeBro.
+    Outdated,
+    Ready,
+}
+
+/// The control side, shared between the UI and the background thread.
+#[derive(Clone, Debug, Default)]
+pub struct Live {
+    pub settings: Settings,
+    pub helper: HelperState,
+    pub guard: Guard,
+    /// The helper holds the fans now.
+    pub manual: bool,
+    /// The admin prompt is up.
+    pub busy: bool,
+    /// Last install error, shown under the install button.
+    pub error: String,
+}
+
+impl Live {
+    /// The mode wants the helper and it isn't ready.
+    pub fn needs_helper(&self) -> bool {
+        self.settings.mode != Mode::Auto && self.helper != HelperState::Ready
+    }
+}
+
+/// What the UI asks for.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Cmd {
+    /// New settings; `save` once the user lets go of a slider or point.
+    Set(Settings, bool),
+    Install,
+    Uninstall,
+}
+
 pub struct FanControl {
     snap: Shared,
+    live: Arc<Mutex<Live>>,
     on: Arc<AtomicBool>,
+    /// Wakes the background thread early after a change.
+    kick: Arc<AtomicBool>,
+    demo: bool,
 }
 
 impl FanControl {
     pub fn new(env: &ToolEnv) -> Self {
         let on = Arc::new(AtomicBool::new(true));
-        let snap = if env.demo { Arc::new(Mutex::new(data::demo())) } else { start(env.ctx.clone(), on.clone()) };
-        FanControl { snap, on }
+        let kick = Arc::new(AtomicBool::new(false));
+        let live = Arc::new(Mutex::new(Live { settings: if env.demo { Settings::default() } else { control::load() }, ..Default::default() }));
+        let snap = if env.demo { Arc::new(Mutex::new(data::demo())) } else { start(env.ctx.clone(), on.clone(), live.clone(), kick.clone()) };
+        FanControl { snap, live, on, kick, demo: env.demo }
+    }
+
+    fn run(&mut self, cmds: Vec<Cmd>, ctx: &egui::Context) {
+        for c in cmds {
+            match c {
+                Cmd::Set(s, save) => {
+                    if save && !self.demo {
+                        control::save(&s);
+                    }
+                    self.live.lock().unwrap().settings = s;
+                    self.kick.store(true, Ordering::Relaxed);
+                }
+                Cmd::Install | Cmd::Uninstall if self.demo => {}
+                Cmd::Install | Cmd::Uninstall => {
+                    let install = c == Cmd::Install;
+                    {
+                        let mut l = self.live.lock().unwrap();
+                        if l.busy {
+                            continue;
+                        }
+                        l.busy = true;
+                        l.error.clear();
+                    }
+                    let (live, kick, ctx) = (self.live.clone(), self.kick.clone(), ctx.clone());
+                    std::thread::spawn(move || {
+                        let r = if install { helper::install() } else { helper::uninstall() };
+                        let mut l = live.lock().unwrap();
+                        l.busy = false;
+                        l.error = r.err().unwrap_or_default();
+                        if !install && l.error.is_empty() {
+                            l.helper = HelperState::Missing;
+                            l.manual = false;
+                        }
+                        drop(l);
+                        kick.store(true, Ordering::Relaxed);
+                        ctx.request_repaint();
+                    });
+                }
+            }
+        }
+    }
+
+    fn view(&self) -> (Snapshot, Live) {
+        (self.snap.lock().unwrap().clone(), self.live.lock().unwrap().clone())
+    }
+}
+
+impl Drop for FanControl {
+    fn drop(&mut self) {
+        if !self.demo && self.live.lock().unwrap().manual {
+            ask(&Request::Auto);
+        }
     }
 }
 
 /// Read the sensors every [`data::SAMPLE_SECS`] on a background thread
-/// while the tool is on.
-fn start(ctx: egui::Context, on: Arc<AtomicBool>) -> Shared {
+/// while the tool is on, and tell the helper what the fans should do.
+fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: Arc<AtomicBool>) -> Shared {
     let snap: Shared = Arc::new(Mutex::new(Snapshot::default()));
     let out = snap.clone();
     std::thread::Builder::new()
@@ -45,8 +148,12 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>) -> Shared {
         .spawn(move || {
             let mut probe = probe::Probe::open();
             let chip = chip_name();
+            let mut held = false;
+            let mut last_read = std::time::Instant::now() - Duration::from_secs(60);
             loop {
-                if on.load(Ordering::Relaxed) {
+                let on_now = on.load(Ordering::Relaxed);
+                if on_now && last_read.elapsed() >= Duration::from_secs(data::SAMPLE_SECS) {
+                    last_read = std::time::Instant::now();
                     let r = probe.read();
                     let thermal = crate::kit::native::thermal_state();
                     let mut s = out.lock().unwrap();
@@ -57,10 +164,47 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>) -> Shared {
                     s.thermal = thermal;
                     s.chip = chip.clone();
                     s.push_history();
-                    drop(s);
-                    ctx.request_repaint();
                 }
-                std::thread::sleep(Duration::from_secs(data::SAMPLE_SECS));
+                // what the fans should do
+                let s = out.lock().unwrap().clone();
+                let (settings, tripped) = {
+                    let mut l = live.lock().unwrap();
+                    let tripped = control::hottest(&s).is_some_and(|h| l.guard.update(h));
+                    (l.settings.clone(), tripped)
+                };
+                let want = on_now && s.loaded && !s.fans.is_empty() && settings.mode != Mode::Auto && !tripped;
+                let reply = if want {
+                    let temp = settings.curve.source.read(&s);
+                    let rpm = settings.targets(&s.fans, temp);
+                    if rpm.iter().any(Option::is_some) {
+                        held = true;
+                        ask(&Request::Set { rpm })
+                    } else {
+                        ask(&Request::Auto)
+                    }
+                } else if held {
+                    held = false;
+                    ask(&Request::Auto)
+                } else {
+                    ask(&Request::Hello)
+                };
+                {
+                    let mut l = live.lock().unwrap();
+                    l.helper = match &reply {
+                        None => HelperState::Missing,
+                        Some(r) if r.version != helper::VERSION => HelperState::Outdated,
+                        Some(_) => HelperState::Ready,
+                    };
+                    l.manual = reply.as_ref().is_some_and(|r| r.manual);
+                }
+                ctx.request_repaint();
+                // sleep until the next sample, or a change from the UI
+                for _ in 0..(data::SAMPLE_SECS * 10) {
+                    if kick.swap(false, Ordering::Relaxed) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
             }
         })
         .ok();
@@ -118,23 +262,37 @@ impl Tool for FanControl {
         ui::widget(&s, size, ui, rect, cx);
     }
     fn detail_ui(&mut self, _detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        let s = self.snap.lock().unwrap().clone();
-        ui::sheet(&s, ui, rect, cx);
+        let (s, l) = self.view();
+        let cmds = ui::sheet(&s, &l, ui, rect, cx);
+        self.run(cmds, ui.ctx());
     }
     fn has_page(&self) -> bool {
         true
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        let s = self.snap.lock().unwrap().clone();
-        page::page(&s, ui, rect, cx);
+        let (s, l) = self.view();
+        let cmds = page::page(&s, &l, ui, rect, cx);
+        self.run(cmds, ui.ctx());
     }
     fn set_on(&mut self, on: bool) {
         self.on.store(on, Ordering::Relaxed);
+        self.kick.store(true, Ordering::Relaxed);
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {
         match view {
             "fan" => Some(View::Page),
             "fan-detail" => Some(View::Detail(SHEET)),
+            "fan-curve" | "fan-fixed" | "fan-install" => {
+                let mut l = self.live.lock().unwrap();
+                l.settings.mode = match view {
+                    "fan-curve" => Mode::Curve,
+                    "fan-fixed" => Mode::Fixed,
+                    _ => Mode::Quiet,
+                };
+                l.helper = if view == "fan-install" { HelperState::Missing } else { HelperState::Ready };
+                l.manual = view != "fan-install";
+                Some(View::Page)
+            }
             "fan-air" => {
                 *self.snap.lock().unwrap() = data::demo_fanless();
                 Some(View::Page)

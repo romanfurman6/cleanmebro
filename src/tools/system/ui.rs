@@ -192,10 +192,9 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
             v
         }
         "network" => vec![("Download".into(), None, human_rate(s.net_down)), ("Upload".into(), None, human_rate(s.net_up)), ("Today".into(), None, human_bytes(s.net_recv_total))],
-        "devices" => s.devices.iter().take(3).map(|d| (d.name.clone(), d.battery.map(|b| (b as f32 / 100.0, if b <= m::BT_LOW_BATTERY_MAX_PCT { AMBER } else { GREEN })), d.battery.map(|b| format!("{b}%")).unwrap_or_default())).collect(),
         _ => Vec::new(),
     };
-    let empty = if id == "devices" { "No Bluetooth devices" } else { "On power adapter" };
+    let empty = "On power adapter";
     tile::lines(p, r, &lines, empty);
 }
 

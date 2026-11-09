@@ -6,8 +6,12 @@
 //! storage (default), memory, battery, cpu, network, devices, claude-detail,
 //! cleanup, cleanup-no-claude, results, lens, lens-live, claude, claude-missing,
 //! health, customize, settings-tools, fan, fan-detail, fan-air, fan-air-detail,
+//! fan-curve, fan-fixed, fan-install,
 //! or widget-<tool>/<widget>@<size> for one widget alone (widget-system/devices@4:4).
 //! `--fan-report` prints every fan and temperature sensor this Mac reports.
+//! `--fan-install` / `--fan-uninstall` add or remove the fan helper,
+//! `--fan-set 2400,3000|auto|hello` talks to it (the lease lasts 8 s).
+//! `--fan-helper <uid>` is the helper itself (run by launchd as root).
 
 mod core;
 mod kit;
@@ -17,6 +21,32 @@ fn main() -> eframe::Result {
     if std::env::args().any(|a| a == "--fan-report") {
         tools::fan::probe::report();
         return Ok(());
+    }
+    {
+        // the fan helper and its test switches
+        let a: Vec<String> = std::env::args().collect();
+        match a.get(1).map(String::as_str) {
+            Some("--fan-helper") => tools::fan::helper::serve(a.get(2).and_then(|u| u.parse().ok()).unwrap_or(0)),
+            Some("--fan-install") => {
+                println!("{:?}", tools::fan::helper::install());
+                return Ok(());
+            }
+            Some("--fan-uninstall") => {
+                println!("{:?}", tools::fan::helper::uninstall());
+                return Ok(());
+            }
+            Some("--fan-set") => {
+                use tools::fan::helper::{ask, Request};
+                let req = match a.get(2).map(String::as_str) {
+                    None | Some("auto") => Request::Auto,
+                    Some("hello") => Request::Hello,
+                    Some(v) => Request::Set { rpm: v.split(',').map(|x| x.parse().ok()).collect() },
+                };
+                println!("{:?}", ask(&req));
+                return Ok(());
+            }
+            _ => {}
+        }
     }
     if std::env::args().any(|a| a == "--scan-report") {
         tools::cleanup::scan_report(std::env::args().any(|a| a == "--ai"));

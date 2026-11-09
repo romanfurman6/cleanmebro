@@ -1,8 +1,10 @@
 //! The Fan Control page in the full window: a big dial per fan with
-//! spinning blades, a heat map of the chip, the fan mode and the last
-//! 10 minutes of speed and temperature.
+//! spinning blades, a heat map of the chip, the fan mode (with the speed
+//! slider and curve editor) and the last 10 minutes of speed and temperature.
 
-use super::data::{heat, heat_text, rpm_text, Snapshot, HISTORY, SAMPLE_SECS};
+use super::control::{speed, Mode, Preset, Settings, Source, CURVE_HI, CURVE_LO};
+use super::data::{heat, heat_text, rpm_text, Fan, Snapshot, HISTORY, SAMPLE_SECS};
+use super::{Cmd, HelperState, Live};
 use super::ui::{blades, dial, fan_name, heat_pos, heat_scale, hottest_text, is_block, keep_spinning, plural, sparkline, spin, thermal_hint, BLADE, HOT_LINE, LINE};
 use crate::core::tool::Cx;
 use crate::kit::glass::*;
@@ -11,7 +13,7 @@ use egui::{Align2, Color32, Pos2, Rect, Stroke, Ui, Vec2};
 const GAP: f32 = 12.0;
 const ROW1_H: f32 = 222.0;
 
-pub fn page(s: &Snapshot, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
+pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<Cmd> {
     let p = ui.painter().clone();
     let t = ui.ctx().input(|i| i.time);
     let mut sub = Vec::new();
@@ -81,24 +83,289 @@ pub fn page(s: &Snapshot, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     y += ROW1_H + 14.0;
 
     // row 2: mode
-    let mr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, 64.0));
-    glass_card(&p, mr, 14.0, 0.0, false);
-    p.text(Pos2::new(mr.left() + 14.0, mr.top() + 20.0), Align2::LEFT_CENTER, "Mode", bold(13.0), TEXT);
-    let chip = Rect::from_min_size(Pos2::new(mr.left() + 62.0, mr.top() + 8.0), Vec2::new(64.0, 24.0));
-    p.rect_filled(chip, 7.0, if s.fans.is_empty() { white(16) } else { tint::FAN });
-    p.text(chip.center(), Align2::CENTER_CENTER, if s.fans.is_empty() { "Passive" } else { "Auto" }, bold(12.0), Color32::WHITE);
-    let hint = if s.fans.is_empty() {
-        "macOS manages heat on its own. There is no fan to set."
-    } else {
-        "macOS sets the speed and spins the fans up when the chip gets warm. Quiet, Fixed, Curve and Max arrive with the fan helper."
-    };
-    text_fit(&p, Pos2::new(mr.left() + 14.0, mr.top() + 46.0), Align2::LEFT_CENTER, hint, font(12.0), TEXT_DIM, mr.width() - 28.0);
+    let mut cmds = Vec::new();
+    let mr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, mode_height(s, l)));
+    mode_card(ui, mr, s, l, &mut cmds);
     y = mr.bottom() + 14.0;
 
     // row 3: history
     let hr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, r.bottom() - 18.0));
     if hr.height() > 90.0 {
         history(&p, hr, s);
+    }
+    cmds
+}
+
+const MODE_HINTS: [&str; 5] = [
+    "macOS decides. Fans speed up when the chip gets warm.",
+    "Fans may stop when cool and stay at their minimum when warm. If any sensor passes 95 °C, they go back to Auto.",
+    "The fans hold one speed, whatever the temperature.",
+    "",
+    "Full speed. Good before a long export or a game.",
+];
+const INSTALL_H: f32 = 52.0;
+const FIXED_H: f32 = 40.0;
+const CURVE_H: f32 = 222.0;
+
+fn mode_height(s: &Snapshot, l: &Live) -> f32 {
+    if s.fans.is_empty() {
+        return 64.0;
+    }
+    let mut h = 84.0 + 28.0;
+    if l.needs_helper() || !l.error.is_empty() {
+        h += INSTALL_H;
+    }
+    match l.settings.mode {
+        Mode::Fixed => h += FIXED_H,
+        Mode::Curve => h += CURVE_H,
+        _ => {}
+    }
+    h
+}
+
+/// The mode card: Auto / Quiet / Fixed / Curve / Max, the helper's state,
+/// and for Fixed a speed slider, for Curve the curve editor.
+fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>) {
+    let p = ui.painter().clone();
+    glass_card(&p, mr, 14.0, 0.0, false);
+    let lx = mr.left() + 14.0;
+    let rx = mr.right() - 14.0;
+    if s.fans.is_empty() {
+        p.text(Pos2::new(lx, mr.top() + 20.0), Align2::LEFT_CENTER, "Mode", bold(13.0), TEXT);
+        let chip = Rect::from_min_size(Pos2::new(mr.left() + 62.0, mr.top() + 8.0), Vec2::new(64.0, 24.0));
+        p.rect_filled(chip, 7.0, white(16));
+        p.text(chip.center(), Align2::CENTER_CENTER, "Passive", bold(12.0), Color32::WHITE);
+        text_fit(&p, Pos2::new(lx, mr.top() + 46.0), Align2::LEFT_CENTER, "macOS manages heat on its own. There is no fan to set.", font(12.0), TEXT_DIM, mr.width() - 28.0);
+        return;
+    }
+    let st = &l.settings;
+    let fan0 = s.fans[0].clone();
+    // title + modes + helper state
+    let ty = mr.top() + 24.0;
+    p.text(Pos2::new(lx, ty), Align2::LEFT_CENTER, "Mode", bold(13.0), TEXT);
+    let labels: Vec<&str> = Mode::ALL.iter().map(|m| m.label()).collect();
+    let seg = Rect::from_min_size(Pos2::new(lx + 52.0, ty - 15.0), Vec2::new(360.0f32.min(mr.width() - 260.0), 30.0));
+    if let Some(i) = segmented(ui, seg, ui.scope_id().with("fan-mode-page"), &labels, st.mode.index()) {
+        let mut n = st.clone();
+        n.mode = Mode::ALL[i];
+        cmds.push(Cmd::Set(n, true));
+    }
+    let (state, col) = match l.helper {
+        HelperState::Ready if l.manual => ("Helper holds the fans", GREEN),
+        HelperState::Ready => ("Helper installed", GREEN),
+        HelperState::Outdated => ("Helper needs an update", AMBER),
+        HelperState::Missing => ("Helper not installed", TEXT_FAINT),
+        HelperState::Unknown => ("Checking helper…", TEXT_FAINT),
+    };
+    let tr = p.text(Pos2::new(rx, ty), Align2::RIGHT_CENTER, state, font(12.0), if col == GREEN { TEXT_DIM } else { col });
+    p.circle_filled(Pos2::new(tr.left() - 9.0, ty), 3.5, col);
+
+    // what the mode does now
+    let mut y = mr.top() + 56.0;
+    let temp = st.curve.source.read(s);
+    let hint = if st.mode != Mode::Auto && l.guard.tripped {
+        format!("Fans are on Auto: a sensor reached {:.0} °C. {} resumes once everything is below 80 °C.", l.guard.peak, st.mode.label())
+    } else if st.mode == Mode::Curve {
+        match temp {
+            Some(t) => format!("Speed follows the {} temperature: {t:.0} °C now, so {} rpm.", source_word(st.curve.source), rpm_text(speed(&fan0, st.curve.at(t)))),
+            None => "Speed follows a temperature.".into(),
+        }
+    } else {
+        MODE_HINTS[st.mode.index()].into()
+    };
+    let hint_col = if l.guard.tripped && st.mode != Mode::Auto { AMBER } else { TEXT_DIM };
+    text_fit(&p, Pos2::new(lx, y), Align2::LEFT_CENTER, &hint, font(12.0), hint_col, mr.width() - 28.0);
+    y += 20.0;
+
+    // the helper, when the mode needs it
+    if l.needs_helper() || !l.error.is_empty() {
+        let ir = Rect::from_min_size(Pos2::new(lx, y), Vec2::new(mr.width() - 28.0, INSTALL_H - 8.0));
+        p.rect_filled(ir, 10.0, with_alpha(tint::FAN, 0.12));
+        p.rect_stroke(ir, 10.0, Stroke::new(1.0, with_alpha(tint::FAN, 0.35)), egui::StrokeKind::Inside);
+        let (label, msg) = match l.helper {
+            _ if l.busy => ("Waiting…", "macOS is asking for your password."),
+            HelperState::Outdated => ("Update helper…", "CleanMeBro was updated. Approve the new helper once."),
+            _ => ("Install helper…", "To change fan speed, CleanMeBro adds a small helper that runs with admin rights. macOS asks for your password once."),
+        };
+        let bw = button_width(&p, label, BTN_PRIMARY);
+        let br = Rect::from_min_size(Pos2::new(ir.right() - 8.0 - bw, ir.center().y - 14.0), Vec2::new(bw, 28.0));
+        let (msg, mcol) = if l.error.is_empty() { (msg.to_string(), TEXT_SOFT) } else { (format!("Didn't work: {}", l.error), RED) };
+        text_fit(&p, Pos2::new(ir.left() + 12.0, ir.center().y), Align2::LEFT_CENTER, &msg, font(12.0), mcol, ir.width() - bw - 36.0);
+        if l.needs_helper() && pill_button(ui, br, label, BTN_PRIMARY, !l.busy).clicked() {
+            cmds.push(Cmd::Install);
+        }
+        y += INSTALL_H;
+    }
+
+    match st.mode {
+        Mode::Fixed => {
+            fixed_slider(ui, Rect::from_min_size(Pos2::new(lx, y), Vec2::new(mr.width() - 28.0, FIXED_H - 8.0)), st, &fan0, cmds);
+            y += FIXED_H;
+        }
+        Mode::Curve => {
+            curve_editor(ui, Rect::from_min_size(Pos2::new(lx, y), Vec2::new(mr.width() - 28.0, CURVE_H - 12.0)), st, &fan0, temp, cmds);
+            y += CURVE_H;
+        }
+        _ => {}
+    }
+
+    // footer: the safety promise, and a way to take the helper out
+    let fy = y + 8.0;
+    hairline(&p, Pos2::new(lx, y - 4.0), Pos2::new(rx, y - 4.0));
+    text_fit(&p, Pos2::new(lx, fy), Align2::LEFT_CENTER, "Fans go back to Auto when you quit, when the Mac sleeps, or if any sensor passes 95 °C.", font(11.0), TEXT_FAINT, mr.width() - 140.0);
+    if matches!(l.helper, HelperState::Ready | HelperState::Outdated) && !l.busy && link(ui, Pos2::new(rx, fy), Align2::RIGHT_CENTER, "Remove helper", 11.0).clicked() {
+        cmds.push(Cmd::Uninstall);
+    }
+}
+
+fn source_word(s: Source) -> &'static str {
+    match s {
+        Source::Hottest => "hottest sensor's",
+        Source::Cpu => "CPU",
+        Source::Gpu => "GPU",
+    }
+}
+
+/// "Speed" with a slider over the fan's range and the rpm it gives.
+fn fixed_slider(ui: &mut Ui, r: Rect, st: &Settings, fan: &Fan, cmds: &mut Vec<Cmd>) {
+    let p = ui.painter().clone();
+    let cy = r.center().y;
+    p.text(Pos2::new(r.left(), cy), Align2::LEFT_CENTER, "Speed", font(12.0), TEXT_DIM);
+    let value = format!("{} rpm", rpm_text(speed(fan, st.fixed)));
+    let vr = p.text(Pos2::new(r.right(), cy), Align2::RIGHT_CENTER, value, bold(13.0), TEXT);
+    let track = Rect::from_min_max(Pos2::new(r.left() + 56.0, cy - 3.0), Pos2::new(vr.left() - 18.0, cy + 3.0));
+    let hit = track.expand2(Vec2::new(8.0, 12.0));
+    let resp = ui.interact(hit, ui.scope_id().with("fan-fixed"), egui::Sense::click_and_drag());
+    let mut v = st.fixed;
+    if let Some(pos) = resp.interact_pointer_pos() {
+        if resp.dragged() || resp.clicked() || resp.drag_stopped() {
+            v = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0);
+        }
+    }
+    p.rect_filled(track, 3.0, white(24));
+    p.rect_filled(Rect::from_min_max(track.min, Pos2::new(track.left() + track.width() * v, track.bottom())), 3.0, LINE);
+    let knob = Pos2::new(track.left() + track.width() * v, cy);
+    p.circle_filled(knob, 9.0, Color32::WHITE);
+    p.circle_stroke(knob, 9.0, Stroke::new(1.0, with_alpha(Color32::BLACK, 0.3)));
+    p.text(Pos2::new(track.left(), cy + 15.0), Align2::LEFT_CENTER, rpm_text(fan.min), font(10.0), TEXT_FAINT);
+    p.text(Pos2::new(track.right(), cy + 15.0), Align2::RIGHT_CENTER, rpm_text(fan.max), font(10.0), TEXT_FAINT);
+    if resp.hovered() || resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if (v - st.fixed).abs() > f32::EPSILON || resp.drag_stopped() || resp.clicked() {
+        let mut n = st.clone();
+        n.fixed = v;
+        cmds.push(Cmd::Set(n, resp.drag_stopped() || resp.clicked()));
+    }
+}
+
+/// The curve: temperature across, fan speed up, three draggable points,
+/// the live reading as a white dot, and Auto above 95 °C. Presets and the
+/// temperature to follow on the right.
+fn curve_editor(ui: &mut Ui, r: Rect, st: &Settings, fan: &Fan, temp: Option<f32>, cmds: &mut Vec<Cmd>) {
+    let p = ui.painter().clone();
+    let side_w = 230.0;
+    let chart = Rect::from_min_max(Pos2::new(r.left() + 44.0, r.top() + 6.0), Pos2::new(r.right() - side_w - 24.0, r.bottom() - 20.0));
+    const T_MAX: f32 = 100.0;
+    let x_of = |t: f32| chart.left() + (t - CURVE_LO) / (T_MAX - CURVE_LO) * chart.width();
+    let y_of = |f: f32| chart.bottom() - f * chart.height();
+    // grid
+    p.rect_filled(chart, 8.0, white(6));
+    for k in 0..=4 {
+        let yy = y_of(k as f32 / 4.0);
+        p.line_segment([Pos2::new(chart.left(), yy), Pos2::new(chart.right(), yy)], Stroke::new(1.0, white(10)));
+        p.text(Pos2::new(chart.left() - 6.0, yy), Align2::RIGHT_CENTER, rpm_text(speed(fan, k as f32 / 4.0)), font(10.0), TEXT_FAINT);
+    }
+    for t in (30..=100).step_by(10) {
+        p.text(Pos2::new(x_of(t as f32), chart.bottom() + 10.0), Align2::CENTER_CENTER, format!("{t}°"), font(10.0), TEXT_FAINT);
+    }
+    // Auto zone
+    let zone = Rect::from_min_max(Pos2::new(x_of(CURVE_HI), chart.top()), chart.max);
+    p.rect_filled(zone, 0.0, with_alpha(RED, 0.10));
+    p.text(Pos2::new(zone.center().x, chart.top() + 10.0), Align2::CENTER_CENTER, "Auto", bold(10.0), with_alpha(RED, 0.9));
+    // the line and its fill
+    let c = &st.curve;
+    let mut pts = vec![Pos2::new(x_of(CURVE_LO), y_of(c.pts[0].1))];
+    pts.extend(c.pts.iter().map(|(t, f)| Pos2::new(x_of(*t), y_of(*f))));
+    pts.push(Pos2::new(x_of(CURVE_HI), y_of(c.pts[2].1)));
+    let mut fill = pts.clone();
+    fill.push(Pos2::new(x_of(CURVE_HI), chart.bottom()));
+    fill.push(Pos2::new(x_of(CURVE_LO), chart.bottom()));
+    let mut mesh = egui::epaint::Mesh::default();
+    for w in pts.windows(2) {
+        let base = mesh.vertices.len() as u32;
+        let col = with_alpha(LINE, 0.18);
+        mesh.colored_vertex(w[0], col);
+        mesh.colored_vertex(w[1], col);
+        mesh.colored_vertex(Pos2::new(w[1].x, chart.bottom()), col);
+        mesh.colored_vertex(Pos2::new(w[0].x, chart.bottom()), col);
+        mesh.add_triangle(base, base + 1, base + 2);
+        mesh.add_triangle(base, base + 2, base + 3);
+    }
+    p.add(egui::Shape::mesh(mesh));
+    p.add(egui::Shape::line(pts, Stroke::new(2.5, LINE)));
+    // live reading
+    if let Some(t) = temp {
+        let tx = t.clamp(CURVE_LO, T_MAX);
+        let (dx, dy) = (x_of(tx), y_of(c.at(t)));
+        p.add(egui::Shape::dashed_line(&[Pos2::new(dx, chart.bottom()), Pos2::new(dx, dy)], Stroke::new(1.0, white(70)), 3.0, 3.0));
+        p.circle_filled(Pos2::new(dx, dy), 6.0, Color32::WHITE);
+        p.circle_stroke(Pos2::new(dx, dy), 9.0, Stroke::new(3.0, with_alpha(Color32::WHITE, 0.2)));
+    }
+    // handles
+    let mut n = st.clone();
+    let mut changed = false;
+    let mut done = false;
+    for i in 0..3 {
+        let hp = Pos2::new(x_of(c.pts[i].0), y_of(c.pts[i].1));
+        let resp = ui.interact(Rect::from_center_size(hp, Vec2::splat(24.0)), ui.scope_id().with(("fan-pt", i)), egui::Sense::drag());
+        if resp.dragged() {
+            if let Some(pos) = ui.ctx().pointer_interact_pos() {
+                let t = CURVE_LO + (pos.x - chart.left()) / chart.width() * (T_MAX - CURVE_LO);
+                let f = (chart.bottom() - pos.y) / chart.height();
+                n.curve.drag(i, t, f);
+                changed = true;
+            }
+        }
+        done |= resp.drag_stopped();
+        let hot = resp.hovered() || resp.dragged();
+        if hot {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            p.text(hp + Vec2::new(0.0, -18.0), Align2::CENTER_BOTTOM, format!("{:.0}° · {}", c.pts[i].0, rpm_text(speed(fan, c.pts[i].1))), bold(11.0), TEXT);
+        }
+        p.circle_filled(hp, 7.5, BG);
+        p.circle_stroke(hp, 7.5, Stroke::new(3.0, if hot { Color32::WHITE } else { LINE }));
+    }
+
+    // side: presets and source
+    let sx = r.right() - side_w;
+    let mut sy = r.top() + 4.0;
+    p.text(Pos2::new(sx, sy), Align2::LEFT_TOP, "Presets", bold(12.0), TEXT);
+    sy += 20.0;
+    let names: Vec<&str> = Preset::ALL.iter().map(|p| p.label()).collect();
+    let cur = c.preset().map(|k| Preset::ALL.iter().position(|x| *x == k).unwrap_or(0)).unwrap_or(usize::MAX);
+    if let Some(i) = segmented(ui, Rect::from_min_size(Pos2::new(sx, sy), Vec2::new(side_w, 28.0)), ui.scope_id().with("fan-preset"), &names, cur) {
+        n.curve.pts = Preset::ALL[i].points();
+        changed = true;
+        done = true;
+    }
+    sy += 42.0;
+    p.text(Pos2::new(sx, sy), Align2::LEFT_TOP, "Follow temperature of", bold(12.0), TEXT);
+    sy += 20.0;
+    let srcs: Vec<&str> = Source::ALL.iter().map(|s| s.label()).collect();
+    let si = Source::ALL.iter().position(|x| *x == c.source).unwrap_or(0);
+    if let Some(i) = segmented(ui, Rect::from_min_size(Pos2::new(sx, sy), Vec2::new(side_w, 28.0)), ui.scope_id().with("fan-source"), &srcs, si) {
+        n.curve.source = Source::ALL[i];
+        changed = true;
+        done = true;
+    }
+    sy += 44.0;
+    p.text(Pos2::new(sx, sy), Align2::LEFT_TOP, "Auto above 95 °C", font(12.0), TEXT_SOFT);
+    p.text(Pos2::new(sx, sy + 17.0), Align2::LEFT_TOP, "Safety. Can't be turned off.", font(11.0), TEXT_FAINT);
+    sy += 44.0;
+    paragraph(&p, Pos2::new(sx, sy), "Drag the points. Below the first one the fans stay at its speed.", font(11.0), TEXT_FAINT, side_w);
+    if changed || done {
+        cmds.push(Cmd::Set(n, done));
     }
 }
 
