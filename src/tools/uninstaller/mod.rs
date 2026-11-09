@@ -6,13 +6,11 @@
 //! Drop an app on its page or its widget, or just start dragging an app out of
 //! /Applications: a small drop zone appears at the top of the screen.
 //!
-//! Page routes: "" (Apps), "leftovers", "login", "app:<path>" (select an app).
+//! Page routes: "" (Apps), "leftovers", "app:<path>" (select an app).
 
 mod apps;
 mod leftovers;
-mod login;
 mod mac;
-mod plist;
 mod remove;
 mod ui;
 
@@ -136,14 +134,6 @@ pub struct Drag {
 }
 
 #[derive(Default)]
-pub struct LoginState {
-    pub loaded: bool,
-    pub apps: Vec<login::LoginApp>,
-    pub apps_error: Option<String>,
-    pub jobs: Vec<login::Job>,
-}
-
-#[derive(Default)]
 pub struct State {
     pub phase: Phase,
     pub apps: Vec<AppRow>,
@@ -155,7 +145,6 @@ pub struct State {
     pub notice: Option<Notice>,
     pub drop: Drop,
     pub drag: Drag,
-    pub login: LoginState,
     pub settings: Settings,
     /// Rescan when the current scan ends.
     pub again: bool,
@@ -173,13 +162,11 @@ pub struct Settings {
     pub drop_zone: bool,
     /// Names of apps seen installed, by bundle id (names for leftovers).
     pub known: BTreeMap<String, String>,
-    /// Login apps turned off here (so they can be turned back on).
-    pub login_off: Vec<(String, PathBuf, bool)>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { watch_removed: true, drop_zone: true, known: BTreeMap::new(), login_off: Vec::new() }
+        Settings { watch_removed: true, drop_zone: true, known: BTreeMap::new() }
     }
 }
 
@@ -207,7 +194,6 @@ pub type Shared = Arc<Mutex<State>>;
 pub enum Tab {
     Apps,
     Leftovers,
-    Login,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -252,7 +238,6 @@ pub struct Uninstaller {
     pub origin: Origin,
     /// Bundle ids of open apps, refreshed at most every 2 s.
     pub running: Option<(Vec<String>, Instant)>,
-    pub login_requested: bool,
     /// The widget asked for the window page.
     pub want_page: bool,
     /// The drop zone keeps showing the result until then.
@@ -292,7 +277,6 @@ impl Uninstaller {
             demo_now: None,
             origin: Origin::Page,
             running: None,
-            login_requested: false,
             want_page: false,
             done_until: None,
             on: true,
@@ -421,36 +405,6 @@ impl Uninstaller {
                         None => Drop::Refused(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "Couldn't read this app.".into()),
                     };
                 }
-                ctx.request_repaint();
-            })
-            .ok();
-    }
-
-    pub fn load_login(&self) {
-        if self.demo {
-            return;
-        }
-        let (st, lib, ctx) = (self.st.clone(), self.roots.user_library.clone(), self.ctx.clone());
-        std::thread::Builder::new()
-            .name("uninstaller-login".into())
-            .spawn(move || {
-                let jobs = login::read_jobs(&lib);
-                let apps = login::login_apps();
-                let mut g = st.lock().unwrap();
-                g.login.jobs = jobs;
-                match apps {
-                    Ok(mut a) => {
-                        for (name, path, hidden) in &g.settings.login_off {
-                            if !a.iter().any(|x| x.path == *path) {
-                                a.push(login::LoginApp { name: name.clone(), path: path.clone(), hidden: *hidden, on: false });
-                            }
-                        }
-                        g.login.apps = a;
-                        g.login.apps_error = None;
-                    }
-                    Err(e) => g.login.apps_error = Some(e),
-                }
-                g.login.loaded = true;
                 ctx.request_repaint();
             })
             .ok();
@@ -764,7 +718,6 @@ impl Tool for Uninstaller {
     fn open_page(&mut self, route: &str) {
         match route {
             "leftovers" => self.tab = Tab::Leftovers,
-            "login" => self.tab = Tab::Login,
             r if r.starts_with("app:") => {
                 self.tab = Tab::Apps;
                 self.filter = Filter::All;

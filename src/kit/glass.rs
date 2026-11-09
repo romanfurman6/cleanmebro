@@ -55,6 +55,7 @@ pub mod tint {
     pub const CAPTURE: Color32 = Color32::from_rgb(0x6E, 0x56, 0xCF);
     pub const KEEP_AWAKE: Color32 = Color32::from_rgb(0xC2, 0x41, 0x7A);
     pub const FAN: Color32 = Color32::from_rgb(0x0E, 0x8F, 0xB0);
+    pub const STARTUP: Color32 = Color32::from_rgb(0xD6, 0x45, 0x3D);
     pub const NEUTRAL: Color32 = Color32::from_rgb(0x63, 0x63, 0x66);
 }
 
