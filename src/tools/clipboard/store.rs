@@ -127,6 +127,7 @@ impl Entry {
     }
 
     /// Whether the search words all appear in the entry.
+    #[cfg(test)]
     pub fn matches(&self, query: &str) -> bool {
         let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
         self.matches_words(&words)
