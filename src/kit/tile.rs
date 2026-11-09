@@ -1,5 +1,6 @@
 //! Building blocks for panel widgets at the grid sizes (see
-//! `core::tool::Size`): the card, the standard Small / Wide / Row layouts,
+//! `core::tool::Size`): the card, the standard Small / Wide layouts, the
+//! split Row (a summary on the left, a breakdown on the right),
 //! the header of a Medium or Large widget, rings and sparklines.
 
 use super::glass::*;
@@ -101,28 +102,51 @@ pub fn wide(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, 
     resp
 }
 
-/// Row (1:4): a big chip, the title with its value on the right, a thin bar
-/// (or a caption) under them.
-#[allow(clippy::too_many_arguments)]
-pub fn row(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, title: &str, value: &str, bar_or_caption: Result<(f32, Color32), &str>, selected: bool) -> Response {
-    let resp = card(ui, rect, id, selected);
-    let p = ui.painter();
-    let chip = Rect::from_min_size(Pos2::new(rect.left() + 12.0, rect.center().y - 17.0), Vec2::splat(34.0));
-    tool_chip(p, chip, glyph, color);
-    row_text(p, rect, chip.right() + 12.0, title, value, bar_or_caption);
-    resp
+/// The chip of a split Row (where `row_split` draws it), for widgets that
+/// paint over it.
+pub fn row_chip(rect: Rect) -> Rect {
+    Rect::from_min_size(Pos2::new(rect.left() + 12.0, rect.center().y - 17.0), Vec2::splat(34.0))
 }
 
-/// The text part of a Row from `x0` to the right edge.
-pub fn row_text(p: &egui::Painter, rect: Rect, x0: f32, title: &str, value: &str, bar_or_caption: Result<(f32, Color32), &str>) {
-    let x1 = rect.right() - 12.0;
-    let cy = rect.center().y - 7.0;
-    let vr = text_fit(p, Pos2::new(x1, cy), Align2::RIGHT_CENTER, value, font(12.0), TEXT_DIM, (x1 - x0) * 0.6);
-    text_fit(p, Pos2::new(x0, cy), Align2::LEFT_CENTER, title, bold(13.0), TEXT, vr.left() - x0 - 8.0);
-    match bar_or_caption {
-        Ok((f, c)) => bar(p, Rect::from_min_max(Pos2::new(x0, cy + 13.0), Pos2::new(x1, cy + 17.0)), f, c),
-        Err(cap) => {
-            text_fit(p, Pos2::new(x0, cy + 17.0), Align2::LEFT_CENTER, cap, font(11.0), TEXT_FAINT, x1 - x0);
+/// Row (1:4) in two halves. Left: a big chip, the label, a big value and a
+/// caption. The right half is returned for a breakdown (bar lines, a
+/// sparkline…), so the row shows as much as a Medium's first lines.
+#[allow(clippy::too_many_arguments)]
+pub fn row_split(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, label: &str, value: &str, caption: &str, selected: bool) -> (Response, Rect) {
+    let resp = card(ui, rect, id, selected);
+    let p = ui.painter();
+    let chip = row_chip(rect);
+    tool_chip(p, chip, glyph, color);
+    let split = rect.left() + (rect.width() * 0.47).round();
+    let (x0, x1) = (chip.right() + 10.0, split - 10.0);
+    let cy = rect.center().y;
+    text_fit(p, Pos2::new(x0, cy - 19.0), Align2::LEFT_CENTER, label, font(11.0), TEXT_DIM, x1 - x0);
+    // the value shrinks a step before it gets cut
+    let size = if p.layout_no_wrap(value.to_string(), bold(19.0), TEXT).size().x <= x1 - x0 { 19.0 } else { 15.0 };
+    text_fit(p, Pos2::new(x0, cy + 1.0), Align2::LEFT_CENTER, value, bold(size), TEXT, x1 - x0);
+    text_fit(p, Pos2::new(x0, cy + 21.0), Align2::LEFT_CENTER, caption, font(11.0), TEXT_FAINT, x1 - x0);
+    p.line_segment([Pos2::new(split, rect.top() + 14.0), Pos2::new(split, rect.bottom() - 14.0)], Stroke::new(1.0, white(18)));
+    (resp, Rect::from_min_max(Pos2::new(split + 12.0, rect.top() + 11.0), Pos2::new(rect.right() - 12.0, rect.bottom() - 11.0)))
+}
+
+/// Up to three bar lines stacked in `r` (the right half of a split Row);
+/// `empty` is shown when there are none.
+pub fn lines(p: &egui::Painter, r: Rect, lines: &[(String, Option<(f32, Color32)>, String)], empty: &str) {
+    if lines.is_empty() {
+        text_fit(p, r.center(), Align2::CENTER_CENTER, empty, font(11.0), TEXT_FAINT, r.width());
+        return;
+    }
+    // narrow: label and value on one line, the bar as a thin rule under it
+    let n = lines.len().min(3);
+    let lh = (r.height() / n as f32).min(24.0);
+    let top = r.center().y - lh * n as f32 / 2.0;
+    for (k, (label, frac, value)) in lines.iter().take(n).enumerate() {
+        let lr = Rect::from_min_size(Pos2::new(r.left(), top + k as f32 * lh), Vec2::new(r.width(), lh));
+        let ty = if frac.is_some() { lr.top() + lh * 0.4 } else { lr.center().y };
+        let vr = text_fit(p, Pos2::new(lr.right(), ty), Align2::RIGHT_CENTER, value, font(11.5), TEXT_DIM, lr.width() * 0.55);
+        text_fit(p, Pos2::new(lr.left(), ty), Align2::LEFT_CENTER, label, font(11.5), TEXT_SOFT, vr.left() - lr.left() - 6.0);
+        if let Some((f, c)) = frac {
+            bar(p, Rect::from_min_max(Pos2::new(lr.left(), lr.bottom() - 5.0), Pos2::new(lr.right(), lr.bottom() - 2.5)), *f, *c);
         }
     }
 }

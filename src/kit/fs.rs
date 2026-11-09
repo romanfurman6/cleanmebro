@@ -78,6 +78,11 @@ pub fn move_to_trash(p: &Path) -> Result<(), String> {
     crate::kit::native::trash_item(p)
 }
 
+/// Like `move_to_trash`, and returns where in the Trash the item landed.
+pub fn move_to_trash_at(p: &Path) -> Result<PathBuf, String> {
+    crate::kit::native::trash_item_at(p)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

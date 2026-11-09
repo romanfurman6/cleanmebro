@@ -45,12 +45,8 @@ pub struct Battery {
     pub permanent_failure: bool,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct Device {
-    pub name: String,
-    pub kind: String,
-    pub battery: Option<u8>,
-}
+pub use super::devices::Device;
+use super::devices;
 
 #[derive(Clone, Debug, Default)]
 pub struct Wifi {
@@ -106,6 +102,8 @@ pub struct Snapshot {
     pub online: bool,
     pub wifi: Wifi,
     pub devices: Vec<Device>,
+    /// Device alert and menu bar settings (changed from the Devices sheet).
+    pub bt_prefs: devices::Prefs,
     pub speed: SpeedTest,
 }
 
@@ -171,8 +169,18 @@ impl Snapshot {
 
 pub type Shared = Arc<Mutex<Snapshot>>;
 
+/// Change the device alert / menu bar settings and save them.
+pub fn change_bt_prefs(mon: &Shared, f: impl FnOnce(&mut devices::Prefs)) {
+    let prefs = {
+        let mut s = mon.lock().unwrap();
+        f(&mut s.bt_prefs);
+        s.bt_prefs
+    };
+    prefs.save();
+}
+
 pub fn start(ctx: egui::Context, demo: bool) -> Shared {
-    let shared: Shared = Arc::new(Mutex::new(Snapshot::default()));
+    let shared: Shared = Arc::new(Mutex::new(Snapshot { bt_prefs: devices::Prefs::load(), ..Snapshot::default() }));
     let s = shared.clone();
     std::thread::Builder::new()
         .name("monitor".into())
@@ -187,6 +195,9 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
     let mut last_ticks = cpu_ticks();
     let mut last_net = Instant::now();
     let mut tick: u64 = 0;
+    // the slow Bluetooth report, refreshed from the input registry in between
+    let mut bt_profile: Vec<Device> = Vec::new();
+    let mut bt_alerts = devices::Alerts::default();
     // one-off facts
     {
         let (model, chip) = hardware();
@@ -225,9 +236,20 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
 
         let slow_battery = tick.is_multiple_of(5);
         let slow_profile = tick.is_multiple_of(30);
+        let hid_tick = tick.is_multiple_of(5);
         let slow_sizes = tick.is_multiple_of(300);
         let battery = if slow_battery { Some(battery()) } else { None };
-        let (devices, wifi) = if slow_profile { (Some(bluetooth()), Some(wifi())) } else { (None, None) };
+        let wifi = if slow_profile { Some(wifi()) } else { None };
+        if slow_profile {
+            bt_profile = devices::parse_profiler(&run_cmd("system_profiler", &["SPBluetoothDataType", "-json"]));
+        }
+        let devices = if slow_profile || hid_tick {
+            let mut list = bt_profile.clone();
+            devices::merge(&mut list, &devices::parse_ioreg(&run_cmd("ioreg", &["-r", "-l", "-k", "BatteryPercent"])));
+            Some(list)
+        } else {
+            None
+        };
 
         {
             let mut s = shared.lock().unwrap();
@@ -264,6 +286,14 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
                 s.battery = b;
             }
             if let Some(d) = devices {
+                if s.bt_prefs.alerts {
+                    for (title, body) in bt_alerts.check(&d) {
+                        crate::kit::notify::send(&title, &body);
+                    }
+                } else {
+                    // stay quiet, but remember so turning alerts on doesn't replay old ones
+                    bt_alerts.check(&d);
+                }
                 s.devices = d;
             }
             if let Some(w) = wifi {
@@ -495,38 +525,6 @@ fn power_health_text() -> String {
     String::new()
 }
 
-fn bluetooth() -> Vec<Device> {
-    let out = run_cmd("system_profiler", &["SPBluetoothDataType", "-json"]);
-    let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
-    let mut list = Vec::new();
-    if let Some(arr) = v["SPBluetoothDataType"][0]["device_connected"].as_array() {
-        for entry in arr {
-            if let Some(obj) = entry.as_object() {
-                for (name, info) in obj {
-                    let pct = |k: &str| info[k].as_str().and_then(|s| s.trim_end_matches('%').parse::<u8>().ok());
-                    let battery = pct("device_batteryLevelMain")
-                        .or_else(|| pct("device_batteryLevel"))
-                        .or_else(|| match (pct("device_batteryLevelLeft"), pct("device_batteryLevelRight")) {
-                            (Some(a), Some(b)) => Some(a.min(b)),
-                            (a, b) => a.or(b),
-                        });
-                    // Apple mobile devices (iPhone/iPad) are skipped, as in the original
-                    let minor = info["device_minorType"].as_str().unwrap_or("");
-                    if minor.contains("Phone") || minor.contains("iPad") {
-                        continue;
-                    }
-                    list.push(Device {
-                        name: name.clone(),
-                        kind: info["device_minorType"].as_str().unwrap_or("").to_string(),
-                        battery,
-                    });
-                }
-            }
-        }
-    }
-    list
-}
-
 fn wifi() -> Wifi {
     let mut w = Wifi::default();
     let out = run_cmd("system_profiler", &["SPAirPortDataType", "-json"]);
@@ -717,10 +715,8 @@ pub fn demo_snapshot() -> Snapshot {
         net_recv_total: 5_400_000_000,
         online: true,
         wifi: Wifi { name: "Home Wi-Fi".into(), security: "WPA3 PERSONAL".into(), phy: "802.11ax".into(), channel: "149 (5GHz, 80MHz)".into(), signal: "-52 dBm / -92 dBm".into(), wired: false },
-        devices: vec![
-            Device { name: "AirPods Max".into(), kind: "Headphones".into(), battery: Some(37) },
-            Device { name: "Magic Keyboard".into(), kind: "Keyboard".into(), battery: Some(82) },
-        ],
+        devices: devices::demo(),
+        bt_prefs: devices::Prefs::default(),
         speed: SpeedTest::default(),
     }
 }
