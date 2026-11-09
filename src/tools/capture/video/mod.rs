@@ -637,6 +637,11 @@ pub fn probe(path: &std::path::Path, download: bool) {
     let t = Instant::now();
     let n = sound::audio_tracks(path);
     eprintln!("[video] {} audio tracks: {n}", path.display());
+    for (k, name) in ["mix", "system", "mic"].iter().enumerate().take(n) {
+        if let Ok(s) = sound::read_nth(path, k, 8_000, 1) {
+            eprintln!("[video] track {k} ({name}): peak {:.3}", s.iter().fold(0.0f32, |m, v| m.max(v.abs())));
+        }
+    }
     match sound::read_audio(path, sound::voice_track(n), 16_000, 1) {
         Ok(s) => eprintln!("[video] voice at 16 kHz: {} samples ({:.2} s), peak {:.3} ({:?})", s.len(), s.len() as f64 / 16_000.0, s.iter().fold(0.0f32, |m, v| m.max(v.abs())), t.elapsed()),
         Err(e) => eprintln!("[video] reading the voice failed: {e}"),

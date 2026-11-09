@@ -258,8 +258,8 @@ pub fn transcribe(video: &Path, m: Model, p: &std::sync::Arc<Progress>) -> Resul
     use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
     p.total.store(100, Ordering::Relaxed);
     p.done.store(0, Ordering::Relaxed);
-    let track = super::sound::voice_track(super::sound::audio_tracks(video));
-    let pcm = super::sound::read_audio(video, track, 16_000, 1)?;
+    // the mix: everyone in a call, not only this Mac's microphone
+    let pcm = super::sound::read_audio(video, super::sound::Track::Mix, 16_000, 1)?;
     if pcm.is_empty() {
         return Err("This video has no sound".into());
     }
@@ -275,9 +275,18 @@ pub fn transcribe(video: &Path, m: Model, p: &std::sync::Arc<Progress>) -> Resul
     params.set_print_realtime(false);
     params.set_print_special(false);
     params.set_print_timestamps(false);
-    let (pa, pc) = (p.clone(), p.clone());
+    let pa = p.clone();
     params.set_progress_callback_safe(move |pct: i32| pa.done.store(pct.clamp(0, 100) as u64, Ordering::Relaxed));
-    params.set_abort_callback_safe(move || pc.cancelled());
+    // whisper-rs 0.16's safe abort callback reads its closure wrongly (and
+    // aborts every encode), so the raw one, on the cancel flag itself
+    unsafe extern "C" fn stop(flag: *mut std::ffi::c_void) -> bool {
+        unsafe { (*(flag as *const AtomicBool)).load(Ordering::Relaxed) }
+    }
+    // `p` outlives `full` below, so the flag stays where it is
+    unsafe {
+        params.set_abort_callback(Some(stop));
+        params.set_abort_callback_user_data(&p.cancel as *const AtomicBool as *mut std::ffi::c_void);
+    }
     state.full(params, &pcm).map_err(|e| if p.cancelled() { "Stopped".to_string() } else { format!("Transcribing failed: {e}") })?;
     let raw = (0..state.full_n_segments())
         .filter_map(|i| state.get_segment(i))

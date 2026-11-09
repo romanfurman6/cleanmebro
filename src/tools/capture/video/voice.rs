@@ -75,6 +75,9 @@ pub fn clean(video: &Path, strength: f32, p: &Progress) -> Result<PathBuf, Strin
         return Err("This video has no sound".into());
     }
     let voice = sound::read_audio(video, sound::voice_track(n), 48_000, 2)?;
+    if voice.iter().all(|v| v.abs() < 1e-4) {
+        return Err(if n >= 3 { "The microphone track is silent: nothing to clean up".into() } else { "The sound is silent: nothing to clean up".into() });
+    }
     let system = if n >= 3 { Some(sound::read_audio(video, Track::System, 48_000, 2)?) } else { None };
     let cleaned = to_stereo(&denoise(&to_mono(&voice), strength, p)?);
     let mixed = match &system {
