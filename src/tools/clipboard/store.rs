@@ -96,6 +96,9 @@ pub struct Entry {
     pub hash: u64,
 }
 
+/// Characters of a clip a list row needs at most.
+const TITLE_MAX: usize = 300;
+
 impl Entry {
     pub fn time(&self) -> chrono::DateTime<chrono::Local> {
         chrono::DateTime::from_timestamp_millis(self.last).map(|t| t.with_timezone(&chrono::Local)).unwrap_or_else(chrono::Local::now)
@@ -122,7 +125,47 @@ impl Entry {
                 }
             }
             Kind::Link => self.text.trim().trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_string(),
-            _ => self.text.split_whitespace().collect::<Vec<_>>().join(" "),
+            _ => {
+                // one line in a row shows a few dozen characters: don't join
+                // every word of a long clip
+                let mut out = String::new();
+                for w in self.text.split_whitespace() {
+                    if out.len() >= TITLE_MAX {
+                        break;
+                    }
+                    if !out.is_empty() {
+                        out.push(' ');
+                    }
+                    out.push_str(w);
+                }
+                if out.len() > TITLE_MAX {
+                    let cut = (0..=TITLE_MAX).rev().find(|i| out.is_char_boundary(*i)).unwrap_or(0);
+                    out.truncate(cut);
+                }
+                out
+            }
+        }
+    }
+
+    /// A copy for drawing one row: the text cut to what a title or a
+    /// thumbnail needs (a clip can be megabytes, rows are drawn every frame).
+    pub fn light(&self) -> Entry {
+        Entry {
+            id: self.id,
+            kind: self.kind,
+            text: crate::kit::glass::prefix_chars(&self.text, TITLE_MAX).to_string(),
+            app: self.app.clone(),
+            bundle: self.bundle.clone(),
+            first: self.first,
+            last: self.last,
+            count: self.count,
+            pinned: self.pinned,
+            w: self.w,
+            h: self.h,
+            rtf: self.rtf,
+            html: self.html,
+            bytes: self.bytes,
+            hash: self.hash,
         }
     }
 
@@ -506,6 +549,19 @@ mod tests {
     }
 
     const LIM: Limits = Limits { keep: 3, max_days: 30, dedupe: true };
+
+    #[test]
+    fn long_clips_stay_cheap_to_draw() {
+        let mut st = Store::open(std::env::temp_dir().join(format!("cmb-clip-long-{}", std::process::id())));
+        st.entries.clear();
+        let id = st.add(&text(&"lorem ipsum\n".repeat(100_000)), 0, LIM).unwrap();
+        let e = st.get(id).unwrap();
+        assert!(e.title().len() <= TITLE_MAX && e.title().starts_with("lorem ipsum lorem"));
+        let l = e.light();
+        assert!(l.text.chars().count() <= TITLE_MAX && l.id == e.id && l.kind == e.kind && l.last == e.last);
+        let id2 = st.add(&text("a  b\nc"), 1, LIM).unwrap();
+        assert_eq!(st.get(id2).unwrap().title(), "a b c");
+    }
 
     #[test]
     fn kinds() {

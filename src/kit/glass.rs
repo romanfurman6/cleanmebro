@@ -536,20 +536,41 @@ pub fn legend_row(p: &Painter, r: Rect, color: Color32, label: &str, value: &str
 
 /// Text that is cut with an ellipsis to fit `max_w`.
 pub fn text_fit(painter: &Painter, pos: Pos2, align: Align2, text: &str, font: FontId, color: Color32, max_w: f32) -> Rect {
-    let mut s = text.to_owned();
-    let mut g = painter.layout_no_wrap(s.clone(), font.clone(), color);
+    // No glyph is narrower than about a quarter of the font size, so more
+    // characters than this can never fit: don't lay out a whole long clip.
+    let cap = ((max_w.max(0.0) / (font.size * 0.25).max(1.0)) as usize).saturating_add(2);
+    let chars: Vec<char> = text.chars().take(cap + 1).collect();
+    let mut g = if chars.len() > cap {
+        painter.layout_no_wrap(chars[..cap].iter().collect::<String>() + "…", font.clone(), color)
+    } else {
+        painter.layout_no_wrap(text.to_owned(), font.clone(), color)
+    };
     if g.size().x > max_w {
-        let chars: Vec<char> = text.chars().collect();
-        let mut n = chars.len();
-        while n > 1 && g.size().x > max_w {
-            n -= 1;
-            s = chars[..n].iter().collect::<String>() + "…";
-            g = painter.layout_no_wrap(s.clone(), font.clone(), color);
+        // the longest prefix (plus "…") that fits: binary search, not one
+        // layout per dropped character
+        let cut = |n: usize| painter.layout_no_wrap(chars[..n].iter().collect::<String>() + "…", font.clone(), color);
+        let (mut lo, mut hi) = (1usize, chars.len().min(cap));
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+            if cut(mid).size().x <= max_w {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
         }
+        g = cut(lo);
     }
     let rect = align.anchor_size(pos, g.size());
     painter.galley(rect.min, g, color);
     rect
+}
+
+/// At most `max_chars` characters of `s` (a prefix, no copy).
+pub fn prefix_chars(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((i, _)) => &s[..i],
+        None => s,
+    }
 }
 
 /// Middle-ellipsis for long paths: "/Users/me/Library/…/Cache".
@@ -567,11 +588,16 @@ pub fn middle_ellipsis(s: &str, max_chars: usize) -> String {
 
 /// Wrapped paragraph; returns the height used.
 pub fn paragraph(painter: &Painter, pos: Pos2, text: &str, font: FontId, color: Color32, width: f32) -> f32 {
-    let g = painter.layout(text.to_owned(), font, color, width);
+    // a paragraph sits in a box: a few thousand characters fill any of them,
+    // and laying out a megabyte clip every frame stalls scrolling
+    let g = painter.layout(prefix_chars(text, PARAGRAPH_MAX).to_owned(), font, color, width);
     let h = g.size().y;
     painter.galley(pos, g, color);
     h
 }
+
+/// Characters a [`paragraph`] lays out at most.
+pub const PARAGRAPH_MAX: usize = 4000;
 
 // ---------------------------------------------------------------- icons
 
@@ -993,6 +1019,38 @@ pub fn human_duration(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `f` with a painter inside a real egui frame.
+    fn with_painter(f: impl FnOnce(&Painter)) {
+        let ctx = egui::Context::default();
+        let mut f = Some(f);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            if let Some(f) = f.take() {
+                f(ui.painter());
+            }
+        });
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn text_fit_cuts_long_text_fast() {
+        with_painter(|p| {
+            let long = "word ".repeat(200_000);
+            let t = std::time::Instant::now();
+            let r = text_fit(p, Pos2::ZERO, Align2::LEFT_TOP, &long, FontId::proportional(13.0), Color32::WHITE, 200.0);
+            assert!(r.width() <= 200.0 && r.width() > 150.0, "{r:?}");
+            // used to lay out the text once per dropped character
+            assert!(t.elapsed().as_millis() < 200, "{:?}", t.elapsed());
+            let short = text_fit(p, Pos2::ZERO, Align2::LEFT_TOP, "hi", FontId::proportional(13.0), Color32::WHITE, 200.0);
+            assert!(short.width() < 30.0);
+        });
+    }
+
+    #[test]
+    fn prefixes() {
+        assert_eq!(prefix_chars("héllo", 2), "hé");
+        assert_eq!(prefix_chars("hi", 5), "hi");
+    }
 
     #[test]
     fn byte_sizes() {

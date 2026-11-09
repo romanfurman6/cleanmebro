@@ -303,7 +303,7 @@ fn list(c: &mut Clipboard, q: &mut Quick, ui: &mut Ui, body: Rect, ids: &[u64]) 
     let first = q.sel.saturating_sub(rows.saturating_sub(2)).min(ids.len().saturating_sub(rows));
     let mut out = None;
     for (slot, k) in (first..ids.len().min(first + rows)).enumerate() {
-        let Some(e) = c.store.get(ids[k]).cloned() else { continue };
+        let Some((e, title)) = c.store.get(ids[k]).map(|e| (e.light(), e.title())) else { continue };
         let r = Rect::from_min_size(Pos2::new(left.left(), left.top() + slot as f32 * 34.0), Vec2::new(left.width(), 33.0));
         let resp = ui.interact(r, ui.scope_id().with(("quick-row", e.id)), Sense::click());
         let sel = k == q.sel;
@@ -322,7 +322,7 @@ fn list(c: &mut Clipboard, q: &mut Quick, ui: &mut Ui, body: Rect, ids: &[u64]) 
             right -= 18.0;
         }
         let f = if e.kind == Kind::Code { mono(12.0) } else { font(12.0) };
-        text_fit(&p, Pos2::new(th.right() + 9.0, r.center().y), Align2::LEFT_CENTER, &e.title(), f, TEXT, right - th.right() - 9.0);
+        text_fit(&p, Pos2::new(th.right() + 9.0, r.center().y), Align2::LEFT_CENTER, &title, f, TEXT, right - th.right() - 9.0);
         if resp.clicked() {
             out = Some(Act::Paste(e.id, false));
         }

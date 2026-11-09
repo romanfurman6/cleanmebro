@@ -43,6 +43,7 @@ pub enum Tab {
 
 /// (filter, query, history version) and the ids they gave.
 type VisibleMemo = (Filter, String, u64, Vec<u64>);
+type RowsMemo = ((u64, Filter, String, chrono::NaiveDate), Arc<Vec<ui::Row>>);
 
 /// The history filter: everything, one kind, or pinned only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,6 +116,8 @@ pub struct Clipboard {
     /// The last [`Clipboard::visible`] answer, keyed by its question and the
     /// history's version: it's asked several times every frame.
     visible_memo: std::cell::RefCell<Option<VisibleMemo>>,
+    /// The history list's rows, keyed like `visible_memo` plus today's date.
+    rows_memo: std::cell::RefCell<Option<RowsMemo>>,
     /// Shell requests made outside a ui pass.
     actions: Vec<Action>,
     /// Asked for paste but Accessibility is off: show the hint in the panel.
@@ -162,6 +165,7 @@ impl Clipboard {
             app_rx,
             confirm_clear: None,
             visible_memo: Default::default(),
+            rows_memo: Default::default(),
             actions: Vec::new(),
             needs_access: false,
             demo_quick: None,
