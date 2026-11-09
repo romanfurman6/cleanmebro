@@ -140,7 +140,7 @@ fn countdown(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     let pos = Pos2::new((screen.x - size.x) / 2.0, (screen.y - size.y) / 2.0);
     let title = &plain("capture-countdown");
     let mut cancel = false;
-    ctx.show_viewport_immediate(ViewportId::from_hash_of(title), floating(title, pos, size).with_active(false), |ui, _| {
+    crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), floating(title, pos, size).with_active(false), |ui, _| {
         let r = ui.max_rect();
         let p = ui.painter();
         let card = Rect::from_center_size(r.center(), Vec2::splat(180.0));
@@ -173,7 +173,7 @@ fn permission(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     let pos = Pos2::new((screen.x - size.x) / 2.0, screen.y * 0.3);
     let title = &plain("capture-permission");
     let mut choice = None;
-    ctx.show_viewport_immediate(ViewportId::from_hash_of(title), floating(title, pos, size).with_active(true), |ui, _| {
+    crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), floating(title, pos, size).with_active(true), |ui, _| {
         let r = ui.max_rect();
         let p = ui.painter().clone();
         p.rect_filled(r, 14.0, BG);
@@ -235,8 +235,7 @@ fn preview(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     let mut act = None;
     // the native window may appear a frame late: lift it for a few frames
     let lift = pv.frames < 5;
-    pv.frames += 1;
-    ctx.show_viewport_immediate(vid, floating(title, pos, size).with_active(false), |ui, _| {
+    let shown = crate::kit::viewport::show(ctx, vid, floating(title, pos, size).with_active(false), |ui, _| {
         if lift {
             mac::float_window(title, false);
         }
@@ -291,6 +290,9 @@ fn preview(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
             pv.born = Instant::now();
         }
     });
+    if shown.is_some() {
+        pv.frames += 1;
+    }
     let expired = hide_after.is_some_and(|s| pv.born.elapsed().as_secs_f32() > s as f32);
     let (id, img) = (pv.id, pv.img.clone());
     match act {
@@ -348,10 +350,9 @@ fn pins(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         });
         let title = plain(&format!("capture-pin-{}", pin.n));
         let lift = pin.frames < 5;
-        pin.frames += 1;
         let vid = ViewportId::from_hash_of(("capture-pin", pin.n));
         let builder = floating(&title, pos, size).with_has_shadow(true);
-        ctx.show_viewport_immediate(vid, builder, |ui, _| {
+        let shown = crate::kit::viewport::show(ctx, vid, builder, |ui, _| {
             let vctx = ui.ctx().clone();
             if lift {
                 mac::float_window(&title, false);
@@ -392,6 +393,9 @@ fn pins(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
                 close.push(k);
             }
         });
+        if shown.is_some() {
+            pin.frames += 1;
+        }
     }
     for k in edit {
         if let Some(pin) = c.pins.get(k) {
@@ -422,7 +426,6 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     let pos = Pos2::new((screen.x - size.x) / 2.0, ((screen.y - size.y) / 2.0).max(30.0));
     let title = &plain("capture-editor");
     let first = !ew.opened;
-    ew.opened = true;
     let builder = ViewportBuilder::default()
         .with_title(title)
         .with_inner_size(size)
@@ -435,9 +438,10 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         .with_has_shadow(true)
         .with_active(true);
     let mut closed = false;
-    ctx.show_viewport_immediate(ViewportId::from_hash_of("capture-editor"), builder, |ui, _| {
+    crate::kit::viewport::show(ctx, ViewportId::from_hash_of("capture-editor"), builder, |ui, _| {
         let vctx = ui.ctx().clone();
         if first {
+            ew.opened = true;
             vctx.send_viewport_cmd(ViewportCommand::Focus);
             crate::kit::native::activate();
         }
@@ -493,7 +497,6 @@ fn overlay(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     let title = &plain("capture-overlay");
     let first = ov.frames == 0;
     let lift = ov.frames < 5;
-    ov.frames += 1;
     let builder = ViewportBuilder::default()
         .with_title(title)
         .with_decorations(false)
@@ -504,7 +507,7 @@ fn overlay(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         .with_taskbar(false)
         .with_active(true);
     let mut done: Option<Option<String>> = None;
-    ctx.show_viewport_immediate(ViewportId::from_hash_of(title), builder, |ui, _| {
+    let shown = crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), builder, |ui, _| {
         let vctx = ui.ctx().clone();
         if lift {
             mac::float_window(title, true);
@@ -588,6 +591,9 @@ fn overlay(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         }
         vctx.request_repaint();
     });
+    if shown.is_some() {
+        ov.frames += 1;
+    }
     if let Some(copied) = done {
         c.overlay = None;
         if let Some(t) = copied {
@@ -611,7 +617,7 @@ fn hud(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     let pos = Pos2::new((screen.x - size.x) / 2.0, 44.0);
     let title = &plain("capture-hud");
     let vid = ViewportId::from_hash_of(("capture-hud", at));
-    ctx.show_viewport_immediate(vid, floating(title, pos, size).with_active(false).with_mouse_passthrough(true), |ui, _| {
+    crate::kit::viewport::show(ctx, vid, floating(title, pos, size).with_active(false).with_mouse_passthrough(true), |ui, _| {
         let r = ui.max_rect();
         let p = ui.painter();
         p.rect_filled(r, r.height() / 2.0, Color32::from_rgba_unmultiplied(28, 28, 31, 240));
