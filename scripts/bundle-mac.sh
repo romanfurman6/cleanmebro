@@ -57,6 +57,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAppleEventsUsageDescription</key><string>CleanMeBro asks Finder to pick a folder for saved captures.</string>
+  <key>NSMicrophoneUsageDescription</key><string>CleanMeBro records your voice in screen recordings when you turn the microphone on.</string>
+  <key>NSCameraUsageDescription</key><string>CleanMeBro shows your camera in screen recordings when you turn the camera on.</string>
 </dict>
 </plist>
 PLIST

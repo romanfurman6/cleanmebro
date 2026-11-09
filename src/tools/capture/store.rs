@@ -13,6 +13,9 @@ pub enum Kind {
     Window,
     Screen,
     Edited,
+    /// A screen recording: the entry's picture is a frame from it, `saved`
+    /// is the mp4.
+    Recording,
 }
 
 impl Kind {
@@ -22,6 +25,7 @@ impl Kind {
             Kind::Window => "Window",
             Kind::Screen => "Screen",
             Kind::Edited => "Edited",
+            Kind::Recording => "Recording",
         }
     }
 }
@@ -38,6 +42,9 @@ pub struct Shot {
     pub saved: Option<PathBuf>,
     #[serde(default)]
     pub pinned: bool,
+    /// A recording's length in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secs: Option<f32>,
 }
 
 impl Shot {
@@ -87,7 +94,7 @@ impl Store {
             id += 1;
         }
         std::fs::write(self.path(id), png).map_err(|e| e.to_string())?;
-        self.shots.insert(0, Shot { id, kind, w: size.0, h: size.1, saved: None, pinned: false });
+        self.shots.insert(0, Shot { id, kind, w: size.0, h: size.1, saved: None, pinned: false, secs: None });
         self.trim(keep);
         self.write_index();
         Ok(id)
@@ -129,6 +136,20 @@ impl Store {
             s.saved = Some(path);
         }
         self.write_index();
+    }
+
+    /// Mark an entry as a recording of `secs` saved at `video`.
+    pub fn set_video(&mut self, id: u64, video: PathBuf, secs: f32) {
+        if let Some(s) = self.shots.iter_mut().find(|s| s.id == id) {
+            s.saved = Some(video);
+            s.secs = Some(secs);
+        }
+        self.write_index();
+    }
+
+    /// The history entry of the video at `path`, if there is one.
+    pub fn video_entry(&self, path: &Path) -> Option<&Shot> {
+        self.shots.iter().find(|s| s.kind == Kind::Recording && s.saved.as_deref() == Some(path))
     }
 
     pub fn set_pinned(&mut self, id: u64, pinned: bool) {

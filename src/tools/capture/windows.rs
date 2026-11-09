@@ -123,11 +123,11 @@ fn texture(ctx: &egui::Context, slot: &mut Option<egui::TextureHandle>, name: &s
 }
 
 /// A window title that keeps the shell's glass away.
-fn plain(name: &str) -> String {
+pub(super) fn plain(name: &str) -> String {
     format!("{}{name}", crate::kit::native::PLAIN_WINDOW)
 }
 
-fn floating(title: &str, pos: Pos2, size: Vec2) -> ViewportBuilder {
+pub(super) fn floating(title: &str, pos: Pos2, size: Vec2) -> ViewportBuilder {
     ViewportBuilder::default()
         .with_title(title)
         .with_decorations(false)

@@ -81,12 +81,24 @@ mod tests {
     fn tools_do_not_import_each_other() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tools");
         let names: Vec<String> = std::fs::read_dir(&root).unwrap().flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        // every file of a tool, sub-folders too
+        fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                if e.path().is_dir() {
+                    files(&e.path(), out);
+                } else {
+                    out.push(e.path());
+                }
+            }
+        }
         for me in &names {
-            for f in std::fs::read_dir(root.join(me)).unwrap().flatten() {
-                let src = std::fs::read_to_string(f.path()).unwrap();
+            let mut all = Vec::new();
+            files(&root.join(me), &mut all);
+            for f in all {
+                let src = std::fs::read_to_string(&f).unwrap();
                 for other in names.iter().filter(|o| *o != me) {
                     for pat in [format!("tools::{other}"), format!("super::super::{other}")] {
-                        assert!(!src.contains(&pat), "{} uses {pat}", f.path().display());
+                        assert!(!src.contains(&pat), "{} uses {pat}", f.display());
                     }
                 }
             }

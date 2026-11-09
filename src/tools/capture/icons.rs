@@ -34,6 +34,15 @@ pub enum Ico {
     Close,
     Check,
     Keyboard,
+    Record,
+    Mic,
+    MicOff,
+    Camera,
+    Speaker,
+    Pause,
+    Play,
+    Restart,
+    Gear,
 }
 
 fn symbol(i: Ico) -> &'static str {
@@ -66,6 +75,15 @@ fn symbol(i: Ico) -> &'static str {
         Ico::Close => "xmark",
         Ico::Check => "checkmark",
         Ico::Keyboard => "keyboard",
+        Ico::Record => "record.circle",
+        Ico::Mic => "mic",
+        Ico::MicOff => "mic.slash",
+        Ico::Camera => "video",
+        Ico::Speaker => "speaker.wave.2",
+        Ico::Pause => "pause",
+        Ico::Play => "play.fill",
+        Ico::Restart => "arrow.counterclockwise",
+        Ico::Gear => "gearshape",
     }
 }
 
@@ -200,6 +218,46 @@ pub fn draw(p: &Painter, i: Ico, rect: Rect, color: Color32) {
             line(&[(7.0, 14.0), (17.0, 14.0)]);
             for x in [7.0, 11.0, 15.0] {
                 p.circle_filled(pt(x, 10.0), u, color);
+            }
+        }
+        Ico::Record => {
+            circle(12.0, 12.0, 9.0);
+            p.circle_filled(pt(12.0, 12.0), 4.5 * u, color);
+        }
+        Ico::Mic | Ico::MicOff => {
+            boxr(9.0, 3.0, 15.0, 13.0);
+            line(&[(5.0, 11.0), (6.0, 15.0), (12.0, 18.0), (18.0, 15.0), (19.0, 11.0)]);
+            line(&[(12.0, 18.0), (12.0, 21.0)]);
+            if i == Ico::MicOff {
+                line(&[(3.0, 3.0), (21.0, 21.0)]);
+            }
+        }
+        Ico::Camera => {
+            boxr(3.0, 7.0, 15.0, 17.0);
+            closed(&[(15.0, 10.0), (21.0, 7.0), (21.0, 17.0), (15.0, 14.0)]);
+        }
+        Ico::Speaker => {
+            closed(&[(4.0, 9.0), (8.0, 9.0), (13.0, 5.0), (13.0, 19.0), (8.0, 15.0), (4.0, 15.0)]);
+            line(&[(16.0, 9.0), (17.5, 12.0), (16.0, 15.0)]);
+            line(&[(19.0, 6.0), (21.5, 12.0), (19.0, 18.0)]);
+        }
+        Ico::Pause => {
+            line(&[(9.0, 5.0), (9.0, 19.0)]);
+            line(&[(15.0, 5.0), (15.0, 19.0)]);
+        }
+        Ico::Play => {
+            p.add(PathShape::convex_polygon(vec![pt(7.0, 4.0), pt(20.0, 12.0), pt(7.0, 20.0)], color, Stroke::NONE));
+        }
+        Ico::Restart => {
+            line(&[(4.0, 4.0), (4.0, 9.0), (9.0, 9.0)]);
+            p.add(PathShape::line(arc(pt(12.0, 12.0), 8.0 * u, 200.0, 160.0, pt(4.0, 9.0)), PathStroke::new(w, color)));
+        }
+        Ico::Gear => {
+            circle(12.0, 12.0, 3.0);
+            circle(12.0, 12.0, 7.5);
+            for k in 0..8 {
+                let a = (k as f32 * 45.0f32).to_radians();
+                line(&[(12.0 + 7.5 * a.cos(), 12.0 + 7.5 * a.sin()), (12.0 + 10.0 * a.cos(), 12.0 + 10.0 * a.sin())]);
             }
         }
     }
