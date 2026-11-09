@@ -64,6 +64,12 @@ impl Tool for Claude {
     fn detail_ui(&mut self, _detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::detail(&self.info, ui, rect, cx);
     }
+    fn set_on(&mut self, on: bool) {
+        crate::kit::claude_code::set_tool_on(on);
+        if on {
+            backend::request_refresh();
+        }
+    }
     fn has_page(&self) -> bool {
         true
     }
@@ -101,6 +107,12 @@ impl Tool for Claude {
         match view {
             "claude-detail" => Some(View::Detail(LIMITS)),
             "claude" => Some(View::Page),
+            "claude-missing" => {
+                let mut g = self.info.lock().unwrap();
+                *g = backend::ClaudeInfo { loading: false, installed: false, fetched: Some(chrono::Local::now()), ..Default::default() };
+                g.error = Some(format!("Claude Code isn't installed on this Mac. {}", crate::kit::claude_code::Availability::NotInstalled.how()));
+                Some(View::Page)
+            }
             _ => None,
         }
     }

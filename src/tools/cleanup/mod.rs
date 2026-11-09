@@ -22,6 +22,8 @@ pub struct Cleanup {
     pub(crate) clean_group: Option<Group>,
     pub(crate) clean_confirm: bool,
     pub(crate) clean_log: bool,
+    /// Screenshots: show Cleanup as if Claude were in this state.
+    pub(crate) demo_claude: Option<crate::kit::claude_code::Availability>,
 }
 
 impl Cleanup {
@@ -34,6 +36,7 @@ impl Cleanup {
             clean_group: Some(Group::Claude),
             clean_confirm: false,
             clean_log: false,
+            demo_claude: None,
         }
     }
 }
@@ -50,7 +53,7 @@ impl Tool for Cleanup {
         "Cleanup"
     }
     fn about(&self) -> &'static str {
-        "AI-checked junk removal"
+        "Safe junk removal, checked by Claude when it's on"
     }
     fn badge(&self) -> Badge {
         badge()
@@ -90,8 +93,8 @@ impl Tool for Cleanup {
         let g = self.clean.lock().unwrap();
         if g.phase == engine::Phase::Results { human_bytes(g.total()) } else { String::new() }
     }
-    fn page_ui(&mut self, ui: &mut Ui, rect: Rect, _cx: &mut Cx) {
-        page::page(self, ui, rect);
+    fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        page::page(self, ui, rect, cx);
     }
     fn recommendations(&self) -> Vec<Recommendation> {
         let blue = tint::CLEANUP;
@@ -101,7 +104,11 @@ impl Tool for Cleanup {
             priority: 0,
             badge: Badge { icon: Icon::Broom, color: blue },
             title: "Let's give your Mac a quick clean".into(),
-            body: "Claude checks each cache and log path and tells you what's safe to remove.".into(),
+            body: if self.demo || crate::kit::claude_code::availability().ready() {
+                "Claude checks each cache and log path and tells you what's safe to remove.".into()
+            } else {
+                "Finds caches, logs and leftovers and tells you what's safe to remove.".into()
+            },
             action: "Start Cleanup".into(),
             go: go.clone(),
         }];
@@ -121,6 +128,10 @@ impl Tool for Cleanup {
     fn demo_view(&mut self, view: &str) -> Option<View> {
         match view {
             "cleanup" => Some(View::Page),
+            "cleanup-no-claude" => {
+                self.demo_claude = Some(crate::kit::claude_code::Availability::NotInstalled);
+                Some(View::Page)
+            }
             "results" => {
                 *self.clean.lock().unwrap() = page::demo_results();
                 Some(View::Page)
