@@ -85,7 +85,9 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel
         Size::S14 => {
             if devs.is_empty() {
                 tool_chip(p, Rect::from_min_size(Pos2::new(r.left() + 12.0, r.center().y - 17.0), Vec2::splat(34.0)), Icon::Bluetooth, tint::HEALTH);
-                tile::row_text(p, r, r.left() + 58.0, "No devices connected", "", Err("Turn on AirPods, a mouse or a keyboard"));
+                let x0 = r.left() + 58.0;
+                text_fit(p, Pos2::new(x0, r.center().y - 9.0), Align2::LEFT_CENTER, "No devices connected", bold(13.0), TEXT, r.right() - 12.0 - x0);
+                text_fit(p, Pos2::new(x0, r.center().y + 10.0), Align2::LEFT_CENTER, "Turn on AirPods, a mouse or a keyboard", font(11.0), TEXT_FAINT, r.right() - 12.0 - x0);
                 return resp;
             }
             let n = devs.len().clamp(1, 5);
