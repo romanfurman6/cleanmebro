@@ -57,6 +57,22 @@ struct Devs {
     mics: Vec<sys::Device>,
     cam: Option<String>,
     mic: Option<String>,
+    /// The mic's level now, 0..1, while it's listened to.
+    level: Option<f32>,
+}
+
+const METER_ON: Color32 = Color32::from_rgb(0x34, 0xC7, 0x59);
+
+/// Five bars, lit up to `level`, in `r` (bottom aligned).
+fn meter_bars(p: &egui::Painter, r: Rect, level: f32) {
+    let w = (r.width() - 4.0 * 2.0) / 5.0;
+    for i in 0..5 {
+        let h = r.height() * (0.4 + 0.15 * i as f32);
+        let x = r.left() + i as f32 * (w + 2.0);
+        let bar = Rect::from_min_max(Pos2::new(x, r.bottom() - h), Pos2::new(x + w, r.bottom()));
+        let lit = level >= (i as f32 + 1.0) / 6.0;
+        p.rect_filled(bar, 1.0, if lit { METER_ON } else { white(40) });
+    }
 }
 
 impl Devs {
@@ -163,7 +179,7 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
     let s = c.settings.rec.clone();
     let cam_name = c.rec.device_name(Media::Camera, &s);
     let mic_name = c.rec.device_name(Media::Mic, &s);
-    let devs = Devs { menu: c.rec.menu, cams: c.rec.cams.clone(), mics: c.rec.mics.clone(), cam: c.rec.device_id(Media::Camera, &s), mic: c.rec.device_id(Media::Mic, &s) };
+    let devs = Devs { menu: c.rec.menu, cams: c.rec.cams.clone(), mics: c.rec.mics.clone(), cam: c.rec.device_id(Media::Camera, &s), mic: c.rec.device_id(Media::Mic, &s), level: c.rec.meter.as_ref().map(|m| m.level()) };
     let many = c.rec.displays.len() > 1;
     let shown = crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), builder, |ui, _| {
         let vctx = ui.ctx().clone();
@@ -279,7 +295,7 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
         } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) || vctx.input(|i| i.viewport().close_requested()) {
             todo.push(Do::Cancel);
         }
-        if matches!(pick.source, Source::Window | Source::Area) {
+        if matches!(pick.source, Source::Window | Source::Area) || devs.level.is_some() {
             vctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         let _ = (&mut todo, &cam_name, &mic_name);
@@ -381,7 +397,7 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
             }
             icons::draw(p, ico, Rect::from_center_size(Pos2::new(rr.left() + 22.0, rr.center().y), Vec2::splat(18.0)), TEXT_SOFT);
             p.text(Pos2::new(rr.left() + 44.0, rr.center().y - 8.0), Align2::LEFT_CENTER, label, font(13.0), TEXT);
-            let dr = text_fit(p, Pos2::new(rr.left() + 44.0, rr.center().y + 9.0), Align2::LEFT_CENTER, &dev, font(11.0), TEXT_DIM, rr.width() - 134.0);
+            let dr = text_fit(p, Pos2::new(rr.left() + 44.0, rr.center().y + 9.0), Align2::LEFT_CENTER, &dev, font(11.0), TEXT_DIM, rr.width() - 170.0);
             if let Some(m) = media {
                 chevron(p, Pos2::new(dr.right() + 9.0, dr.center().y), TEXT_DIM);
                 let dresp = ui.interact(dr.with_max_x(dr.right() + 16.0).expand(4.0), id.with(("dev", k)), Sense::click());
@@ -394,6 +410,11 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
                 }
             }
             let sw = Rect::from_min_size(Pos2::new(rr.right() - 52.0, rr.center().y - 11.0), Vec2::new(38.0, 22.0));
+            if let (Some(Media::Mic), Some(l)) = (media, devs.level) {
+                let mr = Rect::from_min_size(Pos2::new(sw.left() - 42.0, rr.center().y - 8.0), Vec2::new(28.0, 16.0));
+                meter_bars(p, mr, l);
+                ui.interact(mr, id.with("meter"), Sense::hover()).on_hover_text("Microphone level: say something to test it");
+            }
             if small_switch(ui, sw, id.with(("sw", k)), on) {
                 todo.push(match k {
                     0 => Do::Camera,
@@ -431,6 +452,13 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
             let color = if on { Color32::WHITE } else { TEXT_FAINT };
             if on {
                 p.circle_filled(b.center(), 16.0, with_alpha(tint::CAPTURE, 0.45));
+            }
+            if k == 1 {
+                if let Some(l) = devs.level {
+                    let lr = Rect::from_min_size(Pos2::new(b.left() + 6.0, b.bottom() + 1.0), Vec2::new(20.0, 3.0));
+                    p.rect_filled(lr, 1.5, white(40));
+                    p.rect_filled(Rect::from_min_size(lr.min, Vec2::new(lr.width() * l, lr.height())), 1.5, METER_ON);
+                }
             }
             if icon_button(ui, b, id.with(("t", k)), if on { ico_on } else { ico_off }, &format!("{tip}: {}", if on { "on" } else { "off" }), color, false) {
                 todo.push(match k {

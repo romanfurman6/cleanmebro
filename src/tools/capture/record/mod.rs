@@ -10,6 +10,7 @@
 
 pub mod camera;
 pub mod engine;
+pub mod meter;
 pub mod mixer;
 pub mod sys;
 pub mod timeline;
@@ -121,6 +122,9 @@ pub struct Recorder {
     pub cams: Vec<sys::Device>,
     /// The device list open in the picker.
     pub menu: Option<Media>,
+    /// The picker's live mic level, and which mic it was opened for.
+    pub meter: Option<meter::MicMeter>,
+    meter_for: Option<Option<String>>,
     pub saved: Option<Saved>,
     pub tx: Sender<Event>,
     rx: Receiver<Event>,
@@ -142,7 +146,7 @@ pub const SAVED_SECS: f32 = 8.0;
 impl Recorder {
     pub fn new(ctx: egui::Context) -> Recorder {
         let (tx, rx) = channel();
-        Recorder { phase: Phase::Idle, displays: Vec::new(), camera: None, mics: Vec::new(), cams: Vec::new(), menu: None, saved: None, tx, rx, last_area: None, out: Vec::new(), folder: PathBuf::new(), last_display: Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 900.0)), ctx }
+        Recorder { phase: Phase::Idle, displays: Vec::new(), camera: None, mics: Vec::new(), cams: Vec::new(), menu: None, meter: None, meter_for: None, saved: None, tx, rx, last_area: None, out: Vec::new(), folder: PathBuf::new(), last_display: Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 900.0)), ctx }
     }
 
     pub fn idle(&self) -> bool {
@@ -433,8 +437,25 @@ impl Recorder {
         Some(if l.paused { format!("❚❚ {t}") } else { format!("● {t}") })
     }
 
+    /// Listen to the chosen mic while the picker is up (for its meter).
+    fn keep_meter(&mut self, s: &RecSettings) {
+        let want = matches!(self.phase, Phase::Pick(_)) && s.mic && sys::access(Media::Mic) == Access::Allowed;
+        if !want {
+            self.meter = None;
+            self.meter_for = None;
+            return;
+        }
+        let dev = s.mic_device.clone().filter(|id| self.mics.iter().any(|d| &d.id == id));
+        if self.meter_for.as_ref() != Some(&dev) {
+            self.meter = None;
+            self.meter = meter::MicMeter::open(dev.as_deref());
+            self.meter_for = Some(dev);
+        }
+    }
+
     /// Background results and timers; call once per pass.
     pub fn tick(&mut self, s: &mut RecSettings) {
+        self.keep_meter(s);
         while let Ok(e) = self.rx.try_recv() {
             match e {
                 Event::Started(Ok(session)) => match std::mem::replace(&mut self.phase, Phase::Idle) {
