@@ -1,11 +1,12 @@
 //! Mac health rows for the panel (disk, memory, CPU, battery, network,
 //! devices), the panel's title line, and the detail sheet each row opens.
 
+use super::devices;
+use super::devices_ui;
 use super::monitor::{self, Level, Snapshot};
 use super::ID;
 use crate::core::tool::{Cx, PanelHeader, Size};
 use crate::kit::glass::*;
-use crate::kit::mechanics as m;
 use crate::kit::tile;
 use egui::{Align2, Color32, Pos2, Rect, Ui};
 
@@ -95,13 +96,12 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
         }
         "devices" => {
             let n = s.devices.len();
-            let caption = if n == 0 {
-                "None connected".to_string()
-            } else {
-                s.devices.iter().take(2).map(|d| match d.battery { Some(b) => format!("{} {b}%", d.name), None => d.name.clone() }).collect::<Vec<_>>().join(" · ")
-            };
-            let glyph = if s.devices.iter().any(|d| d.kind.contains("Head")) { Icon::Headphones } else { Icon::Bluetooth };
-            (glyph, "Devices".into(), (n.to_string(), "connected".into()), caption, None)
+            let low = devices::lowest_first(&s.devices).into_iter().next();
+            let caption = if n == 0 { "None connected".to_string() } else { devices_ui::note(&s.devices) };
+            match low.as_ref().and_then(|d| d.battery().map(|b| (d, b))) {
+                Some((d, b)) => (d.kind.icon(), "Devices".into(), (b.to_string(), "%".into()), caption, Some(((b as f32 / 100.0).clamp(0.02, 1.0), devices::color(b)))),
+                None => (Icon::Bluetooth, "Devices".into(), (n.to_string(), "connected".into()), caption, None),
+            }
         }
         _ => return None,
     };
@@ -123,8 +123,14 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
         overview(&s, size, ui.painter(), r);
         return;
     }
-    let Some(mt) = metric(&s, id) else { return };
     let sel = cx.is_detail_open(ID, id);
+    if id == "devices" {
+        if devices_ui::widget(&s, size, ui, r, wid, sel).clicked() {
+            cx.toggle_detail(ID, id);
+        }
+        return;
+    }
+    let Some(mt) = metric(&s, id) else { return };
     let col = tint::HEALTH;
     let resp = match size {
         Size::S11 => match mt.bar {
@@ -168,12 +174,8 @@ fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rec
             Vec::new()
         }
         "network" => vec![("Download".into(), None, human_rate(s.net_down)), ("Upload".into(), None, human_rate(s.net_up)), ("Received today".into(), None, human_bytes(s.net_recv_total))],
-        "devices" => s.devices.iter().take(3).map(|d| (d.name.clone(), d.battery.map(|b| (b as f32 / 100.0, if b <= m::BT_LOW_BATTERY_MAX_PCT { AMBER } else { GREEN })), d.battery.map(|b| format!("{b}%")).unwrap_or_default())).collect(),
         _ => vec![(mt.caption.clone(), mt.bar, String::new())],
     };
-    if id == "devices" && s.devices.is_empty() {
-        tile::empty_note(p, list, "No Bluetooth devices connected");
-    }
     let lh = (list.height() / 3.0).min(22.0);
     for (k, (label, frac, value)) in lines.iter().enumerate() {
         let lr = Rect::from_min_size(Pos2::new(list.left(), list.top() + k as f32 * lh), egui::Vec2::new(list.width(), lh));
@@ -266,6 +268,9 @@ pub fn detail(mon: &monitor::Shared, d: &str, ui: &mut Ui, rect: Rect, cx: &mut 
         Action::Close => cx.close_detail(),
         Action::Open(tool) => cx.open_page(tool, ""),
         Action::SpeedTest => monitor::start_speed_test(mon.clone(), ui.ctx().clone()),
+        Action::ToggleAlerts => monitor::change_bt_prefs(mon, |p| p.alerts = !p.alerts),
+        Action::ToggleMenuBar => monitor::change_bt_prefs(mon, |p| p.menu_bar = !p.menu_bar),
+        Action::OpenBluetooth => devices::open_bluetooth_settings(),
         Action::None => {}
     }
 }

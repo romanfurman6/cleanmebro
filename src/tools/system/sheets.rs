@@ -27,6 +27,9 @@ pub enum Action {
     /// Open another tool's page by id ("cleanup", "lens").
     Open(&'static str),
     SpeedTest,
+    ToggleAlerts,
+    ToggleMenuBar,
+    OpenBluetooth,
 }
 
 fn level_color(l: Level) -> Color32 {
@@ -78,12 +81,14 @@ struct Spec {
     legend: Vec<Legend>,
     speed: bool,
     facts: Vec<Fact>,
+    /// On/off rows under the cards: label, hint, state, what a click does.
+    switches: Vec<(&'static str, String, bool, Action)>,
     buttons: Vec<(&'static str, u8, Action)>,
 }
 
 impl Spec {
     fn new(icon: Icon, chip: Color32, title: impl Into<String>, sub: impl Into<String>) -> Self {
-        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], buttons: vec![] }
+        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], switches: vec![], buttons: vec![] }
     }
 }
 
@@ -249,18 +254,25 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             sp
         }
         Sheet::Devices => {
-            let mut sp = Spec::new(Icon::Headphones, tint::NEUTRAL, "Devices", format!("{} connected", s.devices.len()));
-            for d in &s.devices {
-                match d.battery {
-                    Some(b) => {
-                        let low = b <= m::BT_LOW_BATTERY_MAX_PCT;
-                        let c = if low { RED } else if b < 50 { AMBER } else { GREEN };
-                        sp.legend.push(Legend { color: c, label: d.name.clone(), value: format!("{b}%"), value_col: if low { RED } else { TEXT } });
-                    }
+            let devs = super::devices::lowest_first(&s.devices);
+            let mut sp = Spec::new(Icon::Bluetooth, tint::NEUTRAL, "Devices", super::devices_ui::note(&devs));
+            for d in &devs {
+                match d.battery() {
+                    Some(b) => sp.legend.push(Legend { color: super::devices::color(b), label: format!("{} · {}", d.name, d.kind.label()), value: format!("{b}%"), value_col: super::devices::text_color(b) }),
                     None => sp.legend.push(Legend { color: TEXT_FAINT, label: d.name.clone(), value: "no battery data".into(), value_col: TEXT_FAINT }),
                 }
+                if d.split() {
+                    for (label, v) in d.parts() {
+                        if let Some(v) = v {
+                            sp.legend.push(Legend { color: with_alpha(super::devices::color(v), 0.55), label: format!("    {label}"), value: format!("{v}%"), value_col: TEXT_DIM });
+                        }
+                    }
+                }
             }
-            sp.facts.push(fact("Low battery alert", format!("Below {}%", m::BT_LOW_BATTERY_MAX_PCT + 1), TEXT, "Shown in the panel when a device runs low."));
+            let (low, crit) = (m::BT_LOW_BATTERY_MAX_PCT + 1, m::BT_CRITICAL_BATTERY_MAX_PCT + 1);
+            sp.switches.push(("Low battery alerts", format!("macOS notification below {low}% and {crit}%"), s.bt_prefs.alerts, Action::ToggleAlerts));
+            sp.switches.push(("Show in menu bar", format!("Only while a device is below {low}%"), s.bt_prefs.menu_bar, Action::ToggleMenuBar));
+            sp.buttons = vec![("Bluetooth Settings", BTN_SECONDARY, Action::OpenBluetooth)];
             sp
         }
     }
@@ -276,7 +288,12 @@ pub fn sheet(ui: &mut Ui, rect: Rect, kind: Sheet, s: &Snapshot) -> Action {
     let p = ui.painter().clone();
     let x0 = rect.left() + 16.0;
     let x1 = rect.right() - 16.0;
-    body(&p, ui.ctx(), &sp, kind, s, x0, x1 - x0, rect.top() + SHEET_HEADER_H + 16.0);
+    let top = rect.top() + SHEET_HEADER_H + 16.0;
+    let h = body(&p, ui.ctx(), &sp, kind, s, x0, x1 - x0, top);
+    let sw = switches(ui, &sp, x0, x1 - x0, top + h + 14.0);
+    if sw != Action::None {
+        action = sw;
+    }
     let a = buttons(ui, &sp, s, x1, rect.bottom() - 16.0);
     if a != Action::None {
         action = a;
@@ -303,7 +320,7 @@ impl Section {
     /// Total height at width `w` (header + content), measured off-screen.
     pub fn height(&self, p: &egui::Painter, ctx: &egui::Context, s: &Snapshot, w: f32) -> f32 {
         let hidden = p.with_clip_rect(Rect::NOTHING);
-        SECTION_HEAD_H + body(&hidden, ctx, &self.sp, self.kind, s, 0.0, w, 0.0)
+        SECTION_HEAD_H + body(&hidden, ctx, &self.sp, self.kind, s, 0.0, w, 0.0) + switches_h(&self.sp)
     }
 
     /// Draw the section at `r` (its width and top; the height comes from
@@ -327,7 +344,11 @@ impl Section {
         let tw = (bx - r.left() - 40.0 - 8.0).max(60.0);
         text_fit(&p, r.min + Vec2::new(40.0, 0.0), Align2::LEFT_TOP, &self.sp.title, bold(15.0), TEXT, tw);
         text_fit(&p, r.min + Vec2::new(40.0, 19.0), Align2::LEFT_TOP, &self.sp.sub, font(12.0), TEXT_DIM, tw);
-        body(&p, ui.ctx(), &self.sp, self.kind, s, r.left(), r.width(), r.top() + SECTION_HEAD_H);
+        let h = body(&p, ui.ctx(), &self.sp, self.kind, s, r.left(), r.width(), r.top() + SECTION_HEAD_H);
+        let sw = switches(ui, &self.sp, r.left(), r.width(), r.top() + SECTION_HEAD_H + h + 14.0);
+        if sw != Action::None {
+            action = sw;
+        }
         action
     }
 }
@@ -441,6 +462,38 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
         y += h;
     }
     y - top
+}
+
+const SWITCH_ROW_H: f32 = 48.0;
+
+/// Height of the switches card plus the gap above it (0 without switches).
+fn switches_h(sp: &Spec) -> f32 {
+    if sp.switches.is_empty() { 0.0 } else { 14.0 + 8.0 + sp.switches.len() as f32 * SWITCH_ROW_H }
+}
+
+/// The on/off rows of a sheet in one card starting at `y`.
+fn switches(ui: &mut Ui, sp: &Spec, x0: f32, w: f32, y: f32) -> Action {
+    if sp.switches.is_empty() {
+        return Action::None;
+    }
+    let p = ui.painter().clone();
+    let card = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 8.0 + sp.switches.len() as f32 * SWITCH_ROW_H));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    let mut action = Action::None;
+    for (k, (label, hint, on, act)) in sp.switches.iter().enumerate() {
+        let rr = Rect::from_min_size(Pos2::new(x0, y + 4.0 + k as f32 * SWITCH_ROW_H), Vec2::new(w, SWITCH_ROW_H));
+        if k > 0 {
+            hairline(&p, Pos2::new(rr.left() + 12.0, rr.top()), Pos2::new(rr.right() - 12.0, rr.top()));
+        }
+        let sr = Rect::from_min_size(Pos2::new(rr.right() - 12.0 - 36.0, rr.center().y - 10.0), Vec2::new(36.0, 20.0));
+        if switch(ui, sr, ui.scope_id().with(("sheet-switch", *label)), *on, true).clicked() {
+            action = *act;
+        }
+        let tw = sr.left() - rr.left() - 24.0;
+        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, label, font(13.0), TEXT, tw);
+        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y + 2.0), Align2::LEFT_TOP, hint, font(12.0), TEXT_FAINT, tw);
+    }
+    action
 }
 
 /// A sheet's buttons in a row ending at `right`, sitting on `bottom`.

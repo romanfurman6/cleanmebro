@@ -1,6 +1,8 @@
 //! Mac health tool: live readings of disk, memory, battery, CPU, network and
 //! Bluetooth devices, shown as panel widgets with a detail sheet each.
 
+mod devices;
+mod devices_ui;
 pub mod monitor;
 mod page;
 mod sheets;
@@ -34,7 +36,7 @@ const WIDGETS: [WidgetSpec; 7] = [
     WidgetSpec { id: "cpu", title: "CPU", about: "Load and temperature, with the last minute.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
     WidgetSpec { id: "battery", title: "Battery", about: "Charge and time left.", sizes: &[Size::S11, Size::S12, Size::S14], size: Size::S12, default_on: true },
     WidgetSpec { id: "network", title: "Network", about: "Wi-Fi and live speed.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
-    WidgetSpec { id: "devices", title: "Connected Devices", about: "Bluetooth devices and their batteries.", sizes: &[Size::S12, Size::S14, Size::S24], size: Size::S12, default_on: true },
+    WidgetSpec { id: "devices", title: "Connected Devices", about: "Bluetooth devices and their batteries.", sizes: &[Size::S11, Size::S12, Size::S14, Size::S24, Size::S44], size: Size::S12, default_on: true },
     WidgetSpec { id: "health", title: "Mac Health", about: "Every reading at a glance.", sizes: &[Size::S24, Size::S44], size: Size::S24, default_on: false },
 ];
 
@@ -104,6 +106,12 @@ impl Tool for System {
             v.push(Recommendation { priority: m::PRIORITY_TRASH_OVERFILL, badge: blue(Icon::Trash), title: "Empty Trash Bins".into(), body: format!("Your Trash holds {}. Empty it to get the space back.", human_bytes(s.trash_bytes.unwrap_or(0))), action: "Review Cleanup".into(), go: page("cleanup") });
         }
         v
+    }
+
+    /// The emptiest Bluetooth device while it is low ("Mouse 14%").
+    fn tray_title(&self) -> Option<String> {
+        let s = self.mon.lock().unwrap();
+        devices::tray_title(&s.devices, s.bt_prefs)
     }
 
     fn demo_view(&mut self, view: &str) -> Option<View> {

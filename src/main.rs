@@ -5,7 +5,8 @@
 //! window as a PNG and exits. `--view <name>` picks what it shows: panel,
 //! storage (default), memory, battery, cpu, network, devices, claude-detail,
 //! cleanup, cleanup-no-claude, results, lens, lens-live, claude, claude-missing,
-//! health, customize, settings-tools, fan, fan-detail, fan-air, fan-air-detail.
+//! health, customize, settings-tools, fan, fan-detail, fan-air, fan-air-detail,
+//! or widget-<tool>/<widget>@<size> for one widget alone (widget-system/devices@4:4).
 //! `--fan-report` prints every fan and temperature sensor this Mac reports.
 
 mod core;
