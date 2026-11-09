@@ -11,6 +11,7 @@ Mac health panel, Claude plan limits, an AI-judged Cleanup and Disk Map.
 | **Claude** | Plan and limits from the Claude CLI (`claude auth status`, `claude -p /usage`, which spends no tokens). Local token activity is counted from `~/.claude/projects` logs (counts only). |
 | **Cleanup** | Finds junk by rule (System Junk, Xcode, app and developer caches, AI clutter). Claude judges each **path** (never file contents) as safe / ask / keep. Anything unclear waits for your OK. Items go to the Trash by default. |
 | **Disk Map** | Measures a folder tree, then shows it as a drill-down treemap. Selected items go to the Trash after review. |
+| **Clipboard** | History of what you copy (text, links, code, colors, images, files), kept on this Mac. ⌥⌘V opens quick paste over any app: big preview cards or a list, type to search, ↵ pastes (needs Accessibility), ⇧↵ pastes plain text, ⌘1–9 pick directly. Pin entries, pause recording, exclude apps. Password managers and items apps mark as concealed are skipped unless turned on. |
 
 Every rule and threshold, with its source, is in [docs/MECHANICS.md](docs/MECHANICS.md).
 
@@ -57,7 +58,8 @@ cargo run --release -- --screenshot out.png --view panel
 
 `--view` values: `panel`, `customize` (Settings › Widgets), `settings-tools`,
 `storage`, `memory`, `battery`, `cpu`, `network`, `devices`, `claude-detail`,
-`cleanup`, `results`, `lens`, `lens-live`, `claude`.
+`cleanup`, `results`, `lens`, `lens-live`, `claude`, `clipboard`,
+`clipboard-settings`, `clipboard-quick`, `clipboard-list`.
 
 ## Architecture
 

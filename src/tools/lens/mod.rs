@@ -20,6 +20,9 @@ pub struct Lens {
     /// zooming out, start time).
     pub(crate) lens_morph: Option<(Option<egui::Rect>, PathBuf, f64)>,
     pub(crate) lens_selected: Vec<(PathBuf, u64)>,
+    /// Inside "Other": how many of the folder's biggest items are hidden
+    /// (0 = the folder itself).
+    pub(crate) lens_skip: usize,
     pub(crate) lens_review: bool,
     pub(crate) lens_msg: Option<String>,
     /// The folder list while mapping, refreshed a few times a second:
@@ -48,6 +51,7 @@ impl Lens {
             lens_path: root,
             lens_morph: None,
             lens_selected: vec![],
+            lens_skip: 0,
             lens_review: false,
             lens_msg: None,
             lens_live: None,
