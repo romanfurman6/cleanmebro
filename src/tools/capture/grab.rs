@@ -28,17 +28,32 @@ impl Grab {
     }
 }
 
-/// Run `screencapture` and load what it wrote. Ok(None) means the user
-/// pressed Esc (no file).
-pub fn run(grab: Grab) -> Result<Option<RgbaImage>, String> {
+/// A capture as `screencapture` wrote it: the PNG bytes (kept as they are
+/// for history, the clipboard and a PNG copy, so nothing is encoded again)
+/// and the decoded picture.
+pub struct Grabbed {
+    pub png: Vec<u8>,
+    pub img: RgbaImage,
+}
+
+/// Run `screencapture`; the PNG file it wrote. Ok(None) means the user
+/// pressed Esc (no file). The caller removes the file.
+pub fn shoot(grab: Grab) -> Result<Option<PathBuf>, String> {
     let path = temp_path();
     let status = std::process::Command::new("/usr/sbin/screencapture").args(grab.args()).arg(&path).status().map_err(|e| format!("couldn't start screencapture: {e}"))?;
     if !path.exists() {
         return if status.success() { Ok(None) } else { Err(format!("screencapture failed ({status})")) };
     }
-    let img = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
-    let _ = std::fs::remove_file(&path);
-    Ok(Some(img))
+    Ok(Some(path))
+}
+
+/// Read and decode what [`shoot`] wrote, then remove the file.
+pub fn load(path: &std::path::Path) -> Result<Grabbed, String> {
+    let png = std::fs::read(path).map_err(|e| e.to_string());
+    let _ = std::fs::remove_file(path);
+    let png = png?;
+    let img = image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(|e| e.to_string())?.to_rgba8();
+    Ok(Grabbed { png, img })
 }
 
 fn temp_path() -> PathBuf {

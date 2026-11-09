@@ -176,12 +176,21 @@ pub fn recognize_image(img: &image::RgbaImage) -> Vec<TextLine> {
 
 fn recognize_image_inner(img: &image::RgbaImage) -> Vec<TextLine> {
     let path = std::env::temp_dir().join(format!("cleanmebro-ocr-{}-{}.png", std::process::id(), rand_id()));
-    if img.save(&path).is_err() {
+    if std::fs::write(&path, super::store::png_bytes(img)).is_err() {
         return Vec::new();
     }
-    let mut lines = imp::recognize(&path, img.width() as f32, img.height() as f32);
+    let lines = recognize_file(&path);
     let _ = std::fs::remove_file(&path);
+    lines
+}
+
+/// Recognize text in an image file as it is (no decoding or re-encoding),
+/// lines in reading order.
+pub fn recognize_file(path: &Path) -> Vec<TextLine> {
+    let Ok((w, h)) = image::image_dimensions(path) else { return Vec::new() };
+    let mut lines = imp::recognize(path, w as f32, h as f32);
     sort_reading_order(&mut lines);
+    OCR_READY.store(true, std::sync::atomic::Ordering::Relaxed);
     lines
 }
 

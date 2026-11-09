@@ -23,6 +23,9 @@ pub struct Countdown {
 pub struct Preview {
     id: Option<u64>,
     img: RgbaImage,
+    /// The picture at the preview's size, for its texture (a full-size
+    /// texture of a 5K capture is ~60 MB to convert and upload).
+    small: Option<egui::ColorImage>,
     note: String,
     /// Names its window; `born` moves while the mouse is over it.
     key: Instant,
@@ -32,8 +35,8 @@ pub struct Preview {
 }
 
 impl Preview {
-    pub fn new(id: Option<u64>, img: RgbaImage, note: String) -> Preview {
-        Preview { id, img, note, key: Instant::now(), born: Instant::now(), tex: None, frames: 0 }
+    pub fn new(id: Option<u64>, img: RgbaImage, small: Option<egui::ColorImage>, note: String) -> Preview {
+        Preview { id, img, small, note, key: Instant::now(), born: Instant::now(), tex: None, frames: 0 }
     }
 }
 
@@ -290,7 +293,11 @@ fn preview(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         }
         // picture: drag moves the preview, click opens the editor
         let tr = Rect::from_min_size(Pos2::new(r.left() + 8.0, r.top() + 34.0), Vec2::new(w - 16.0, th));
-        let tex = texture(&vctx, &mut pv.tex, "capture-preview", &pv.img);
+        if pv.tex.is_none() {
+            let ci = pv.small.take().unwrap_or_else(|| super::scaled_image(&pv.img, super::PREVIEW_PX));
+            pv.tex = Some(vctx.load_texture("capture-preview", ci, egui::TextureOptions::LINEAR));
+        }
+        let tex = pv.tex.as_ref().map(|t| t.id()).unwrap();
         super::ui::thumb(&p, tr, Some(tex), (iw, ih), 8.0);
         let tresp = ui.interact(tr, ui.scope_id().with("pic"), Sense::click_and_drag());
         p.rect_stroke(tr, 8.0, Stroke::new(1.0, if tresp.hovered() { ACCENT } else { white(26) }), StrokeKind::Inside);
@@ -322,39 +329,31 @@ fn preview(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         pv.frames += 1;
     }
     let expired = hide_after.is_some_and(|s| pv.born.elapsed().as_secs_f32() > s as f32);
-    let (id, img) = (pv.id, pv.img.clone());
+    if act.is_none() && !expired {
+        return;
+    }
+    // the preview closes on any action: take its picture instead of copying it
+    let Some(Preview { id, img, .. }) = c.preview.take() else { return };
     match act {
-        Some(PreviewAct::Copy) => {
-            if c.copy_image(&img) {
+        Some(PreviewAct::Copy) => match id.and_then(|id| c.store.png(id)) {
+            Some(png) => {
+                c.copy_png(png);
                 c.hud("Copied");
             }
-            c.preview = None;
-        }
-        Some(PreviewAct::Save) => {
-            if let Some(p) = c.save_image(id, &img) {
-                c.hud(format!("Saved to {}", short_path(&p)));
+            None => {
+                c.copy_image(img);
+                c.hud("Copied");
             }
-            c.preview = None;
-        }
-        Some(PreviewAct::Edit) => {
-            c.preview = None;
-            c.open_editor(id, img);
-        }
-        Some(PreviewAct::Pin) => {
-            c.preview = None;
-            c.pin(id, img);
-        }
-        Some(PreviewAct::Text) => {
-            c.preview = None;
-            c.spawn_ocr(img);
-        }
-        Some(PreviewAct::Close) => c.preview = None,
-        None if expired => c.preview = None,
-        None => {}
+        },
+        Some(PreviewAct::Save) => c.save_image_later(id, img),
+        Some(PreviewAct::Edit) => c.open_editor(id, img),
+        Some(PreviewAct::Pin) => c.pin(id, img),
+        Some(PreviewAct::Text) => c.spawn_ocr(img),
+        Some(PreviewAct::Close) | None => {}
     }
 }
 
-fn short_path(p: &std::path::Path) -> String {
+pub fn short_path(p: &std::path::Path) -> String {
     let home = dirs::home_dir().map(|h| h.display().to_string()).unwrap_or_default();
     let s = p.display().to_string();
     if !home.is_empty() && s.starts_with(&home) {
@@ -527,26 +526,21 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     for r in std::mem::take(&mut ew.ed.requests) {
         match r {
             // Copy and Save finish the job: the editor closes and a toast confirms
+            // encoding and writing happen on a thread; a failure shows as a toast
             Request::Copy => {
-                let img = ew.ed.rendered();
-                if c.copy_image(&img) {
-                    c.hud("Copied to clipboard");
-                    closed = true;
-                } else {
-                    ew.ed.flash("Couldn't copy");
-                }
+                c.copy_image(ew.ed.rendered());
+                c.hud("Copied to clipboard");
+                closed = true;
             }
             Request::Save => {
-                let id = c.commit_edit(&mut ew.ed);
                 let img = ew.ed.rendered();
-                if let Some(p) = c.save_image(id, &img) {
-                    c.hud(format!("Saved to {}", short_path(&p)));
-                    closed = true;
-                }
+                let id = c.commit_rendered(&mut ew.ed, &img);
+                c.save_image_later(id, img);
+                closed = true;
             }
             Request::Pin => {
-                let id = c.commit_edit(&mut ew.ed);
                 let img = ew.ed.rendered();
+                let id = c.commit_rendered(&mut ew.ed, &img);
                 c.pin(id, img);
                 ew.ed.flash("Pinned on screen");
             }
@@ -667,7 +661,11 @@ fn overlay(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) || vctx.input(|i| i.viewport().close_requested()) {
             done = Some(None);
         }
-        vctx.request_repaint();
+        // frames while the window settles; after that the mouse and keys
+        // bring the next one (a still mouse needs none)
+        if lift {
+            vctx.request_repaint();
+        }
     });
     if shown.is_some() {
         ov.frames += 1;
