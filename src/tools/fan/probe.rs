@@ -72,6 +72,23 @@ pub fn report() {
     for (i, f) in r.fans.iter().enumerate() {
         println!("  fan {i}: {:.0} rpm (min {:.0}, max {:.0})", f.rpm, f.min, f.max);
     }
+    #[cfg(target_os = "macos")]
+    if let Some(smc) = mac::Smc::open() {
+        println!("Control keys:");
+        let n = r.fans.len().max(1);
+        let mut keys = vec!["Ftst".to_string()];
+        for i in 0..n {
+            for k in ["Md", "md", "Tg", "Dc"] {
+                keys.push(format!("F{i}{k}"));
+            }
+        }
+        for k in keys {
+            match smc.info_of(&k) {
+                Some((size, kind)) => println!("  {k:<5} {kind} ({size} B) = {:?}", smc.read(&k)),
+                None => println!("  {k:<5} -"),
+            }
+        }
+    }
     println!("HID temperature sensors: {}", r.hid.len());
     for s in &r.hid {
         println!("  {:<32} {:>6.1} °C  {:?}", s.name, s.celsius, s.group);
@@ -92,6 +109,20 @@ fn fourcc_str(v: u32) -> String {
     v.to_be_bytes().iter().map(|b| *b as char).collect()
 }
 
+/// Encode `v` as SMC bytes of a numeric type, `size` bytes long.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn encode(kind: u32, v: f32, size: usize) -> Option<Vec<u8>> {
+    let b = match fourcc_str(kind).as_str() {
+        "flt " => v.to_le_bytes().to_vec(),
+        "fpe2" => ((v.max(0.0) * 4.0) as u16).to_be_bytes().to_vec(),
+        "ui8 " => vec![v.clamp(0.0, 255.0) as u8],
+        "ui16" => (v.clamp(0.0, 65535.0) as u16).to_be_bytes().to_vec(),
+        "ui32" => (v.max(0.0) as u32).to_be_bytes().to_vec(),
+        _ => return None,
+    };
+    (b.len() == size).then_some(b)
+}
+
 /// Decode SMC bytes of a numeric type.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn decode(kind: u32, b: &[u8]) -> Option<f32> {
@@ -108,9 +139,9 @@ fn decode(kind: u32, b: &[u8]) -> Option<f32> {
 }
 
 #[cfg(target_os = "macos")]
-mod mac {
+pub(super) mod mac {
     use super::super::data::{group_of_hid, plausible, Fan, Sensor};
-    use super::{decode, fourcc, fourcc_str};
+    use super::{decode, encode, fourcc, fourcc_str};
     use std::ffi::{c_char, c_void, CStr, CString};
 
     // ------------------------------------------------------------ IOKit / CF
@@ -224,6 +255,7 @@ mod mac {
 
     const KERNEL_INDEX_SMC: u32 = 2;
     const CMD_READ_BYTES: u8 = 5;
+    const CMD_WRITE_BYTES: u8 = 6;
     const CMD_READ_INDEX: u8 = 8;
     const CMD_READ_KEYINFO: u8 = 9;
 
@@ -262,6 +294,20 @@ mod mac {
         fn info(&self, key: &str) -> Option<KeyInfo> {
             let input = KeyData { key: fourcc(key), data8: CMD_READ_KEYINFO, ..Default::default() };
             self.call(&input).map(|o| o.info).filter(|i| i.size > 0 && i.size <= 32)
+        }
+
+        /// (size, type) of a key, if this SMC has it.
+        pub fn info_of(&self, key: &str) -> Option<(u32, String)> {
+            self.info(key).map(|i| (i.size, fourcc_str(i.kind)))
+        }
+
+        /// Write a number to a key in the key's own type. Needs root.
+        pub fn write(&self, key: &str, v: f32) -> bool {
+            let Some(info) = self.info(key) else { return false };
+            let Some(b) = encode(info.kind, v, info.size as usize) else { return false };
+            let mut input = KeyData { key: fourcc(key), info, data8: CMD_WRITE_BYTES, ..Default::default() };
+            input.bytes[..b.len()].copy_from_slice(&b);
+            self.call(&input).is_some()
         }
 
         pub fn read_with(&self, key: &str, info: KeyInfo) -> Option<f32> {
@@ -307,6 +353,61 @@ mod mac {
                 }
             }
             out
+        }
+    }
+
+    /// Fan speed control through the SMC. Writing needs root, so only the
+    /// helper uses this. On Apple silicon `Ftst` = 1 first takes the fans
+    /// away from thermalmonitord; the mode key is `F{i}Md` or, on newer
+    /// chips, `F{i}md`.
+    pub struct Control {
+        smc: Smc,
+        test_key: bool,
+        modes: Vec<String>,
+        unlocked: bool,
+        pub ranges: Vec<(f32, f32)>,
+    }
+
+    impl Control {
+        pub fn open() -> Option<Control> {
+            let smc = Smc::open()?;
+            let fans = smc.fans();
+            let modes = (0..fans.len()).map(|i| if smc.info(&format!("F{i}md")).is_some() { format!("F{i}md") } else { format!("F{i}Md") }).collect();
+            let test_key = smc.info("Ftst").is_some();
+            let ranges = fans.iter().map(|f| (f.min, f.max)).collect();
+            Some(Control { smc, test_key, modes, unlocked: false, ranges })
+        }
+
+        /// Hold fan `i` at `rpm`. True once the SMC reports the fan as manual.
+        pub fn manual(&mut self, i: usize, rpm: f32) -> bool {
+            let Some(mode) = self.modes.get(i) else { return false };
+            if self.test_key && !self.unlocked {
+                self.unlocked = self.smc.write("Ftst", 1.0);
+            }
+            if self.smc.read(mode) != Some(1.0) {
+                self.smc.write(mode, 1.0);
+            }
+            let (lo, hi) = self.ranges[i];
+            self.smc.write(&format!("F{i}Tg"), rpm.clamp(lo, hi.max(lo)));
+            self.smc.read(mode) == Some(1.0)
+        }
+
+        /// Give fan `i` back to macOS.
+        pub fn release(&mut self, i: usize) {
+            if let Some(mode) = self.modes.get(i) {
+                self.smc.write(mode, 0.0);
+            }
+        }
+
+        /// Give every fan back to macOS.
+        pub fn auto(&mut self) {
+            for i in 0..self.modes.len() {
+                self.release(i);
+            }
+            if self.test_key {
+                self.smc.write("Ftst", 0.0);
+            }
+            self.unlocked = false;
         }
     }
 
@@ -392,7 +493,19 @@ mod mac {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, fourcc};
+    use super::{decode, encode, fourcc};
+
+    #[test]
+    fn encodes_smc_types() {
+        assert_eq!(encode(fourcc("flt "), 2140.0, 4), Some(2140.0f32.to_le_bytes().to_vec()));
+        assert_eq!(encode(fourcc("fpe2"), 2140.0, 2), Some(vec![0x21, 0x70]));
+        assert_eq!(encode(fourcc("ui8 "), 1.0, 1), Some(vec![1]));
+        assert_eq!(encode(fourcc("ui8 "), 1.0, 2), None);
+        assert_eq!(encode(fourcc("ch8*"), 1.0, 1), None);
+        for (k, v, n) in [("flt ", 3196.5, 4), ("fpe2", 1350.0, 2), ("ui16", 7.0, 2)] {
+            assert_eq!(decode(fourcc(k), &encode(fourcc(k), v, n).unwrap()), Some(v));
+        }
+    }
 
     #[test]
     fn decodes_smc_types() {

@@ -3,7 +3,8 @@
 //! scale and sparklines.
 
 use super::data::{heat, heat_text, rpm_text, Fan, Group, Snapshot};
-use super::{ID, SHEET};
+use super::control::Mode;
+use super::{Cmd, HelperState, Live, ID, SHEET};
 use crate::core::tool::{Cx, Size};
 use crate::kit::tile;
 use crate::kit::glass::*;
@@ -299,12 +300,13 @@ fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str, t: f64) {
 
 /// The sheet beside the panel: fan speeds with their minimum, every part's
 /// temperature, thermal pressure and a way into the page.
-pub fn sheet(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Vec<Cmd> {
+    let mut cmds = Vec::new();
     let p = ui.painter().clone();
     let (title, sub) = if s.fans.is_empty() {
         ("Temperatures".to_string(), s.chip.clone())
     } else {
-        ("Fans".to_string(), format!("{} · mode Auto", plural(s.fans.len(), "fan")))
+        ("Fans".to_string(), format!("{} · mode {}", plural(s.fans.len(), "fan"), mode_word(l)))
     };
     if sheet_header(ui, rect, Icon::Fan, tint::FAN, &title, &sub) {
         cx.close_detail();
@@ -329,7 +331,19 @@ pub fn sheet(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
             y += 36.0;
         }
         p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "The tick marks the lowest speed the fan allows.", font(11.0), TEXT_FAINT);
-        y += 26.0;
+        y += 24.0;
+        // quick mode switch; anything that needs more (helper, curve) opens the page
+        let labels: Vec<&str> = Mode::ALL.iter().map(|m| m.label()).collect();
+        if let Some(i) = segmented(ui, Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 28.0)), ui.scope_id().with("fan-mode"), &labels, l.settings.mode.index()) {
+            let mut st = l.settings.clone();
+            st.mode = Mode::ALL[i];
+            let open = st.mode == Mode::Curve || (st.mode != Mode::Auto && l.helper != HelperState::Ready);
+            cmds.push(Cmd::Set(st, true));
+            if open {
+                cx.open_page(ID, "");
+            }
+        }
+        y += 40.0;
     } else {
         let msg = if !s.loaded {
             "Reading sensors…"
@@ -382,6 +396,18 @@ pub fn sheet(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         cx.open_page(ID, "");
     }
     keep_spinning(ui, s);
+    cmds
+}
+
+/// "Curve", or "Auto (hot)" while the 95 °C safety holds the fans.
+pub fn mode_word(l: &Live) -> String {
+    if l.settings.mode != Mode::Auto && l.guard.tripped {
+        "Auto (too hot)".into()
+    } else if l.needs_helper() {
+        format!("{} (needs helper)", l.settings.mode.label())
+    } else {
+        l.settings.mode.label().into()
+    }
 }
 
 /// Hint line and colour for a thermal pressure level.
