@@ -7,6 +7,7 @@ use crate::kit::mechanics as m;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -225,6 +226,17 @@ const WIFI_EVERY: Cadence = Cadence::secs(60, None);
 const WIFI_DETAILS_EVERY: Cadence = Cadence::secs(10 * 60, None);
 /// Folder sizes for the storage chart (walks whole folders).
 const SIZES_EVERY: Cadence = Cadence::secs(600, None);
+/// A folder walk is running (on its own thread).
+static SIZING: AtomicBool = AtomicBool::new(false);
+
+/// Background priority: macOS runs it on the efficiency cores and slows its
+/// disk reads, so it never competes with the app or a recording.
+fn lowest_priority() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_BACKGROUND, 0);
+    }
+}
 
 fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
     let mut sys = sysinfo::System::new();
@@ -349,20 +361,30 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
         }
         activity::repaint(&ctx);
 
-        if SIZES_EVERY.due(&mut sizes_at) {
-            // folder sizes for the storage chart (can take a few seconds)
-            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-            let cats = vec![
-                ("Applications".to_string(), dir_size(Path::new("/Applications"))),
-                ("Documents".to_string(), dir_size(&home.join("Documents"))),
-                ("Downloads".to_string(), dir_size(&home.join("Downloads"))),
-                ("Desktop".to_string(), dir_size(&home.join("Desktop"))),
-            ];
-            let trash = std::fs::read_dir(home.join(".Trash")).ok().map(|_| dir_size(&home.join(".Trash")));
-            let mut s = shared.lock().unwrap();
-            s.categories = cats;
-            s.trash_bytes = trash;
-            activity::repaint(&ctx);
+        // never during a recording: the walk can take a whole core for a while
+        if !activity::recording() && !SIZING.load(Ordering::Relaxed) && SIZES_EVERY.due(&mut sizes_at) {
+            SIZING.store(true, Ordering::Relaxed);
+            let (shared, ctx) = (shared.clone(), ctx.clone());
+            let walk = std::thread::Builder::new().name("folder-sizes".into()).spawn(move || {
+                lowest_priority();
+                let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+                let cats = vec![
+                    ("Applications".to_string(), dir_size(Path::new("/Applications"))),
+                    ("Documents".to_string(), dir_size(&home.join("Documents"))),
+                    ("Downloads".to_string(), dir_size(&home.join("Downloads"))),
+                    ("Desktop".to_string(), dir_size(&home.join("Desktop"))),
+                ];
+                let trash = std::fs::read_dir(home.join(".Trash")).ok().map(|_| dir_size(&home.join(".Trash")));
+                let mut s = shared.lock().unwrap();
+                s.categories = cats;
+                s.trash_bytes = trash;
+                drop(s);
+                SIZING.store(false, Ordering::Relaxed);
+                activity::repaint(&ctx);
+            });
+            if walk.is_err() {
+                SIZING.store(false, Ordering::Relaxed);
+            }
         }
         // the panel opening ends the nap: it shows fresh numbers right away
         activity::nap(Duration::from_millis(m::MONITOR_REFRESH_MS), None);

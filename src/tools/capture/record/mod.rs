@@ -457,6 +457,7 @@ impl Recorder {
 
     /// Background results and timers; call once per pass.
     pub fn tick(&mut self, s: &mut RecSettings) {
+        crate::kit::activity::set_recording(!matches!(self.phase, Phase::Idle | Phase::Pick(_)));
         self.keep_meter(s);
         while let Ok(e) = self.rx.try_recv() {
             match e {

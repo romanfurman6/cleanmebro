@@ -31,6 +31,19 @@ pub fn set_visible(v: bool) {
     }
 }
 
+static RECORDING: AtomicBool = AtomicBool::new(false);
+
+/// Called by the recorder: is a recording counting down, live or saving?
+/// Heavy background work (folder walks) waits until it's over.
+pub fn set_recording(v: bool) {
+    RECORDING.store(v, Ordering::Relaxed);
+}
+
+/// Whether a recording is under way.
+pub fn recording() -> bool {
+    RECORDING.load(Ordering::Relaxed)
+}
+
 /// Whether anything of the app is on screen.
 pub fn visible() -> bool {
     VISIBLE.load(Ordering::Relaxed)
