@@ -44,8 +44,6 @@ pub enum Ico {
     Restart,
     Gear,
     Scissors,
-    Text2,
-    Wave,
 }
 
 fn symbol(i: Ico) -> &'static str {
@@ -88,8 +86,6 @@ fn symbol(i: Ico) -> &'static str {
         Ico::Restart => "arrow.counterclockwise",
         Ico::Gear => "gearshape",
         Ico::Scissors => "scissors",
-        Ico::Text2 => "captions.bubble",
-        Ico::Wave => "waveform",
     }
 }
 
@@ -263,17 +259,6 @@ pub fn draw(p: &Painter, i: Ico, rect: Rect, color: Color32) {
             circle(17.0, 17.0, 3.0);
             line(&[(9.0, 15.0), (18.0, 4.0)]);
             line(&[(15.0, 15.0), (6.0, 4.0)]);
-        }
-        Ico::Text2 => {
-            boxr(3.0, 5.0, 21.0, 17.0);
-            line(&[(7.0, 10.0), (17.0, 10.0)]);
-            line(&[(7.0, 13.0), (13.0, 13.0)]);
-        }
-        Ico::Wave => {
-            for (k, h) in [3.0f32, 7.0, 10.0, 6.0, 8.0, 4.0].iter().enumerate() {
-                let x = 4.5 + 3.0 * k as f32;
-                line(&[(x, 12.0 - h / 2.0 * 1.4), (x, 12.0 + h / 2.0 * 1.4)]);
-            }
         }
         Ico::Gear => {
             circle(12.0, 12.0, 3.0);

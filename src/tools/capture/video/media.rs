@@ -59,7 +59,7 @@ mod imp {
     use objc2::runtime::AnyObject;
     use objc2::{AnyThread, MainThreadMarker};
     use objc2_av_foundation::{
-        AVAsset, AVAssetExportPresetPassthrough, AVAssetExportSession, AVAssetExportSessionStatus, AVAssetImageGenerator, AVFileTypeMPEG4, AVMediaTypeVideo, AVMutableComposition, AVPlayer, AVPlayerItem,
+        AVAsset, AVAssetExportPresetPassthrough, AVAssetExportSession, AVAssetExportSessionStatus, AVAssetImageGenerator, AVFileTypeMPEG4, AVMediaTypeAudio, AVMediaTypeVideo, AVMutableComposition, AVPlayer, AVPlayerItem,
         AVPlayerItemVideoOutput, AVURLAsset,
     };
     use objc2_core_foundation::CGSize;
@@ -137,6 +137,42 @@ mod imp {
         }
     }
 
+    /// What plays and what's saved: the file itself, or its picture with
+    /// the cleaned sound from `voice` (the mix on; system sound and the
+    /// cleaned voice off, as the recorder writes them).
+    #[allow(deprecated)]
+    fn source(path: &Path, voice: Option<&Path>) -> Result<Retained<AVAsset>, String> {
+        let orig = asset(path);
+        let Some(voice) = voice else { return Ok(Retained::into_super(orig)) };
+        unsafe {
+            let snd = asset(voice);
+            let (vm, am) = (AVMediaTypeVideo.ok_or("no video")?, AVMediaTypeAudio.ok_or("no audio")?);
+            let d = orig.duration();
+            let comp = AVMutableComposition::composition();
+            let add = |media: &objc2_av_foundation::AVMediaType, from: &objc2_av_foundation::AVAssetTrack, on: bool| -> Result<(), String> {
+                let t = comp.addMutableTrackWithMediaType_preferredTrackID(media, 0).ok_or("can't add a track")?;
+                let r = from.timeRange();
+                let len = if secs(r.duration) > secs(d) { d } else { r.duration };
+                t.insertTimeRange_ofTrack_atTime_error(CMTimeRange { start: r.start, duration: len }, from, cm(0.0)).map_err(|e| ns_err(&e))?;
+                t.setEnabled(on);
+                Ok(())
+            };
+            for v in orig.tracksWithMediaType(vm).iter() {
+                add(vm, &v, true)?;
+            }
+            let (oa, sa) = (orig.tracksWithMediaType(am), snd.tracksWithMediaType(am));
+            let mix = sa.firstObject().ok_or("the cleaned sound is empty")?;
+            add(am, &mix, true)?;
+            if oa.count() >= 3 {
+                add(am, &oa.objectAtIndex(1), false)?;
+                if sa.count() >= 2 {
+                    add(am, &sa.objectAtIndex(1), false)?;
+                }
+            }
+            Ok(Retained::into_super(Retained::into_super(comp)))
+        }
+    }
+
     pub struct Player {
         player: Retained<AVPlayer>,
         item: Retained<AVPlayerItem>,
@@ -148,13 +184,13 @@ mod imp {
 
     impl Player {
         /// Main thread only.
-        pub fn open(path: &Path) -> Result<Player, String> {
+        pub fn open(path: &Path, voice: Option<&Path>) -> Result<Player, String> {
             let mtm = MainThreadMarker::new().ok_or("not on the main thread")?;
             if !path.exists() {
                 return Err("The file isn't there any more".into());
             }
             unsafe {
-                let a = asset(path);
+                let a = source(path, voice)?;
                 let duration = secs(a.duration());
                 let (w, h) = video_size(&a).ok_or("No video in this file")?;
                 let scale = (super::VIEW_W / w).min(1.0);
@@ -268,10 +304,10 @@ mod imp {
     /// Write the kept pieces of `src` to `dest` (no re-encoding). `done`
     /// runs on a background thread.
     #[allow(deprecated)]
-    pub fn export(src: &Path, edl: &Edl, dest: PathBuf, done: Reply<PathBuf>) {
+    pub fn export(src: &Path, voice: Option<&Path>, edl: &Edl, dest: PathBuf, done: Reply<PathBuf>) {
         let run = || -> Result<Retained<AVAssetExportSession>, String> {
             unsafe {
-                let a = asset(src);
+                let a = source(src, voice)?;
                 let comp = AVMutableComposition::composition();
                 let mut at = 0.0;
                 for &(s, e) in &edl.keep {
@@ -325,7 +361,7 @@ mod other {
     }
 
     impl Player {
-        pub fn open(_path: &Path) -> Result<Player, String> {
+        pub fn open(_path: &Path, _voice: Option<&Path>) -> Result<Player, String> {
             Err("Video playback needs macOS".into())
         }
         pub fn time(&self) -> f64 {
@@ -346,7 +382,7 @@ mod other {
         Vec::new()
     }
 
-    pub fn export(_src: &Path, _edl: &Edl, _dest: PathBuf, done: Reply<PathBuf>) {
+    pub fn export(_src: &Path, _voice: Option<&Path>, _edl: &Edl, _dest: PathBuf, done: Reply<PathBuf>) {
         done(Err("Saving video needs macOS".into()))
     }
 }

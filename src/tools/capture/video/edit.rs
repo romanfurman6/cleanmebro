@@ -113,6 +113,12 @@ impl Edl {
         None
     }
 
+    /// How much kept video comes before source `t` (its place in the edited
+    /// video, also for a `t` inside a cut: where the cut closes up).
+    pub fn edited_at(&self, t: f64) -> f64 {
+        self.keep.iter().map(|&(a, b)| (t.min(b) - a).max(0.0)).sum()
+    }
+
     /// Edited time → source time (clamped into the video).
     pub fn to_source(&self, e: f64) -> f64 {
         let mut left = e.max(0.0);
@@ -191,6 +197,9 @@ mod tests {
         assert_eq!(e.to_source(100.0), 10.0);
         assert_eq!(e.playable(3.0), Some(5.0));
         assert_eq!(e.playable(10.5), None);
+        assert_eq!(e.edited_at(3.0), 2.0, "inside a cut: where it closes up");
+        assert_eq!(e.edited_at(7.0), 4.0);
+        assert_eq!(e.edited_at(20.0), 7.0);
     }
 
     #[test]
