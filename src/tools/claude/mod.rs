@@ -6,7 +6,7 @@ pub mod backend;
 mod page;
 mod ui;
 
-use crate::core::tool::{Action, Badge, Cx, MenuItem, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::core::tool::{Action, Badge, Cx, MenuItem, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::glass::{tint, Icon};
 use egui::{Rect, Ui};
 
@@ -45,19 +45,14 @@ impl Tool for Claude {
         "Monitor"
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: LIMITS, title: "Claude limits", span: 4, default_on: true, group: None }]
+        vec![WidgetSpec { id: LIMITS, title: "Claude limits", about: "Session and weekly limits, tokens today.", sizes: UP_TO_MEDIUM, size: Size::S14, default_on: true }]
     }
-    fn widget_height(&self, _widget: &str, _width: f32) -> f32 {
-        ui::CARD_H
-    }
-    fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+    fn widget_ui(&mut self, widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         if widget != LIMITS {
             return;
         }
-        let resp = crate::kit::glass::card(ui, rect, ui.scope_id().with("c-claude"), crate::kit::glass::R_CARD, cx.is_detail_open(ID, LIMITS));
         let cl = self.info.lock().unwrap().clone();
-        ui::card(ui.painter(), rect, &cl, ui.ctx().input(|i| i.time));
-        if resp.clicked() {
+        if ui::widget(ui, rect, size, &cl, cx.is_detail_open(ID, LIMITS)).clicked() {
             cx.toggle_detail(ID, LIMITS);
         }
     }

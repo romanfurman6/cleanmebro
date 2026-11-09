@@ -7,7 +7,9 @@
 
 use super::engine::{Engine, Span, State, GRACE_CHOICES, WORKING_SECS};
 use super::{KeepAwake, ID};
+use crate::core::tool::Size;
 use crate::kit::glass::*;
+use crate::kit::tile;
 use egui::epaint::{PathShape, PathStroke};
 use egui::{Align2, Color32, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 use std::f32::consts::{PI, TAU};
@@ -303,27 +305,65 @@ fn hero(p: &Painter, r: Rect, e: &Engine, st: State, now: i64, t: f64, big: bool
 
 // ---------------------------------------------------------------- panel
 
-pub fn tile(k: &mut KeepAwake, ui: &mut Ui, rect: Rect) {
-    let st = k.state();
-    let resp = quick_tile(ui, rect, ui.scope_id().with("q-awake"), Icon::Cup, tint::KEEP_AWAKE, "Awake", &short_state(st), true);
-    if st.awake() {
-        ui.painter().rect_stroke(rect, R_CARD, Stroke::new(1.5, with_alpha(look(st).ring, 0.75)), StrokeKind::Inside);
+/// The Keep Awake widget at `size`. A click on the small ones flips the
+/// switch; Large is the full card.
+pub fn widget(k: &mut KeepAwake, size: Size, ui: &mut Ui, rect: Rect, cx: &mut crate::core::tool::Cx) {
+    if size == Size::S44 {
+        card(k, ui, rect, cx);
+        return;
     }
-    let tip = if k.engine.lock().unwrap().manual_since.is_some() { "Let the Mac sleep" } else { "Keep the Mac awake" };
+    let now = k.now();
+    let t = ui.ctx().input(|i| i.time);
+    let id = ui.scope_id().with("w-awake");
+    let (st, frac, (title, reason, _), manual) = {
+        let e = k.engine.lock().unwrap();
+        let st = e.state(now);
+        (st, ring_frac(&e, st, now), hero_text(&e, st, now), e.manual_since.is_some())
+    };
+    let lk = look(st);
+    let resp = if st.awake() { tile::glow_card(ui, rect, id, lk.ring, false) } else { tile::card(ui, rect, id, false) };
+    let p = ui.painter().clone();
+    let tip = if manual { "Let the Mac sleep" } else { "Keep the Mac awake" };
+    match size {
+        Size::S11 => {
+            let sr = Rect::from_center_size(Pos2::new(rect.center().x, rect.top() + 32.0), Vec2::splat(50.0));
+            scene(&p, sr, st, frac, t);
+            p.text(Pos2::new(rect.center().x, rect.bottom() - 9.0), Align2::CENTER_BOTTOM, short_state(st), bold(11.0), if st.awake() { lk.soft } else { TEXT_DIM });
+        }
+        Size::S24 => {
+            let mut e = k.engine.lock().unwrap();
+            let hr = rect.shrink(1.0);
+            if let Some(br) = hero(&p, hr, &e, st, now, t, false) {
+                if pill_button(ui, br, "Keep awake", BTN_SECONDARY, true).clicked() {
+                    e.set_manual(true, now);
+                }
+            }
+            let sw = Rect::from_min_size(Pos2::new(rect.right() - 12.0 - 38.0, rect.top() + 12.0), Vec2::new(38.0, 22.0));
+            if switch(ui, sw, id.with("sw"), manual, true).on_hover_text(tip).clicked() {
+                e.set_manual(!manual, now);
+            }
+            return;
+        }
+        _ => {
+            let side = rect.height() - 16.0;
+            let sr = Rect::from_min_size(Pos2::new(rect.left() + 10.0, rect.center().y - side / 2.0), Vec2::splat(side));
+            scene(&p, sr, st, frac, t);
+            let x = sr.right() + 10.0;
+            let right = if size == Size::S14 { rect.right() - 60.0 } else { rect.right() - 8.0 };
+            text_fit(&p, Pos2::new(x, rect.center().y - 9.0), Align2::LEFT_CENTER, &title, bold(if size == Size::S14 { 17.0 } else { 14.0 }), TEXT, right - x);
+            text_fit(&p, Pos2::new(x, rect.center().y + 11.0), Align2::LEFT_CENTER, &reason, font(11.0), lk.soft, right - x);
+            if size == Size::S14 {
+                let sw = Rect::from_min_size(Pos2::new(rect.right() - 12.0 - 38.0, rect.center().y - 11.0), Vec2::new(38.0, 22.0));
+                if switch(ui, sw, id.with("sw"), manual, true).on_hover_text(tip).clicked() {
+                    k.toggle();
+                }
+                return;
+            }
+        }
+    }
     if resp.on_hover_text(tip).clicked() {
         k.toggle();
     }
-}
-
-fn shown_sessions(e: &Engine, now: i64) -> usize {
-    if !e.settings.claude {
-        return 0;
-    }
-    e.working(now).len().clamp(1, CARD_SESSIONS)
-}
-
-pub fn card_height(e: &Engine, now: i64) -> f32 {
-    10.0 + 30.0 + HERO_H + 8.0 + ROW_H + shown_sessions(e, now) as f32 * SESSION_H + 4.0 + ROW_H + 6.0
 }
 
 pub fn card(k: &mut KeepAwake, ui: &mut Ui, rect: Rect, cx: &mut crate::core::tool::Cx) {
@@ -331,7 +371,7 @@ pub fn card(k: &mut KeepAwake, ui: &mut Ui, rect: Rect, cx: &mut crate::core::to
     let t = ui.ctx().input(|i| i.time);
     let p = ui.painter().clone();
     let id = ui.scope_id().with("awake-card");
-    glass_card(&p, rect, R_CARD, 0.0, false);
+    tile::paint_card(&p, rect, 0.0, false);
     let x0 = rect.left() + 12.0;
     let x1 = rect.right() - 12.0;
     let mut y = rect.top() + 10.0;

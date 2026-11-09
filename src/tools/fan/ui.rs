@@ -4,14 +4,15 @@
 
 use super::data::{heat, heat_text, rpm_text, Fan, Group, Snapshot};
 use super::{ID, SHEET};
-use crate::core::tool::Cx;
+use crate::core::tool::{Cx, Size};
+use crate::kit::tile;
 use crate::kit::glass::*;
 use egui::epaint::Mesh;
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2};
 use std::f32::consts::{PI, TAU};
 use std::time::Duration;
 
-/// Height of the panel card.
+/// Height of the card's fans-and-heat part (all of Medium).
 pub const CARD_H: f32 = 168.0;
 /// Light cyan of the blades and lines.
 pub const BLADE: Color32 = Color32::from_rgb(0x7F, 0xD3, 0xE8);
@@ -144,25 +145,71 @@ pub fn hottest_text(s: &Snapshot) -> Option<(String, f32)> {
 
 // ---------------------------------------------------------------- panel
 
-/// The quarter-width tile: spinning fan in the chip, speed under the label.
-pub fn tile(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-    let sub = if !s.loaded {
+/// The Fans widget at `size`; a click opens the sheet.
+pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+    if size == Size::S24 {
+        return card(s, ui, rect, cx);
+    }
+    if size == Size::S44 {
+        card(s, ui, rect, cx);
+        // every part's temperature under the card's top
+        let p = ui.painter();
+        let x0 = rect.left() + 12.0;
+        let x1 = rect.right() - 12.0;
+        let y0 = rect.top() + CARD_H + 4.0;
+        hairline(p, Pos2::new(x0, y0 - 6.0), Pos2::new(x1, y0 - 6.0));
+        p.text(Pos2::new(x0, y0 + 4.0), Align2::LEFT_TOP, "Temperatures", font(11.0), TEXT_FAINT);
+        let groups = s.groups();
+        let lh = 24.0;
+        let fit = ((rect.bottom() - 10.0 - (y0 + 22.0)) / lh).floor().max(0.0) as usize;
+        for (i, g) in groups.iter().take(fit).enumerate() {
+            let lr = Rect::from_min_size(Pos2::new(x0, y0 + 22.0 + i as f32 * lh), Vec2::new(x1 - x0, lh));
+            tile::bar_line(p, lr, g.group.label(), Some((heat_pos(g.max).max(0.03), heat(g.max))), &format!("{:.0} °C", g.max));
+        }
+        return;
+    }
+    let t = ui.ctx().input(|i| i.time);
+    let id = ui.scope_id().with("w-fans");
+    let sel = cx.is_detail_open(ID, SHEET);
+    let rpm = s.avg_rpm();
+    let value = if !s.loaded {
         "…".to_string()
-    } else if let Some(r) = s.avg_rpm() {
+    } else if let Some(r) = rpm {
         format!("{} rpm", rpm_text(r))
     } else if let Some((_, c)) = s.hottest() {
         format!("{c:.0} °C")
     } else {
         "No data".into()
     };
-    let resp = quick_tile(ui, rect, ui.scope_id().with("fan-tile"), Icon::Fan, tint::FAN, "Fans", &sub, true);
-    if let Some(r) = s.avg_rpm() {
+    let frac = s.avg_frac().unwrap_or(0.0);
+    let hot = hottest_text(s).map(|(g, c)| format!("{g} {c:.0} °C")).unwrap_or_default();
+    let resp = match size {
+        Size::S11 => {
+            let resp = tile::card(ui, rect, id, sel);
+            let p = ui.painter();
+            let c = Pos2::new(rect.center().x, rect.top() + 32.0);
+            ring(p, c, 22.0, 4.0, frac, LINE);
+            blades(p, c, 16.0, spin(t, rpm.unwrap_or(0.0)), BLADE, CARD);
+            text_fit(p, Pos2::new(rect.center().x, rect.bottom() - 9.0), Align2::CENTER_BOTTOM, &value, font(11.0), TEXT_SOFT, rect.width() - 10.0);
+            resp
+        }
+        Size::S12 => tile::wide(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, if rpm.is_some() { Ok((frac.max(0.02), LINE)) } else { Err(hot.as_str()) }, sel),
+        _ => tile::row(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, if hot.is_empty() { Err("") } else { Err(hot.as_str()) }, sel),
+    };
+    // spinning blades over the chip
+    if let Some(r) = rpm {
         let p = ui.painter();
-        let chip = Rect::from_min_size(rect.min + Vec2::new(8.0, 10.0), Vec2::splat(28.0));
-        p.rect_filled(chip, 8.0, tint::FAN);
-        blades(p, chip.center(), 10.0, spin(ui.ctx().input(|i| i.time), r), Color32::WHITE, tint::FAN);
-        keep_spinning(ui, s);
+        let chip = match size {
+            Size::S12 => Some(Rect::from_min_size(Pos2::new(rect.left() + tile::PAD, rect.top() + 9.0), Vec2::splat(18.0))),
+            Size::S14 => Some(Rect::from_min_size(Pos2::new(rect.left() + 12.0, rect.center().y - 17.0), Vec2::splat(34.0))),
+            _ => None,
+        };
+        if let Some(chip) = chip {
+            p.rect_filled(chip, chip.width() * 0.28, tint::FAN);
+            blades(p, chip.center(), chip.width() * 0.36, spin(t, r), Color32::WHITE, tint::FAN);
+        }
     }
+    keep_spinning(ui, s);
     if resp.clicked() {
         cx.toggle_detail(ID, SHEET);
     }
@@ -222,7 +269,8 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
             let hot: Vec<f32> = s.history.iter().map(|h| h.1).collect();
             let lo = hot.iter().copied().fold(f32::MAX, f32::min).min(c) - 4.0;
             let hi = hot.iter().copied().fold(f32::MIN, f32::max).max(c) + 4.0;
-            sparkline(&p, Rect::from_min_max(Pos2::new(x0, ty + 34.0), Pos2::new(x1, rect.bottom() - 10.0)), &hot, lo, hi, HOT_LINE, None);
+            let bottom = rect.bottom().min(rect.top() + CARD_H) - 10.0;
+            sparkline(&p, Rect::from_min_max(Pos2::new(x0, ty + 34.0), Pos2::new(x1, bottom)), &hot, lo, hi, HOT_LINE, None);
         }
         None if s.loaded => {
             p.text(Pos2::new(x0, ty + 7.0), Align2::LEFT_CENTER, "No temperature sensors found", font(12.0), TEXT_DIM);
@@ -232,11 +280,7 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
 }
 
 fn card_resp(ui: &mut Ui, rect: Rect, selected: bool) -> egui::Response {
-    let r = crate::kit::glass::card(ui, rect, ui.scope_id().with("fan-card"), R_CARD, selected);
-    if r.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    r
+    tile::card(ui, rect, ui.scope_id().with("fan-card"), selected)
 }
 
 /// One fan in the panel card: ring with blades, name and speed.

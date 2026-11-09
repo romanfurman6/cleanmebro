@@ -6,7 +6,7 @@ mod page;
 mod sheets;
 mod ui;
 
-use crate::core::tool::{Action, Badge, Cx, PanelHeader, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::core::tool::{Action, Badge, Cx, PanelHeader, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::glass::{human_bytes, tint, Icon, BLUE};
 use crate::kit::mechanics as m;
 use egui::{Rect, Ui};
@@ -26,13 +26,16 @@ impl System {
     }
 }
 
-const WIDGETS: [WidgetSpec; 6] = [
-    WidgetSpec { id: "storage", title: "Storage", span: 2, default_on: true, group: None },
-    WidgetSpec { id: "memory", title: "Memory", span: 2, default_on: true, group: None },
-    WidgetSpec { id: "cpu", title: "CPU", span: 2, default_on: true, group: None },
-    WidgetSpec { id: "battery", title: "Battery", span: 2, default_on: true, group: None },
-    WidgetSpec { id: "network", title: "Network", span: 2, default_on: true, group: None },
-    WidgetSpec { id: "devices", title: "Connected Devices", span: 2, default_on: true, group: None },
+const SMALL_TO_MEDIUM: &[Size] = UP_TO_MEDIUM;
+
+const WIDGETS: [WidgetSpec; 7] = [
+    WidgetSpec { id: "storage", title: "Storage", about: "Free space on your startup disk.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
+    WidgetSpec { id: "memory", title: "Memory", about: "Memory pressure and what uses it.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
+    WidgetSpec { id: "cpu", title: "CPU", about: "Load and temperature, with the last minute.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
+    WidgetSpec { id: "battery", title: "Battery", about: "Charge and time left.", sizes: &[Size::S11, Size::S12, Size::S14], size: Size::S12, default_on: true },
+    WidgetSpec { id: "network", title: "Network", about: "Wi-Fi and live speed.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
+    WidgetSpec { id: "devices", title: "Connected Devices", about: "Bluetooth devices and their batteries.", sizes: &[Size::S12, Size::S14, Size::S24], size: Size::S12, default_on: true },
+    WidgetSpec { id: "health", title: "Mac Health", about: "Every reading at a glance.", sizes: &[Size::S24, Size::S44], size: Size::S24, default_on: false },
 ];
 
 impl Tool for System {
@@ -57,11 +60,8 @@ impl Tool for System {
     fn widgets(&self) -> Vec<WidgetSpec> {
         WIDGETS.to_vec()
     }
-    fn widget_height(&self, widget: &str, _width: f32) -> f32 {
-        ui::widget_height(widget)
-    }
-    fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        ui::widget(&self.mon, widget, ui, rect, cx);
+    fn widget_ui(&mut self, widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        ui::widget(&self.mon, widget, size, ui, rect, cx);
     }
     fn detail_ui(&mut self, detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::detail(&self.mon, detail, ui, rect, cx);
@@ -110,6 +110,6 @@ impl Tool for System {
         if view == "health" {
             return Some(View::Page);
         }
-        WIDGETS.iter().find(|w| w.id == view).map(|w| View::Detail(w.id))
+        WIDGETS.iter().filter(|w| w.id != "health").find(|w| w.id == view).map(|w| View::Detail(w.id))
     }
 }

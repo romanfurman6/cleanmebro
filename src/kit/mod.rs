@@ -8,4 +8,5 @@ pub mod glass;
 pub mod hotkeys;
 pub mod mechanics;
 pub mod native;
+pub mod tile;
 pub mod viewport;

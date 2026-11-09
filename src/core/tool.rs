@@ -16,6 +16,84 @@ pub type ToolId = &'static str;
 /// Number of columns in the panel's widget grid.
 pub const GRID_COLUMNS: u8 = 4;
 
+/// A widget's size on the panel grid, written rows × columns: one cell is
+/// square, so `S12` is one row tall and half the panel wide.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Size {
+    S11,
+    S12,
+    S14,
+    S24,
+    S44,
+}
+
+impl Size {
+    pub const ALL: [Size; 5] = [Size::S11, Size::S12, Size::S14, Size::S24, Size::S44];
+    /// (rows, columns)
+    pub fn dims(self) -> (u8, u8) {
+        match self {
+            Size::S11 => (1, 1),
+            Size::S12 => (1, 2),
+            Size::S14 => (1, 4),
+            Size::S24 => (2, 4),
+            Size::S44 => (4, 4),
+        }
+    }
+    pub fn cols(self) -> u8 {
+        self.dims().1
+    }
+    /// "1:2", also the saved form.
+    pub fn label(self) -> &'static str {
+        match self {
+            Size::S11 => "1:1",
+            Size::S12 => "1:2",
+            Size::S14 => "1:4",
+            Size::S24 => "2:4",
+            Size::S44 => "4:4",
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Size::S11 => "Small",
+            Size::S12 => "Wide",
+            Size::S14 => "Row",
+            Size::S24 => "Medium",
+            Size::S44 => "Large",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Size> {
+        Size::ALL.into_iter().find(|z| z.label() == s)
+    }
+}
+
+/// A widget a tool offers for the panel.
+#[derive(Clone, Copy, Debug)]
+pub struct WidgetSpec {
+    pub id: &'static str,
+    /// Name shown in the widget gallery.
+    pub title: &'static str,
+    /// One line for the gallery.
+    pub about: &'static str,
+    /// The sizes it can be drawn at, smallest first.
+    pub sizes: &'static [Size],
+    /// Its size until the user picks another.
+    pub size: Size,
+    /// Shown until the user changes the panel.
+    pub default_on: bool,
+}
+
+impl WidgetSpec {
+    /// `want` if this widget offers it, else its default size.
+    pub fn fit(&self, want: Size) -> Size {
+        if self.sizes.contains(&want) { want } else { self.size }
+    }
+}
+
+/// Every size.
+pub const ALL_SIZES: &[Size] = &Size::ALL;
+/// Every size but Large.
+pub const UP_TO_MEDIUM: &[Size] = &[Size::S11, Size::S12, Size::S14, Size::S24];
+
 /// What a tool needs to start: the egui context (for repaints from its
 /// background threads) and whether it should show sample data.
 pub struct ToolEnv {
@@ -29,21 +107,6 @@ pub struct ToolEnv {
 pub struct Badge {
     pub icon: Icon,
     pub color: Color32,
-}
-
-/// A widget a tool offers for the panel.
-#[derive(Clone, Copy, Debug)]
-pub struct WidgetSpec {
-    pub id: &'static str,
-    /// Name shown in the widget gallery (Settings › Widgets).
-    pub title: &'static str,
-    /// Width in grid columns out of [`GRID_COLUMNS`]: 1 quarter, 2 half, 4 full.
-    pub span: u8,
-    /// Shown until the user changes the panel.
-    pub default_on: bool,
-    /// Widgets of the same group that sit next to each other share one card
-    /// (full-width rows such as the Mac metrics).
-    pub group: Option<&'static str>,
 }
 
 /// The panel's title line: the first tool that returns one wins.
@@ -161,11 +224,8 @@ pub trait Tool {
     fn widgets(&self) -> Vec<WidgetSpec> {
         Vec::new()
     }
-    /// Height of a widget at the given width.
-    fn widget_height(&self, _widget: &str, _width: f32) -> f32 {
-        0.0
-    }
-    fn widget_ui(&mut self, _widget: &str, _ui: &mut Ui, _rect: Rect, _cx: &mut Cx) {}
+    /// Draw a widget at `size` (one the spec offers) filling `rect`.
+    fn widget_ui(&mut self, _widget: &str, _size: Size, _ui: &mut Ui, _rect: Rect, _cx: &mut Cx) {}
 
     // ---- detail sheets beside the panel
     /// Draws the whole sheet, header included (see `glass::sheet_header`).
@@ -217,6 +277,15 @@ pub trait Tool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sizes_round_trip() {
+        for z in Size::ALL {
+            assert_eq!(Size::parse(z.label()), Some(z));
+            assert!(z.cols() <= GRID_COLUMNS);
+        }
+        assert_eq!(Size::parse("3:3"), None);
+    }
 
     #[test]
     fn cx_collects_actions_in_order() {

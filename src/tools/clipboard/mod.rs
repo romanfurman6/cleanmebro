@@ -12,7 +12,7 @@ mod store;
 mod ui;
 mod watch;
 
-use crate::core::tool::{Action, Badge, Cx, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
 use crate::kit::glass::Icon;
 use crate::kit::hotkeys::Keys;
 use egui::{Color32, Rect, Ui};
@@ -26,7 +26,6 @@ use std::time::{Duration, Instant};
 use store::{Clip, Kind, Store};
 
 pub const ID: ToolId = "clipboard";
-const TILE: &str = "tile";
 const CARD: &str = "recent";
 pub const TINT: Color32 = Color32::from_rgb(0xC7, 0x80, 0x1F);
 
@@ -447,24 +446,10 @@ impl Tool for Clipboard {
         self.settings.shortcut.as_ref().map(|s| s.display()).unwrap_or_default()
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![
-            WidgetSpec { id: TILE, title: "Clipboard (quick action)", span: 1, default_on: false, group: None },
-            WidgetSpec { id: CARD, title: "Recent clipboard", span: 4, default_on: true, group: None },
-        ]
+        vec![WidgetSpec { id: CARD, title: "Clipboard", about: "Your latest clips; click one to copy it again.", sizes: ALL_SIZES, size: Size::S11, default_on: true }]
     }
-    fn widget_height(&self, widget: &str, _width: f32) -> f32 {
-        if widget == TILE {
-            crate::kit::glass::QUICK_TILE_H
-        } else {
-            ui::CARD_H
-        }
-    }
-    fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        if widget == TILE {
-            ui::tile(self, ui, rect);
-        } else {
-            ui::card(self, ui, rect, cx);
-        }
+    fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        ui::widget(self, size, ui, rect, cx);
     }
     fn has_page(&self) -> bool {
         true

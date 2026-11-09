@@ -8,7 +8,7 @@ mod page;
 pub mod probe;
 mod ui;
 
-use crate::core::tool::{Badge, Cx, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::core::tool::{Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
 use crate::kit::glass::{tint, Icon};
 use data::Snapshot;
 use egui::{Rect, Ui};
@@ -17,7 +17,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const ID: ToolId = "fan";
-const TILE: &str = "tile";
 const CARD: &str = "fans";
 const SHEET: &str = "fans";
 
@@ -112,25 +111,11 @@ impl Tool for FanControl {
         }
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![
-            WidgetSpec { id: TILE, title: "Fans (quick tile)", span: 1, default_on: true, group: None },
-            WidgetSpec { id: CARD, title: "Fans", span: 4, default_on: true, group: None },
-        ]
+        vec![WidgetSpec { id: CARD, title: "Fans", about: "Fan speed and the hottest part, live.", sizes: ALL_SIZES, size: Size::S14, default_on: true }]
     }
-    fn widget_height(&self, widget: &str, _width: f32) -> f32 {
-        if widget == TILE {
-            crate::kit::glass::QUICK_TILE_H
-        } else {
-            ui::CARD_H
-        }
-    }
-    fn widget_ui(&mut self, widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+    fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let s = self.snap.lock().unwrap().clone();
-        if widget == TILE {
-            ui::tile(&s, ui, rect, cx);
-        } else {
-            ui::card(&s, ui, rect, cx);
-        }
+        ui::widget(&s, size, ui, rect, cx);
     }
     fn detail_ui(&mut self, _detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let s = self.snap.lock().unwrap().clone();

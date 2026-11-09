@@ -5,14 +5,15 @@
 use super::settings::{Ignored, Layout, AGES, KEEP_MAX, KEEP_MIN};
 use super::store::{parse_color, Entry, Kind};
 use super::{mac, Clipboard, Filter, Tab, ID, TINT};
-use crate::core::tool::Cx;
+use crate::core::tool::{Cx, Size};
+use crate::kit::tile;
 use crate::kit::glass::*;
 use crate::kit::hotkeys::Shortcut;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId};
 use std::time::Instant;
 
-pub const CARD_H: f32 = 254.0;
-const PANEL_ROWS: usize = 5;
+/// Most recent clips listed in the Large widget.
+const PANEL_ROWS: usize = 8;
 const ROW_H: f32 = 36.0;
 
 // ---------------------------------------------------------------- shared bits
@@ -149,9 +150,37 @@ fn row_hover(ui: &Ui, r: Rect, id: egui::Id) -> egui::Response {
 
 // ---------------------------------------------------------------- panel
 
-pub fn tile(c: &mut Clipboard, ui: &mut Ui, rect: Rect) {
-    let sub = c.pause_label().map(|_| "Paused".to_string()).or_else(|| c.settings.shortcut.as_ref().map(|s| s.display())).unwrap_or_else(|| "History".into());
-    if quick_tile(ui, rect, ui.scope_id().with("q-clipboard"), Icon::Clipboard, TINT, "Clipboard", &sub, true).clicked() {
+/// The Clipboard widget at `size`: the small ones open quick paste with the
+/// latest clip on show; Medium and Large are the card with recent clips.
+pub fn widget(c: &mut Clipboard, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+    if matches!(size, Size::S24 | Size::S44) {
+        return card(c, ui, rect, cx);
+    }
+    let id = ui.scope_id().with("w-clipboard");
+    let latest = c.visible(Filter::All, "").first().and_then(|i| c.store.get(*i).cloned());
+    let shortcut = c.settings.shortcut.as_ref().map(|s| s.display()).unwrap_or_default();
+    let status = c.pause_label().map(|_| "Paused".to_string()).unwrap_or_else(|| if shortcut.is_empty() { "History".into() } else { shortcut.clone() });
+    let (title, sub) = match &latest {
+        Some(e) => (e.title(), format!("{} · {}", if e.app.is_empty() { "Unknown app" } else { &e.app }, ago(e))),
+        None => ("Nothing copied yet".to_string(), status.clone()),
+    };
+    let resp = match size {
+        Size::S11 => tile::small(ui, rect, id, Icon::Clipboard, TINT, "Clipboard", &status, false),
+        Size::S12 => tile::wide(ui, rect, id, Icon::Clipboard, TINT, &status, &title, Err(&sub), false),
+        _ => {
+            let resp = tile::card(ui, rect, id, false);
+            let p = ui.painter().clone();
+            let th = Rect::from_min_size(Pos2::new(rect.left() + 12.0, rect.center().y - 17.0), Vec2::splat(34.0));
+            match &latest {
+                Some(e) => entry_thumb(c, &p, th, e, 8.0),
+                None => tool_chip(&p, th, Icon::Clipboard, TINT),
+            }
+            tile::row_text(&p, rect, th.right() + 12.0, &title, &status, Err(&sub));
+            resp
+        }
+    };
+    if resp.on_hover_text("Open quick paste").clicked() {
+        cx.push(crate::core::tool::Action::HidePanel);
         c.want_quick = true;
     }
 }
@@ -161,7 +190,7 @@ pub fn tile(c: &mut Clipboard, ui: &mut Ui, rect: Rect) {
 pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
     let id = ui.scope_id().with("clipboard-card");
-    glass_card(&p, rect, R_CARD, 0.0, false);
+    tile::paint_card(&p, rect, 0.0, false);
     let x0 = rect.left() + 12.0;
     let x1 = rect.right() - 12.0;
     let mut y = rect.top() + 10.0;
@@ -215,7 +244,8 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     }
     y += 28.0 + 6.0;
 
-    let ids: Vec<u64> = c.visible(Filter::All, "").into_iter().take(PANEL_ROWS).collect();
+    let fit = ((rect.bottom() - 6.0 - y) / 34.0).floor().max(1.0) as usize;
+    let ids: Vec<u64> = c.visible(Filter::All, "").into_iter().take(fit.min(PANEL_ROWS)).collect();
     if ids.is_empty() {
         let r = Rect::from_min_max(Pos2::new(x0, y + 4.0), Pos2::new(x1, rect.bottom() - 12.0));
         dashed_rect(&p, r, 8.0, white(40));

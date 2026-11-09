@@ -6,8 +6,9 @@
 pub mod engine;
 mod page;
 
-use crate::core::tool::{Action, Badge, Cx, Recommendation, Tool, ToolEnv, ToolId, View, WidgetSpec};
-use crate::kit::glass::{human_bytes, quick_tile, tint, Icon, QUICK_TILE_H};
+use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
+use crate::kit::glass::{human_bytes, tint, Icon, ACCENT};
+use crate::kit::tile;
 use egui::{Rect, Ui};
 use engine::Group;
 
@@ -62,22 +63,44 @@ impl Tool for Cleanup {
         "Clean"
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: "clean", title: "Clean (quick action)", span: 1, default_on: true, group: None }]
+        vec![WidgetSpec { id: "clean", title: "Clean", about: "Junk found by the last scan; opens Cleanup.", sizes: UP_TO_MEDIUM, size: Size::S11, default_on: true }]
     }
-    fn widget_height(&self, _widget: &str, _width: f32) -> f32 {
-        QUICK_TILE_H
-    }
-    fn widget_ui(&mut self, _widget: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        let sub = {
-            let g = self.clean.lock().unwrap();
-            match g.phase {
-                engine::Phase::Results => human_bytes(g.total()),
-                engine::Phase::Scanning | engine::Phase::Judging => "Scanning…".into(),
-                engine::Phase::Cleaning => "Cleaning…".into(),
-                _ => "Scan".into(),
+    fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        let g = self.clean.lock().unwrap().clone();
+        let (value, sub, frac) = match g.phase {
+            engine::Phase::Results => (human_bytes(g.total()), "found · ready to review".to_string(), None),
+            engine::Phase::Scanning | engine::Phase::Judging => ("Scanning…".into(), g.current.clone(), Some(g.progress)),
+            engine::Phase::Cleaning => ("Cleaning…".into(), g.current.clone(), Some(g.progress)),
+            engine::Phase::Done => (human_bytes(g.cleaned_bytes), "cleaned".into(), None),
+            engine::Phase::Intro => ("Scan".into(), "Find junk you can remove".into(), None),
+        };
+        let id = ui.scope_id().with("w-clean");
+        let col = tint::CLEANUP;
+        let bar = frac.map(|f| (f.clamp(0.01, 1.0), ACCENT)).ok_or(sub.as_str());
+        let resp = match size {
+            Size::S11 => tile::small(ui, rect, id, Icon::Broom, col, "Clean", &value, false),
+            Size::S12 => tile::wide(ui, rect, id, Icon::Broom, col, "Clean", &value, bar, false),
+            Size::S14 => tile::row(ui, rect, id, Icon::Broom, col, "Clean", &value, bar, false),
+            _ => {
+                let resp = tile::card(ui, rect, id, false);
+                let p = ui.painter();
+                let body = tile::head(p, rect, Icon::Broom, col, "Clean", &value);
+                if g.phase == engine::Phase::Results {
+                    let tot = g.total().max(1) as f32;
+                    let mut groups: Vec<(engine::Group, u64)> = engine::Group::ALL.iter().map(|k| (*k, g.group_bytes(*k))).filter(|(_, b)| *b > 0).collect();
+                    groups.sort_by_key(|g| std::cmp::Reverse(g.1));
+                    let lh = 22.0;
+                    for (k, (grp, b)) in groups.iter().take(4).enumerate() {
+                        let lr = Rect::from_min_size(egui::pos2(body.left(), body.top() + k as f32 * lh), egui::vec2(body.width(), lh));
+                        tile::bar_line(p, lr, grp.title(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), &human_bytes(*b));
+                    }
+                } else {
+                    tile::empty_note(p, body, &sub);
+                }
+                resp
             }
         };
-        if quick_tile(ui, rect, ui.scope_id().with("q-clean"), Icon::Broom, tint::CLEANUP, "Clean", &sub, true).clicked() {
+        if resp.clicked() {
             cx.open_page(ID, "");
         }
     }

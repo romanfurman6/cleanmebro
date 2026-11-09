@@ -3,7 +3,8 @@
 
 use super::backend;
 use super::ID;
-use crate::core::tool::Cx;
+use crate::core::tool::{Cx, Size};
+use crate::kit::tile;
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, Ui, Vec2};
 
@@ -11,16 +12,45 @@ use egui::{Align2, Color32, Pos2, Rect, Ui, Vec2};
 pub const CLEANUP: &str = "cleanup";
 const GAP: f32 = 12.0;
 
-/// Height of the panel card.
-pub const CARD_H: f32 = 92.0;
+/// The Claude widget at `size`.
+pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &backend::ClaudeInfo, sel: bool) -> egui::Response {
+    let id = ui.scope_id().with("w-claude");
+    let t = ui.ctx().input(|i| i.time);
+    let session = cl.session().cloned();
+    let pct = session.as_ref().map(|l| l.pct).unwrap_or(0.0);
+    let col = super::page::usage_color(pct);
+    let value = session.as_ref().map(|_| format!("{pct:.0}%")).unwrap_or_else(|| "–".into());
+    match size {
+        Size::S11 => tile::small_ring(ui, r, id, Icon::Sparkle, pct / 100.0, col, &format!("Session {value}"), sel),
+        Size::S12 => {
+            let st = status(cl);
+            let bar_or = if session.is_some() { Ok(((pct / 100.0).max(0.01), col)) } else { Err(st.as_str()) };
+            tile::wide(ui, r, id, Icon::Sparkle, tint::CLAUDE, "Claude · session", &value, bar_or, sel)
+        }
+        Size::S14 => {
+            let resp = tile::card(ui, r, id, sel);
+            card(ui.painter(), r, cl, t);
+            resp
+        }
+        _ => {
+            let resp = tile::card(ui, r, id, sel);
+            let p = ui.painter();
+            let body = tile::head(p, r, Icon::Sparkle, tint::CLAUDE, &cl.plan_title(), &status(cl));
+            for (k, (label, l)) in [("Session", cl.session()), ("Week", cl.weekly())].into_iter().enumerate() {
+                let lr = Rect::from_min_size(Pos2::new(body.left(), body.top() + k as f32 * 22.0), Vec2::new(body.width(), 22.0));
+                let v = l.map(|l| format!("{:.0}% · {}", l.pct, short_reset(&l.resets).trim_start_matches("resets "))).unwrap_or_default();
+                tile::bar_line(p, lr, label, l.map(|l| ((l.pct / 100.0).max(0.01), super::page::usage_color(l.pct))), &v);
+            }
+            let lr = Rect::from_min_max(Pos2::new(body.left(), body.top() + 52.0), body.max);
+            p.text(lr.left_top(), Align2::LEFT_TOP, "Tokens · 7 days", font(11.0), TEXT_FAINT);
+            super::page::day_bars(p, Rect::from_min_max(lr.left_top() + Vec2::new(0.0, 17.0), lr.max), &cl.local.daily, 5.0);
+            resp
+        }
+    }
+}
 
-/// The panel card: plan, tokens today, then Session and Week bars.
-pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
-    let x0 = r.left() + 12.0;
-    let x1 = r.right() - 12.0;
-    let hy = r.top() + 19.0;
-    icon(p, Icon::Sparkle, Rect::from_center_size(Pos2::new(x0 + 8.0, hy), Vec2::splat(16.0)), CLAUDE);
-    let status = if cl.loading && cl.limits.is_empty() {
+fn status(cl: &backend::ClaudeInfo) -> String {
+    if cl.loading && cl.limits.is_empty() {
         "Checking…".to_string()
     } else if !cl.installed && !cl.loading {
         "Not installed".to_string()
@@ -30,7 +60,16 @@ pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
         cl.error.clone().unwrap_or_else(|| "No data yet".into())
     } else {
         format!("{} tokens today", backend::human_tokens(cl.local.tokens_today))
-    };
+    }
+}
+
+/// The panel card: plan, tokens today, then Session and Week bars.
+pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
+    let x0 = r.left() + 12.0;
+    let x1 = r.right() - 12.0;
+    let hy = r.top() + 17.0;
+    icon(p, Icon::Sparkle, Rect::from_center_size(Pos2::new(x0 + 8.0, hy), Vec2::splat(16.0)), CLAUDE);
+    let status = status(cl);
     let sw = text_fit(p, Pos2::new(x1, hy), Align2::RIGHT_CENTER, &status, font(12.0), TEXT_DIM, 170.0).width();
     text_fit(p, Pos2::new(x0 + 24.0, hy), Align2::LEFT_CENTER, &cl.plan_title(), bold(13.0), TEXT, (x1 - sw - 12.0) - (x0 + 24.0));
     if cl.limits.is_empty() && cl.loading {
@@ -38,7 +77,7 @@ pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
     }
     let rows = [("Session", cl.session().cloned()), ("Week", cl.weekly().cloned())];
     for (k, (label, l)) in rows.iter().enumerate() {
-        let yy = r.top() + 46.0 + k as f32 * 24.0;
+        let yy = r.top() + 42.0 + k as f32 * 22.0;
         p.text(Pos2::new(x0, yy), Align2::LEFT_CENTER, *label, font(12.0), TEXT_DIM);
         let bar_r = Rect::from_min_max(Pos2::new(x0 + 64.0, yy - 2.0), Pos2::new(x1 - 92.0 - 36.0 - 16.0, yy + 2.0));
         match l {
