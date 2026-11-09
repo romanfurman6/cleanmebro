@@ -1,7 +1,7 @@
 //! The installed apps: where they are, what they are called, where they came
 //! from, when they were last opened, and which ones must never be removed.
 
-use super::plist;
+use crate::kit::plist;
 use std::path::{Path, PathBuf};
 
 /// Where an app came from (a filter on the Apps page).

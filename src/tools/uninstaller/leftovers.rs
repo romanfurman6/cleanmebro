@@ -10,7 +10,7 @@
 //! inside the app. Anything that matches two installed apps, or that the
 //! shared protection rules keep, is never offered.
 
-use super::plist;
+use crate::kit::plist;
 use crate::kit::fs::is_protected;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};

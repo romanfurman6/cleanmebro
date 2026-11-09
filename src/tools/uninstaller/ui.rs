@@ -1,11 +1,10 @@
-//! Uninstaller on screen: the window page (Apps, Leftovers, Login items), the
+//! Uninstaller on screen: the window page (Apps, Leftovers), the
 //! review sheet, the result bar with Undo, the panel widget, the drop zone
 //! that appears while an app is dragged, and the note shown when an app was
 //! thrown away elsewhere.
 
 use super::apps::Source;
 use super::leftovers::{Item, Kind};
-use super::login::{self, Scope};
 use super::remove::Target;
 use super::{mac, Drop, Filter, Origin, Phase, Review, Sort, Tab, Uninstaller, ID, TINT, UNDO_FOR, UNUSED_DAYS};
 use crate::core::tool::{Cx, Size};
@@ -174,13 +173,12 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     if idle {
         u.rescan();
     }
-    let (n_apps, total, phase, orphan_bytes, jobs) = {
+    let (n_apps, total, phase, orphan_bytes) = {
         let g = u.st.lock().unwrap();
-        (g.apps.len(), g.apps.iter().map(|a| a.total()).sum::<u64>(), g.phase, g.orphans.iter().map(|o| o.bytes()).sum::<u64>(), g.login.jobs.len() + g.login.apps.len())
+        (g.apps.len(), g.apps.iter().map(|a| a.total()).sum::<u64>(), g.phase, g.orphans.iter().map(|o| o.bytes()).sum::<u64>())
     };
     let sub = match (u.tab, phase) {
         (Tab::Leftovers, _) => "Data left behind by apps that are no longer installed".to_string(),
-        (Tab::Login, _) => "What starts with your Mac. Turn things off without removing the app.".to_string(),
         (_, Phase::Listing) => "Looking for apps…".to_string(),
         (_, Phase::Sizing { done, total: t }) => format!("{n_apps} apps · measuring {done} of {t}…"),
         _ => format!("{n_apps} apps · {} · drop any app on this window to remove it", human_bytes(total)),
@@ -189,24 +187,25 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let labels_owned = [
         "Apps".to_string(),
         if orphan_bytes > 0 { format!("Leftovers · {}", human_bytes(orphan_bytes)) } else { "Leftovers".into() },
-        if jobs > 0 { format!("Login items · {jobs}") } else { "Login items".into() },
     ];
     let labels: Vec<&str> = labels_owned.iter().map(|s| s.as_str()).collect();
-    let tw = 380.0;
+    let tw = 260.0;
     let tr = Rect::from_min_max(Pos2::new(btns.right() - tw, btns.top()), btns.max);
     let cur = match u.tab {
         Tab::Apps => 0,
         Tab::Leftovers => 1,
-        Tab::Login => 2,
     };
     if let Some(i) = segmented(ui, tr, ui.scope_id().with("un-tab"), &labels, cur) {
-        u.tab = [Tab::Apps, Tab::Leftovers, Tab::Login][i];
+        u.tab = [Tab::Apps, Tab::Leftovers][i];
+    }
+    // what starts with the Mac moved to its own tool
+    if link(ui, Pos2::new(tr.left() - 16.0, tr.center().y), Align2::RIGHT_CENTER, "Startup items", 12.0).on_hover_text("Turn off what starts with your Mac").clicked() {
+        cx.open_page("startup", "");
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     match u.tab {
         Tab::Apps => apps_tab(u, ui, body),
         Tab::Leftovers => leftovers_tab(u, ui, body),
-        Tab::Login => login_tab(u, ui, body, cx),
     }
 
     // a drop on the window
@@ -891,165 +890,6 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     });
 }
 
-// ---------------------------------------------------------------- Login items
-
-fn login_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, cx: &mut Cx) {
-    let ctx = ui.ctx().clone();
-    let p = ui.painter().clone();
-    let x0 = body.left() + 24.0;
-    let x1 = body.right() - 24.0;
-    if !u.login_requested {
-        u.login_requested = true;
-        u.load_login();
-    }
-    let (loaded, apps, apps_err, jobs) = {
-        let g = u.st.lock().unwrap();
-        (g.login.loaded, g.login.apps.clone(), g.login.apps_error.clone(), g.login.jobs.clone())
-    };
-    if !loaded {
-        spinner(&p, Pos2::new(x0 + 8.0, body.top() + 30.0), 7.0, ctx.input(|i| i.time), ACCENT);
-        p.text(Pos2::new(x0 + 24.0, body.top() + 30.0), Align2::LEFT_CENTER, "Reading what starts with your Mac…", font(13.0), TEXT_DIM);
-        ctx.request_repaint_after(Duration::from_millis(60));
-        return;
-    }
-    let installed: Vec<(PathBuf, String)> = u.st.lock().unwrap().apps.iter().map(|a| (a.path.clone(), a.name.clone())).collect();
-    let owner_of = |prog: &Option<PathBuf>| -> Option<(PathBuf, String)> {
-        let pr = prog.as_ref()?;
-        installed.iter().find(|(p, _)| pr.starts_with(p)).cloned()
-    };
-    enum Row {
-        Head(&'static str, &'static str, bool),
-        App(login::LoginApp),
-        Job(login::Job),
-        Note(String),
-    }
-    let mut rows = vec![Row::Head("OPEN AT LOGIN", "Apps macOS opens when you log in", true)];
-    match &apps_err {
-        Some(e) => rows.push(Row::Note(format!("Couldn't read the list ({e}). Allow CleanMeBro to control System Events in System Settings › Privacy & Security › Automation."))),
-        None if apps.is_empty() => rows.push(Row::Note("No apps open at login.".into())),
-        None => rows.extend(apps.iter().cloned().map(Row::App)),
-    }
-    for (scope, title, hint) in [
-        (Scope::User, "BACKGROUND AGENTS · YOURS", "~/Library/LaunchAgents"),
-        (Scope::AllUsers, "BACKGROUND AGENTS · ALL USERS", "/Library/LaunchAgents · switched for you only"),
-        (Scope::System, "SYSTEM DAEMONS", "/Library/LaunchDaemons · needs your password"),
-    ] {
-        let js: Vec<&login::Job> = jobs.iter().filter(|j| j.scope == scope).collect();
-        if js.is_empty() {
-            continue;
-        }
-        rows.push(Row::Head(title, hint, false));
-        rows.extend(js.into_iter().cloned().map(Row::Job));
-    }
-    let h: f32 = rows.iter().map(|r| match r {
-        Row::Head(..) => 34.0,
-        Row::Note(_) => 40.0,
-        _ => 46.0,
-    }).sum();
-    let area = Rect::from_min_max(Pos2::new(x0, body.top() + 8.0), Pos2::new(x1, body.bottom() - 12.0));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(area));
-    child.set_clip_rect(area);
-    let mut flip_app: Option<login::LoginApp> = None;
-    let mut flip_job: Option<login::Job> = None;
-    let mut budget = ICONS_PER_FRAME;
-    ScrollArea::vertical().id_salt("un-login").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (a, _) = ui.allocate_exact_size(Vec2::new(area.width(), h + 8.0), Sense::hover());
-        let p = ui.painter().clone();
-        let mut y = a.top();
-        for row in &rows {
-            match row {
-                Row::Head(t, hint, settings) => {
-                    let tr = section_header(&p, Pos2::new(a.left() + 4.0, y + 22.0), Align2::LEFT_CENTER, t);
-                    p.text(Pos2::new(tr.right() + 8.0, y + 22.0), Align2::LEFT_CENTER, *hint, font(11.0), TEXT_FAINT);
-                    if *settings && link(ui, Pos2::new(a.right() - 4.0, y + 22.0), Align2::RIGHT_CENTER, "Open in System Settings", 12.0).clicked() {
-                        login::open_settings();
-                    }
-                    y += 34.0;
-                }
-                Row::Note(t) => {
-                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 36.0));
-                    glass_card(&p, r, 10.0, 0.0, false);
-                    text_fit(&p, Pos2::new(r.left() + 14.0, r.center().y), Align2::LEFT_CENTER, t, font(12.0), TEXT_DIM, r.width() - 28.0);
-                    y += 40.0;
-                }
-                Row::App(la) => {
-                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 44.0));
-                    glass_card(&p, r, 10.0, 0.0, false);
-                    let ir = Rect::from_center_size(Pos2::new(r.left() + 14.0 + 13.0, r.center().y), Vec2::splat(26.0));
-                    app_icon(u, &ctx, &p, ir, Some(&la.path), &la.name, &mut budget);
-                    p.text(Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &la.name, bold(13.0), if la.on { TEXT } else { TEXT_DIM });
-                    p.text(Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, if la.hidden { "Opens hidden" } else { "Opens its window" }, font(11.0), TEXT_FAINT);
-                    let sw = Rect::from_center_size(Pos2::new(r.right() - 32.0, r.center().y), Vec2::new(36.0, 20.0));
-                    if switch(ui, sw, ui.scope_id().with(("un-la", &la.path)), la.on, true).clicked() {
-                        flip_app = Some(la.clone());
-                    }
-                    y += 46.0;
-                }
-                Row::Job(j) => {
-                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 44.0));
-                    glass_card(&p, r, 10.0, 0.0, false);
-                    let owner = owner_of(&j.program);
-                    let name = owner.as_ref().map(|o| o.1.clone()).unwrap_or_else(|| super::pretty_name(&j.label));
-                    let ir = Rect::from_center_size(Pos2::new(r.left() + 14.0 + 13.0, r.center().y), Vec2::splat(26.0));
-                    app_icon(u, &ctx, &p, ir, owner.as_ref().map(|o| o.0.as_path()), &name, &mut budget);
-                    let sw = Rect::from_center_size(Pos2::new(r.right() - 32.0, r.center().y), Vec2::new(36.0, 20.0));
-                    let mut right = sw.left() - 12.0;
-                    if j.orphan {
-                        right = outline_chip(&p, Pos2::new(right, r.center().y), Align2::RIGHT_CENTER, "app removed", Color32::from_rgb(0xF2, 0xC4, 0x6B)).left() - 6.0;
-                    }
-                    if j.scope == Scope::System {
-                        right = outline_chip(&p, Pos2::new(right, r.center().y), Align2::RIGHT_CENTER, "admin", TEXT_DIM).left() - 6.0;
-                    }
-                    text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &name, bold(13.0), if j.on { TEXT } else { TEXT_DIM }, right - ir.right() - 20.0);
-                    let detail = match &j.program {
-                        Some(pr) => format!("{} · {}", j.label, pr.display()),
-                        None => j.label.clone(),
-                    };
-                    let dr = text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, &detail, font(11.0), TEXT_FAINT, right - ir.right() - 20.0);
-                    ui.interact(dr, ui.scope_id().with(("un-jtip", &j.label)), Sense::hover()).on_hover_text(j.plist.display().to_string());
-                    if switch(ui, sw, ui.scope_id().with(("un-job", &j.label, j.scope as u8)), j.on, true).clicked() {
-                        flip_job = Some(j.clone());
-                    }
-                    y += 46.0;
-                }
-            }
-        }
-    });
-    if let Some(la) = flip_app {
-        let want = !la.on;
-        let res = if u.demo { Ok(()) } else { login::set_login_app(&la, want) };
-        match res {
-            Ok(()) => {
-                let mut g = u.st.lock().unwrap();
-                if let Some(x) = g.login.apps.iter_mut().find(|x| x.path == la.path) {
-                    x.on = want;
-                }
-                g.settings.login_off.retain(|(_, p, _)| *p != la.path);
-                if !want {
-                    g.settings.login_off.push((la.name.clone(), la.path.clone(), la.hidden));
-                }
-                if !u.demo {
-                    g.settings.save();
-                }
-            }
-            Err(e) => cx.toast(format!("Couldn't change {}: {e}", la.name)),
-        }
-    }
-    if let Some(j) = flip_job {
-        let want = !j.on;
-        let res = if u.demo { Ok(()) } else { login::set_job(&j, want) };
-        match res {
-            Ok(()) => {
-                let mut g = u.st.lock().unwrap();
-                if let Some(x) = g.login.jobs.iter_mut().find(|x| x.label == j.label && x.scope == j.scope) {
-                    x.on = want;
-                }
-            }
-            Err(e) => cx.toast(format!("Couldn't change {}: {e}", j.label)),
-        }
-    }
-}
-
 // ---------------------------------------------------------------- panel widget
 
 pub fn widget(u: &mut Uninstaller, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
@@ -1367,7 +1207,6 @@ fn notice(u: &mut Uninstaller, ctx: &egui::Context, cx: &mut Cx) {
 pub mod demo {
     use super::super::apps::Source;
     use super::super::leftovers::{Item, Kind};
-    use super::super::login::{Job, LoginApp, Scope};
     use super::super::{AppRow, Filter, Orphan, Phase, Review, Tab, Uninstaller};
     use crate::core::tool::View;
     use std::path::PathBuf;
@@ -1464,35 +1303,6 @@ pub mod demo {
         ]
     }
 
-    fn login(u: &Uninstaller) {
-        let mut g = u.st.lock().unwrap();
-        g.login.loaded = true;
-        g.login.apps = vec![
-            LoginApp { name: "Slack".into(), path: "/Applications/Slack.app".into(), hidden: true, on: true },
-            LoginApp { name: "Spotify".into(), path: "/Applications/Spotify.app".into(), hidden: false, on: false },
-        ];
-        let home = crate::kit::fs::home();
-        let j = |label: &str, prog: &str, scope: Scope, on: bool, orphan: bool| Job {
-            label: label.into(),
-            plist: match scope {
-                Scope::User => home.join(format!("Library/LaunchAgents/{label}.plist")),
-                Scope::AllUsers => PathBuf::from(format!("/Library/LaunchAgents/{label}.plist")),
-                Scope::System => PathBuf::from(format!("/Library/LaunchDaemons/{label}.plist")),
-            },
-            program: Some(PathBuf::from(prog)),
-            scope,
-            on,
-            orphan,
-        };
-        g.login.jobs = vec![
-            j("com.google.GoogleUpdater.wake", "/Users/you/Library/Application Support/Google/GoogleUpdater/Current/GoogleUpdater.app/Contents/MacOS/GoogleUpdater", Scope::User, true, false),
-            j("us.zoom.updater.login.check", "/Applications/Zoom.app/Contents/Frameworks/ZoomUpdater.app/Contents/MacOS/ZoomUpdater", Scope::User, true, false),
-            j("com.teamviewer.teamviewer_desktop", "/Applications/TeamViewer.app/Contents/Helpers/TeamViewer_Desktop", Scope::User, true, true),
-            j("com.microsoft.update.agent", "/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app/Contents/MacOS/Microsoft Update Assistant", Scope::AllUsers, false, false),
-            j("com.docker.vmnetd", "/Library/PrivilegedHelperTools/com.docker.vmnetd", Scope::System, true, false),
-        ];
-    }
-
     /// Load sample data for `view` and say what to show.
     pub fn fill(u: &mut Uninstaller, view: &str) -> Option<View> {
         if !view.starts_with("uninstaller") {
@@ -1506,7 +1316,6 @@ pub mod demo {
             g.phase = Phase::Ready;
             g.last = None;
         }
-        login(u);
         u.tab = Tab::Apps;
         u.filter = Filter::All;
         u.review = None;
@@ -1534,7 +1343,6 @@ pub mod demo {
                 u.review = Some(Review { targets: vec![t], open: [0].into() });
             }
             "uninstaller-leftovers" => u.tab = Tab::Leftovers,
-            "uninstaller-login" => u.tab = Tab::Login,
             _ => return None,
         }
         Some(View::Page)
@@ -1570,7 +1378,7 @@ mod tests {
     fn demo_views_load() {
         let env = crate::core::tool::ToolEnv { ctx: egui::Context::default(), demo: true };
         let mut u = Uninstaller::new(&env);
-        for v in ["uninstaller", "uninstaller-review", "uninstaller-done", "uninstaller-reset", "uninstaller-leftovers", "uninstaller-login"] {
+        for v in ["uninstaller", "uninstaller-review", "uninstaller-done", "uninstaller-reset", "uninstaller-leftovers"] {
             assert!(demo::fill(&mut u, v).is_some(), "{v}");
         }
         assert!(demo::fill(&mut u, "clipboard").is_none());

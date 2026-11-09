@@ -10,6 +10,7 @@ pub mod cleanup;
 pub mod keep_awake;
 pub mod fan;
 pub mod lens;
+pub mod startup;
 pub mod system;
 pub mod uninstaller;
 
@@ -22,6 +23,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
         Box::new(cleanup::Cleanup::new(env)),
         Box::new(lens::Lens::new(env)),
         Box::new(uninstaller::Uninstaller::new(env)),
+        Box::new(startup::Startup::new(env)),
         Box::new(capture::Capture::new(env)),
         Box::new(clipboard::Clipboard::new(env)),
         Box::new(claude::Claude::new(env)),
@@ -43,6 +45,7 @@ pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "system/battery",
     "system/network",
     "system/devices",
+    "startup/summary",
     "claude/limits",
     "fan/fans",
     "core/recommendation",
