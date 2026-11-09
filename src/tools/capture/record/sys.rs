@@ -201,10 +201,6 @@ mod imp {
         let _ = std::process::Command::new("open").arg(format!("x-apple.systempreferences:com.apple.preference.security?{pane}")).spawn();
     }
 
-    pub fn open_file(p: &std::path::Path) {
-        let _ = std::process::Command::new("open").arg(p).spawn();
-    }
-
     /// Put the file itself on the clipboard, so pasting into a chat attaches it.
     pub fn copy_file(p: &std::path::Path) -> bool {
         let url = NSURL::fileURLWithPath(&NSString::from_str(&p.to_string_lossy()));
@@ -276,7 +272,6 @@ mod other {
         done(false)
     }
     pub fn open_privacy(_m: Media) {}
-    pub fn open_file(_p: &std::path::Path) {}
     pub fn copy_file(_p: &std::path::Path) -> bool {
         false
     }

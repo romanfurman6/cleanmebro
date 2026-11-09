@@ -98,9 +98,16 @@ impl Mixer {
         }
     }
 
+    #[cfg(test)]
     /// The next mixed stretch: (first frame, interleaved stereo), or None
     /// when there's nothing new. `flush` hands out everything left.
     pub fn pull(&mut self, flush: bool) -> Option<(i64, Vec<f32>)> {
+        self.pull_split(flush).map(|(at, mix, _)| (at, mix))
+    }
+
+    /// Like [`Mixer::pull`], plus each source on its own (system, mic),
+    /// over the same stretch; a source that's off is all silence.
+    pub fn pull_split(&mut self, flush: bool) -> Option<(i64, Vec<f32>, [Vec<f32>; 2])> {
         let live: Vec<&Track> = [&self.sys, &self.mic].into_iter().filter(|t| t.on).collect();
         if live.is_empty() {
             return None;
@@ -118,8 +125,8 @@ impl Mixer {
             return None;
         }
         let n = (until - self.pos) as usize;
-        let mut out = vec![0.0f32; n * 2];
-        for t in [&mut self.sys, &mut self.mic] {
+        let mut parts = [vec![0.0f32; n * 2], vec![0.0f32; n * 2]];
+        for (t, out) in [&mut self.sys, &mut self.mic].into_iter().zip(parts.iter_mut()) {
             if !t.on {
                 continue;
             }
@@ -133,8 +140,8 @@ impl Mixer {
             let mut i = offset * 2;
             while i < out.len() {
                 let (Some(l), Some(r)) = (t.buf.pop_front(), t.buf.pop_front()) else { break };
-                out[i] += l;
-                out[i + 1] += r;
+                out[i] = l;
+                out[i + 1] = r;
                 i += 2;
                 t.start += 1;
             }
@@ -142,12 +149,15 @@ impl Mixer {
                 t.start = until;
             }
         }
-        for v in &mut out {
-            *v = v.clamp(-1.0, 1.0);
+        let mix: Vec<f32> = parts[0].iter().zip(&parts[1]).map(|(a, b)| (a + b).clamp(-1.0, 1.0)).collect();
+        for part in &mut parts {
+            for v in part.iter_mut() {
+                *v = v.clamp(-1.0, 1.0);
+            }
         }
         let at = self.pos;
         self.pos = until;
-        Some((at, out))
+        Some((at, mix, parts))
     }
 }
 
@@ -233,6 +243,17 @@ mod tests {
         let (at, out) = m.pull(false).unwrap();
         assert_eq!((at, out.len() / 2), (60, 40));
         assert!(out.iter().all(|&v| v == 0.75));
+    }
+
+    #[test]
+    fn each_source_also_comes_out_on_its_own() {
+        let mut m = Mixer::new(true, true);
+        m.push(Src::System, 0, &tone(0.25, 50));
+        m.push(Src::Mic, 10, &tone(0.5, 40));
+        let (at, mix, [sys, mic]) = m.pull_split(false).unwrap();
+        assert_eq!((at, mix.len(), sys.len(), mic.len()), (0, 100, 100, 100));
+        assert_eq!((sys[0], mic[0], mix[0]), (0.25, 0.0, 0.25));
+        assert_eq!((sys[40], mic[40], mix[40]), (0.25, 0.5, 0.75));
     }
 
     #[test]

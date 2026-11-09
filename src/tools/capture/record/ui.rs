@@ -854,7 +854,7 @@ fn saved(c: &mut Capture, ctx: &egui::Context) {
         let presp = ui.interact(pic, id.with("play"), Sense::click());
         p.circle_filled(play.center(), 26.0, Color32::from_rgba_unmultiplied(28, 28, 31, if presp.hovered() { 230 } else { 200 }));
         icons::draw(&p, Ico::Play, play.shrink(16.0), Color32::WHITE);
-        if presp.on_hover_text("Play").clicked() {
+        if presp.on_hover_text("Play and edit").clicked() {
             todo = Some(Do::Open);
         }
         let len = timeline::clock_label(sv.secs);
@@ -870,7 +870,7 @@ fn saved(c: &mut Capture, ctx: &egui::Context) {
         icons::draw(&p, Ico::Check, Rect::from_center_size(Pos2::new(r.left() + 18.0, y), Vec2::splat(13.0)), Color32::from_rgb(0x30, 0xD1, 0x58));
         p.text(Pos2::new(r.left() + 30.0, y), Align2::LEFT_CENTER, format!("Saved · {}", megabytes(sv.bytes)), font(12.0), TEXT);
         p.text(Pos2::new(r.right() - 12.0, y), Align2::RIGHT_CENTER, format!("{}×{}", sv.size.0, sv.size.1), font(12.0), TEXT_FAINT);
-        let acts = [(Ico::Play, "Open", Do::Open), (Ico::Folder, "Finder", Do::Reveal), (Ico::Copy, "Copy", Do::Copy), (Ico::Trash, "Delete", Do::Delete)];
+        let acts = [(Ico::Scissors, "Edit", Do::Open), (Ico::Folder, "Finder", Do::Reveal), (Ico::Copy, "Copy", Do::Copy), (Ico::Trash, "Delete", Do::Delete)];
         let bw = (r.width() - 16.0 - 12.0) / 4.0;
         for (k, (ico, label, act)) in acts.into_iter().enumerate() {
             let br = Rect::from_min_size(Pos2::new(r.left() + 8.0 + k as f32 * (bw + 4.0), y + 14.0), Vec2::new(bw, 44.0));
@@ -895,7 +895,10 @@ fn saved(c: &mut Capture, ctx: &egui::Context) {
     let path = sv.path.clone();
     let history = sv.history;
     match todo {
-        Some(Do::Open) => sys::open_file(&path),
+        Some(Do::Open) => {
+            c.rec.saved = None;
+            c.open_video(path);
+        }
         Some(Do::Reveal) => sys::reveal(&path),
         Some(Do::Copy) => {
             if sys::copy_file(&path) {

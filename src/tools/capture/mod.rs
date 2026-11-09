@@ -19,6 +19,7 @@ mod render;
 mod settings;
 mod store;
 mod ui;
+pub mod video;
 mod windows;
 
 use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
@@ -149,6 +150,8 @@ pub struct Capture {
     ctx: egui::Context,
     next_pin: u64,
     rec: record::Recorder,
+    /// The video viewer, when one is open.
+    video: Option<video::Viewer>,
 }
 
 impl Capture {
@@ -195,6 +198,7 @@ impl Capture {
             ctx: env.ctx.clone(),
             next_pin: 1,
             rec: record::Recorder::new(env.ctx.clone()),
+            video: None,
         };
         c.apply_keys();
         c
@@ -573,6 +577,16 @@ impl Capture {
         self.editor = Some(windows::EditorWin::new(ed));
     }
 
+    /// Open a video in the viewer (one at a time).
+    fn open_video(&mut self, path: PathBuf) {
+        if let Some(v) = &self.video {
+            if v.path == path {
+                return;
+            }
+        }
+        self.video = Some(video::Viewer::open(&self.ctx, path));
+    }
+
     fn open_editor_for(&mut self, id: u64) {
         match self.store.load(id) {
             Some(img) => self.open_editor(Some(id), img),
@@ -751,6 +765,7 @@ impl Tool for Capture {
             self.pins.clear();
             self.overlay = None;
             self.perm_card = None;
+            self.video = None;
             if self.rec.live().is_some() {
                 self.rec.stop();
             } else if !matches!(self.rec.phase, record::Phase::Saving) {
@@ -838,7 +853,7 @@ impl Tool for Capture {
         if !self.queue.is_empty() || !self.actions.is_empty() {
             ctx.request_repaint();
         }
-        let windows = !self.pins.is_empty() || self.editor.is_some() || self.overlay.is_some() || self.perm_card.is_some() || self.rec.busy();
+        let windows = !self.pins.is_empty() || self.editor.is_some() || self.video.is_some() || self.overlay.is_some() || self.perm_card.is_some() || self.rec.busy();
         timed || windows || !self.queue.is_empty() || !self.actions.is_empty()
     }
     fn windows(&mut self, ctx: &egui::Context, cx: &mut Cx) {
@@ -853,6 +868,7 @@ impl Tool for Capture {
         }
         windows::show(self, ctx, cx);
         record::ui::show(self, ctx, cx);
+        video::show(self, ctx);
         self.recorder_out();
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {

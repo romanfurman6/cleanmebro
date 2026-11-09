@@ -344,7 +344,7 @@ fn load(c: &Capture, it: &Item) -> Option<image::RgbaImage> {
 fn run_act(c: &mut Capture, act: Act, it: &Item) {
     if let Some(v) = &it.video {
         match act {
-            Act::Edit => record::sys::open_file(v),
+            Act::Edit => c.open_video(v.clone()),
             Act::Copy => c.hud(if record::sys::copy_file(v) { "Copied the video" } else { "Couldn't copy" }),
             Act::Reveal => mac::reveal(v),
             Act::Pin => c.hud("Videos can't be pinned"),
@@ -480,7 +480,7 @@ fn tile_ui(ui: &mut Ui, p: &egui::Painter, r: Rect, it: &Item, tex: Option<egui:
         let delete_tip = if it.src == Src::File { "Move to Trash" } else { "Delete" };
         let acts: [(Ico, &str, Act); 5] = [
             (Ico::Copy, "Copy", Act::Copy),
-            (if it.video.is_some() { Ico::Play } else { Ico::Edit }, if it.video.is_some() { "Play" } else { "Edit" }, Act::Edit),
+            (if it.video.is_some() { Ico::Scissors } else { Ico::Edit }, if it.video.is_some() { "Play and edit" } else { "Edit" }, Act::Edit),
             (Ico::Pin, "Pin on screen", Act::Pin),
             (Ico::Folder, "Show in Finder", Act::Reveal),
             (Ico::Trash, delete_tip, Act::Delete),
