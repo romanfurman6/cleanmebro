@@ -28,6 +28,10 @@ const MORPH_SECS: f64 = 0.35;
 const HEADER_H: f32 = 57.0;
 const FOOTER_H: f32 = 42.0;
 const ASIDE_W: f32 = 260.0;
+/// Smallest block worth drawing on its own (about 64 × 46 points); smaller
+/// items fold into one block.
+const MIN_BLOCK_PX: f64 = 64.0 * 46.0;
+const MAX_BLOCKS: usize = 60;
 
 pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let shared = app.lens.clone();
@@ -484,9 +488,17 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
     let fr = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - FOOTER_H), r.max);
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, fr.top() - 12.0));
     let area = Rect::from_min_max(body.min, Pos2::new(body.right() - ASIDE_W - 16.0, body.bottom()));
-    let mut vals: Vec<f64> = node.children.iter().map(|c| c.bytes as f64).collect();
-    if node.other > 0 {
-        vals.push(node.other as f64);
+    // only blocks big enough to read get their own place; the rest fold
+    // into one "smaller items" block (children are sorted biggest first)
+    let px = (area.width() * area.height()) as f64;
+    let whole = node.bytes.max(1) as f64;
+    let readable = |b: u64| b as f64 / whole * px >= MIN_BLOCK_PX;
+    let keep = node.children.iter().take(MAX_BLOCKS).take_while(|c| readable(c.bytes)).count();
+    let folded = node.children.len() - keep;
+    let other_bytes = node.other + node.children[keep..].iter().map(|c| c.bytes).sum::<u64>();
+    let mut vals: Vec<f64> = node.children[..keep].iter().map(|c| c.bytes as f64).collect();
+    if other_bytes > 0 && (readable(other_bytes) || keep == 0) {
+        vals.push(other_bytes as f64);
     }
     let rects = scan::squarify(&vals, area);
     let now = ctx.input(|i| i.time);
@@ -499,7 +511,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         let (from, to) = match into {
             Some(clicked) => (area, clicked),
             None => {
-                let k = node.children.iter().position(|c| focus.starts_with(&c.path))?;
+                let k = node.children[..keep].iter().position(|c| focus.starts_with(&c.path))?;
                 (rects[k], area)
             }
         };
@@ -523,7 +535,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
     let mut toggle: Option<(PathBuf, u64)> = None;
     for k in 0..n {
         let base = rects[k];
-        let child = node.children.get(k);
+        let child = node.children[..keep].get(k);
         let key = child.map(|c| c.path.clone()).unwrap_or_else(|| node.path.join("\u{0}other"));
         let target = match morph {
             Some((from, to, e)) => lerp_rect(affine(base, from, to), base, e),
@@ -537,7 +549,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         }
         let (name, bytes, path) = match child {
             Some(c) => (c.name.clone(), c.bytes, Some(c.path.clone())),
-            None => ("Other items".to_string(), node.other, None),
+            None => ("Other".to_string(), other_bytes, None),
         };
         let measuring = path.as_ref().is_some_and(|pa| pending.is_some_and(|q| q.contains(pa)));
         let hue = match &path {
@@ -588,7 +600,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         }
         // selection box in the corner
         let mut box_clicked = false;
-        if selectable && morph.is_none() && br.width() > 30.0 && br.height() > 30.0 {
+        if selectable && morph.is_none() && br.width() > 64.0 && br.height() > 46.0 {
             let bx = Rect::from_min_size(Pos2::new(br.right() - 24.0, br.top() + 6.0), Vec2::splat(18.0));
             let bresp = ui.interact(bx, id.with("box"), Sense::click());
             if on {
@@ -602,7 +614,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             box_clicked = bresp.on_hover_text(if on { "Remove from the list" } else { "Add to the list" }).clicked();
         }
         if hov || (morph.is_none() && ui.rect_contains_pointer(br)) {
-            hovered = Some((path.as_ref().map(|pa| tilde(pa)).unwrap_or_else(|| format!("{} · small files", tilde(&node.path))), hue, bytes, (kids > 0 && !measuring).then_some(kids)));
+            hovered = Some((path.as_ref().map(|pa| tilde(pa)).unwrap_or_else(|| if folded > 0 { format!("{} · {folded} smaller items and small files", tilde(&node.path)) } else { format!("{} · small files", tilde(&node.path)) }), hue, bytes, (kids > 0 && !measuring).then_some(kids)));
         }
         if let Some(pa) = &path {
             if box_clicked {
