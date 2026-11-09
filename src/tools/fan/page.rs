@@ -98,7 +98,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
 
 const MODE_HINTS: [&str; 5] = [
     "macOS decides. Fans speed up when the chip gets warm.",
-    "Fans stay at their minimum. If any sensor passes 95 °C, they go back to Auto.",
+    "Fans may stop when cool and stay at their minimum when warm. If any sensor passes 95 °C, they go back to Auto.",
     "The fans hold one speed, whatever the temperature.",
     "",
     "Full speed. Good before a long export or a game.",

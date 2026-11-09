@@ -10,6 +10,8 @@ use std::path::PathBuf;
 pub const TRIP_C: f32 = 95.0;
 /// …until everything cools below this.
 pub const RESUME_C: f32 = 80.0;
+/// Below this Quiet leaves the fans to macOS, which stops them when cool.
+pub const QUIET_FROM_C: f32 = 60.0;
 /// Curve x range, °C.
 pub const CURVE_LO: f32 = 30.0;
 pub const CURVE_HI: f32 = 95.0;
@@ -163,7 +165,8 @@ impl Settings {
     pub fn targets(&self, fans: &[Fan], temp: Option<f32>) -> Vec<Option<f32>> {
         let frac = match self.mode {
             Mode::Auto => None,
-            Mode::Quiet => Some(0.0),
+            // cool: let macOS stop the fans; warm: hold them at minimum
+            Mode::Quiet => temp.filter(|t| *t >= QUIET_FROM_C).map(|_| 0.0),
             Mode::Fixed => Some(self.fixed.clamp(0.0, 1.0)),
             Mode::Curve => temp.map(|t| self.curve.at(t)),
             Mode::Max => Some(1.0),
@@ -274,6 +277,7 @@ mod tests {
         assert_eq!(s.targets(&fans, Some(70.0)), vec![None, None]);
         s.mode = Mode::Quiet;
         assert_eq!(s.targets(&fans, Some(70.0)), vec![Some(1200.0), Some(1000.0)]);
+        assert_eq!(s.targets(&fans, Some(45.0)), vec![None, None]);
         s.mode = Mode::Max;
         assert_eq!(s.targets(&fans, None), vec![Some(5700.0), Some(2000.0)]);
         s.mode = Mode::Fixed;
