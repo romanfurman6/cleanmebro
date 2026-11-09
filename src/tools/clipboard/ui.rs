@@ -168,14 +168,23 @@ pub fn widget(c: &mut Clipboard, size: Size, ui: &mut Ui, rect: Rect, cx: &mut C
         Size::S11 => tile::small(ui, rect, id, Icon::Clipboard, TINT, "Clipboard", &status, false),
         Size::S12 => tile::wide(ui, rect, id, Icon::Clipboard, TINT, &status, &title, Err(&sub), false),
         _ => {
-            let resp = tile::card(ui, rect, id, false);
+            // left: the count and status; right: the two latest clips
+            let n = c.store.entries.len();
+            let count = format!("{n} item{}", if n == 1 { "" } else { "s" });
+            let (resp, right) = tile::row_split(ui, rect, id, Icon::Clipboard, TINT, "Clipboard", &count, &status, false);
             let p = ui.painter().clone();
-            let th = Rect::from_min_size(Pos2::new(rect.left() + 12.0, rect.center().y - 17.0), Vec2::splat(34.0));
-            match &latest {
-                Some(e) => entry_thumb(c, &p, th, e, 8.0),
-                None => tool_chip(&p, th, Icon::Clipboard, TINT),
+            let recent: Vec<Entry> = c.visible(Filter::All, "").into_iter().take(2).filter_map(|i| c.store.get(i).cloned()).collect();
+            if recent.is_empty() {
+                text_fit(&p, right.center(), Align2::CENTER_CENTER, "Nothing copied yet", font(11.0), TEXT_FAINT, right.width());
             }
-            tile::row_text(&p, rect, th.right() + 12.0, &title, &status, Err(&sub));
+            let lh = right.height() / 2.0;
+            for (k, e) in recent.iter().enumerate() {
+                let lr = Rect::from_min_size(Pos2::new(right.left(), right.top() + k as f32 * lh), Vec2::new(right.width(), lh));
+                let th = Rect::from_min_size(Pos2::new(lr.left(), lr.center().y - 10.0), Vec2::splat(20.0));
+                entry_thumb(c, &p, th, e, 5.0);
+                let ag = p.text(Pos2::new(lr.right(), lr.center().y), Align2::RIGHT_CENTER, ago(e), font(11.0), TEXT_FAINT);
+                text_fit(&p, Pos2::new(th.right() + 8.0, lr.center().y), Align2::LEFT_CENTER, &e.title(), font(12.0), TEXT_SOFT, ag.left() - th.right() - 14.0);
+            }
             resp
         }
     };
@@ -368,21 +377,6 @@ fn day_label(d: chrono::NaiveDate) -> String {
     } else {
         d.format("%A, %b %-d").to_string().to_uppercase()
     }
-}
-
-/// A single-line search field. Returns true when the text changed.
-pub fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, focus: bool, size: f32) -> egui::Response {
-    let p = ui.painter().clone();
-    p.rect_filled(r, 7.0, white(15));
-    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(size)), TEXT_FAINT);
-    let tr = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top()), Pos2::new(r.right() - 8.0, r.bottom()));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT)).frame(egui::Frame::NONE).font(font(size)).text_color(TEXT).desired_width(tr.width());
-    let resp = child.add(te);
-    if focus && !resp.has_focus() {
-        resp.request_focus();
-    }
-    resp
 }
 
 fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {

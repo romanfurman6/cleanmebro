@@ -17,14 +17,6 @@ pub const CORE: &str = "core";
 /// "Today's Recommendation", fed by every tool.
 pub const RECOMMENDATION: &str = "recommendation";
 
-/// The widget gallery beside the panel while editing.
-#[derive(Clone, Debug, Default)]
-pub struct Gallery {
-    /// The widget whose sizes are shown (`tool/widget`); `None` = the list.
-    pub pick: Option<String>,
-    pub size: Option<Size>,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     Panel,
@@ -55,13 +47,10 @@ pub struct App {
     pub settings_tab: usize,
     /// A widget being dragged in the editor.
     pub drag: Option<super::editor::Drag>,
-    /// The panel is in edit mode: widgets wobble, can be moved, resized and
-    /// removed.
-    pub editing: bool,
-    /// The widget selected in edit mode (its size bar shows).
+    /// The widget selected in Settings › Widgets (its size bar shows).
     pub edit_sel: Option<String>,
-    /// The gallery sheet beside the panel, while editing.
-    pub gallery: Option<Gallery>,
+    /// The search text above the widget gallery in Settings › Widgets.
+    pub widget_search: String,
     // window/tray state
     tray: Option<tray_icon::TrayIcon>,
     tray_rx: Receiver<tray_icon::TrayIconEvent>,
@@ -121,9 +110,8 @@ impl App {
             settings_open: false,
             settings_tab: 0,
             drag: None,
-            editing: false,
             edit_sel: None,
-            gallery: None,
+            widget_search: String::new(),
             tray,
             tray_rx,
             tray_title: String::new(),
@@ -218,14 +206,15 @@ impl App {
     fn apply_view(&mut self, view: &str) {
         match view {
             "panel" => return,
-            // edit mode, with a widget selected / the gallery open
-            "edit" | "gallery" | "gallery-pick" => {
-                self.editing = true;
-                self.edit_sel = Some("fan/fans".into());
-                if view != "edit" {
-                    self.edit_sel = None;
-                    let pick = (view == "gallery-pick").then(|| "clipboard/recent".to_string());
-                    self.gallery = Some(Gallery { pick, size: Some(Size::S24) });
+            // the widget editor, with a widget selected / a search typed
+            "edit" | "gallery" => {
+                self.mode = Mode::Window;
+                self.settings_open = true;
+                self.settings_tab = 0;
+                if view == "edit" {
+                    self.edit_sel = Some("fan/fans".into());
+                } else {
+                    self.widget_search = "mem".into();
                 }
                 return;
             }
@@ -254,6 +243,20 @@ impl App {
                 }
                 for (k, z) in show {
                     super::settings::add_entry(&mut self.widgets, k, *z, None);
+                }
+                return;
+            }
+            // every widget that offers Row (1:4), at that size
+            "rows" => {
+                for t in &mut self.tools {
+                    t.demo_view("sizes");
+                }
+                for e in &mut self.widgets {
+                    e.on = false;
+                }
+                let keys: Vec<String> = self.tools.iter().flat_map(|t| t.widgets().into_iter().filter(|w| w.sizes.contains(&Size::S14)).map(|w| super::settings::widget_key(t.id(), w.id)).collect::<Vec<_>>()).collect();
+                for k in keys {
+                    super::settings::add_entry(&mut self.widgets, &k, Size::S14, None);
                 }
                 return;
             }
@@ -328,31 +331,15 @@ impl App {
         }
     }
 
-    /// Start editing the panel's widgets (closes any sheet).
-    pub fn start_editing(&mut self, ctx: &egui::Context) {
-        self.editing = true;
-        self.edit_sel = None;
-        self.detail = None;
-        self.gear_open = false;
-        self.reshape(ctx);
-    }
-
-    pub fn stop_editing(&mut self) {
-        self.editing = false;
-        self.edit_sel = None;
-        self.gallery = None;
-        self.drag = None;
-    }
-
-    /// Whether a sheet (a tool's detail or the gallery) sits beside the panel.
+    /// Whether a tool's detail sheet sits beside the panel.
     pub fn sheet_open(&self) -> bool {
-        self.detail.is_some() || self.gallery.is_some()
+        self.detail.is_some()
     }
 
     /// The panel's height for its current widgets, before the screen limit.
     fn panel_height(&self) -> f32 {
         let content = super::panel::content_height(self);
-        let h = super::panel::HEADER + content + super::panel::footer_height(self);
+        let h = super::panel::HEADER + content + super::panel::FOOTER;
         if self.sheet_open() {
             h.max(m::PANEL_HEIGHT)
         } else {
@@ -412,7 +399,6 @@ impl App {
     pub fn hide(&mut self, ctx: &egui::Context) {
         self.visible = false;
         self.gear_open = false;
-        self.stop_editing();
         self.last_hide = Instant::now();
         ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Visible(false));
     }
@@ -548,11 +534,7 @@ impl eframe::App for App {
                     let sheet = Rect::from_min_size(full.left_top(), Vec2::new(m::DETAIL_WIDTH, full.height()));
                     let x = panel.left() - 6.0;
                     ui.painter().line_segment([Pos2::new(x, full.top() + 18.0), Pos2::new(x, full.bottom() - 18.0)], egui::Stroke::new(1.0, white(30)));
-                    if self.gallery.is_some() {
-                        super::gallery::sheet(self, ui, sheet);
-                    } else {
-                        super::panel::detail(self, ui, sheet, &mut cx);
-                    }
+                    super::panel::detail(self, ui, sheet, &mut cx);
                 }
                 let before = self.widgets.clone();
                 super::panel::panel(self, ui, panel, &mut cx);

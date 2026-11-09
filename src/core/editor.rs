@@ -1,10 +1,11 @@
-//! Settings in the full window. Widgets: a gallery of every widget, grouped
-//! by tool, next to a live preview of the panel; drag widgets into the panel
-//! to add them, around it to reorder, and back to the gallery to hide them.
-//! Tools: turn whole tools on or off.
+//! Settings in the full window. Widgets: the one place to edit the menu-bar
+//! panel. A searchable gallery of every widget, grouped by tool, next to a
+//! live preview of the panel; drag widgets into the panel to add them,
+//! around it to reorder, and back to the gallery to hide them; click one to
+//! pick its size. Tools: turn whole tools on or off.
 
 use super::panel::{self, Placed};
-use super::settings::{hide_entry, place_entry, widget_key};
+use super::settings::{hide_entry, place_entry, set_size, widget_key};
 use super::shell::{App, CORE, RECOMMENDATION};
 use super::tool::{Cx, GRID_COLUMNS};
 use crate::kit::glass::*;
@@ -28,6 +29,10 @@ const GALLERY_W: f32 = 330.0;
 const CARD_H: f32 = 48.0;
 const CARD_GAP: f32 = 8.0;
 const END_SLOT_H: f32 = 40.0;
+/// The gallery's title, hint and search field above the list.
+const GALLERY_HEAD: f32 = 104.0;
+/// Under the panel preview: the selected widget's sizes.
+const SIZE_BAR_H: f32 = 64.0;
 
 /// What a drop would do right now.
 #[derive(Clone, Debug, PartialEq)]
@@ -62,15 +67,23 @@ struct Item {
     /// `None`: a planned tool's widget, which can't be added yet.
     key: Option<String>,
     title: String,
+    /// The tool's name and the widget's one-liner, for search.
+    words: String,
     span: u8,
     glyph: Icon,
     color: Color32,
     added: bool,
 }
 
-/// The gallery's groups: each enabled tool's widgets, the shell's, then the
-/// planned tools'.
-fn gallery(app: &App) -> Vec<(String, Vec<Item>)> {
+/// Whether `query` (any case, every word) matches the widget.
+fn matches(query: &str, title: &str, words: &str) -> bool {
+    let hay = format!("{title} {words}").to_lowercase();
+    query.to_lowercase().split_whitespace().all(|w| hay.contains(w))
+}
+
+/// The gallery's groups, filtered by `query`: each enabled tool's widgets,
+/// then the shell's. Groups with nothing left are dropped.
+fn gallery(app: &App, query: &str) -> Vec<(String, Vec<Item>)> {
     let added = |k: &str| app.widgets.iter().any(|e| e.key == k && e.on);
     let mut groups = Vec::new();
     for (_, t) in app.tools.iter().enumerate().filter(|(i, _)| app.tool_on(*i)) {
@@ -81,8 +94,9 @@ fn gallery(app: &App) -> Vec<(String, Vec<Item>)> {
             .map(|w| {
                 let key = widget_key(t.id(), w.id);
                 let span = if w.size.cols() <= 2 { 2 } else { GRID_COLUMNS };
-                Item { added: added(&key), key: Some(key), title: w.title.into(), span, glyph: b.icon, color: b.color }
+                Item { added: added(&key), key: Some(key), title: w.title.into(), words: format!("{} {}", t.name(), w.about), span, glyph: b.icon, color: b.color }
             })
+            .filter(|it| matches(query, &it.title, &it.words))
             .collect();
         if !items.is_empty() {
             groups.push((t.name().to_uppercase(), items));
@@ -92,10 +106,13 @@ fn gallery(app: &App) -> Vec<(String, Vec<Item>)> {
         .into_iter()
         .map(|(id, title, glyph)| {
             let key = widget_key(CORE, id);
-            Item { added: added(&key), key: Some(key), title: title.into(), span: GRID_COLUMNS, glyph, color: tint::NEUTRAL }
+            Item { added: added(&key), key: Some(key), title: title.into(), words: "suggestion tip today".into(), span: GRID_COLUMNS, glyph, color: tint::NEUTRAL }
         })
-        .collect();
-    groups.push(("CORE".into(), core));
+        .filter(|it| matches(query, &it.title, &it.words))
+        .collect::<Vec<_>>();
+    if !core.is_empty() {
+        groups.push(("CORE".into(), core));
+    }
     groups
 }
 
@@ -119,22 +136,35 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     p.rect_filled(gr, CornerRadius::ZERO, gallery_bg);
     hairline(&p, gr.right_top(), gr.right_bottom());
     let mut add: Option<String> = None;
-    let mut child = ui.new_child(UiBuilder::new().max_rect(gr.shrink(16.0)).layout(egui::Layout::top_down(egui::Align::Min)));
-    child.set_clip_rect(gr);
+    let head = Rect::from_min_size(gr.min + Vec2::new(16.0, 16.0), Vec2::new(gr.width() - 32.0, GALLERY_HEAD - 16.0));
+    p.text(head.min, Align2::LEFT_TOP, "Widgets", bold(15.0), TEXT);
+    let hint = if over_gallery || dragging_out { "Drop here to hide it" } else { "Drag into the panel, or press +" };
+    p.text(head.min + Vec2::new(0.0, 20.0), Align2::LEFT_TOP, hint, font(12.0), if over_gallery { RED } else { TEXT_DIM });
+    let sr = Rect::from_min_size(head.min + Vec2::new(0.0, 48.0), Vec2::new(head.width(), 30.0));
+    let mut q = std::mem::take(&mut app.widget_search);
+    let sresp = search_field(ui, sr, &mut q, "Search widgets", false, 13.0);
+    if sresp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        q.clear();
+    }
+    app.widget_search = q;
+    let query = app.widget_search.clone();
+    let list_r = Rect::from_min_max(Pos2::new(gr.left(), gr.top() + GALLERY_HEAD), gr.max);
+    let mut child = ui.new_child(UiBuilder::new().max_rect(list_r.shrink2(Vec2::new(16.0, 4.0))).layout(egui::Layout::top_down(egui::Align::Min)));
+    child.set_clip_rect(list_r);
     ScrollArea::vertical().id_salt("gallery").auto_shrink([false, false]).show(&mut child, |ui| {
         let w = ui.available_width();
-        let groups = gallery(app);
+        let groups = gallery(app, &query);
         let col = (w - CARD_GAP * (GRID_COLUMNS as f32 - 1.0)) / GRID_COLUMNS as f32;
-        let mut h = 40.0;
+        let mut h = 12.0;
         for (_, items) in &groups {
             h += 26.0 + rows_height(items) + 16.0;
         }
-        let (origin, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
+        let (origin, _) = ui.allocate_exact_size(Vec2::new(w, h.max(80.0)), Sense::hover());
         let p = ui.painter().clone();
-        p.text(origin.min, Align2::LEFT_TOP, "Widgets", bold(15.0), TEXT);
-        let hint = if over_gallery || dragging_out { "Drop here to hide it" } else { "Drag into the panel, or press +" };
-        p.text(origin.min + Vec2::new(0.0, 20.0), Align2::LEFT_TOP, hint, font(12.0), if over_gallery { RED } else { TEXT_DIM });
-        let mut y = origin.top() + 52.0;
+        if groups.is_empty() {
+            p.text(origin.center_top() + Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, format!("No widgets match \"{}\"", query.trim()), font(13.0), TEXT_DIM);
+        }
+        let mut y = origin.top() + 8.0;
         for (name, items) in &groups {
             section_header(&p, Pos2::new(origin.left(), y), Align2::LEFT_TOP, name);
             y += 22.0;
@@ -160,6 +190,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     });
     if let Some(k) = add {
         place_entry(&mut app.widgets, &k, None);
+        app.edit_sel = Some(k);
     }
 
     // preview: a hint of the menu bar, the title row, then the panel
@@ -185,7 +216,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     }
     let shown = panel::place(app, panel::inner_width()).0.len();
     p.text(Pos2::new(reset.left() - 10.0, title_y + 12.0), Align2::RIGHT_CENTER, format!("{shown} widget{}", if shown == 1 { "" } else { "s" }), font(12.0), TEXT_FAINT);
-    let boxr = Rect::from_min_max(Pos2::new(px, title_y + 36.0), Pos2::new(px + pw, pr.bottom() - 20.0));
+    let boxr = Rect::from_min_max(Pos2::new(px, title_y + 36.0), Pos2::new(px + pw, pr.bottom() - 20.0 - SIZE_BAR_H));
     p.rect_filled(boxr.translate(Vec2::new(0.0, 12.0)).expand(4.0), 18.0, Color32::from_black_alpha(70));
     p.rect_filled(boxr, 14.0, BG);
     p.rect_stroke(boxr, 14.0, Stroke::new(1.0, white(31)), StrokeKind::Inside);
@@ -196,6 +227,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let need = content_h + panel::GAP + END_SLOT_H + 8.0;
     let mut target = Target::Nothing;
     let mut hide: Option<String> = None;
+    let mut pick: Option<Pick> = None;
     let mut child = ui.new_child(UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(area.expand2(Vec2::new(panel::PAD, 10.0)));
     ScrollArea::vertical().id_salt("preview").auto_shrink([false, false]).show(&mut child, |ui| {
@@ -203,16 +235,27 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
         ui.add_space(8.0);
         let (origin, _) = ui.allocate_exact_size(Vec2::new(area.width(), need.max(area.height() - 8.0)), Sense::hover());
         let clip = ui.clip_rect();
-        let (t, h) = preview(app, ui, origin, clip, &placed, content_h, pointer);
+        let (t, h, k) = preview(app, ui, origin, clip, &placed, content_h, pointer);
         target = t;
         hide = h;
+        pick = k;
     });
     if over_gallery {
         target = Target::Hide;
     }
     if let Some(k) = hide {
         hide_entry(&mut app.widgets, &k);
+        if app.edit_sel.as_deref() == Some(k.as_str()) {
+            app.edit_sel = None;
+        }
     }
+    match pick {
+        Some(Pick::Select(k)) => app.edit_sel = if app.edit_sel.as_deref() == Some(k.as_str()) { None } else { Some(k) },
+        Some(Pick::Grow(k)) => step_size(app, &k),
+        None => {}
+    }
+    let bar = Rect::from_min_size(Pos2::new(px, boxr.bottom() + 14.0), Vec2::new(pw, SIZE_BAR_H - 8.0));
+    size_bar(app, ui, bar);
 
     // the dragged block follows the pointer; dropping applies the target
     if let Some(d) = app.drag.clone() {
@@ -314,11 +357,59 @@ fn plus(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
     p.line_segment([c - Vec2::new(0.0, s), c + Vec2::new(0.0, s)], Stroke::new(1.8, col));
 }
 
-/// The panel's widgets, drawn for real but not live: clicks pick them up
-/// instead. Returns the drop target under the pointer and a widget whose
-/// "−" was clicked.
+/// A click on a widget in the preview.
+enum Pick {
+    /// Select it (or unselect it again).
+    Select(String),
+    /// Its corner handle: the next size.
+    Grow(String),
+}
+
+/// The widget's next size it offers (wrapping around).
+fn step_size(app: &mut App, key: &str) {
+    let Some((_, spec)) = app.widget_spec(key) else { return };
+    let Some(cur) = app.widgets.iter().find(|e| e.key == key).map(|e| spec.fit(e.size)) else { return };
+    let i = spec.sizes.iter().position(|z| *z == cur).unwrap_or(0);
+    set_size(&mut app.widgets, key, spec.sizes[(i + 1) % spec.sizes.len()]);
+}
+
+/// Under the panel: the selected widget's name and its size chips, or a hint.
+fn size_bar(app: &mut App, ui: &mut Ui, r: Rect) {
+    let p = ui.painter().clone();
+    let sel = app.edit_sel.clone().and_then(|k| {
+        let (_, spec) = app.widget_spec(&k)?;
+        let cur = spec.fit(app.widgets.iter().find(|e| e.key == k && e.on)?.size);
+        Some((k, spec, cur))
+    });
+    let Some((key, spec, cur)) = sel else {
+        text_fit(&p, r.center(), Align2::CENTER_CENTER, "Click a widget to resize it · drag to move · − to remove", font(12.0), TEXT_FAINT, r.width());
+        return;
+    };
+    let ty = r.top() + 8.0;
+    let tr = p.text(Pos2::new(r.left(), ty), Align2::LEFT_CENTER, spec.title, bold(12.0), TEXT);
+    p.text(Pos2::new(tr.right() + 6.0, ty), Align2::LEFT_CENTER, "size", font(12.0), TEXT_FAINT);
+    p.text(Pos2::new(r.right(), ty), Align2::RIGHT_CENTER, format!("{} · {}", cur.name(), cur.label()), font(12.0), TEXT_FAINT);
+    let chips = Rect::from_min_max(Pos2::new(r.left(), ty + 14.0), Pos2::new(r.right(), ty + 44.0));
+    if let Some(z) = panel::size_chips(ui, chips, ui.scope_id().with(("sizes", &key)), spec.sizes, cur) {
+        set_size(&mut app.widgets, &key, z);
+    }
+}
+
+/// Two little arrows pointing apart, corner to corner.
+fn resize_glyph(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
+    let st = Stroke::new(1.6, col);
+    p.line_segment([c - Vec2::splat(s), c + Vec2::splat(s)], st);
+    for (tip, dir) in [(c - Vec2::splat(s), 1.0), (c + Vec2::splat(s), -1.0)] {
+        p.line_segment([tip, tip + Vec2::new(3.0 * dir, 0.0)], st);
+        p.line_segment([tip, tip + Vec2::new(0.0, 3.0 * dir)], st);
+    }
+}
+
+/// The panel's widgets, drawn for real but not live: clicks select them and
+/// drags pick them up instead. Returns the drop target under the pointer, a
+/// widget whose "−" was clicked, and a click on a widget or its handle.
 #[allow(clippy::too_many_arguments)]
-fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Placed], content_h: f32, pointer: Option<Pos2>) -> (Target, Option<String>) {
+fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Placed], content_h: f32, pointer: Option<Pos2>) -> (Target, Option<String>, Option<Pick>) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time) as f32;
@@ -327,6 +418,7 @@ fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Place
     // tools' widgets may ask for things (open a sheet…): ignore it here
     let mut quiet = Cx::new(None);
     let mut hide = None;
+    let mut pick = None;
     let mut keys: Vec<String> = Vec::with_capacity(placed.len());
     for (n, w) in placed.iter().enumerate() {
         let key = app.widgets[w.entry].key.clone();
@@ -337,11 +429,19 @@ fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Place
         panel::draw_widget(app, ui, w, r, &mut quiet);
         let id = ui.scope_id().with(("ed", &key));
         let resp = ui.interact(base, id, Sense::click_and_drag());
+        let selected = app.edit_sel.as_deref() == Some(key.as_str());
         if dragged.as_deref() == Some(key.as_str()) {
             p.rect_filled(base, R_CARD, with_alpha(BG, 0.7));
+        } else if selected {
+            p.rect_stroke(base.expand(2.0), R_CARD + 2.0, Stroke::new(2.0, ACCENT), StrokeKind::Outside);
         } else if resp.hovered() && app.drag.is_none() {
             p.rect_stroke(base, R_CARD, Stroke::new(1.0, white(46)), StrokeKind::Inside);
+        }
+        if resp.hovered() && app.drag.is_none() {
             ctx.set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if resp.clicked() {
+            pick = Some(Pick::Select(key.clone()));
         }
         if resp.drag_started() && app.drag.is_none() {
             let title = app.widget_spec(&key).map(|(_, s)| s.title.to_string()).unwrap_or_default();
@@ -357,6 +457,20 @@ fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Place
             p.line_segment([mb.center() - Vec2::new(4.5, 0.0), mb.center() + Vec2::new(4.5, 0.0)], Stroke::new(1.8, Color32::WHITE));
             if b.on_hover_text("Hide").clicked() {
                 hide = Some(key.clone());
+            }
+        }
+        // the selected one's corner handle: next size
+        let hb = Rect::from_center_size(base.right_bottom() - Vec2::new(2.0, 2.0), Vec2::splat(22.0));
+        if selected && app.drag.is_none() && clip.contains(hb.center()) {
+            let b = ui.interact(hb, id.with("grow"), Sense::click());
+            p.circle_filled(hb.center(), 11.0, BG);
+            p.circle_filled(hb.center(), 9.0, if b.hovered() { lerp_color(ACCENT, Color32::WHITE, 0.2) } else { ACCENT });
+            resize_glyph(&p, hb.center(), 4.0, Color32::WHITE);
+            if b.hovered() {
+                ctx.set_cursor_icon(egui::CursorIcon::ResizeNwSe);
+            }
+            if b.on_hover_text("Next size").clicked() {
+                pick = Some(Pick::Grow(key.clone()));
             }
         }
         keys.push(key);
@@ -398,7 +512,7 @@ fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Place
     dashed_rect(&p, end, 10.0, if on_end { ACCENT } else { white(40) });
     let label = if app.drag.is_some() { "Drop here to add at the end" } else { "Drag widgets here" };
     p.text(end.center(), Align2::CENTER_CENTER, label, font(12.0), if on_end { ACCENT } else { TEXT_MUTED });
-    (target, hide)
+    (target, hide, pick)
 }
 
 fn dist(r: Rect, q: Pos2) -> f32 {

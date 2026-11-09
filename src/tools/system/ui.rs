@@ -138,7 +138,11 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
             None => tile::small(ui, r, wid, mt.glyph, col, &mt.big, &mt.label, sel),
         },
         Size::S12 => tile::wide(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), mt.bar.ok_or(mt.caption.as_str()), sel),
-        Size::S14 => tile::row(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), mt.bar.ok_or(mt.caption.as_str()), sel),
+        Size::S14 => {
+            let (resp, right) = tile::row_split(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), &mt.caption, sel);
+            row_body(&s, id, &mt, ui.painter(), right);
+            resp
+        }
         _ => {
             let resp = tile::card(ui, r, wid, sel);
             let p = ui.painter();
@@ -154,6 +158,46 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
 
 /// A list line: label, optional bar, value.
 type Line = (String, Option<(f32, Color32)>, String);
+
+/// The right half of a Row metric: its breakdown, or the CPU's history.
+fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
+    let lines: Vec<Line> = match id {
+        "storage" => {
+            let tot = s.disk_total.max(1) as f32;
+            let used = s.disk_total.saturating_sub(s.disk_free);
+            let mut v: Vec<Line> = vec![("Used".into(), mt.bar, human_bytes(used))];
+            v.extend(s.categories.iter().take(2).map(|(n, b)| (n.clone(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), human_bytes(*b))));
+            v
+        }
+        "memory" => {
+            let tot = s.mem_total.max(1) as f32;
+            [("App", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / tot).clamp(0.01, 1.0), PURPLE)), human_bytes(b))).collect()
+        }
+        "cpu" => {
+            tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(GREEN), Some(with_alpha(GREEN, 0.12)));
+            return;
+        }
+        "battery" => {
+            let b = &s.battery;
+            let mut v: Vec<Line> = vec![("Charge".into(), mt.bar, format!("{}%", b.percent))];
+            if let Some(h) = b.health_pct {
+                v.push(("Health".into(), Some(((h / 100.0).clamp(0.01, 1.0), if h < 80.0 { AMBER } else { GREEN })), format!("{h:.0}%")));
+            }
+            if b.cycles > 0 {
+                v.push(("Cycles".into(), None, b.cycles.to_string()));
+            }
+            if !b.present {
+                v.clear();
+            }
+            v
+        }
+        "network" => vec![("Download".into(), None, human_rate(s.net_down)), ("Upload".into(), None, human_rate(s.net_up)), ("Today".into(), None, human_bytes(s.net_recv_total))],
+        "devices" => s.devices.iter().take(3).map(|d| (d.name.clone(), d.battery.map(|b| (b as f32 / 100.0, if b <= m::BT_LOW_BATTERY_MAX_PCT { AMBER } else { GREEN })), d.battery.map(|b| format!("{b}%")).unwrap_or_default())).collect(),
+        _ => Vec::new(),
+    };
+    let empty = if id == "devices" { "No Bluetooth devices" } else { "On power adapter" };
+    tile::lines(p, r, &lines, empty);
+}
 
 /// The body of a Medium metric: a big value and the reading's breakdown.
 fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rect) {
