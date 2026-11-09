@@ -131,7 +131,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         paragraph(&p, lr.min + Vec2::new(12.0, 34.0), &msg, font(13.0), TEXT_SOFT, lr.width() - 24.0);
         if cl.loading {
             spinner(&p, Pos2::new(lr.right() - 20.0, lr.top() + 20.0), 6.0, ui.ctx().input(|i| i.time), TEXT_DIM);
-            ui.ctx().request_repaint();
+            crate::kit::glass::animate(ui.ctx());
         }
         col = 3;
     }

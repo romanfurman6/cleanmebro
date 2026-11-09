@@ -11,7 +11,6 @@ use crate::kit::glass::*;
 use egui::epaint::Mesh;
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2};
 use std::f32::consts::{PI, TAU};
-use std::time::Duration;
 
 /// Height of the card's fans-and-heat part (all of Medium).
 pub const CARD_H: f32 = 168.0;
@@ -29,7 +28,7 @@ pub fn spin(t: f64, rpm: f32) -> f32 {
 /// Ask for the next frame soon while any blade is turning.
 pub fn keep_spinning(ui: &Ui, s: &Snapshot) {
     if s.fans.iter().any(|f| f.rpm > 0.0) {
-        ui.ctx().request_repaint_after(Duration::from_millis(33));
+        crate::kit::glass::animate(ui.ctx());
     }
 }
 
@@ -247,7 +246,7 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let fh = 52.0;
     if !s.loaded {
         spinner(&p, Pos2::new(rect.center().x, fy + fh / 2.0), 8.0, t, TEXT_DIM);
-        ui.ctx().request_repaint();
+        crate::kit::glass::animate(ui.ctx());
     } else if s.fans.is_empty() {
         let r = Rect::from_min_size(Pos2::new(x0, fy), Vec2::new(x1 - x0, fh));
         p.rect_filled(r, 10.0, white(10));
