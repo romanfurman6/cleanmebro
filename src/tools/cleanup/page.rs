@@ -472,10 +472,14 @@ fn verdict_chip(it: &Item) -> (&'static str, (Color32, Color32)) {
 
 /// One results row. `cols` = x offsets of the name, verdict and size (right edge) columns.
 fn item_row(app: &mut App, ui: &mut Ui, i: usize, w: f32, cols: (f32, f32, f32)) {
-    let it = app.clean.lock().unwrap().items[i].clone();
-    let asking = it.verdict == Verdict::Ask && it.by != Who::You;
     let h = 66.0;
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
+    // a group can hold hundreds of items: only those in view are drawn
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let it = app.clean.lock().unwrap().items[i].clone();
+    let asking = it.verdict == Verdict::Ask && it.by != Who::You;
     let p = ui.painter().clone();
     if resp.hovered() {
         p.rect_filled(rect, 0.0, white(6));

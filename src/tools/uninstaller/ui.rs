@@ -366,7 +366,11 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
                 if !r.intersects(clip) {
                     continue;
                 }
-                let a = u.st.lock().unwrap().apps[i].clone();
+                // the row without its file list, which can be long
+                let (a, total) = {
+                    let g = u.st.lock().unwrap();
+                    (g.apps[i].without_items(), g.apps[i].total())
+                };
                 let resp = ui.interact(r, ui.scope_id().with(("un-row", &a.path)), Sense::click());
                 let sel = u.selected.as_ref() == Some(&a.path);
                 if sel {
@@ -391,7 +395,7 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
                 let ir = Rect::from_center_size(Pos2::new(cb.right() + 10.0 + 13.0, r.center().y), Vec2::splat(26.0));
                 app_icon(u, &ctx, &p, ir, Some(&a.path), &a.name, &mut budget);
                 let tc = if dim { TEXT_FAINT } else { TEXT };
-                let size = if a.locked.is_some() { "—".to_string() } else if a.sized { human_bytes(a.total()) } else { "…".into() };
+                let size = if a.locked.is_some() { "—".to_string() } else if a.sized { human_bytes(total) } else { "…".into() };
                 p.text(Pos2::new(c_size - area.left() + area.left(), r.center().y), Align2::RIGHT_CENTER, size, font(13.0), tc);
                 let stale = a.last_used.is_some_and(|t| now - t > UNUSED_DAYS * 86400) && !dim;
                 p.text(Pos2::new(c_used, r.center().y), Align2::RIGHT_CENTER, ago(now, a.last_used), font(12.0), if stale { Color32::from_rgb(0xF2, 0xC4, 0x6B) } else { TEXT_FAINT });
@@ -505,6 +509,9 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
         let p = ui.painter().clone();
         for (k, it) in a.items.iter().enumerate() {
             let rr = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * 26.0), Vec2::new(area.width() - 8.0, 26.0));
+            if !ui.is_rect_visible(rr) {
+                continue;
+            }
             let cb = Rect::from_center_size(Pos2::new(rr.left() + 6.0 + 7.0, rr.center().y), Vec2::splat(13.0));
             let resp = checkbox(ui, cb, ui.scope_id().with(("un-file", &it.path)), it.selected, true);
             let sr = p.text(Pos2::new(rr.right(), rr.center().y), Align2::RIGHT_CENTER, human_bytes(it.bytes), font(12.0), TEXT_DIM);
@@ -860,6 +867,10 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
         let p = ui.painter().clone();
         for (k, o) in orphans.iter().enumerate() {
             let r = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * 40.0), Vec2::new(area.width(), 40.0));
+            // only rows in view: each one joins its paths for the tooltip
+            if !ui.is_rect_visible(r) {
+                continue;
+            }
             let resp = ui.interact(r, ui.scope_id().with(("un-orow", &o.id)), Sense::click());
             if resp.hovered() {
                 p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 7.0, white(8));

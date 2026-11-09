@@ -10,6 +10,7 @@ use crate::kit::tile;
 use crate::kit::glass::*;
 use crate::kit::hotkeys::Shortcut;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId};
+use std::collections::HashMap;
 use std::time::Instant;
 
 /// Most recent clips listed in the Large widget.
@@ -435,43 +436,64 @@ fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     }
 }
 
-/// Rows grouped as Pinned, then by day.
-fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
-    enum Row {
-        Head(String),
-        Item(u64),
+/// A line of the history list.
+pub(super) enum Row {
+    Head(String),
+    /// An entry and its one-line title, worked out once per change.
+    Item(u64, String),
+}
+
+/// The list's rows for the visible ids: Pinned, then one group per day.
+/// Rebuilt only when the history, filter, search or day changes, not on
+/// every frame of a scroll.
+fn grouped_rows(c: &Clipboard, ids: &[u64]) -> std::sync::Arc<Vec<Row>> {
+    let today = chrono::Local::now().date_naive();
+    let key = (c.store.rev(), c.filter, c.search.clone(), today);
+    if let Some((k, rows)) = c.rows_memo.borrow().as_ref() {
+        if *k == key {
+            return rows.clone();
+        }
     }
+    let by_id: HashMap<u64, &Entry> = c.store.entries.iter().map(|e| (e.id, e)).collect();
     let mut rows = Vec::new();
     let mut last: Option<String> = None;
     for id in ids {
-        let Some(e) = c.store.get(*id) else { continue };
+        let Some(e) = by_id.get(id) else { continue };
         let head = if e.pinned { "PINNED".to_string() } else { day_label(e.time().date_naive()) };
         if last.as_ref() != Some(&head) {
             rows.push(Row::Head(head.clone()));
             last = Some(head);
         }
-        rows.push(Row::Item(*id));
+        rows.push(Row::Item(*id, e.title()));
     }
+    let rows = std::sync::Arc::new(rows);
+    *c.rows_memo.borrow_mut() = Some((key, rows.clone()));
+    rows
+}
+
+/// Rows grouped as Pinned, then by day.
+fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
+    let rows = grouped_rows(c, ids);
     let h: f32 = rows.iter().map(|r| if matches!(r, Row::Head(_)) { 28.0 } else { ROW_H }).sum::<f32>() + 8.0;
     let mut child = ui.new_child(UiBuilder::new().max_rect(list.shrink2(Vec2::new(0.0, 4.0))));
     ScrollArea::vertical().id_salt("clip-list").auto_shrink([false, false]).show(&mut child, |ui| {
         let (area, _) = ui.allocate_exact_size(Vec2::new(list.width(), h), Sense::hover());
         let p = ui.painter().clone();
         let mut y = area.top();
-        for row in &rows {
+        for row in rows.iter() {
             match row {
                 Row::Head(t) => {
                     p.text(Pos2::new(area.left() + 14.0, y + 18.0), Align2::LEFT_CENTER, t, bold(11.0), TEXT_FAINT);
                     y += 28.0;
                 }
-                Row::Item(id) => {
+                Row::Item(id, title) => {
                     let r = Rect::from_min_size(Pos2::new(area.left() + 4.0, y), Vec2::new(area.width() - 8.0, ROW_H));
                     // up to a thousand rows: only those in view are drawn
                     if !ui.is_rect_visible(r) {
                         y += ROW_H;
                         continue;
                     }
-                    let Some(e) = c.store.get(*id).cloned() else { continue };
+                    let Some(e) = c.store.get(*id).map(Entry::light) else { continue };
                     let resp = ui.interact(r, ui.scope_id().with(("clip-row", e.id)), Sense::click());
                     let sel = c.selected == Some(e.id);
                     if sel {
@@ -493,7 +515,7 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
                     }
                     let tx = th.right() + 10.0;
                     let f = if e.kind == Kind::Code { mono(12.0) } else { font(13.0) };
-                    text_fit(&p, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, &e.title(), f, TEXT, right - tx);
+                    text_fit(&p, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, title, f, TEXT, right - tx);
                     if resp.clicked() {
                         c.selected = Some(e.id);
                     }
@@ -632,7 +654,7 @@ pub fn preview(c: &mut Clipboard, _ui: &mut Ui, p: &egui::Painter, r: Rect, e: &
             }
         }
         Kind::Code => {
-            let g = clip.layout(e.text.clone(), mono(12.0), Color32::from_rgb(0xE5, 0xE5, 0xEA), inner.width());
+            let g = clip.layout(prefix_chars(&e.text, PARAGRAPH_MAX).to_string(), mono(12.0), Color32::from_rgb(0xE5, 0xE5, 0xEA), inner.width());
             clip.galley(inner.min, g, TEXT);
         }
         Kind::Text => {
