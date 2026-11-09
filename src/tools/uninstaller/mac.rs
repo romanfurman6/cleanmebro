@@ -15,10 +15,7 @@ pub fn file_url_path(url: &str) -> Option<PathBuf> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Some(b) = std::str::from_utf8(&bytes[i + 1..i + 3])
-                .ok()
-                .and_then(|h| u8::from_str_radix(h, 16).ok())
-            {
+            if let Some(b) = std::str::from_utf8(&bytes[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
                 out.push(b);
                 i += 3;
                 continue;
@@ -34,9 +31,7 @@ pub fn file_url_path(url: &str) -> Option<PathBuf> {
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use objc2_app_kit::{
-        NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeFileURL, NSRunningApplication,
-    };
+    use objc2_app_kit::{NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeFileURL, NSRunningApplication};
     use objc2_foundation::NSString;
     use std::path::PathBuf;
 
@@ -49,8 +44,7 @@ mod imp {
         if id.is_empty() {
             return false;
         }
-        let apps =
-            NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(id));
+        let apps = NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(id));
         apps.iter().any(|a| !a.isTerminated())
     }
 
@@ -60,8 +54,7 @@ mod imp {
         if id.is_empty() {
             return false;
         }
-        let apps =
-            NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(id));
+        let apps = NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(id));
         let mut any = false;
         for a in apps.iter() {
             if !a.isTerminated() {
@@ -97,6 +90,7 @@ mod imp {
         }
         out
     }
+
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -119,8 +113,8 @@ mod imp {
     }
 }
 
-pub use crate::kit::macos::{app_icon, reveal, run_admin, sh_quote, uid};
 pub use imp::*;
+pub use crate::kit::macos::{app_icon, reveal, run_admin, sh_quote, uid};
 
 #[cfg(test)]
 mod tests {
@@ -128,9 +122,6 @@ mod tests {
 
     #[test]
     fn file_urls() {
-        assert_eq!(
-            file_url_path("file:///Applications/Zoom%20Pro.app/"),
-            Some(PathBuf::from("/Applications/Zoom Pro.app"))
-        );
+        assert_eq!(file_url_path("file:///Applications/Zoom%20Pro.app/"), Some(PathBuf::from("/Applications/Zoom Pro.app")));
     }
 }

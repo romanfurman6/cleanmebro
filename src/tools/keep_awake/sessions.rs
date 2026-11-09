@@ -28,9 +28,7 @@ impl Scanner {
     /// Sessions written to in the last day, newest first.
     pub fn scan(&mut self, root: &Path, now: i64) -> Vec<Session> {
         let mut out = Vec::new();
-        let Ok(rd) = std::fs::read_dir(root) else {
-            return out;
-        };
+        let Ok(rd) = std::fs::read_dir(root) else { return out };
         for e in rd.flatten() {
             let folder = e.path();
             if !folder.is_dir() {
@@ -38,21 +36,11 @@ impl Scanner {
             }
             // session id → (newest write, a log to read the project from)
             let mut by_session: HashMap<String, (i64, PathBuf)> = HashMap::new();
-            let Ok(files) = std::fs::read_dir(&folder) else {
-                continue;
-            };
+            let Ok(files) = std::fs::read_dir(&folder) else { continue };
             for f in files.flatten() {
                 let p = f.path();
-                let Some(stem) = p.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
-                    continue;
-                };
-                let newest = if p.is_dir() {
-                    newest_log(&p, 2)
-                } else if is_log(&p) {
-                    mtime(&p).map(|t| (t, p.clone()))
-                } else {
-                    None
-                };
+                let Some(stem) = p.file_stem().map(|s| s.to_string_lossy().into_owned()) else { continue };
+                let newest = if p.is_dir() { newest_log(&p, 2) } else if is_log(&p) { mtime(&p).map(|t| (t, p.clone())) } else { None };
                 if let Some((t, log)) = newest {
                     let slot = by_session.entry(stem).or_insert((t, log.clone()));
                     if t > slot.0 {
@@ -65,10 +53,7 @@ impl Scanner {
                     continue;
                 }
                 let project = self.name(&folder, &log);
-                out.push(Session {
-                    project,
-                    last_write: t,
-                });
+                out.push(Session { project, last_write: t });
             }
         }
         out.sort_by_key(|s| std::cmp::Reverse(s.last_write));
@@ -80,9 +65,7 @@ impl Scanner {
             return n.clone();
         }
         // only a name read from a log is kept; the folder's guess is retried
-        match crate::kit::claude_code::first_cwd(log)
-            .and_then(|c| c.file_name().map(|s| s.to_string_lossy().into_owned()))
-        {
+        match crate::kit::claude_code::first_cwd(log).and_then(|c| c.file_name().map(|s| s.to_string_lossy().into_owned())) {
             Some(n) => {
                 self.names.insert(folder.to_path_buf(), n.clone());
                 n
@@ -94,14 +77,8 @@ impl Scanner {
 
 /// The last dash-separated part of the encoded folder name.
 fn fallback_name(folder: &Path) -> String {
-    let enc = folder
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    enc.rsplit('-')
-        .find(|s| !s.is_empty())
-        .unwrap_or(&enc)
-        .to_string()
+    let enc = folder.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    enc.rsplit('-').find(|s| !s.is_empty()).unwrap_or(&enc).to_string()
 }
 
 fn is_log(p: &Path) -> bool {
@@ -119,11 +96,7 @@ fn newest_log(dir: &Path, depth: u32) -> Option<(i64, PathBuf)> {
     for e in std::fs::read_dir(dir).ok()?.flatten() {
         let p = e.path();
         let found = if p.is_dir() {
-            if depth > 0 {
-                newest_log(&p, depth - 1)
-            } else {
-                None
-            }
+            if depth > 0 { newest_log(&p, depth - 1) } else { None }
         } else if is_log(&p) {
             mtime(&p).map(|t| (t, p))
         } else {
@@ -147,18 +120,11 @@ mod tests {
         let root = std::env::temp_dir().join(format!("cmb-awake-sessions-{}", std::process::id()));
         let proj = root.join("-Users-me-work-cleanmebro");
         std::fs::create_dir_all(proj.join("abc/subagents")).unwrap();
-        std::fs::write(
-            proj.join("abc.jsonl"),
-            "{\"cwd\":\"/Users/me/work/cleanmebro\"}\n",
-        )
-        .unwrap();
+        std::fs::write(proj.join("abc.jsonl"), "{\"cwd\":\"/Users/me/work/cleanmebro\"}\n").unwrap();
         std::fs::write(proj.join("abc/subagents/agent-1.jsonl"), "{}\n").unwrap();
         std::fs::write(proj.join("def.jsonl"), "{}\n").unwrap();
         std::fs::write(proj.join("notes.txt"), "x").unwrap();
-        let now = std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
+        let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
         let mut s = Scanner::default();
         let found = s.scan(&root, now);
         assert_eq!(found.len(), 2, "{found:?}");
@@ -169,10 +135,7 @@ mod tests {
 
     #[test]
     fn name_from_folder_when_log_has_no_cwd() {
-        assert_eq!(
-            fallback_name(Path::new("/x/-Users-me-api-server")),
-            "server"
-        );
+        assert_eq!(fallback_name(Path::new("/x/-Users-me-api-server")), "server");
         assert_eq!(fallback_name(Path::new("/x/-Users-me-app-")), "app");
     }
 }

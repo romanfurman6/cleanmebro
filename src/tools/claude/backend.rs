@@ -3,9 +3,7 @@
 //! activity comes from counting usage fields in ~/.claude/projects logs.
 
 use crate::kit::activity::{self, Every, Wake};
-use crate::kit::claude_code::{
-    self as cc, claude_bin, claude_cmd, projects_dir, scan_projects, Project,
-};
+use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd, projects_dir, scan_projects, Project};
 use crate::kit::mechanics as m;
 use chrono::{DateTime, Local, Utc};
 use serde_json::Value;
@@ -69,19 +67,13 @@ impl ClaudeInfo {
         }
     }
     pub fn session(&self) -> Option<&Limit> {
-        self.limits
-            .iter()
-            .find(|l| l.label.to_lowercase().contains("session"))
+        self.limits.iter().find(|l| l.label.to_lowercase().contains("session"))
     }
     pub fn weekly(&self) -> Option<&Limit> {
         self.limits
             .iter()
             .find(|l| l.label.to_lowercase().contains("all models"))
-            .or_else(|| {
-                self.limits
-                    .iter()
-                    .find(|l| l.label.to_lowercase().contains("week"))
-            })
+            .or_else(|| self.limits.iter().find(|l| l.label.to_lowercase().contains("week")))
     }
     pub fn plan_title(&self) -> String {
         if self.plan.is_empty() {
@@ -116,10 +108,7 @@ struct LogUsage {
 }
 
 pub fn start(ctx: egui::Context, demo: bool) -> Shared {
-    let shared: Shared = Arc::new(Mutex::new(ClaudeInfo {
-        loading: true,
-        ..Default::default()
-    }));
+    let shared: Shared = Arc::new(Mutex::new(ClaudeInfo { loading: true, ..Default::default() }));
     if demo {
         *shared.lock().unwrap() = demo_info();
         return shared;
@@ -141,10 +130,8 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                     continue;
                 }
                 // the limits also feed the menu-bar title, so they refresh hidden too
-                let retry_empty = s.lock().unwrap().limits.is_empty()
-                    && limits_at.age().is_some_and(|a| a.as_secs() > 60);
-                if retry_empty || limits_at.due(Duration::from_secs(m::CLAUDE_LIMITS_REFRESH_SECS))
-                {
+                let retry_empty = s.lock().unwrap().limits.is_empty() && limits_at.age().is_some_and(|a| a.as_secs() > 60);
+                if retry_empty || limits_at.due(Duration::from_secs(m::CLAUDE_LIMITS_REFRESH_SECS)) {
                     limits_at.mark();
                     s.lock().unwrap().loading = true;
                     activity::repaint(&ctx);
@@ -152,18 +139,10 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                 }
                 // the rest is only shown in the panel and the window: hidden,
                 // it waits until they open (the nap below ends then)
-                if (activity::visible() || local_at.age().is_none())
-                    && local_at.due(Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS))
-                {
+                if (activity::visible() || local_at.age().is_none()) && local_at.due(Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS)) {
                     let projects = scan_projects();
                     let local = local_usage(&mut cache);
-                    let data = size_at
-                        .due(Duration::from_secs(CLAUDE_DATA_SIZE_SECS))
-                        .then(|| {
-                            crate::kit::fs::dir_size(
-                                &dirs::home_dir().unwrap_or_default().join(".claude"),
-                            )
-                        });
+                    let data = size_at.due(Duration::from_secs(CLAUDE_DATA_SIZE_SECS)).then(|| crate::kit::fs::dir_size(&dirs::home_dir().unwrap_or_default().join(".claude")));
                     let mut g = s.lock().unwrap();
                     g.projects = projects;
                     g.local = local;
@@ -175,11 +154,7 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                 activity::repaint(&ctx);
                 // wait, but wake early when someone asks for a refresh or the
                 // panel opens
-                if activity::nap(
-                    Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS),
-                    Some(cc::recheck()),
-                ) == Wake::Kicked
-                {
+                if activity::nap(Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS), Some(cc::recheck())) == Wake::Kicked {
                     limits_at.reset();
                     local_at.reset();
                 }
@@ -203,10 +178,7 @@ fn fetch_cli(s: &Shared) {
         g.installed = false;
         g.signed_out = false;
         g.limits.clear();
-        g.error = Some(format!(
-            "Claude Code isn't installed on this Mac. {}",
-            cc::Availability::NotInstalled.how()
-        ));
+        g.error = Some(format!("Claude Code isn't installed on this Mac. {}", cc::Availability::NotInstalled.how()));
         return;
     };
     // plan + login
@@ -214,10 +186,7 @@ fn fetch_cli(s: &Shared) {
     let (known, plan) = match status {
         Ok(o) => {
             let v: Value = serde_json::from_slice(&o.stdout).unwrap_or(Value::Null);
-            (
-                v["loggedIn"].as_bool(),
-                v["subscriptionType"].as_str().unwrap_or("").to_string(),
-            )
+            (v["loggedIn"].as_bool(), v["subscriptionType"].as_str().unwrap_or("").to_string())
         }
         Err(_) => (None, String::new()),
     };
@@ -225,13 +194,7 @@ fn fetch_cli(s: &Shared) {
     cc::set_signed_in(known);
     // limits (a local slash command: no model call, no tokens)
     let usage = claude_cmd(&bin)
-        .args([
-            "-p",
-            "/usage",
-            "--output-format",
-            "json",
-            "--no-session-persistence",
-        ])
+        .args(["-p", "/usage", "--output-format", "json", "--no-session-persistence"])
         .output();
     let mut g = s.lock().unwrap();
     g.installed = true;
@@ -246,14 +209,7 @@ fn fetch_cli(s: &Shared) {
             let text = v["result"].as_str().unwrap_or("").to_string();
             let (limits, contrib, note) = parse_usage(&text);
             if limits.is_empty() {
-                g.error = Some(if logged_in {
-                    "Claude didn't report limits right now.".into()
-                } else {
-                    format!(
-                        "Sign in to Claude Code to see your limits. {}",
-                        cc::Availability::SignedOut.how()
-                    )
-                });
+                g.error = Some(if logged_in { "Claude didn't report limits right now.".into() } else { format!("Sign in to Claude Code to see your limits. {}", cc::Availability::SignedOut.how()) });
                 if g.signed_out {
                     g.limits.clear();
                 }
@@ -280,24 +236,13 @@ pub fn parse_usage(text: &str) -> (Vec<Limit>, Vec<Contrib>, String) {
         if let Some(idx) = t.find("% used") {
             if let Some((label, rest)) = t[..idx].rsplit_once(':') {
                 let pct = rest.trim().parse::<f32>().unwrap_or(0.0);
-                let resets = t[idx..]
-                    .split("resets")
-                    .nth(1)
-                    .map(|s| s.trim().to_string())
-                    .unwrap_or_default();
-                limits.push(Limit {
-                    label: label.trim().to_string(),
-                    pct,
-                    resets,
-                });
+                let resets = t[idx..].split("resets").nth(1).map(|s| s.trim().to_string()).unwrap_or_default();
+                limits.push(Limit { label: label.trim().to_string(), pct, resets });
                 continue;
             }
         }
         if t.starts_with("Last ") && t.contains('·') {
-            contrib.push(Contrib {
-                title: t.to_string(),
-                lines: vec![],
-            });
+            contrib.push(Contrib { title: t.to_string(), lines: vec![] });
             continue;
         }
         if line.starts_with("  ") && !t.is_empty() {
@@ -336,9 +281,7 @@ fn local_usage(cache: &mut UsageCache) -> Local7 {
     let mut seen = std::collections::HashSet::new();
     if let Ok(rd) = std::fs::read_dir(projects_dir()) {
         for proj in rd.flatten() {
-            let Ok(files) = std::fs::read_dir(proj.path()) else {
-                continue;
-            };
+            let Ok(files) = std::fs::read_dir(proj.path()) else { continue };
             for f in files.flatten() {
                 let p = f.path();
                 if p.extension().map(|x| x != "jsonl").unwrap_or(true) {
@@ -346,10 +289,7 @@ fn local_usage(cache: &mut UsageCache) -> Local7 {
                 }
                 let Ok(md) = f.metadata() else { continue };
                 let Ok(mt) = md.modified() else { continue };
-                let mts = mt
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0);
+                let mts = mt.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
                 if mts < week {
                     continue;
                 }
@@ -363,16 +303,8 @@ fn local_usage(cache: &mut UsageCache) -> Local7 {
         }
     }
     cache.retain(|k, _| seen.contains(k));
-    let today_start = Local::now()
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .and_then(|d| d.and_local_timezone(Local).single())
-        .map(|d| d.timestamp())
-        .unwrap_or(now - 86_400);
-    let mut l = Local7 {
-        daily: vec![0; 7],
-        ..Default::default()
-    };
+    let today_start = Local::now().date_naive().and_hms_opt(0, 0, 0).and_then(|d| d.and_local_timezone(Local).single()).map(|d| d.timestamp()).unwrap_or(now - 86_400);
+    let mut l = Local7 { daily: vec![0; 7], ..Default::default() };
     for log in cache.values() {
         for &(ts, tokens, out) in &log.entries {
             if ts < week {
@@ -403,9 +335,7 @@ fn read_usage(p: &Path, len: u64, log: &mut LogUsage) {
     if len < log.read {
         *log = LogUsage::default();
     }
-    let Ok(mut f) = std::fs::File::open(p) else {
-        return;
-    };
+    let Ok(mut f) = std::fs::File::open(p) else { return };
     if f.seek(SeekFrom::Start(log.read)).is_err() {
         return;
     }
@@ -434,10 +364,7 @@ fn usage_entry(line: &[u8], ids: &mut std::collections::HashSet<Vec<u8>>) -> Opt
     let ti = find(line, b"\"timestamp\":\"")?;
     let ts_bytes = &line[ti + 13..];
     let te = ts_bytes.iter().position(|&b| b == b'"')?;
-    let ts = std::str::from_utf8(&ts_bytes[..te])
-        .ok()
-        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.timestamp())?;
+    let ts = std::str::from_utf8(&ts_bytes[..te]).ok().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|d| d.timestamp())?;
     // one reply can be logged in several lines; count each message id once
     if let Some(mi) = find(line, b"\"id\":\"msg_") {
         let rest = &line[mi + 6..];
@@ -506,16 +433,7 @@ fn demo_info() -> ClaudeInfo {
         note,
         error: None,
         fetched: Some(Local::now()),
-        local: Local7 {
-            tokens_5h: 1_250_000,
-            tokens_today: 3_400_000,
-            tokens_7d: 21_000_000,
-            output_7d: 900_000,
-            requests_today: 637,
-            daily: vec![
-                2_100_000, 3_900_000, 1_200_000, 4_400_000, 2_800_000, 3_200_000, 3_400_000,
-            ],
-        },
+        local: Local7 { tokens_5h: 1_250_000, tokens_today: 3_400_000, tokens_7d: 21_000_000, output_7d: 900_000, requests_today: 637, daily: vec![2_100_000, 3_900_000, 1_200_000, 4_400_000, 2_800_000, 3_200_000, 3_400_000] },
         projects: vec![],
         data_bytes: 5_400_000_000,
     }
@@ -545,10 +463,7 @@ mod tests {
     #[test]
     fn limit_labels() {
         assert_eq!(short_label("Current session"), "Current session (5h)");
-        assert_eq!(
-            short_label("Current week (all models)"),
-            "This week · all models"
-        );
+        assert_eq!(short_label("Current week (all models)"), "This week · all models");
         assert_eq!(short_label("Current week (Opus)"), "This week · Opus");
         assert_eq!(short_label("Something else"), "Something else");
     }
@@ -563,10 +478,7 @@ mod tests {
 
     #[test]
     fn balanced_object() {
-        assert_eq!(
-            balanced(b"{\"a\":{\"b\":1}},\"x\":2}"),
-            b"{\"a\":{\"b\":1}}"
-        );
+        assert_eq!(balanced(b"{\"a\":{\"b\":1}},\"x\":2}"), b"{\"a\":{\"b\":1}}");
         assert_eq!(balanced(b"{open"), b"{open");
     }
 
@@ -575,11 +487,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cmb-usage-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("s.jsonl");
-        let line = |id: &str| {
-            format!(
+        let line = |id: &str| format!(
             "{{\"cwd\":\"/tmp/proj\",\"timestamp\":\"2026-11-08T10:00:00Z\",\"message\":{{\"id\":\"{id}\",\"usage\":{{\"input_tokens\":10,\"output_tokens\":5,\"cache_creation_input_tokens\":100,\"cache_read_input_tokens\":9999}}}}}}\n"
-        )
-        };
+        );
         let body = line("msg_1") + &line("msg_1") + &line("msg_2") + "{\"type\":\"user\"}\n";
         // a half-written last line waits for the next read
         let partial = line("msg_3");

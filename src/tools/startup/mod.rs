@@ -9,9 +9,7 @@
 mod items;
 mod ui;
 
-use crate::core::tool::{
-    Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec,
-};
+use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec};
 use crate::kit::glass::{tint, Icon};
 use egui::{Rect, Ui};
 use items::{Job, LoginApp, Scope, When};
@@ -56,43 +54,24 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings {
-            login_off: Vec::new(),
-            known: BTreeSet::new(),
-            seeded: false,
-            notify_new: true,
-        }
+        Settings { login_off: Vec::new(), known: BTreeSet::new(), seeded: false, notify_new: true }
     }
 }
 
 fn data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("cleanmebro")
-        .join("startup")
+    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join("startup")
 }
 
 impl Settings {
     fn load() -> Settings {
-        if let Some(s) = std::fs::read_to_string(data_dir().join("settings.json"))
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-        {
+        if let Some(s) = std::fs::read_to_string(data_dir().join("settings.json")).ok().and_then(|s| serde_json::from_str(&s).ok()) {
             return s;
         }
         // first run: keep the login apps turned off in the Uninstaller's old Login items tab
         let mut s = Settings::default();
-        let old = data_dir()
-            .with_file_name("uninstaller")
-            .join("settings.json");
-        if let Some(v) = std::fs::read_to_string(old)
-            .ok()
-            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        {
-            if let Some(off) = v
-                .get("login_off")
-                .and_then(|o| serde_json::from_value(o.clone()).ok())
-            {
+        let old = data_dir().with_file_name("uninstaller").join("settings.json");
+        if let Some(v) = std::fs::read_to_string(old).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+            if let Some(off) = v.get("login_off").and_then(|o| serde_json::from_value(o.clone()).ok()) {
                 s.login_off = off;
             }
         }
@@ -126,11 +105,7 @@ pub struct State {
 
 impl State {
     pub fn suggested(&self) -> Vec<Job> {
-        self.jobs
-            .iter()
-            .filter(|j| j.suggested())
-            .cloned()
-            .collect()
+        self.jobs.iter().filter(|j| j.suggested()).cloned().collect()
     }
     pub fn total(&self) -> usize {
         self.jobs.len() + self.apps.len()
@@ -140,10 +115,7 @@ impl State {
     }
     /// The last batch while Undo is still offered.
     pub fn undoable(&self) -> Option<usize> {
-        self.last
-            .as_ref()
-            .filter(|(_, t)| t.elapsed() < UNDO_FOR)
-            .map(|(c, _)| c.len())
+        self.last.as_ref().filter(|(_, t)| t.elapsed() < UNDO_FOR).map(|(c, _)| c.len())
     }
 }
 
@@ -165,26 +137,14 @@ impl Startup {
     pub fn new(env: &ToolEnv) -> Self {
         let user_library = crate::kit::fs::home().join("Library");
         let st: Shared = Arc::new(Mutex::new(State::default()));
-        let me = Startup {
-            st: st.clone(),
-            ctx: env.ctx.clone(),
-            demo: env.demo,
-            user_library: user_library.clone(),
-            filter: Filter::All,
-            search: String::new(),
-            apps_requested: false,
-            icons: Default::default(),
-        };
+        let me = Startup { st: st.clone(), ctx: env.ctx.clone(), demo: env.demo, user_library: user_library.clone(), filter: Filter::All, search: String::new(), apps_requested: false, icons: Default::default() };
         if env.demo {
             demo(&mut st.lock().unwrap(), false);
             return me;
         }
         st.lock().unwrap().settings = Settings::load();
         let ctx = env.ctx.clone();
-        std::thread::Builder::new()
-            .name("startup-watch".into())
-            .spawn(move || watch(st, user_library, ctx))
-            .ok();
+        std::thread::Builder::new().name("startup-watch".into()).spawn(move || watch(st, user_library, ctx)).ok();
         me
     }
 
@@ -208,12 +168,7 @@ impl Startup {
                     Ok(mut a) => {
                         for (name, path, hidden) in &g.settings.login_off {
                             if !a.iter().any(|x| x.path == *path) {
-                                a.push(LoginApp {
-                                    name: name.clone(),
-                                    path: path.clone(),
-                                    hidden: *hidden,
-                                    on: false,
-                                });
+                                a.push(LoginApp { name: name.clone(), path: path.clone(), hidden: *hidden, on: false });
                             }
                         }
                         g.apps = a;
@@ -265,13 +220,7 @@ impl Startup {
                 if !demo {
                     items::set_jobs(&[(j.clone(), want)])?;
                 }
-                if let Some(x) = st
-                    .lock()
-                    .unwrap()
-                    .jobs
-                    .iter_mut()
-                    .find(|x| x.key() == j.key())
-                {
+                if let Some(x) = st.lock().unwrap().jobs.iter_mut().find(|x| x.key() == j.key()) {
                     x.on = want;
                     if !want {
                         x.pid = None;
@@ -297,9 +246,7 @@ impl Startup {
                 }
                 g.settings.login_off.retain(|(_, p, _)| *p != a.path);
                 if !want {
-                    g.settings
-                        .login_off
-                        .push((a.name.clone(), a.path.clone(), a.hidden));
+                    g.settings.login_off.push((a.name.clone(), a.path.clone(), a.hidden));
                 }
                 if !demo {
                     g.settings.save();
@@ -338,41 +285,42 @@ impl Startup {
 
     /// Put the last batch back as it was.
     pub fn undo(&self) {
-        let Some((changes, _)) = self.state().last.clone() else {
-            return;
-        };
+        let Some((changes, _)) = self.state().last.clone() else { return };
         let demo = self.demo;
-        self.work("Turning them back on…".into(), move |st| {
-            let jobs: Vec<(Job, bool)> = changes
-                .iter()
-                .map(|Change::Job(j)| (j.clone(), j.on))
-                .collect();
-            if !demo {
-                items::set_jobs(&jobs)?;
-            }
-            let mut g = st.lock().unwrap();
-            for (j, on) in &jobs {
-                if let Some(x) = g.jobs.iter_mut().find(|x| x.key() == j.key()) {
-                    x.on = *on;
-                    x.pid = j.pid;
+        self.work(
+            "Turning them back on…".into(),
+            move |st| {
+                let jobs: Vec<(Job, bool)> = changes.iter().map(|Change::Job(j)| (j.clone(), j.on)).collect();
+                if !demo {
+                    items::set_jobs(&jobs)?;
                 }
-            }
-            g.last = None;
-            Ok(())
-        });
+                let mut g = st.lock().unwrap();
+                for (j, on) in &jobs {
+                    if let Some(x) = g.jobs.iter_mut().find(|x| x.key() == j.key()) {
+                        x.on = *on;
+                        x.pid = j.pid;
+                    }
+                }
+                g.last = None;
+                Ok(())
+            },
+        );
     }
 
     /// Stop a job and move its file to the Trash.
     pub fn trash(&self, j: &Job) {
         let j = j.clone();
         let demo = self.demo;
-        self.work(format!("Moving {} to the Trash…", j.name), move |st| {
-            if !demo {
-                items::trash_job(&j)?;
-            }
-            st.lock().unwrap().jobs.retain(|x| x.key() != j.key());
-            Ok(())
-        });
+        self.work(
+            format!("Moving {} to the Trash…", j.name),
+            move |st| {
+                if !demo {
+                    items::trash_job(&j)?;
+                }
+                st.lock().unwrap().jobs.retain(|x| x.key() != j.key());
+                Ok(())
+            },
+        );
     }
 
     pub fn set_notify(&self, on: bool) {
@@ -385,20 +333,14 @@ impl Startup {
 }
 
 pub fn plural(n: usize, word: &str) -> String {
-    if n == 1 {
-        format!("1 {word}")
-    } else {
-        format!("{n} {word}s")
-    }
+    if n == 1 { format!("1 {word}") } else { format!("{n} {word}s") }
 }
 
 /// Read the launchd folders now and then; announce plists that weren't there before.
 fn watch(st: Shared, lib: PathBuf, ctx: egui::Context) {
     loop {
         let jobs = items::read_jobs(&lib);
-        let paths: BTreeSet<PathBuf> = items::plist_paths(&lib, std::path::Path::new("/"))
-            .into_iter()
-            .collect();
+        let paths: BTreeSet<PathBuf> = items::plist_paths(&lib, std::path::Path::new("/")).into_iter().collect();
         let mut announce = Vec::new();
         {
             let mut g = st.lock().unwrap();
@@ -426,14 +368,7 @@ fn watch(st: Shared, lib: PathBuf, ctx: egui::Context) {
         }
         for j in announce {
             let app = j.owner_name().unwrap_or_else(|| j.name.clone());
-            crate::kit::notify::send(
-                &format!("{app} added itself to startup"),
-                &format!(
-                    "{} · runs {}. Turn it off in CleanMeBro › Startup.",
-                    j.label,
-                    j.when.label(j.scope)
-                ),
-            );
+            crate::kit::notify::send(&format!("{app} added itself to startup"), &format!("{} · runs {}. Turn it off in CleanMeBro › Startup.", j.label, j.when.label(j.scope)));
         }
         ctx.request_repaint();
         std::thread::sleep(POLL);
@@ -442,14 +377,7 @@ fn watch(st: Shared, lib: PathBuf, ctx: egui::Context) {
 
 /// Sample data for screenshots. `done`: right after "Turn off 4".
 pub fn demo(g: &mut State, done: bool) {
-    let job = |label: &str,
-               name: &str,
-               prog: &str,
-               scope: Scope,
-               when: When,
-               on: bool,
-               pid: Option<u32>,
-               orphan: bool| {
+    let job = |label: &str, name: &str, prog: &str, scope: Scope, when: When, on: bool, pid: Option<u32>, orphan: bool| {
         let program = Some(PathBuf::from(prog));
         let owner = items::owner_app(std::path::Path::new(prog));
         let dir = match scope {
@@ -457,18 +385,7 @@ pub fn demo(g: &mut State, done: bool) {
             Scope::AllUsers => "/Library/LaunchAgents",
             Scope::System => "/Library/LaunchDaemons",
         };
-        Job {
-            label: label.into(),
-            plist: PathBuf::from(format!("{dir}/{label}.plist")),
-            program,
-            scope,
-            on,
-            when,
-            pid,
-            orphan,
-            owner,
-            name: name.into(),
-        }
+        Job { label: label.into(), plist: PathBuf::from(format!("{dir}/{label}.plist")), program, scope, on, when, pid, orphan, owner, name: name.into() }
     };
     g.jobs = vec![
         job("com.docker.helper", "Docker", "/Applications/Docker.app/Contents/Library/LaunchServices/com.docker.helper", Scope::User, When::KeepsRunning, true, Some(812), false),
@@ -480,18 +397,8 @@ pub fn demo(g: &mut State, done: bool) {
         job("com.docker.vmnetd", "Docker", "/Library/PrivilegedHelperTools/com.docker.vmnetd", Scope::System, When::KeepsRunning, true, Some(233), false),
     ];
     g.apps = vec![
-        LoginApp {
-            name: "Slack".into(),
-            path: "/Applications/Slack.app".into(),
-            hidden: true,
-            on: true,
-        },
-        LoginApp {
-            name: "Spotify".into(),
-            path: "/Applications/Spotify.app".into(),
-            hidden: false,
-            on: false,
-        },
+        LoginApp { name: "Slack".into(), path: "/Applications/Slack.app".into(), hidden: true, on: true },
+        LoginApp { name: "Spotify".into(), path: "/Applications/Spotify.app".into(), hidden: false, on: false },
     ];
     g.jobs_loaded = true;
     g.apps_loaded = true;
@@ -509,10 +416,7 @@ pub fn demo(g: &mut State, done: bool) {
 }
 
 fn badge() -> Badge {
-    Badge {
-        icon: Icon::Power,
-        color: tint::STARTUP,
-    }
+    Badge { icon: Icon::Power, color: tint::STARTUP }
 }
 
 impl Tool for Startup {
@@ -533,21 +437,10 @@ impl Tool for Startup {
     }
     fn sidebar_meta(&self) -> String {
         let n = self.state().suggested().len();
-        if n > 0 {
-            n.to_string()
-        } else {
-            String::new()
-        }
+        if n > 0 { n.to_string() } else { String::new() }
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec {
-            id: SUMMARY,
-            title: "Startup",
-            about: "What starts with your Mac, and one button for what can go.",
-            sizes: &[Size::S11, Size::S12, Size::S24],
-            size: Size::S24,
-            default_on: true,
-        }]
+        vec![WidgetSpec { id: SUMMARY, title: "Startup", about: "What starts with your Mac, and one button for what can go.", sizes: &[Size::S11, Size::S12, Size::S24], size: Size::S24, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(self, size, ui, rect, cx);
@@ -571,27 +464,14 @@ impl Tool for Startup {
             return Vec::new();
         }
         let names: Vec<String> = list.iter().take(2).map(|j| j.name.clone()).collect();
-        let more = if list.len() > 2 {
-            format!(" and {} more", list.len() - 2)
-        } else {
-            String::new()
-        };
+        let more = if list.len() > 2 { format!(" and {} more", list.len() - 2) } else { String::new() };
         vec![Recommendation {
             priority: 8,
             badge: badge(),
-            title: format!(
-                "{} start with your Mac for nothing",
-                plural(list.len(), "item")
-            ),
-            body: format!(
-                "{}{more}. Turning them off removes nothing.",
-                names.join(", ")
-            ),
+            title: format!("{} start with your Mac for nothing", plural(list.len(), "item")),
+            body: format!("{}{more}. Turning them off removes nothing.", names.join(", ")),
             action: "Review".into(),
-            go: Action::OpenPage {
-                tool: ID.into(),
-                route: "suggested".into(),
-            },
+            go: Action::OpenPage { tool: ID.into(), route: "suggested".into() },
         }]
     }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
@@ -610,11 +490,7 @@ impl Tool for Startup {
                 *g = State::default();
                 demo(&mut g, view == "startup-done");
                 drop(g);
-                self.filter = if view == "startup-suggested" {
-                    Filter::Suggested
-                } else {
-                    Filter::All
-                };
+                self.filter = if view == "startup-suggested" { Filter::Suggested } else { Filter::All };
                 Some(View::Page)
             }
             _ => None,
@@ -632,23 +508,8 @@ mod tests {
         let mut g = State::default();
         demo(&mut g, false);
         let s: Vec<String> = g.suggested().iter().map(|j| j.name.clone()).collect();
-        assert_eq!(
-            s,
-            vec![
-                "Google Updater",
-                "Steam Cleaner",
-                "TeamViewer",
-                "Microsoft AutoUpdate"
-            ]
-        );
-        assert_eq!(
-            g.jobs
-                .iter()
-                .find(|j| j.name == "TeamViewer")
-                .unwrap()
-                .why(),
-            Some(Why::Removed)
-        );
+        assert_eq!(s, vec!["Google Updater", "Steam Cleaner", "TeamViewer", "Microsoft AutoUpdate"]);
+        assert_eq!(g.jobs.iter().find(|j| j.name == "TeamViewer").unwrap().why(), Some(Why::Removed));
         let mut d = State::default();
         demo(&mut d, true);
         assert!(d.suggested().is_empty());

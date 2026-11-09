@@ -85,11 +85,7 @@ pub struct WidgetSpec {
 impl WidgetSpec {
     /// `want` if this widget offers it, else its default size.
     pub fn fit(&self, want: Size) -> Size {
-        if self.sizes.contains(&want) {
-            want
-        } else {
-            self.size
-        }
+        if self.sizes.contains(&want) { want } else { self.size }
     }
 }
 
@@ -144,22 +140,13 @@ pub struct MenuItem {
 pub enum Action {
     /// Open the full window on a tool's page. `route` is defined by that tool
     /// ("" = its default view).
-    OpenPage {
-        tool: String,
-        route: String,
-    },
+    OpenPage { tool: String, route: String },
     /// Show a tool's detail sheet beside the panel. With `toggle`, a second
     /// request for the open sheet closes it.
-    ShowDetail {
-        tool: String,
-        detail: String,
-        toggle: bool,
-    },
+    ShowDetail { tool: String, detail: String, toggle: bool },
     CloseDetail,
     /// Open the window on Settings (`tools`: on the Tools tab).
-    OpenSettings {
-        tools: bool,
-    },
+    OpenSettings { tools: bool },
     /// Hide the menu-bar panel (e.g. before a screenshot of the screen).
     HidePanel,
     Toast(String),
@@ -181,24 +168,14 @@ pub struct Cx {
 
 impl Cx {
     pub fn new(open_detail: Option<(String, String)>) -> Self {
-        Cx {
-            open_detail,
-            actions: Vec::new(),
-        }
+        Cx { open_detail, actions: Vec::new() }
     }
     pub fn open_page(&mut self, tool: &str, route: &str) {
-        self.actions.push(Action::OpenPage {
-            tool: tool.into(),
-            route: route.into(),
-        });
+        self.actions.push(Action::OpenPage { tool: tool.into(), route: route.into() });
     }
     /// Open or close (if already open) a detail sheet.
     pub fn toggle_detail(&mut self, tool: &str, detail: &str) {
-        self.actions.push(Action::ShowDetail {
-            tool: tool.into(),
-            detail: detail.into(),
-            toggle: true,
-        });
+        self.actions.push(Action::ShowDetail { tool: tool.into(), detail: detail.into(), toggle: true });
     }
     pub fn close_detail(&mut self) {
         self.actions.push(Action::CloseDetail);
@@ -214,9 +191,7 @@ impl Cx {
     }
     /// Whether this tool's detail sheet `detail` is the one showing.
     pub fn is_detail_open(&self, tool: &str, detail: &str) -> bool {
-        self.open_detail
-            .as_ref()
-            .is_some_and(|(t, d)| t == tool && d == detail)
+        self.open_detail.as_ref().is_some_and(|(t, d)| t == tool && d == detail)
     }
     pub fn take_actions(&mut self) -> Vec<Action> {
         std::mem::take(&mut self.actions)
@@ -323,22 +298,9 @@ mod tests {
         cx.toggle_detail("system", "cpu");
         let a = cx.take_actions();
         assert_eq!(a.len(), 3);
-        assert_eq!(
-            a[0],
-            Action::OpenPage {
-                tool: "cleanup".into(),
-                route: "claude".into()
-            }
-        );
+        assert_eq!(a[0], Action::OpenPage { tool: "cleanup".into(), route: "claude".into() });
         assert_eq!(a[1], Action::Toast("hi".into()));
-        assert_eq!(
-            a[2],
-            Action::ShowDetail {
-                tool: "system".into(),
-                detail: "cpu".into(),
-                toggle: true
-            }
-        );
+        assert_eq!(a[2], Action::ShowDetail { tool: "system".into(), detail: "cpu".into(), toggle: true });
         assert!(cx.take_actions().is_empty());
     }
 }

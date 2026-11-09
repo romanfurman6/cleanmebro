@@ -14,12 +14,7 @@ use egui::{Context, Ui, ViewportBuilder, ViewportClass, ViewportId};
 /// deferred viewport with an empty ui: eframe creates those at the start of
 /// its next pass, with the event loop. Once the window is there, it is drawn
 /// as an immediate viewport as before.
-pub fn show<T>(
-    ctx: &Context,
-    id: ViewportId,
-    builder: ViewportBuilder,
-    ui: impl FnMut(&mut Ui, ViewportClass) -> T,
-) -> Option<T> {
+pub fn show<T>(ctx: &Context, id: ViewportId, builder: ViewportBuilder, ui: impl FnMut(&mut Ui, ViewportClass) -> T) -> Option<T> {
     if ctx.embed_viewports() || has_window(ctx, id) {
         return Some(ctx.show_viewport_immediate(id, builder, ui));
     }
@@ -30,12 +25,7 @@ pub fn show<T>(
 
 /// eframe fills a viewport's native scale only once it has a window.
 fn has_window(ctx: &Context, id: ViewportId) -> bool {
-    ctx.input(|i| {
-        i.raw
-            .viewports
-            .get(&id)
-            .is_some_and(|v| v.native_pixels_per_point.is_some())
-    })
+    ctx.input(|i| i.raw.viewports.get(&id).is_some_and(|v| v.native_pixels_per_point.is_some()))
 }
 
 #[cfg(test)]
@@ -49,17 +39,9 @@ mod tests {
         input.viewports.insert(id, egui::ViewportInfo::default());
         let ctx = Context::default();
         let mut seen = (true, true);
-        ctx.run_ui(input.clone(), |ui| seen.0 = has_window(ui.ctx(), id))
-            .textures_delta
-            .clear();
-        input
-            .viewports
-            .get_mut(&id)
-            .unwrap()
-            .native_pixels_per_point = Some(2.0);
-        ctx.run_ui(input, |ui| seen.1 = has_window(ui.ctx(), id))
-            .textures_delta
-            .clear();
+        ctx.run_ui(input.clone(), |ui| seen.0 = has_window(ui.ctx(), id)).textures_delta.clear();
+        input.viewports.get_mut(&id).unwrap().native_pixels_per_point = Some(2.0);
+        ctx.run_ui(input, |ui| seen.1 = has_window(ui.ctx(), id)).textures_delta.clear();
         assert_eq!(seen, (false, true));
     }
 }

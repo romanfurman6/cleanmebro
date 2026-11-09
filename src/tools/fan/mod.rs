@@ -81,26 +81,9 @@ impl FanControl {
     pub fn new(env: &ToolEnv) -> Self {
         let on = Arc::new(AtomicBool::new(true));
         let kick = Arc::new(Kick::new());
-        let live = Arc::new(Mutex::new(Live {
-            settings: if env.demo {
-                Settings::default()
-            } else {
-                control::load()
-            },
-            ..Default::default()
-        }));
-        let snap = if env.demo {
-            Arc::new(Mutex::new(data::demo()))
-        } else {
-            start(env.ctx.clone(), on.clone(), live.clone(), kick.clone())
-        };
-        FanControl {
-            snap,
-            live,
-            on,
-            kick,
-            demo: env.demo,
-        }
+        let live = Arc::new(Mutex::new(Live { settings: if env.demo { Settings::default() } else { control::load() }, ..Default::default() }));
+        let snap = if env.demo { Arc::new(Mutex::new(data::demo())) } else { start(env.ctx.clone(), on.clone(), live.clone(), kick.clone()) };
+        FanControl { snap, live, on, kick, demo: env.demo }
     }
 
     fn run(&mut self, cmds: Vec<Cmd>, ctx: &egui::Context) {
@@ -126,11 +109,7 @@ impl FanControl {
                     }
                     let (live, kick, ctx) = (self.live.clone(), self.kick.clone(), ctx.clone());
                     std::thread::spawn(move || {
-                        let r = if install {
-                            helper::install()
-                        } else {
-                            helper::uninstall()
-                        };
+                        let r = if install { helper::install() } else { helper::uninstall() };
                         let mut l = live.lock().unwrap();
                         l.busy = false;
                         l.error = r.err().unwrap_or_default();
@@ -148,10 +127,7 @@ impl FanControl {
     }
 
     fn view(&self) -> (Snapshot, Live) {
-        (
-            self.snap.lock().unwrap().clone(),
-            self.live.lock().unwrap().clone(),
-        )
+        (self.snap.lock().unwrap().clone(), self.live.lock().unwrap().clone())
     }
 }
 
@@ -165,12 +141,7 @@ impl Drop for FanControl {
 
 /// Read the sensors every [`data::SAMPLE_SECS`] on a background thread
 /// while the tool is on, and tell the helper what the fans should do.
-fn start(
-    ctx: egui::Context,
-    on: Arc<AtomicBool>,
-    live: Arc<Mutex<Live>>,
-    kick: Arc<Kick>,
-) -> Shared {
+fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: Arc<Kick>) -> Shared {
     let snap: Shared = Arc::new(Mutex::new(Snapshot::default()));
     let out = snap.clone();
     std::thread::Builder::new()
@@ -201,19 +172,11 @@ fn start(
                     let tripped = control::hottest(&s).is_some_and(|h| l.guard.update(h));
                     (l.settings.clone(), tripped)
                 };
-                let want = on_now
-                    && s.loaded
-                    && !s.fans.is_empty()
-                    && settings.mode != Mode::Auto
-                    && !tripped;
+                let want = on_now && s.loaded && !s.fans.is_empty() && settings.mode != Mode::Auto && !tripped;
                 // nothing to hold and nobody looking (or the tool is off):
                 // leave the helper alone, its state is asked when shown
                 if !want && !held && !(on_now && activity::visible()) {
-                    let wait = if on_now {
-                        Duration::from_secs(data::SAMPLE_SECS)
-                    } else {
-                        Duration::from_secs(3600)
-                    };
+                    let wait = if on_now { Duration::from_secs(data::SAMPLE_SECS) } else { Duration::from_secs(3600) };
                     activity::nap(wait, Some(&kick));
                     continue;
                 }
@@ -258,29 +221,16 @@ fn chip_name() -> String {
         let name = std::ffi::CString::new("machdep.cpu.brand_string").unwrap();
         let mut buf = [0u8; 128];
         let mut len = buf.len();
-        let ok = unsafe {
-            libc::sysctlbyname(
-                name.as_ptr(),
-                buf.as_mut_ptr() as *mut libc::c_void,
-                &mut len,
-                std::ptr::null_mut(),
-                0,
-            )
-        } == 0;
+        let ok = unsafe { libc::sysctlbyname(name.as_ptr(), buf.as_mut_ptr() as *mut libc::c_void, &mut len, std::ptr::null_mut(), 0) } == 0;
         if ok {
-            return String::from_utf8_lossy(&buf[..len.saturating_sub(1)])
-                .trim()
-                .to_string();
+            return String::from_utf8_lossy(&buf[..len.saturating_sub(1)]).trim().to_string();
         }
     }
     String::new()
 }
 
 fn badge() -> Badge {
-    Badge {
-        icon: Icon::Fan,
-        color: tint::FAN,
-    }
+    Badge { icon: Icon::Fan, color: tint::FAN }
 }
 
 impl Tool for FanControl {
@@ -308,14 +258,7 @@ impl Tool for FanControl {
         }
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec {
-            id: CARD,
-            title: "Fans",
-            about: "Fan speed and the hottest part, live.",
-            sizes: ALL_SIZES,
-            size: Size::S14,
-            default_on: true,
-        }]
+        vec![WidgetSpec { id: CARD, title: "Fans", about: "Fan speed and the hottest part, live.", sizes: ALL_SIZES, size: Size::S14, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let s = self.snap.lock().unwrap().clone();
@@ -349,11 +292,7 @@ impl Tool for FanControl {
                     "fan-fixed" => Mode::Fixed,
                     _ => Mode::Quiet,
                 };
-                l.helper = if view == "fan-install" {
-                    HelperState::Missing
-                } else {
-                    HelperState::Ready
-                };
+                l.helper = if view == "fan-install" { HelperState::Missing } else { HelperState::Ready };
                 l.manual = view != "fan-install";
                 Some(View::Page)
             }

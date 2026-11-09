@@ -6,13 +6,10 @@ use super::settings::{Ignored, Layout, AGES, KEEP_MAX, KEEP_MIN};
 use super::store::{parse_color, Entry, Kind};
 use super::{mac, Clipboard, Filter, Tab, ID, TINT};
 use crate::core::tool::{Cx, Size};
+use crate::kit::tile;
 use crate::kit::glass::*;
 use crate::kit::hotkeys::Shortcut;
-use crate::kit::tile;
-use egui::{
-    Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2,
-    ViewportBuilder, ViewportId,
-};
+use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId};
 use std::time::Instant;
 
 /// Most recent clips listed in the Large widget.
@@ -94,14 +91,7 @@ pub fn kind_glyph(p: &egui::Painter, kind: Kind, r: Rect, col: Color32, swatch: 
             p.circle_stroke(c, 6.0 * u, Stroke::new(1.0, white(60)));
         }
         Kind::File => {
-            let pts = vec![
-                pt(-5.0, -7.0),
-                pt(2.0, -7.0),
-                pt(5.5, -3.5),
-                pt(5.5, 7.0),
-                pt(-5.0, 7.0),
-                pt(-5.0, -7.0),
-            ];
+            let pts = vec![pt(-5.0, -7.0), pt(2.0, -7.0), pt(5.5, -3.5), pt(5.5, 7.0), pt(-5.0, 7.0), pt(-5.0, -7.0)];
             p.add(egui::Shape::line(pts, s));
             p.line_segment([pt(2.0, -7.0), pt(2.0, -3.5)], s);
             p.line_segment([pt(2.0, -3.5), pt(5.5, -3.5)], s);
@@ -135,33 +125,18 @@ pub fn entry_thumb(c: &mut Clipboard, p: &egui::Painter, r: Rect, e: &Entry, rad
 }
 
 /// An image filling `r`, cropped to keep its shape.
-pub fn cover_image(
-    p: &egui::Painter,
-    r: Rect,
-    tex: egui::TextureId,
-    size: (u32, u32),
-    radius: f32,
-) {
+pub fn cover_image(p: &egui::Painter, r: Rect, tex: egui::TextureId, size: (u32, u32), radius: f32) {
     let (iw, ih) = (size.0.max(1) as f32, size.1.max(1) as f32);
     let (ra, ia) = (r.width() / r.height().max(1.0), iw / ih);
     let uv = if ia > ra {
         let w = ra / ia;
-        Rect::from_min_max(
-            Pos2::new((1.0 - w) / 2.0, 0.0),
-            Pos2::new((1.0 + w) / 2.0, 1.0),
-        )
+        Rect::from_min_max(Pos2::new((1.0 - w) / 2.0, 0.0), Pos2::new((1.0 + w) / 2.0, 1.0))
     } else {
         let h = ia / ra;
-        Rect::from_min_max(
-            Pos2::new(0.0, (1.0 - h) / 2.0),
-            Pos2::new(1.0, (1.0 + h) / 2.0),
-        )
+        Rect::from_min_max(Pos2::new(0.0, (1.0 - h) / 2.0), Pos2::new(1.0, (1.0 + h) / 2.0))
     };
     let mut mesh = egui::epaint::RectShape::filled(r, radius, Color32::WHITE);
-    mesh.brush = Some(std::sync::Arc::new(egui::epaint::Brush {
-        fill_texture_id: tex,
-        uv,
-    }));
+    mesh.brush = Some(std::sync::Arc::new(egui::epaint::Brush { fill_texture_id: tex, uv }));
     p.add(mesh);
 }
 
@@ -182,123 +157,33 @@ pub fn widget(c: &mut Clipboard, size: Size, ui: &mut Ui, rect: Rect, cx: &mut C
         return card(c, ui, rect, cx);
     }
     let id = ui.scope_id().with("w-clipboard");
-    let latest = c
-        .visible(Filter::All, "")
-        .first()
-        .and_then(|i| c.store.get(*i).cloned());
-    let shortcut = c
-        .settings
-        .shortcut
-        .as_ref()
-        .map(|s| s.display())
-        .unwrap_or_default();
-    let status = c
-        .pause_label()
-        .map(|_| "Paused".to_string())
-        .unwrap_or_else(|| {
-            if shortcut.is_empty() {
-                "History".into()
-            } else {
-                shortcut.clone()
-            }
-        });
+    let latest = c.visible(Filter::All, "").first().and_then(|i| c.store.get(*i).cloned());
+    let shortcut = c.settings.shortcut.as_ref().map(|s| s.display()).unwrap_or_default();
+    let status = c.pause_label().map(|_| "Paused".to_string()).unwrap_or_else(|| if shortcut.is_empty() { "History".into() } else { shortcut.clone() });
     let (title, sub) = match &latest {
-        Some(e) => (
-            e.title(),
-            format!(
-                "{} · {}",
-                if e.app.is_empty() {
-                    "Unknown app"
-                } else {
-                    &e.app
-                },
-                ago(e)
-            ),
-        ),
+        Some(e) => (e.title(), format!("{} · {}", if e.app.is_empty() { "Unknown app" } else { &e.app }, ago(e))),
         None => ("Nothing copied yet".to_string(), status.clone()),
     };
     let resp = match size {
-        Size::S11 => tile::small(
-            ui,
-            rect,
-            id,
-            Icon::Clipboard,
-            TINT,
-            "Clipboard",
-            &status,
-            false,
-        ),
-        Size::S12 => tile::wide(
-            ui,
-            rect,
-            id,
-            Icon::Clipboard,
-            TINT,
-            &status,
-            &title,
-            Err(&sub),
-            false,
-        ),
+        Size::S11 => tile::small(ui, rect, id, Icon::Clipboard, TINT, "Clipboard", &status, false),
+        Size::S12 => tile::wide(ui, rect, id, Icon::Clipboard, TINT, &status, &title, Err(&sub), false),
         _ => {
             // left: the count and status; right: the two latest clips
             let n = c.store.entries.len();
             let count = format!("{n} item{}", if n == 1 { "" } else { "s" });
-            let (resp, right) = tile::row_split(
-                ui,
-                rect,
-                id,
-                Icon::Clipboard,
-                TINT,
-                "Clipboard",
-                &count,
-                &status,
-                false,
-            );
+            let (resp, right) = tile::row_split(ui, rect, id, Icon::Clipboard, TINT, "Clipboard", &count, &status, false);
             let p = ui.painter().clone();
-            let recent: Vec<Entry> = c
-                .visible(Filter::All, "")
-                .into_iter()
-                .take(2)
-                .filter_map(|i| c.store.get(i).cloned())
-                .collect();
+            let recent: Vec<Entry> = c.visible(Filter::All, "").into_iter().take(2).filter_map(|i| c.store.get(i).cloned()).collect();
             if recent.is_empty() {
-                text_fit(
-                    &p,
-                    right.center(),
-                    Align2::CENTER_CENTER,
-                    "Nothing copied yet",
-                    font(11.0),
-                    TEXT_FAINT,
-                    right.width(),
-                );
+                text_fit(&p, right.center(), Align2::CENTER_CENTER, "Nothing copied yet", font(11.0), TEXT_FAINT, right.width());
             }
             let lh = right.height() / 2.0;
             for (k, e) in recent.iter().enumerate() {
-                let lr = Rect::from_min_size(
-                    Pos2::new(right.left(), right.top() + k as f32 * lh),
-                    Vec2::new(right.width(), lh),
-                );
-                let th = Rect::from_min_size(
-                    Pos2::new(lr.left(), lr.center().y - 10.0),
-                    Vec2::splat(20.0),
-                );
+                let lr = Rect::from_min_size(Pos2::new(right.left(), right.top() + k as f32 * lh), Vec2::new(right.width(), lh));
+                let th = Rect::from_min_size(Pos2::new(lr.left(), lr.center().y - 10.0), Vec2::splat(20.0));
                 entry_thumb(c, &p, th, e, 5.0);
-                let ag = p.text(
-                    Pos2::new(lr.right(), lr.center().y),
-                    Align2::RIGHT_CENTER,
-                    ago(e),
-                    font(11.0),
-                    TEXT_FAINT,
-                );
-                text_fit(
-                    &p,
-                    Pos2::new(th.right() + 8.0, lr.center().y),
-                    Align2::LEFT_CENTER,
-                    &e.title(),
-                    font(12.0),
-                    TEXT_SOFT,
-                    ag.left() - th.right() - 14.0,
-                );
+                let ag = p.text(Pos2::new(lr.right(), lr.center().y), Align2::RIGHT_CENTER, ago(e), font(11.0), TEXT_FAINT);
+                text_fit(&p, Pos2::new(th.right() + 8.0, lr.center().y), Align2::LEFT_CENTER, &e.title(), font(12.0), TEXT_SOFT, ag.left() - th.right() - 14.0);
             }
             resp
         }
@@ -318,26 +203,9 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let x0 = rect.left() + 12.0;
     let x1 = rect.right() - 12.0;
     let mut y = rect.top() + 10.0;
-    tool_chip(
-        &p,
-        Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(20.0)),
-        Icon::Clipboard,
-        TINT,
-    );
-    p.text(
-        Pos2::new(x0 + 28.0, y + 10.0),
-        Align2::LEFT_CENTER,
-        "Clipboard",
-        bold(13.0),
-        TEXT,
-    );
-    let hl = link(
-        ui,
-        Pos2::new(x1, y + 10.0),
-        Align2::RIGHT_CENTER,
-        "History",
-        12.0,
-    );
+    tool_chip(&p, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(20.0)), Icon::Clipboard, TINT);
+    p.text(Pos2::new(x0 + 28.0, y + 10.0), Align2::LEFT_CENTER, "Clipboard", bold(13.0), TEXT);
+    let hl = link(ui, Pos2::new(x1, y + 10.0), Align2::RIGHT_CENTER, "History", 12.0);
     if hl.clicked() {
         c.tab = Tab::History;
         cx.open_page(ID, "history");
@@ -346,59 +214,21 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let paused = c.paused();
     let label = if paused { "Resume" } else { "Pause 15 min" };
     let g = p.layout_no_wrap(label.to_string(), font(11.0), TEXT);
-    let pr = Rect::from_min_size(
-        Pos2::new(hl.rect.left() - 10.0 - g.size().x - 26.0, y),
-        Vec2::new(g.size().x + 26.0, 20.0),
-    );
+    let pr = Rect::from_min_size(Pos2::new(hl.rect.left() - 10.0 - g.size().x - 26.0, y), Vec2::new(g.size().x + 26.0, 20.0));
     let presp = row_hover(ui, pr, id.with("pause"));
-    p.rect_filled(
-        pr,
-        6.0,
-        if paused {
-            with_alpha(AMBER, 0.22)
-        } else {
-            white(if presp.hovered() { 30 } else { 18 })
-        },
-    );
+    p.rect_filled(pr, 6.0, if paused { with_alpha(AMBER, 0.22) } else { white(if presp.hovered() { 30 } else { 18 }) });
     let bar_c = if paused { AMBER } else { TEXT_SOFT };
     if paused {
         // play triangle
         let cc = Pos2::new(pr.left() + 11.0, pr.center().y);
-        p.add(egui::Shape::convex_polygon(
-            vec![
-                cc + Vec2::new(-3.0, -4.0),
-                cc + Vec2::new(4.0, 0.0),
-                cc + Vec2::new(-3.0, 4.0),
-            ],
-            bar_c,
-            Stroke::NONE,
-        ));
+        p.add(egui::Shape::convex_polygon(vec![cc + Vec2::new(-3.0, -4.0), cc + Vec2::new(4.0, 0.0), cc + Vec2::new(-3.0, 4.0)], bar_c, Stroke::NONE));
     } else {
         for dx in [-2.0, 2.0] {
-            p.line_segment(
-                [
-                    Pos2::new(pr.left() + 11.0 + dx, pr.center().y - 4.0),
-                    Pos2::new(pr.left() + 11.0 + dx, pr.center().y + 4.0),
-                ],
-                Stroke::new(1.6, bar_c),
-            );
+            p.line_segment([Pos2::new(pr.left() + 11.0 + dx, pr.center().y - 4.0), Pos2::new(pr.left() + 11.0 + dx, pr.center().y + 4.0)], Stroke::new(1.6, bar_c));
         }
     }
-    p.text(
-        Pos2::new(pr.left() + 19.0, pr.center().y),
-        Align2::LEFT_CENTER,
-        label,
-        font(11.0),
-        if paused { AMBER } else { TEXT_SOFT },
-    );
-    if presp
-        .on_hover_text(if paused {
-            "Start recording again"
-        } else {
-            "Stop recording for 15 minutes"
-        })
-        .clicked()
-    {
+    p.text(Pos2::new(pr.left() + 19.0, pr.center().y), Align2::LEFT_CENTER, label, font(11.0), if paused { AMBER } else { TEXT_SOFT });
+    if presp.on_hover_text(if paused { "Start recording again" } else { "Stop recording for 15 minutes" }).clicked() {
         c.toggle_pause(15);
     }
     y += 30.0;
@@ -407,35 +237,15 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let sr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 28.0));
     let sresp = row_hover(ui, sr, id.with("search"));
     p.rect_filled(sr, 7.0, white(if sresp.hovered() { 24 } else { 15 }));
-    icon(
-        &p,
-        Icon::Search,
-        Rect::from_center_size(
-            Pos2::new(sr.left() + 16.0, sr.center().y),
-            Vec2::splat(13.0),
-        ),
-        TEXT_FAINT,
-    );
+    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(sr.left() + 16.0, sr.center().y), Vec2::splat(13.0)), TEXT_FAINT);
     let n = c.store.entries.len();
     let hint = match c.pause_label() {
         Some(l) => l,
         None => format!("Search {n} item{}", if n == 1 { "" } else { "s" }),
     };
-    p.text(
-        Pos2::new(sr.left() + 30.0, sr.center().y),
-        Align2::LEFT_CENTER,
-        hint,
-        font(12.0),
-        if paused { AMBER } else { TEXT_FAINT },
-    );
+    p.text(Pos2::new(sr.left() + 30.0, sr.center().y), Align2::LEFT_CENTER, hint, font(12.0), if paused { AMBER } else { TEXT_FAINT });
     if let Some(s) = &c.settings.shortcut {
-        p.text(
-            Pos2::new(sr.right() - 10.0, sr.center().y),
-            Align2::RIGHT_CENTER,
-            s.display(),
-            font(11.0),
-            TEXT_FAINT,
-        );
+        p.text(Pos2::new(sr.right() - 10.0, sr.center().y), Align2::RIGHT_CENTER, s.display(), font(11.0), TEXT_FAINT);
     }
     if sresp.on_hover_text("Open quick paste").clicked() {
         cx.push(crate::core::tool::Action::HidePanel);
@@ -444,34 +254,16 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     y += 28.0 + 6.0;
 
     let fit = ((rect.bottom() - 6.0 - y) / 34.0).floor().max(1.0) as usize;
-    let ids: Vec<u64> = c
-        .visible(Filter::All, "")
-        .into_iter()
-        .take(fit.min(PANEL_ROWS))
-        .collect();
+    let ids: Vec<u64> = c.visible(Filter::All, "").into_iter().take(fit.min(PANEL_ROWS)).collect();
     if ids.is_empty() {
         let r = Rect::from_min_max(Pos2::new(x0, y + 4.0), Pos2::new(x1, rect.bottom() - 12.0));
         dashed_rect(&p, r, 8.0, white(40));
-        let msg = if paused {
-            "Recording is paused"
-        } else {
-            "Copy something and it shows up here"
-        };
-        text_fit(
-            &p,
-            r.center(),
-            Align2::CENTER_CENTER,
-            msg,
-            font(12.0),
-            TEXT_FAINT,
-            r.width() - 16.0,
-        );
+        let msg = if paused { "Recording is paused" } else { "Copy something and it shows up here" };
+        text_fit(&p, r.center(), Align2::CENTER_CENTER, msg, font(12.0), TEXT_FAINT, r.width() - 16.0);
         return;
     }
     for (k, eid) in ids.iter().enumerate() {
-        let Some(e) = c.store.get(*eid).cloned() else {
-            continue;
-        };
+        let Some(e) = c.store.get(*eid).cloned() else { continue };
         let r = Rect::from_min_size(Pos2::new(x0 - 6.0, y), Vec2::new(x1 - x0 + 12.0, 34.0));
         let resp = row_hover(ui, r, id.with(("row", e.id)));
         if resp.hovered() {
@@ -480,50 +272,16 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let th = Rect::from_min_size(Pos2::new(x0, r.center().y - 13.0), Vec2::splat(26.0));
         entry_thumb(c, &p, th, &e, 6.0);
         let key = format!("⌘{}", k + 1);
-        let kr = p.text(
-            Pos2::new(x1, r.center().y),
-            Align2::RIGHT_CENTER,
-            &key,
-            font(11.0),
-            TEXT_FAINT,
-        );
+        let kr = p.text(Pos2::new(x1, r.center().y), Align2::RIGHT_CENTER, &key, font(11.0), TEXT_FAINT);
         let mut right = kr.left() - 8.0;
         if e.pinned {
             pin_glyph(&p, Pos2::new(right - 6.0, r.center().y), TINT);
             right -= 18.0;
         }
         let tx = th.right() + 9.0;
-        let title_font = if e.kind == Kind::Code {
-            mono(11.5)
-        } else {
-            font(12.0)
-        };
-        text_fit(
-            &p,
-            Pos2::new(tx, r.center().y - 7.0),
-            Align2::LEFT_CENTER,
-            &e.title(),
-            title_font,
-            TEXT,
-            right - tx,
-        );
-        text_fit(
-            &p,
-            Pos2::new(tx, r.center().y + 8.0),
-            Align2::LEFT_CENTER,
-            &format!(
-                "{} · {}",
-                if e.app.is_empty() {
-                    "Unknown app"
-                } else {
-                    &e.app
-                },
-                ago(&e)
-            ),
-            font(11.0),
-            TEXT_FAINT,
-            right - tx,
-        );
+        let title_font = if e.kind == Kind::Code { mono(11.5) } else { font(12.0) };
+        text_fit(&p, Pos2::new(tx, r.center().y - 7.0), Align2::LEFT_CENTER, &e.title(), title_font, TEXT, right - tx);
+        text_fit(&p, Pos2::new(tx, r.center().y + 8.0), Align2::LEFT_CENTER, &format!("{} · {}", if e.app.is_empty() { "Unknown app" } else { &e.app }, ago(&e)), font(11.0), TEXT_FAINT, right - tx);
         if resp.on_hover_text("Click to copy").clicked() && c.copy(e.id, false) {
             cx.toast("Copied");
         }
@@ -534,15 +292,7 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
 /// A small push pin.
 pub fn pin_glyph(p: &egui::Painter, c: Pos2, col: Color32) {
     let s = Stroke::new(1.5, col);
-    let pts = vec![
-        c + Vec2::new(-3.0, -6.0),
-        c + Vec2::new(3.0, -6.0),
-        c + Vec2::new(2.0, -1.0),
-        c + Vec2::new(5.0, 2.0),
-        c + Vec2::new(-5.0, 2.0),
-        c + Vec2::new(-2.0, -1.0),
-        c + Vec2::new(-3.0, -6.0),
-    ];
+    let pts = vec![c + Vec2::new(-3.0, -6.0), c + Vec2::new(3.0, -6.0), c + Vec2::new(2.0, -1.0), c + Vec2::new(5.0, 2.0), c + Vec2::new(-5.0, 2.0), c + Vec2::new(-2.0, -1.0), c + Vec2::new(-3.0, -6.0)];
     p.add(egui::Shape::line(pts, s));
     p.line_segment([c + Vec2::new(0.0, 2.0), c + Vec2::new(0.0, 7.0)], s);
 }
@@ -554,44 +304,22 @@ pub fn page(c: &mut Clipboard, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let n = c.store.entries.len();
     let pinned = c.store.entries.iter().filter(|e| e.pinned).count();
     let (sub, sub_col) = match (c.tab, c.pause_label()) {
-        (Tab::Settings, _) => (
-            "History stays on this Mac. Nothing is sent anywhere.".to_string(),
-            TEXT_DIM,
-        ),
+        (Tab::Settings, _) => ("History stays on this Mac. Nothing is sent anywhere.".to_string(), TEXT_DIM),
         (_, Some(l)) => (format!("{l} · {n} items"), AMBER),
-        _ => (
-            format!(
-                "Recording · {n} item{} · {pinned} pinned · {}",
-                if n == 1 { "" } else { "s" },
-                human_bytes(c.store.bytes_on_disk())
-            ),
-            TEXT_DIM,
-        ),
+        _ => (format!("Recording · {n} item{} · {pinned} pinned · {}", if n == 1 { "" } else { "s" }, human_bytes(c.store.bytes_on_disk())), TEXT_DIM),
     };
     let btns = page_header(&p, r, "Clipboard", &sub, sub_col);
     let mut right = btns.right();
     let label = if c.paused() { "Resume" } else { "Pause 15 min" };
     let w = button_width(&p, label, BTN_SECONDARY);
-    let br = Rect::from_min_max(
-        Pos2::new(right - w, btns.top() - 1.0),
-        Pos2::new(right, btns.bottom() + 1.0),
-    );
+    let br = Rect::from_min_max(Pos2::new(right - w, btns.top() - 1.0), Pos2::new(right, btns.bottom() + 1.0));
     if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
         c.toggle_pause(15);
     }
     right = br.left() - 12.0;
-    let tr = Rect::from_min_max(
-        Pos2::new(right - 180.0, btns.top()),
-        Pos2::new(right, btns.bottom()),
-    );
+    let tr = Rect::from_min_max(Pos2::new(right - 180.0, btns.top()), Pos2::new(right, btns.bottom()));
     let cur = (c.tab == Tab::Settings) as usize;
-    if let Some(i) = segmented(
-        ui,
-        tr,
-        ui.scope_id().with("clip-tab"),
-        &["History", "Settings"],
-        cur,
-    ) {
+    if let Some(i) = segmented(ui, tr, ui.scope_id().with("clip-tab"), &["History", "Settings"], cur) {
         c.tab = if i == 1 { Tab::Settings } else { Tab::History };
         c.recording = false;
         c.apply_keys();
@@ -624,42 +352,14 @@ pub fn chips(ui: &mut Ui, p: &egui::Painter, x: f32, y: f32, cur: &mut Filter, s
         let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 26.0));
         let resp = ui.interact(r, ui.scope_id().with((salt, i)), Sense::click());
         let on = *cur == *f;
-        p.rect_filled(
-            r,
-            13.0,
-            if on {
-                with_alpha(BLUE, 0.22)
-            } else if resp.hovered() {
-                white(10)
-            } else {
-                Color32::TRANSPARENT
-            },
-        );
-        p.rect_stroke(
-            r,
-            13.0,
-            Stroke::new(
-                1.0,
-                if on {
-                    with_alpha(ACCENT, 0.45)
-                } else {
-                    white(26)
-                },
-            ),
-            StrokeKind::Inside,
-        );
+        p.rect_filled(r, 13.0, if on { with_alpha(BLUE, 0.22) } else if resp.hovered() { white(10) } else { Color32::TRANSPARENT });
+        p.rect_stroke(r, 13.0, Stroke::new(1.0, if on { with_alpha(ACCENT, 0.45) } else { white(26) }), StrokeKind::Inside);
         let mut tx = r.left() + 11.0;
         if let Filter::Kind(k) = f {
             p.circle_filled(Pos2::new(tx + 3.5, r.center().y), 3.5, k.tint());
             tx += 12.0;
         }
-        p.text(
-            Pos2::new(tx, r.center().y),
-            Align2::LEFT_CENTER,
-            *label,
-            font(12.0),
-            if on { TEXT } else { TEXT_DIM },
-        );
+        p.text(Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, *label, font(12.0), if on { TEXT } else { TEXT_DIM });
         if resp.clicked() {
             *cur = *f;
         }
@@ -693,30 +393,12 @@ fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     c.filter = f;
 
     // clear, with a second click to confirm
-    let confirming = c
-        .confirm_clear
-        .is_some_and(|t| t.elapsed().as_secs_f32() < 3.0);
-    let label = if confirming {
-        "Click again to clear"
-    } else {
-        "Clear unpinned"
-    };
+    let confirming = c.confirm_clear.is_some_and(|t| t.elapsed().as_secs_f32() < 3.0);
+    let label = if confirming { "Click again to clear" } else { "Clear unpinned" };
     let cw = button_width(&p, label, BTN_DANGER) - 10.0;
     let cr = Rect::from_min_max(Pos2::new(x1 - cw, fy), Pos2::new(x1, fy + 26.0));
     let unpinned = c.store.entries.iter().any(|e| !e.pinned);
-    if pill_button(
-        ui,
-        cr,
-        label,
-        if confirming {
-            BTN_DANGER
-        } else {
-            BTN_SECONDARY
-        },
-        unpinned,
-    )
-    .clicked()
-    {
+    if pill_button(ui, cr, label, if confirming { BTN_DANGER } else { BTN_SECONDARY }, unpinned).clicked() {
         if confirming {
             c.store.clear_unpinned();
             c.forget_dropped_thumbs();
@@ -727,19 +409,12 @@ fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
         }
     }
     if confirming {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(250));
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
     }
 
-    let area = Rect::from_min_max(
-        Pos2::new(x0, fy + 40.0),
-        Pos2::new(x1, body.bottom() - 20.0),
-    );
+    let area = Rect::from_min_max(Pos2::new(x0, fy + 40.0), Pos2::new(x1, body.bottom() - 20.0));
     let detail_w = 320.0;
-    let list = Rect::from_min_max(
-        area.min,
-        Pos2::new(area.right() - detail_w - 16.0, area.bottom()),
-    );
+    let list = Rect::from_min_max(area.min, Pos2::new(area.right() - detail_w - 16.0, area.bottom()));
     let aside = Rect::from_min_max(Pos2::new(list.right() + 16.0, area.top()), area.max);
     let ids = c.visible(c.filter, &c.search);
     if c.selected.is_none_or(|s| !ids.contains(&s)) {
@@ -747,30 +422,10 @@ fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     }
     glass_card(&p, list, R_CARD, 0.0, false);
     if ids.is_empty() {
-        let msg = if c.store.entries.is_empty() {
-            "Nothing copied yet"
-        } else {
-            "Nothing matches"
-        };
-        p.text(
-            list.center() - Vec2::new(0.0, 12.0),
-            Align2::CENTER_CENTER,
-            msg,
-            bold(15.0),
-            TEXT_SOFT,
-        );
-        let hint = if c.store.entries.is_empty() {
-            "Copy anything in any app. It lands here."
-        } else {
-            "Try another filter or search."
-        };
-        p.text(
-            list.center() + Vec2::new(0.0, 12.0),
-            Align2::CENTER_CENTER,
-            hint,
-            font(13.0),
-            TEXT_DIM,
-        );
+        let msg = if c.store.entries.is_empty() { "Nothing copied yet" } else { "Nothing matches" };
+        p.text(list.center() - Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT);
+        let hint = if c.store.entries.is_empty() { "Copy anything in any app. It lands here." } else { "Try another filter or search." };
+        p.text(list.center() + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM);
     } else {
         list_rows(c, ui, list, &ids);
     }
@@ -790,136 +445,66 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
     let mut last: Option<String> = None;
     for id in ids {
         let Some(e) = c.store.get(*id) else { continue };
-        let head = if e.pinned {
-            "PINNED".to_string()
-        } else {
-            day_label(e.time().date_naive())
-        };
+        let head = if e.pinned { "PINNED".to_string() } else { day_label(e.time().date_naive()) };
         if last.as_ref() != Some(&head) {
             rows.push(Row::Head(head.clone()));
             last = Some(head);
         }
         rows.push(Row::Item(*id));
     }
-    let h: f32 = rows
-        .iter()
-        .map(|r| {
-            if matches!(r, Row::Head(_)) {
-                28.0
-            } else {
-                ROW_H
-            }
-        })
-        .sum::<f32>()
-        + 8.0;
+    let h: f32 = rows.iter().map(|r| if matches!(r, Row::Head(_)) { 28.0 } else { ROW_H }).sum::<f32>() + 8.0;
     let mut child = ui.new_child(UiBuilder::new().max_rect(list.shrink2(Vec2::new(0.0, 4.0))));
-    ScrollArea::vertical()
-        .id_salt("clip-list")
-        .auto_shrink([false, false])
-        .show(&mut child, |ui| {
-            let (area, _) = ui.allocate_exact_size(Vec2::new(list.width(), h), Sense::hover());
-            let p = ui.painter().clone();
-            let mut y = area.top();
-            for row in &rows {
-                match row {
-                    Row::Head(t) => {
-                        p.text(
-                            Pos2::new(area.left() + 14.0, y + 18.0),
-                            Align2::LEFT_CENTER,
-                            t,
-                            bold(11.0),
-                            TEXT_FAINT,
-                        );
-                        y += 28.0;
-                    }
-                    Row::Item(id) => {
-                        let r = Rect::from_min_size(
-                            Pos2::new(area.left() + 4.0, y),
-                            Vec2::new(area.width() - 8.0, ROW_H),
-                        );
-                        // up to a thousand rows: only those in view are drawn
-                        if !ui.is_rect_visible(r) {
-                            y += ROW_H;
-                            continue;
-                        }
-                        let Some(e) = c.store.get(*id).cloned() else {
-                            continue;
-                        };
-                        let resp =
-                            ui.interact(r, ui.scope_id().with(("clip-row", e.id)), Sense::click());
-                        let sel = c.selected == Some(e.id);
-                        if sel {
-                            p.rect_filled(r, 7.0, with_alpha(BLUE, 0.30));
-                            p.rect_stroke(
-                                r,
-                                7.0,
-                                Stroke::new(1.0, with_alpha(ACCENT, 0.55)),
-                                StrokeKind::Inside,
-                            );
-                        } else if resp.hovered() {
-                            p.rect_filled(r, 7.0, white(10));
-                        }
-                        let th = Rect::from_min_size(
-                            Pos2::new(r.left() + 10.0, r.center().y - 12.0),
-                            Vec2::splat(24.0),
-                        );
-                        entry_thumb(c, &p, th, &e, 6.0);
-                        let tr = p.text(
-                            Pos2::new(r.right() - 10.0, r.center().y),
-                            Align2::RIGHT_CENTER,
-                            e.time().format("%-I:%M %P").to_string(),
-                            font(12.0),
-                            TEXT_FAINT,
-                        );
-                        let ax = tr.left() - 110.0;
-                        p.rect_filled(
-                            Rect::from_center_size(
-                                Pos2::new(ax + 6.0, r.center().y),
-                                Vec2::splat(12.0),
-                            ),
-                            3.0,
-                            app_color(&e.app),
-                        );
-                        text_fit(
-                            &p,
-                            Pos2::new(ax + 18.0, r.center().y),
-                            Align2::LEFT_CENTER,
-                            &e.app,
-                            font(12.0),
-                            TEXT_DIM,
-                            86.0,
-                        );
-                        let mut right = ax - 10.0;
-                        if e.pinned {
-                            pin_glyph(&p, Pos2::new(right - 6.0, r.center().y), TINT);
-                            right -= 18.0;
-                        }
-                        let tx = th.right() + 10.0;
-                        let f = if e.kind == Kind::Code {
-                            mono(12.0)
-                        } else {
-                            font(13.0)
-                        };
-                        text_fit(
-                            &p,
-                            Pos2::new(tx, r.center().y),
-                            Align2::LEFT_CENTER,
-                            &e.title(),
-                            f,
-                            TEXT,
-                            right - tx,
-                        );
-                        if resp.clicked() {
-                            c.selected = Some(e.id);
-                        }
-                        if resp.double_clicked() && c.copy(e.id, false) {
-                            c.hud("Copied");
-                        }
+    ScrollArea::vertical().id_salt("clip-list").auto_shrink([false, false]).show(&mut child, |ui| {
+        let (area, _) = ui.allocate_exact_size(Vec2::new(list.width(), h), Sense::hover());
+        let p = ui.painter().clone();
+        let mut y = area.top();
+        for row in &rows {
+            match row {
+                Row::Head(t) => {
+                    p.text(Pos2::new(area.left() + 14.0, y + 18.0), Align2::LEFT_CENTER, t, bold(11.0), TEXT_FAINT);
+                    y += 28.0;
+                }
+                Row::Item(id) => {
+                    let r = Rect::from_min_size(Pos2::new(area.left() + 4.0, y), Vec2::new(area.width() - 8.0, ROW_H));
+                    // up to a thousand rows: only those in view are drawn
+                    if !ui.is_rect_visible(r) {
                         y += ROW_H;
+                        continue;
                     }
+                    let Some(e) = c.store.get(*id).cloned() else { continue };
+                    let resp = ui.interact(r, ui.scope_id().with(("clip-row", e.id)), Sense::click());
+                    let sel = c.selected == Some(e.id);
+                    if sel {
+                        p.rect_filled(r, 7.0, with_alpha(BLUE, 0.30));
+                        p.rect_stroke(r, 7.0, Stroke::new(1.0, with_alpha(ACCENT, 0.55)), StrokeKind::Inside);
+                    } else if resp.hovered() {
+                        p.rect_filled(r, 7.0, white(10));
+                    }
+                    let th = Rect::from_min_size(Pos2::new(r.left() + 10.0, r.center().y - 12.0), Vec2::splat(24.0));
+                    entry_thumb(c, &p, th, &e, 6.0);
+                    let tr = p.text(Pos2::new(r.right() - 10.0, r.center().y), Align2::RIGHT_CENTER, e.time().format("%-I:%M %P").to_string(), font(12.0), TEXT_FAINT);
+                    let ax = tr.left() - 110.0;
+                    p.rect_filled(Rect::from_center_size(Pos2::new(ax + 6.0, r.center().y), Vec2::splat(12.0)), 3.0, app_color(&e.app));
+                    text_fit(&p, Pos2::new(ax + 18.0, r.center().y), Align2::LEFT_CENTER, &e.app, font(12.0), TEXT_DIM, 86.0);
+                    let mut right = ax - 10.0;
+                    if e.pinned {
+                        pin_glyph(&p, Pos2::new(right - 6.0, r.center().y), TINT);
+                        right -= 18.0;
+                    }
+                    let tx = th.right() + 10.0;
+                    let f = if e.kind == Kind::Code { mono(12.0) } else { font(13.0) };
+                    text_fit(&p, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, &e.title(), f, TEXT, right - tx);
+                    if resp.clicked() {
+                        c.selected = Some(e.id);
+                    }
+                    if resp.double_clicked() && c.copy(e.id, false) {
+                        c.hud("Copied");
+                    }
+                    y += ROW_H;
                 }
             }
-        });
+        }
+    });
 }
 
 /// The selected entry: a big preview, facts and actions.
@@ -929,80 +514,27 @@ fn detail(c: &mut Clipboard, ui: &mut Ui, r: Rect, e: &Entry) {
     let x1 = r.right() - 14.0;
     let mut y = r.top() + 14.0;
     p.circle_filled(Pos2::new(x0 + 4.0, y + 8.0), 4.0, e.kind.tint());
-    p.text(
-        Pos2::new(x0 + 14.0, y + 8.0),
-        Align2::LEFT_CENTER,
-        e.kind.label(),
-        bold(13.0),
-        TEXT,
-    );
-    p.text(
-        Pos2::new(x1, y + 8.0),
-        Align2::RIGHT_CENTER,
-        e.time().format("%b %-d, %-I:%M %P").to_string(),
-        font(12.0),
-        TEXT_FAINT,
-    );
+    p.text(Pos2::new(x0 + 14.0, y + 8.0), Align2::LEFT_CENTER, e.kind.label(), bold(13.0), TEXT);
+    p.text(Pos2::new(x1, y + 8.0), Align2::RIGHT_CENTER, e.time().format("%b %-d, %-I:%M %P").to_string(), font(12.0), TEXT_FAINT);
     y += 26.0;
     let pv = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 200.0));
     preview(c, ui, &p, pv, e, 10.0);
     y = pv.bottom() + 14.0;
     let facts = [
-        (
-            "From",
-            if e.app.is_empty() {
-                "Unknown app".to_string()
-            } else {
-                e.app.clone()
-            },
-        ),
-        (
-            "Copied",
-            if e.count > 1 {
-                format!("{} times", e.count)
-            } else {
-                "once".into()
-            },
-        ),
+        ("From", if e.app.is_empty() { "Unknown app".to_string() } else { e.app.clone() }),
+        ("Copied", if e.count > 1 { format!("{} times", e.count) } else { "once".into() }),
         ("Content", e.summary()),
     ];
     for (k, v) in facts {
-        p.text(
-            Pos2::new(x0, y + 8.0),
-            Align2::LEFT_CENTER,
-            k,
-            font(12.0),
-            TEXT_FAINT,
-        );
-        text_fit(
-            &p,
-            Pos2::new(x0 + 70.0, y + 8.0),
-            Align2::LEFT_CENTER,
-            &v,
-            font(12.0),
-            TEXT,
-            x1 - x0 - 70.0,
-        );
+        p.text(Pos2::new(x0, y + 8.0), Align2::LEFT_CENTER, k, font(12.0), TEXT_FAINT);
+        text_fit(&p, Pos2::new(x0 + 70.0, y + 8.0), Align2::LEFT_CENTER, &v, font(12.0), TEXT, x1 - x0 - 70.0);
         y += 22.0;
     }
     // actions, bottom up
     let bw = (x1 - x0 - 6.0) / 2.0;
-    let del = Rect::from_min_max(
-        Pos2::new(x0, r.bottom() - 40.0),
-        Pos2::new(x1, r.bottom() - 12.0),
-    );
+    let del = Rect::from_min_max(Pos2::new(x0, r.bottom() - 40.0), Pos2::new(x1, r.bottom() - 12.0));
     let dresp = ui.interact(del, ui.scope_id().with(("del", e.id)), Sense::click());
-    p.text(
-        del.center(),
-        Align2::CENTER_CENTER,
-        "Delete from history",
-        font(12.0),
-        if dresp.hovered() {
-            Color32::from_rgb(0xFF, 0x8A, 0x80)
-        } else {
-            Color32::from_rgb(0xFF, 0x69, 0x61)
-        },
-    );
+    p.text(del.center(), Align2::CENTER_CENTER, "Delete from history", font(12.0), if dresp.hovered() { Color32::from_rgb(0xFF, 0x8A, 0x80) } else { Color32::from_rgb(0xFF, 0x69, 0x61) });
     if dresp.clicked() {
         c.store.remove(e.id);
         c.forget_dropped_thumbs();
@@ -1011,27 +543,12 @@ fn detail(c: &mut Clipboard, ui: &mut Ui, r: Rect, e: &Entry) {
     }
     let row2 = del.top() - 8.0 - 30.0;
     let row1 = row2 - 6.0 - 30.0;
-    let b = |k: usize, top: f32| {
-        Rect::from_min_size(
-            Pos2::new(x0 + k as f32 * (bw + 6.0), top),
-            Vec2::new(bw, 30.0),
-        )
-    };
+    let b = |k: usize, top: f32| Rect::from_min_size(Pos2::new(x0 + k as f32 * (bw + 6.0), top), Vec2::new(bw, 30.0));
     if pill_button(ui, b(0, row1), "Copy", BTN_PRIMARY, true).clicked() && c.copy(e.id, false) {
         c.hud("Copied");
     }
-    let plain_ok = matches!(e.kind, Kind::Text | Kind::Code | Kind::Link) && (e.rtf || e.html)
-        || e.kind == Kind::File;
-    if pill_button(
-        ui,
-        b(1, row1),
-        "Copy as plain text",
-        BTN_SECONDARY,
-        plain_ok,
-    )
-    .clicked()
-        && c.copy(e.id, true)
-    {
+    let plain_ok = matches!(e.kind, Kind::Text | Kind::Code | Kind::Link) && (e.rtf || e.html) || e.kind == Kind::File;
+    if pill_button(ui, b(1, row1), "Copy as plain text", BTN_SECONDARY, plain_ok).clicked() && c.copy(e.id, true) {
         c.hud("Copied as plain text");
     }
     let open = match e.kind {
@@ -1044,16 +561,9 @@ fn detail(c: &mut Clipboard, ui: &mut Ui, r: Rect, e: &Entry) {
             if pill_button(ui, b(0, row2), l, BTN_SECONDARY, true).clicked() {
                 let arg = if e.kind == Kind::Link {
                     let t = e.text.trim();
-                    if t.starts_with("http") {
-                        t.to_string()
-                    } else {
-                        format!("https://{t}")
-                    }
+                    if t.starts_with("http") { t.to_string() } else { format!("https://{t}") }
                 } else {
-                    e.files()
-                        .first()
-                        .map(|f| f.display().to_string())
-                        .unwrap_or_default()
+                    e.files().first().map(|f| f.display().to_string()).unwrap_or_default()
                 };
                 let mut cmd = std::process::Command::new("open");
                 if e.kind == Kind::File {
@@ -1066,35 +576,15 @@ fn detail(c: &mut Clipboard, ui: &mut Ui, r: Rect, e: &Entry) {
             pill_button(ui, b(0, row2), "Open", BTN_SECONDARY, false);
         }
     }
-    if pill_button(
-        ui,
-        b(1, row2),
-        if e.pinned { "Unpin" } else { "Pin" },
-        BTN_SECONDARY,
-        true,
-    )
-    .clicked()
-    {
+    if pill_button(ui, b(1, row2), if e.pinned { "Unpin" } else { "Pin" }, BTN_SECONDARY, true).clicked() {
         c.store.set_pinned(e.id, !e.pinned);
     }
 }
 
 /// The entry's content, as large as `r` allows.
-pub fn preview(
-    c: &mut Clipboard,
-    _ui: &mut Ui,
-    p: &egui::Painter,
-    r: Rect,
-    e: &Entry,
-    radius: f32,
-) {
+pub fn preview(c: &mut Clipboard, _ui: &mut Ui, p: &egui::Painter, r: Rect, e: &Entry, radius: f32) {
     p.rect_filled(r, radius, Color32::from_rgb(0x14, 0x14, 0x16));
-    p.rect_stroke(
-        r,
-        radius,
-        Stroke::new(1.0, white(HAIRLINE)),
-        StrokeKind::Inside,
-    );
+    p.rect_stroke(r, radius, Stroke::new(1.0, white(HAIRLINE)), StrokeKind::Inside);
     let inner = r.shrink(12.0);
     let clip = p.with_clip_rect(r.shrink(1.0));
     match e.kind {
@@ -1106,176 +596,54 @@ pub fn preview(
                 let ir = Rect::from_center_size(r.center(), Vec2::new(iw * k, ih * k));
                 cover_image(&clip, ir, t, (e.w, e.h), radius);
             }
-            None => kind_glyph(
-                &clip,
-                Kind::Image,
-                Rect::from_center_size(r.center(), Vec2::splat(48.0)),
-                TEXT_FAINT,
-                None,
-            ),
+            None => kind_glyph(&clip, Kind::Image, Rect::from_center_size(r.center(), Vec2::splat(48.0)), TEXT_FAINT, None),
         },
         Kind::Color => {
             let col = parse_color(&e.text).unwrap_or(GRAY);
             let sw = Rect::from_min_max(r.min, Pos2::new(r.right(), r.bottom() - 54.0));
-            clip.rect_filled(
-                sw,
-                egui::CornerRadius {
-                    nw: radius as u8,
-                    ne: radius as u8,
-                    sw: 0,
-                    se: 0,
-                },
-                col,
-            );
-            let txt = if col.r() as u32 + col.g() as u32 + col.b() as u32 > 420 {
-                Color32::from_rgb(20, 20, 22)
-            } else {
-                Color32::WHITE
-            };
-            clip.text(
-                Pos2::new(sw.left() + 14.0, sw.bottom() - 14.0),
-                Align2::LEFT_BOTTOM,
-                e.text.trim(),
-                mono(20.0),
-                txt,
-            );
+            clip.rect_filled(sw, egui::CornerRadius { nw: radius as u8, ne: radius as u8, sw: 0, se: 0 }, col);
+            let txt = if col.r() as u32 + col.g() as u32 + col.b() as u32 > 420 { Color32::from_rgb(20, 20, 22) } else { Color32::WHITE };
+            clip.text(Pos2::new(sw.left() + 14.0, sw.bottom() - 14.0), Align2::LEFT_BOTTOM, e.text.trim(), mono(20.0), txt);
             let (h, s, l) = hsl(col);
-            clip.text(
-                Pos2::new(inner.left(), sw.bottom() + 14.0),
-                Align2::LEFT_TOP,
-                format!("rgb({}, {}, {})", col.r(), col.g(), col.b()),
-                mono(11.0),
-                TEXT_DIM,
-            );
-            clip.text(
-                Pos2::new(inner.left(), sw.bottom() + 30.0),
-                Align2::LEFT_TOP,
-                format!("hsl({h:.0}°, {s:.0}%, {l:.0}%)"),
-                mono(11.0),
-                TEXT_DIM,
-            );
+            clip.text(Pos2::new(inner.left(), sw.bottom() + 14.0), Align2::LEFT_TOP, format!("rgb({}, {}, {})", col.r(), col.g(), col.b()), mono(11.0), TEXT_DIM);
+            clip.text(Pos2::new(inner.left(), sw.bottom() + 30.0), Align2::LEFT_TOP, format!("hsl({h:.0}°, {s:.0}%, {l:.0}%)"), mono(11.0), TEXT_DIM);
         }
         Kind::Link => {
             let t = e.text.trim();
-            let host = t
-                .trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .split('/')
-                .next()
-                .unwrap_or(t)
-                .to_string();
+            let host = t.trim_start_matches("https://").trim_start_matches("http://").split('/').next().unwrap_or(t).to_string();
             let band = Rect::from_min_max(r.min, Pos2::new(r.right(), r.top() + r.height() * 0.48));
-            clip.rect_filled(
-                band,
-                egui::CornerRadius {
-                    nw: radius as u8,
-                    ne: radius as u8,
-                    sw: 0,
-                    se: 0,
-                },
-                Color32::from_rgb(0x1D, 0x2A, 0x3D),
-            );
-            let letter = host
-                .trim_start_matches("www.")
-                .chars()
-                .next()
-                .map(|c| c.to_ascii_uppercase().to_string())
-                .unwrap_or_default();
+            clip.rect_filled(band, egui::CornerRadius { nw: radius as u8, ne: radius as u8, sw: 0, se: 0 }, Color32::from_rgb(0x1D, 0x2A, 0x3D));
+            let letter = host.trim_start_matches("www.").chars().next().map(|c| c.to_ascii_uppercase().to_string()).unwrap_or_default();
             let chip = Rect::from_center_size(band.center(), Vec2::splat(44.0));
             clip.rect_filled(chip, 12.0, app_color(&host));
-            clip.text(
-                chip.center(),
-                Align2::CENTER_CENTER,
-                letter,
-                bold(22.0),
-                Color32::WHITE,
-            );
-            text_fit(
-                &clip,
-                Pos2::new(inner.left(), band.bottom() + 12.0),
-                Align2::LEFT_TOP,
-                &host,
-                bold(14.0),
-                TEXT,
-                inner.width(),
-            );
-            paragraph(
-                &clip,
-                Pos2::new(inner.left(), band.bottom() + 34.0),
-                t,
-                font(12.0),
-                ACCENT,
-                inner.width(),
-            );
+            clip.text(chip.center(), Align2::CENTER_CENTER, letter, bold(22.0), Color32::WHITE);
+            text_fit(&clip, Pos2::new(inner.left(), band.bottom() + 12.0), Align2::LEFT_TOP, &host, bold(14.0), TEXT, inner.width());
+            paragraph(&clip, Pos2::new(inner.left(), band.bottom() + 34.0), t, font(12.0), ACCENT, inner.width());
         }
         Kind::File => {
             let mut y = inner.top();
             for f in e.files().iter().take(6) {
-                kind_glyph(
-                    &clip,
-                    Kind::File,
-                    Rect::from_min_size(Pos2::new(inner.left(), y), Vec2::splat(18.0)),
-                    TINT,
-                    None,
-                );
-                let name = f
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                text_fit(
-                    &clip,
-                    Pos2::new(inner.left() + 26.0, y + 1.0),
-                    Align2::LEFT_TOP,
-                    &name,
-                    bold(13.0),
-                    TEXT,
-                    inner.width() - 26.0,
-                );
-                let dir = f
-                    .parent()
-                    .map(|d| d.display().to_string())
-                    .unwrap_or_default();
-                text_fit(
-                    &clip,
-                    Pos2::new(inner.left() + 26.0, y + 18.0),
-                    Align2::LEFT_TOP,
-                    &middle_ellipsis(&dir, 46),
-                    font(11.0),
-                    TEXT_FAINT,
-                    inner.width() - 26.0,
-                );
+                kind_glyph(&clip, Kind::File, Rect::from_min_size(Pos2::new(inner.left(), y), Vec2::splat(18.0)), TINT, None);
+                let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                text_fit(&clip, Pos2::new(inner.left() + 26.0, y + 1.0), Align2::LEFT_TOP, &name, bold(13.0), TEXT, inner.width() - 26.0);
+                let dir = f.parent().map(|d| d.display().to_string()).unwrap_or_default();
+                text_fit(&clip, Pos2::new(inner.left() + 26.0, y + 18.0), Align2::LEFT_TOP, &middle_ellipsis(&dir, 46), font(11.0), TEXT_FAINT, inner.width() - 26.0);
                 y += 38.0;
             }
         }
         Kind::Code => {
-            let g = clip.layout(
-                e.text.clone(),
-                mono(12.0),
-                Color32::from_rgb(0xE5, 0xE5, 0xEA),
-                inner.width(),
-            );
+            let g = clip.layout(e.text.clone(), mono(12.0), Color32::from_rgb(0xE5, 0xE5, 0xEA), inner.width());
             clip.galley(inner.min, g, TEXT);
         }
         Kind::Text => {
-            paragraph(
-                &clip,
-                inner.min,
-                &e.text,
-                font(13.0),
-                Color32::from_rgb(0xE5, 0xE5, 0xEA),
-                inner.width(),
-            );
+            paragraph(&clip, inner.min, &e.text, font(13.0), Color32::from_rgb(0xE5, 0xE5, 0xEA), inner.width());
         }
     }
 }
 
 /// Hue (degrees), saturation and lightness (percent) of a color.
 pub fn hsl(c: Color32) -> (f32, f32, f32) {
-    let (r, g, b) = (
-        c.r() as f32 / 255.0,
-        c.g() as f32 / 255.0,
-        c.b() as f32 / 255.0,
-    );
+    let (r, g, b) = (c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0);
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
     let l = (max + min) / 2.0;
@@ -1301,13 +669,7 @@ fn card_rows(p: &egui::Painter, x: f32, y: f32, w: f32, rows: usize) -> Rect {
     glass_card(p, r, R_CARD, 0.0, false);
     for k in 1..rows {
         let ly = r.top() + 4.0 + k as f32 * ROW_H;
-        p.line_segment(
-            [
-                Pos2::new(r.left() + 12.0, ly),
-                Pos2::new(r.right() - 12.0, ly),
-            ],
-            Stroke::new(1.0, white(13)),
-        );
+        p.line_segment([Pos2::new(r.left() + 12.0, ly), Pos2::new(r.right() - 12.0, ly)], Stroke::new(1.0, white(13)));
     }
     r
 }
@@ -1319,39 +681,20 @@ fn row_y(card: Rect, k: usize) -> f32 {
 fn settings_page(c: &mut Clipboard, ui: &mut Ui, body: Rect, cx: &mut Cx) {
     record_key(c, ui, cx);
     let mut child = ui.new_child(UiBuilder::new().max_rect(body));
-    ScrollArea::vertical()
-        .id_salt("clip-settings")
-        .auto_shrink([false, false])
-        .show(&mut child, |ui| {
-            let rows = c.settings.ignore.len().max(1);
-            let h = (500.0f32).max(330.0 + rows as f32 * ROW_H + 120.0);
-            let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h), Sense::hover());
-            let p = ui.painter().clone();
-            let gap = 20.0;
-            let x0 = area.left() + 24.0;
-            let colw = (area.width() - 48.0 - gap) / 2.0;
-            let changed_l = left_col(
-                c,
-                ui,
-                &p,
-                Rect::from_min_size(
-                    Pos2::new(x0, area.top() + 16.0),
-                    Vec2::new(colw, area.height()),
-                ),
-            );
-            let changed_r = right_col(
-                c,
-                ui,
-                &p,
-                Rect::from_min_size(
-                    Pos2::new(x0 + colw + gap, area.top() + 16.0),
-                    Vec2::new(colw, area.height()),
-                ),
-            );
-            if changed_l || changed_r {
-                c.save_settings();
-            }
-        });
+    ScrollArea::vertical().id_salt("clip-settings").auto_shrink([false, false]).show(&mut child, |ui| {
+        let rows = c.settings.ignore.len().max(1);
+        let h = (500.0f32).max(330.0 + rows as f32 * ROW_H + 120.0);
+        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h), Sense::hover());
+        let p = ui.painter().clone();
+        let gap = 20.0;
+        let x0 = area.left() + 24.0;
+        let colw = (area.width() - 48.0 - gap) / 2.0;
+        let changed_l = left_col(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())));
+        let changed_r = right_col(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())));
+        if changed_l || changed_r {
+            c.save_settings();
+        }
+    });
 }
 
 /// While recording: the next key press with a modifier becomes the shortcut.
@@ -1363,15 +706,8 @@ fn record_key(c: &mut Clipboard, ui: &mut Ui, cx: &mut Cx) {
     let mut cancel = false;
     ui.input(|i| {
         for e in &i.events {
-            if let egui::Event::Key {
-                key,
-                pressed: true,
-                modifiers,
-                ..
-            } = e
-            {
-                let plain =
-                    !modifiers.command && !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd;
+            if let egui::Event::Key { key, pressed: true, modifiers, .. } = e {
+                let plain = !modifiers.command && !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd;
                 if *key == egui::Key::Escape && plain {
                     cancel = true;
                 } else if (*key == egui::Key::Backspace || *key == egui::Key::Delete) && plain {
@@ -1389,10 +725,7 @@ fn record_key(c: &mut Clipboard, ui: &mut Ui, cx: &mut Cx) {
     }
     if let Some(s) = result {
         if let Some(w) = s.as_ref().and_then(|s| s.conflict()) {
-            cx.toast(format!(
-                "{}: {w}",
-                s.as_ref().map(|s| s.display()).unwrap_or_default()
-            ));
+            cx.toast(format!("{}: {w}", s.as_ref().map(|s| s.display()).unwrap_or_default()));
         }
         c.settings.shortcut = s;
         c.recording = false;
@@ -1403,13 +736,7 @@ fn record_key(c: &mut Clipboard, ui: &mut Ui, cx: &mut Cx) {
 }
 
 fn label(p: &egui::Painter, card: Rect, k: usize, text: &str) {
-    p.text(
-        Pos2::new(card.left() + 12.0, row_y(card, k)),
-        Align2::LEFT_CENTER,
-        text,
-        font(13.0),
-        TEXT,
-    );
+    p.text(Pos2::new(card.left() + 12.0, row_y(card, k)), Align2::LEFT_CENTER, text, font(13.0), TEXT);
 }
 
 fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bool {
@@ -1419,32 +746,17 @@ fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     let mut changed = false;
     let mut y = col.top();
 
-    p.text(
-        Pos2::new(x0, y),
-        Align2::LEFT_TOP,
-        "Quick paste",
-        bold(15.0),
-        TEXT,
-    );
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Quick paste", bold(15.0), TEXT);
     let card = card_rows(p, x0, y + 28.0, w, 3);
     // shortcut
     label(p, card, 0, "Shortcut");
     let ry = row_y(card, 0);
     let rec = c.recording;
     let cur = c.settings.shortcut.clone();
-    let text = if rec {
-        "Type a shortcut…".to_string()
-    } else {
-        cur.as_ref()
-            .map(|s| s.display())
-            .unwrap_or_else(|| "Record".into())
-    };
+    let text = if rec { "Type a shortcut…".to_string() } else { cur.as_ref().map(|s| s.display()).unwrap_or_else(|| "Record".into()) };
     let g = p.layout_no_wrap(text.clone(), font(12.0), TEXT);
     let bw = (g.size().x + 20.0).max(76.0);
-    let br = Rect::from_min_max(
-        Pos2::new(card.right() - 12.0 - bw, ry - 12.0),
-        Pos2::new(card.right() - 12.0, ry + 12.0),
-    );
+    let br = Rect::from_min_max(Pos2::new(card.right() - 12.0 - bw, ry - 12.0), Pos2::new(card.right() - 12.0, ry + 12.0));
     let resp = ui.interact(br, id.with("key"), Sense::click());
     if rec {
         p.rect_filled(br, 6.0, with_alpha(BLUE, 0.22));
@@ -1455,21 +767,8 @@ fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     } else {
         dashed_rect(p, br, 6.0, white(60));
     }
-    p.text(
-        br.center(),
-        Align2::CENTER_CENTER,
-        text,
-        font(12.0),
-        if cur.is_some() || rec {
-            TEXT
-        } else {
-            TEXT_FAINT
-        },
-    );
-    if resp
-        .on_hover_text("Click, then press the keys. Esc cancels, ⌫ removes it.")
-        .clicked()
-    {
+    p.text(br.center(), Align2::CENTER_CENTER, text, font(12.0), if cur.is_some() || rec { TEXT } else { TEXT_FAINT });
+    if resp.on_hover_text("Click, then press the keys. Esc cancels, ⌫ removes it.").clicked() {
         c.recording = !rec;
         if c.recording {
             if let Some(k) = &mut c.keys {
@@ -1480,30 +779,13 @@ fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
         }
     }
     if let Some(err) = &c.key_error {
-        text_fit(
-            p,
-            Pos2::new(card.left() + 80.0, ry),
-            Align2::LEFT_CENTER,
-            err,
-            font(11.0),
-            AMBER,
-            br.left() - card.left() - 90.0,
-        );
+        text_fit(p, Pos2::new(card.left() + 80.0, ry), Align2::LEFT_CENTER, err, font(11.0), AMBER, br.left() - card.left() - 90.0);
     }
     // layout
     label(p, card, 1, "Layout");
     let ry = row_y(card, 1);
-    let sr = Rect::from_min_max(
-        Pos2::new(card.right() - 12.0 - 130.0, ry - 13.0),
-        Pos2::new(card.right() - 12.0, ry + 13.0),
-    );
-    if let Some(i) = segmented(
-        ui,
-        sr,
-        id.with("layout"),
-        &["Cards", "List"],
-        (c.settings.layout == Layout::List) as usize,
-    ) {
+    let sr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 130.0, ry - 13.0), Pos2::new(card.right() - 12.0, ry + 13.0));
+    if let Some(i) = segmented(ui, sr, id.with("layout"), &["Cards", "List"], (c.settings.layout == Layout::List) as usize) {
         c.settings.layout = if i == 1 { Layout::List } else { Layout::Cards };
         changed = true;
     }
@@ -1511,37 +793,19 @@ fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     label(p, card, 2, "Paste right away");
     let ry = row_y(card, 2);
     let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, ry), Vec2::new(30.0, 18.0));
-    p.text(
-        Pos2::new(sw.left() - 10.0, ry),
-        Align2::RIGHT_CENTER,
-        "off: only copies",
-        font(12.0),
-        TEXT_FAINT,
-    );
+    p.text(Pos2::new(sw.left() - 10.0, ry), Align2::RIGHT_CENTER, "off: only copies", font(12.0), TEXT_FAINT);
     if switch(ui, sw, id.with("paste"), c.settings.paste_now, true).clicked() {
         c.settings.paste_now = !c.settings.paste_now;
         changed = true;
     }
     y = card.bottom() + 16.0;
 
-    p.text(
-        Pos2::new(x0, y),
-        Align2::LEFT_TOP,
-        "History",
-        bold(15.0),
-        TEXT,
-    );
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "History", bold(15.0), TEXT);
     let card = card_rows(p, x0, y + 28.0, w, 5);
     // keep N
     label(p, card, 0, "Keep the last");
     let ry = row_y(card, 0);
-    let unit = p.text(
-        Pos2::new(card.right() - 12.0, ry),
-        Align2::RIGHT_CENTER,
-        "items",
-        font(12.0),
-        TEXT_FAINT,
-    );
+    let unit = p.text(Pos2::new(card.right() - 12.0, ry), Align2::RIGHT_CENTER, "items", font(12.0), TEXT_FAINT);
     let plus = Rect::from_center_size(Pos2::new(unit.left() - 20.0, ry), Vec2::new(24.0, 24.0));
     let num = Rect::from_center_size(Pos2::new(plus.left() - 22.0, ry), Vec2::new(44.0, 24.0));
     let minus = Rect::from_center_size(Pos2::new(num.left() - 12.0, ry), Vec2::new(24.0, 24.0));
@@ -1550,60 +814,28 @@ fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
         p.rect_filled(r, 6.0, white(if resp.hovered() { 34 } else { 20 }));
         p.text(r.center(), Align2::CENTER_CENTER, s, bold(14.0), TEXT);
         if resp.clicked() {
-            let step = if c.settings.keep <= 50 && delta < 0 || c.settings.keep < 50 {
-                delta.signum() * 10
-            } else {
-                delta
-            };
-            c.settings.keep =
-                (c.settings.keep as i64 + step).clamp(KEEP_MIN as i64, KEEP_MAX as i64) as usize;
+            let step = if c.settings.keep <= 50 && delta < 0 || c.settings.keep < 50 { delta.signum() * 10 } else { delta };
+            c.settings.keep = (c.settings.keep as i64 + step).clamp(KEEP_MIN as i64, KEEP_MAX as i64) as usize;
             changed = true;
         }
     }
-    p.text(
-        num.center(),
-        Align2::CENTER_CENTER,
-        c.settings.keep.to_string(),
-        bold(13.0),
-        TEXT,
-    );
+    p.text(num.center(), Align2::CENTER_CENTER, c.settings.keep.to_string(), bold(13.0), TEXT);
     // age
     label(p, card, 1, "Remove older than");
     let ry = row_y(card, 1);
-    let ar = Rect::from_min_max(
-        Pos2::new(card.right() - 12.0 - 230.0, ry - 13.0),
-        Pos2::new(card.right() - 12.0, ry + 13.0),
-    );
-    let cur = AGES
-        .iter()
-        .position(|a| *a == c.settings.max_days)
-        .unwrap_or(2);
-    if let Some(i) = segmented(
-        ui,
-        ar,
-        id.with("age"),
-        &["1 day", "7 days", "30 days", "Never"],
-        cur,
-    ) {
+    let ar = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 230.0, ry - 13.0), Pos2::new(card.right() - 12.0, ry + 13.0));
+    let cur = AGES.iter().position(|a| *a == c.settings.max_days).unwrap_or(2);
+    if let Some(i) = segmented(ui, ar, id.with("age"), &["1 day", "7 days", "30 days", "Never"], cur) {
         c.settings.max_days = AGES[i];
         changed = true;
     }
-    let switches: [(&str, &str, bool); 2] = [
-        ("Keep images", "up to 10 MB each", c.settings.keep_images),
-        ("Move repeats to the top", "", c.settings.dedupe),
-    ];
+    let switches: [(&str, &str, bool); 2] = [("Keep images", "up to 10 MB each", c.settings.keep_images), ("Move repeats to the top", "", c.settings.dedupe)];
     for (k, (l, hint, on)) in switches.iter().enumerate() {
         label(p, card, 2 + k, l);
         let ry = row_y(card, 2 + k);
         let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, ry), Vec2::new(30.0, 18.0));
         if !hint.is_empty() {
-            p.text(
-                Pos2::new(sw.left() - 10.0, ry),
-                Align2::RIGHT_CENTER,
-                *hint,
-                font(12.0),
-                TEXT_FAINT,
-            );
+            p.text(Pos2::new(sw.left() - 10.0, ry), Align2::RIGHT_CENTER, *hint, font(12.0), TEXT_FAINT);
         }
         if switch(ui, sw, id.with(("hsw", k)), *on, true).clicked() {
             if k == 0 {
@@ -1616,42 +848,12 @@ fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     }
     let ry = row_y(card, 4);
     let n = c.store.entries.len();
-    p.text(
-        Pos2::new(card.left() + 12.0, ry),
-        Align2::LEFT_CENTER,
-        format!(
-            "{n} items · {} on disk",
-            human_bytes(c.store.bytes_on_disk())
-        ),
-        font(13.0),
-        TEXT_DIM,
-    );
-    let confirming = c
-        .confirm_clear
-        .is_some_and(|t| t.elapsed().as_secs_f32() < 3.0);
-    let cl = if confirming {
-        "Click again to clear"
-    } else {
-        "Clear unpinned"
-    };
+    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, format!("{n} items · {} on disk", human_bytes(c.store.bytes_on_disk())), font(13.0), TEXT_DIM);
+    let confirming = c.confirm_clear.is_some_and(|t| t.elapsed().as_secs_f32() < 3.0);
+    let cl = if confirming { "Click again to clear" } else { "Clear unpinned" };
     let cw = button_width(p, cl, BTN_DANGER) - 6.0;
-    let cr = Rect::from_min_max(
-        Pos2::new(card.right() - 12.0 - cw, ry - 12.0),
-        Pos2::new(card.right() - 12.0, ry + 12.0),
-    );
-    if pill_button(
-        ui,
-        cr,
-        cl,
-        if confirming {
-            BTN_DANGER
-        } else {
-            BTN_SECONDARY
-        },
-        c.store.entries.iter().any(|e| !e.pinned),
-    )
-    .clicked()
-    {
+    let cr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - cw, ry - 12.0), Pos2::new(card.right() - 12.0, ry + 12.0));
+    if pill_button(ui, cr, cl, if confirming { BTN_DANGER } else { BTN_SECONDARY }, c.store.entries.iter().any(|e| !e.pinned)).clicked() {
         if confirming {
             c.store.clear_unpinned();
             c.forget_dropped_thumbs();
@@ -1661,8 +863,7 @@ fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
         }
     }
     if confirming {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(250));
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
     }
     changed
 }
@@ -1674,62 +875,20 @@ fn right_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     let mut changed = false;
     let mut y = col.top();
 
-    p.text(
-        Pos2::new(x0, y),
-        Align2::LEFT_TOP,
-        "Privacy",
-        bold(15.0),
-        TEXT,
-    );
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Privacy", bold(15.0), TEXT);
     let card = Rect::from_min_size(Pos2::new(x0, y + 28.0), Vec2::new(w, 64.0 + ROW_H + 4.0));
     glass_card(p, card, R_CARD, 0.0, false);
-    let sw = Rect::from_center_size(
-        Pos2::new(card.right() - 27.0, card.top() + 30.0),
-        Vec2::new(30.0, 18.0),
-    );
-    p.text(
-        Pos2::new(card.left() + 12.0, card.top() + 20.0),
-        Align2::LEFT_CENTER,
-        "Record passwords and hidden items",
-        font(13.0),
-        TEXT,
-    );
-    paragraph(
-        p,
-        Pos2::new(card.left() + 12.0, card.top() + 31.0),
-        "Off: skips password managers and anything apps mark as concealed or temporary.",
-        font(11.0),
-        TEXT_FAINT,
-        sw.left() - card.left() - 24.0,
-    );
-    if switch(
-        ui,
-        sw,
-        id.with("concealed"),
-        c.settings.record_concealed,
-        true,
-    )
-    .clicked()
-    {
+    let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, card.top() + 30.0), Vec2::new(30.0, 18.0));
+    p.text(Pos2::new(card.left() + 12.0, card.top() + 20.0), Align2::LEFT_CENTER, "Record passwords and hidden items", font(13.0), TEXT);
+    paragraph(p, Pos2::new(card.left() + 12.0, card.top() + 31.0), "Off: skips password managers and anything apps mark as concealed or temporary.", font(11.0), TEXT_FAINT, sw.left() - card.left() - 24.0);
+    if switch(ui, sw, id.with("concealed"), c.settings.record_concealed, true).clicked() {
         c.settings.record_concealed = !c.settings.record_concealed;
         changed = true;
     }
     let ly = card.top() + 64.0;
-    p.line_segment(
-        [
-            Pos2::new(card.left() + 12.0, ly),
-            Pos2::new(card.right() - 12.0, ly),
-        ],
-        Stroke::new(1.0, white(13)),
-    );
+    p.line_segment([Pos2::new(card.left() + 12.0, ly), Pos2::new(card.right() - 12.0, ly)], Stroke::new(1.0, white(13)));
     let ry = ly + ROW_H / 2.0;
-    p.text(
-        Pos2::new(card.left() + 12.0, ry),
-        Align2::LEFT_CENTER,
-        "Pause recording",
-        font(13.0),
-        TEXT,
-    );
+    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Pause recording", font(13.0), TEXT);
     let mut x = card.right() - 12.0;
     if c.paused() {
         let bw = button_width(p, "Resume", BTN_PRIMARY) - 6.0;
@@ -1738,13 +897,7 @@ fn right_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
             c.toggle_pause(0);
         }
         if let Some(l) = c.pause_label() {
-            p.text(
-                Pos2::new(br.left() - 10.0, ry),
-                Align2::RIGHT_CENTER,
-                l,
-                font(12.0),
-                AMBER,
-            );
+            p.text(Pos2::new(br.left() - 10.0, ry), Align2::RIGHT_CENTER, l, font(12.0), AMBER);
         }
     } else {
         for (l, mins) in [("Until I resume", 0u64), ("1 hour", 60), ("15 min", 15)] {
@@ -1759,69 +912,31 @@ fn right_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     y = card.bottom() + 16.0;
 
     // excluded apps
-    p.text(
-        Pos2::new(x0, y),
-        Align2::LEFT_TOP,
-        "Never record from",
-        bold(15.0),
-        TEXT,
-    );
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Never record from", bold(15.0), TEXT);
     let aw = button_width(p, "Add app…", BTN_SECONDARY) - 6.0;
-    let ar = Rect::from_min_max(
-        Pos2::new(col.right() - aw, y - 3.0),
-        Pos2::new(col.right(), y + 21.0),
-    );
+    let ar = Rect::from_min_max(Pos2::new(col.right() - aw, y - 3.0), Pos2::new(col.right(), y + 21.0));
     if pill_button(ui, ar, "Add app…", BTN_SECONDARY, true).clicked() {
         c.choose_app();
     }
     let n = c.settings.ignore.len();
     let card = card_rows(p, x0, y + 28.0, w, n.max(1));
     if n == 0 {
-        p.text(
-            Pos2::new(card.left() + 12.0, row_y(card, 0)),
-            Align2::LEFT_CENTER,
-            "No apps excluded",
-            font(13.0),
-            TEXT_FAINT,
-        );
+        p.text(Pos2::new(card.left() + 12.0, row_y(card, 0)), Align2::LEFT_CENTER, "No apps excluded", font(13.0), TEXT_FAINT);
     }
     let mut remove = None;
     for (k, ig) in c.settings.ignore.iter().enumerate() {
         let ry = row_y(card, k);
-        p.rect_filled(
-            Rect::from_center_size(Pos2::new(card.left() + 21.0, ry), Vec2::splat(18.0)),
-            5.0,
-            app_color(&ig.name),
-        );
-        p.text(
-            Pos2::new(card.left() + 38.0, ry),
-            Align2::LEFT_CENTER,
-            &ig.name,
-            font(13.0),
-            TEXT,
-        );
+        p.rect_filled(Rect::from_center_size(Pos2::new(card.left() + 21.0, ry), Vec2::splat(18.0)), 5.0, app_color(&ig.name));
+        p.text(Pos2::new(card.left() + 38.0, ry), Align2::LEFT_CENTER, &ig.name, font(13.0), TEXT);
         let clear = Rect::from_center_size(Pos2::new(card.right() - 22.0, ry), Vec2::splat(20.0));
-        let why = if super::settings::default_ignored().contains(ig) {
-            "password manager"
-        } else {
-            "added by you"
-        };
-        p.text(
-            Pos2::new(clear.left() - 8.0, ry),
-            Align2::RIGHT_CENTER,
-            why,
-            font(11.0),
-            TEXT_FAINT,
-        );
+        let why = if super::settings::default_ignored().contains(ig) { "password manager" } else { "added by you" };
+        p.text(Pos2::new(clear.left() - 8.0, ry), Align2::RIGHT_CENTER, why, font(11.0), TEXT_FAINT);
         let cr = ui.interact(clear, id.with(("rm", k)), Sense::click());
         if cr.hovered() {
             p.circle_filled(clear.center(), 10.0, white(26));
         }
         icon(p, Icon::Close, clear.shrink(5.0), TEXT_FAINT);
-        if cr
-            .on_hover_text(format!("Record from {} again", ig.name))
-            .clicked()
-        {
+        if cr.on_hover_text(format!("Record from {} again", ig.name)).clicked() {
             remove = Some(k);
         }
     }
@@ -1832,61 +947,18 @@ fn right_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     y = card.bottom() + 16.0;
 
     // permission
-    p.text(
-        Pos2::new(x0, y),
-        Align2::LEFT_TOP,
-        "Permission",
-        bold(15.0),
-        TEXT,
-    );
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Permission", bold(15.0), TEXT);
     let card = Rect::from_min_size(Pos2::new(x0, y + 28.0), Vec2::new(w, 56.0));
     glass_card(p, card, R_CARD, 0.0, false);
     let ok = mac::can_paste();
-    p.circle_filled(
-        Pos2::new(card.left() + 18.0, card.top() + 19.0),
-        4.0,
-        if ok { GREEN } else { AMBER },
-    );
-    p.text(
-        Pos2::new(card.left() + 30.0, card.top() + 19.0),
-        Align2::LEFT_CENTER,
-        "Accessibility",
-        font(13.0),
-        TEXT,
-    );
-    let status = if ok {
-        "Allowed. Quick paste types ⌘V for you."
-    } else {
-        "Needed to paste into other apps. Without it, items are only copied."
-    };
-    let label = if ok {
-        "Open System Settings"
-    } else {
-        "Allow…"
-    };
+    p.circle_filled(Pos2::new(card.left() + 18.0, card.top() + 19.0), 4.0, if ok { GREEN } else { AMBER });
+    p.text(Pos2::new(card.left() + 30.0, card.top() + 19.0), Align2::LEFT_CENTER, "Accessibility", font(13.0), TEXT);
+    let status = if ok { "Allowed. Quick paste types ⌘V for you." } else { "Needed to paste into other apps. Without it, items are only copied." };
+    let label = if ok { "Open System Settings" } else { "Allow…" };
     let bw = button_width(p, label, BTN_SECONDARY) - 6.0;
-    let br = Rect::from_min_max(
-        Pos2::new(card.right() - 12.0 - bw, card.center().y - 13.0),
-        Pos2::new(card.right() - 12.0, card.center().y + 13.0),
-    );
-    text_fit(
-        p,
-        Pos2::new(card.left() + 30.0, card.top() + 38.0),
-        Align2::LEFT_CENTER,
-        status,
-        font(12.0),
-        TEXT_DIM,
-        br.left() - card.left() - 40.0,
-    );
-    if pill_button(
-        ui,
-        br,
-        label,
-        if ok { BTN_SECONDARY } else { BTN_PRIMARY },
-        true,
-    )
-    .clicked()
-    {
+    let br = Rect::from_min_max(Pos2::new(card.right() - 12.0 - bw, card.center().y - 13.0), Pos2::new(card.right() - 12.0, card.center().y + 13.0));
+    text_fit(p, Pos2::new(card.left() + 30.0, card.top() + 38.0), Align2::LEFT_CENTER, status, font(12.0), TEXT_DIM, br.left() - card.left() - 40.0);
+    if pill_button(ui, br, label, if ok { BTN_SECONDARY } else { BTN_PRIMARY }, true).clicked() {
         mac::open_accessibility_settings();
     }
     changed
@@ -1899,21 +971,9 @@ impl Clipboard {
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
             let script = "set a to choose application with prompt \"Never record copies from\"\nreturn (id of a) & \"|\" & (name of a)";
-            let out = std::process::Command::new("osascript")
-                .args(["-e", script])
-                .output();
-            let got = out
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-            let app = got
-                .and_then(|s| {
-                    s.split_once('|').map(|(b, n)| Ignored {
-                        bundle: b.to_string(),
-                        name: n.to_string(),
-                    })
-                })
-                .filter(|i| !i.bundle.is_empty());
+            let out = std::process::Command::new("osascript").args(["-e", script]).output();
+            let got = out.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+            let app = got.and_then(|s| s.split_once('|').map(|(b, n)| Ignored { bundle: b.to_string(), name: n.to_string() })).filter(|i| !i.bundle.is_empty());
             let _ = tx.send(app);
             ctx.request_repaint();
         });
@@ -1929,10 +989,7 @@ pub fn hud(c: &mut Clipboard, ctx: &egui::Context) {
         return;
     }
     let msg = msg.clone();
-    let screen = ctx
-        .input(|i| i.viewport().monitor_size)
-        .filter(|s| s.x > 100.0)
-        .unwrap_or(Vec2::new(1512.0, 982.0));
+    let screen = ctx.input(|i| i.viewport().monitor_size).filter(|s| s.x > 100.0).unwrap_or(Vec2::new(1512.0, 982.0));
     let w = (msg.chars().count() as f32 * 7.4 + 56.0).clamp(160.0, 560.0);
     let size = Vec2::new(w, 40.0);
     let pos = Pos2::new((screen.x - size.x) / 2.0, 44.0);
@@ -1952,26 +1009,9 @@ pub fn hud(c: &mut Clipboard, ctx: &egui::Context) {
     crate::kit::viewport::show(ctx, vid, b, |ui, _| {
         let r = ui.max_rect();
         let p = ui.painter();
-        p.rect_filled(
-            r,
-            r.height() / 2.0,
-            Color32::from_rgba_unmultiplied(28, 28, 31, 240),
-        );
-        p.rect_stroke(
-            r,
-            r.height() / 2.0,
-            Stroke::new(1.0, white(30)),
-            StrokeKind::Inside,
-        );
-        text_fit(
-            p,
-            r.center(),
-            Align2::CENTER_CENTER,
-            &msg,
-            font(13.0),
-            TEXT,
-            r.width() - 24.0,
-        );
+        p.rect_filled(r, r.height() / 2.0, Color32::from_rgba_unmultiplied(28, 28, 31, 240));
+        p.rect_stroke(r, r.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
+        text_fit(p, r.center(), Align2::CENTER_CENTER, &msg, font(13.0), TEXT, r.width() - 24.0);
     });
 }
 
@@ -1990,23 +1030,7 @@ mod tests {
 
     #[test]
     fn filters_pass() {
-        let mut e = Entry {
-            id: 1,
-            kind: Kind::Link,
-            text: "x".into(),
-            app: String::new(),
-            bundle: String::new(),
-            first: 0,
-            last: 0,
-            count: 1,
-            pinned: false,
-            w: 0,
-            h: 0,
-            rtf: false,
-            html: false,
-            bytes: 0,
-            hash: 0,
-        };
+        let mut e = Entry { id: 1, kind: Kind::Link, text: "x".into(), app: String::new(), bundle: String::new(), first: 0, last: 0, count: 1, pinned: false, w: 0, h: 0, rtf: false, html: false, bytes: 0, hash: 0 };
         assert!(Filter::All.passes(&e));
         assert!(Filter::Kind(Kind::Link).passes(&e));
         assert!(!Filter::Kind(Kind::Text).passes(&e));

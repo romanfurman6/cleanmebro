@@ -27,12 +27,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings {
-            claude: true,
-            manual_screen: true,
-            claude_screen: false,
-            grace_min: 5,
-        }
+        Settings { claude: true, manual_screen: true, claude_screen: false, grace_min: 5 }
     }
 }
 
@@ -53,9 +48,7 @@ pub enum State {
     /// Claude Code is working.
     Claude,
     /// Claude went quiet; sleep is allowed again in `left` seconds.
-    WindDown {
-        left: i64,
-    },
+    WindDown { left: i64 },
 }
 
 impl State {
@@ -98,25 +91,11 @@ impl Engine {
             Some(d) => (load_settings(d), load_log(d, today_start(now()))),
             None => (Settings::default(), Vec::new()),
         };
-        Engine {
-            settings,
-            manual_since: None,
-            sessions: Vec::new(),
-            awake_since: None,
-            log,
-            open: None,
-            claude_last: None,
-            enabled: true,
-            power: Power::default(),
-            dir,
-        }
+        Engine { settings, manual_since: None, sessions: Vec::new(), awake_since: None, log, open: None, claude_last: None, enabled: true, power: Power::default(), dir }
     }
 
     pub fn working(&self, now: i64) -> Vec<&Session> {
-        self.sessions
-            .iter()
-            .filter(|s| now - s.last_write <= WORKING_SECS)
-            .collect()
+        self.sessions.iter().filter(|s| now - s.last_write <= WORKING_SECS).collect()
     }
 
     pub fn state(&self, now: i64) -> State {
@@ -135,11 +114,7 @@ impl Engine {
         match self.claude_last {
             Some(t) => {
                 let left = t + self.settings.grace_min as i64 * 60 - now;
-                if left > 0 {
-                    State::WindDown { left }
-                } else {
-                    State::Off
-                }
+                if left > 0 { State::WindDown { left } } else { State::Off }
             }
             None => State::Off,
         }
@@ -166,10 +141,7 @@ impl Engine {
             State::Manual => self.settings.manual_screen,
             State::Claude | State::WindDown { .. } => self.settings.claude_screen,
         };
-        self.power.apply(Want {
-            system: st.awake(),
-            display,
-        });
+        self.power.apply(Want { system: st.awake(), display });
         match (st.awake(), self.awake_since) {
             (true, None) => self.awake_since = Some(now),
             (false, Some(_)) => self.awake_since = None,
@@ -183,11 +155,7 @@ impl Engine {
     }
 
     pub fn set_manual(&mut self, on: bool, now: i64) {
-        self.manual_since = if on {
-            Some(self.manual_since.unwrap_or(now))
-        } else {
-            None
-        };
+        self.manual_since = if on { Some(self.manual_since.unwrap_or(now)) } else { None };
         self.step(now);
     }
 
@@ -213,11 +181,7 @@ impl Engine {
         let day = today_start(now);
         let mut v: Vec<Span> = self.log.iter().filter(|s| s.end > day).copied().collect();
         if let Some((start, claude)) = self.open {
-            v.push(Span {
-                start,
-                end: now,
-                claude,
-            });
+            v.push(Span { start, end: now, claude });
         }
         for s in &mut v {
             s.start = s.start.max(day);
@@ -226,19 +190,13 @@ impl Engine {
     }
 
     fn close_span(&mut self, now: i64) {
-        let Some((start, claude)) = self.open.take() else {
-            return;
-        };
+        let Some((start, claude)) = self.open.take() else { return };
         if now - start < 30 {
             return;
         }
         let day = today_start(now);
         self.log.retain(|s| s.end > day);
-        self.log.push(Span {
-            start,
-            end: now,
-            claude,
-        });
+        self.log.push(Span { start, end: now, claude });
         if let Some(d) = &self.dir {
             save_json(d, "today.json", &self.log);
         }
@@ -252,10 +210,7 @@ impl Drop for Engine {
 }
 
 pub fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
 /// Unix seconds of local midnight before `t`.
@@ -292,10 +247,7 @@ mod tests {
     use super::*;
 
     fn session(t: i64) -> Session {
-        Session {
-            project: "cleanmebro".into(),
-            last_write: t,
-        }
+        Session { project: "cleanmebro".into(), last_write: t }
     }
 
     #[test]
@@ -306,13 +258,7 @@ mod tests {
         assert_eq!(e.held(), Want::default());
         e.set_manual(true, 1000);
         assert_eq!(e.state(1000), State::Manual);
-        assert_eq!(
-            e.held(),
-            Want {
-                system: true,
-                display: true
-            }
-        );
+        assert_eq!(e.held(), Want { system: true, display: true });
         e.set_manual(false, 1100);
         assert_eq!(e.held(), Want::default());
     }
@@ -323,21 +269,10 @@ mod tests {
         e.sessions = vec![session(1000)];
         e.step(1010);
         assert_eq!(e.state(1010), State::Claude);
-        assert_eq!(
-            e.held(),
-            Want {
-                system: true,
-                display: false
-            }
-        );
+        assert_eq!(e.held(), Want { system: true, display: false });
         // quiet: working until 1000 + 120, then 5 min of grace
         e.step(1200);
-        assert_eq!(
-            e.state(1200),
-            State::WindDown {
-                left: 1120 + 300 - 1200
-            }
-        );
+        assert_eq!(e.state(1200), State::WindDown { left: 1120 + 300 - 1200 });
         assert!(e.held().system);
         e.step(1500);
         assert_eq!(e.state(1500), State::Off);
@@ -368,13 +303,7 @@ mod tests {
         let mut e = Engine::new(None);
         e.sessions = vec![session(1000)];
         e.change(1001, |s| s.claude_screen = true);
-        assert_eq!(
-            e.held(),
-            Want {
-                system: true,
-                display: true
-            }
-        );
+        assert_eq!(e.held(), Want { system: true, display: true });
     }
 
     #[test]

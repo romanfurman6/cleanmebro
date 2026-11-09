@@ -36,8 +36,7 @@ pub fn spawn(shared: Arc<Shared>, tx: Sender<Clip>, ctx: egui::Context) {
                     continue;
                 }
                 last = n;
-                if shared.paused.load(Ordering::Relaxed) || n == shared.own.load(Ordering::Relaxed)
-                {
+                if shared.paused.load(Ordering::Relaxed) || n == shared.own.load(Ordering::Relaxed) {
                     continue;
                 }
                 let images = shared.images.load(Ordering::Relaxed);

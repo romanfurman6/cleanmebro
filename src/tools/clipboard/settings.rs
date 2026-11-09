@@ -57,23 +57,14 @@ pub fn default_ignored() -> Vec<Ignored> {
         ("com.bitwarden.desktop", "Bitwarden"),
     ]
     .iter()
-    .map(|(b, n)| Ignored {
-        bundle: (*b).into(),
-        name: (*n).into(),
-    })
+    .map(|(b, n)| Ignored { bundle: (*b).into(), name: (*n).into() })
     .collect()
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            shortcut: Some(Shortcut {
-                cmd: true,
-                shift: false,
-                alt: true,
-                ctrl: false,
-                key: "V".into(),
-            }),
+            shortcut: Some(Shortcut { cmd: true, shift: false, alt: true, ctrl: false, key: "V".into() }),
             layout: Layout::Cards,
             paste_now: true,
             keep: 200,
@@ -88,11 +79,7 @@ impl Default for Settings {
 
 impl Settings {
     pub fn limits(&self) -> Limits {
-        Limits {
-            keep: self.keep,
-            max_days: self.max_days,
-            dedupe: self.dedupe,
-        }
+        Limits { keep: self.keep, max_days: self.max_days, dedupe: self.dedupe }
     }
 
     pub fn ignores(&self, bundle: &str) -> bool {
@@ -140,12 +127,7 @@ mod tests {
     #[test]
     fn saves_and_loads() {
         let dir = std::env::temp_dir().join(format!("cmb-clip-settings-{}", std::process::id()));
-        let s = Settings {
-            keep: 5,
-            max_days: 3,
-            layout: Layout::List,
-            ..Default::default()
-        };
+        let s = Settings { keep: 5, max_days: 3, layout: Layout::List, ..Default::default() };
         save(&dir, &s);
         let back = load(&dir);
         assert_eq!(back.keep, KEEP_MIN);

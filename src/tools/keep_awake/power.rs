@@ -27,26 +27,13 @@ impl Power {
     /// Take or release assertions so that exactly `want` is held.
     pub fn apply(&mut self, want: Want) {
         if want.system != self.system.is_some() {
-            self.system = toggle(
-                self.system.take(),
-                want.system,
-                "PreventUserIdleSystemSleep",
-                "CleanMeBro Keep Awake",
-            );
+            self.system = toggle(self.system.take(), want.system, "PreventUserIdleSystemSleep", "CleanMeBro Keep Awake");
         }
         let display = want.system && want.display;
         if display != self.display.is_some() {
-            self.display = toggle(
-                self.display.take(),
-                display,
-                "PreventUserIdleDisplaySleep",
-                "CleanMeBro Keep Awake (screen)",
-            );
+            self.display = toggle(self.display.take(), display, "PreventUserIdleDisplaySleep", "CleanMeBro Keep Awake (screen)");
         }
-        self.held = Want {
-            system: want.system,
-            display,
-        };
+        self.held = Want { system: want.system, display };
     }
 }
 
@@ -78,22 +65,13 @@ mod mac {
 
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
-        fn CFStringCreateWithCString(
-            alloc: *const c_void,
-            s: *const c_char,
-            encoding: u32,
-        ) -> CFStringRef;
+        fn CFStringCreateWithCString(alloc: *const c_void, s: *const c_char, encoding: u32) -> CFStringRef;
         fn CFRelease(p: *const c_void);
     }
 
     #[link(name = "IOKit", kind = "framework")]
     unsafe extern "C" {
-        fn IOPMAssertionCreateWithName(
-            kind: CFStringRef,
-            level: u32,
-            name: CFStringRef,
-            id: *mut u32,
-        ) -> i32;
+        fn IOPMAssertionCreateWithName(kind: CFStringRef, level: u32, name: CFStringRef, id: *mut u32) -> i32;
         fn IOPMAssertionRelease(id: u32) -> i32;
     }
 
@@ -138,33 +116,12 @@ mod tests {
     #[test]
     fn display_needs_system() {
         let mut p = Power::default();
-        p.apply(Want {
-            system: false,
-            display: true,
-        });
+        p.apply(Want { system: false, display: true });
         assert_eq!(p.held(), Want::default());
-        p.apply(Want {
-            system: true,
-            display: true,
-        });
-        assert_eq!(
-            p.held(),
-            Want {
-                system: true,
-                display: true
-            }
-        );
-        p.apply(Want {
-            system: true,
-            display: false,
-        });
-        assert_eq!(
-            p.held(),
-            Want {
-                system: true,
-                display: false
-            }
-        );
+        p.apply(Want { system: true, display: true });
+        assert_eq!(p.held(), Want { system: true, display: true });
+        p.apply(Want { system: true, display: false });
+        assert_eq!(p.held(), Want { system: true, display: false });
         p.apply(Want::default());
         assert_eq!(p.held(), Want::default());
     }

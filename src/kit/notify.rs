@@ -15,12 +15,9 @@ mod mac {
     use block2::RcBlock;
     use objc2::runtime::Bool;
     use objc2_foundation::{NSBundle, NSError, NSString};
-    use objc2_user_notifications::{
-        UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
-        UNUserNotificationCenter,
-    };
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use objc2_user_notifications::{UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest, UNUserNotificationCenter};
     use std::sync::Once;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     static ASKED: Once = Once::new();
     static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -35,32 +32,19 @@ mod mac {
         let center = UNUserNotificationCenter::currentNotificationCenter();
         ASKED.call_once(|| {
             let done = RcBlock::new(|_granted: Bool, _err: *mut NSError| {});
-            center.requestAuthorizationWithOptions_completionHandler(
-                UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
-                &done,
-            );
+            center.requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound, &done);
         });
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(title));
         content.setBody(&NSString::from_str(body));
-        let id = NSString::from_str(&format!(
-            "cleanmebro.{}.{}",
-            std::process::id(),
-            SEQ.fetch_add(1, Ordering::Relaxed)
-        ));
+        let id = NSString::from_str(&format!("cleanmebro.{}.{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
         let req = UNNotificationRequest::requestWithIdentifier_content_trigger(&id, &content, None);
         center.addNotificationRequest_withCompletionHandler(&req, None);
     }
 
     fn osascript(title: &str, body: &str) {
         let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!(
-            "display notification \"{}\" with title \"{}\"",
-            q(body),
-            q(title)
-        );
-        let _ = std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .spawn();
+        let script = format!("display notification \"{}\" with title \"{}\"", q(body), q(title));
+        let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
     }
 }

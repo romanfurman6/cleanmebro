@@ -56,24 +56,14 @@ pub fn movable(p: &Path, roots: &Roots, app_roots: &[PathBuf]) -> bool {
     }
     let depth_under = |root: &Path| p.strip_prefix(root).ok().map(|r| r.components().count());
     let is_app = p.extension().is_some_and(|e| e == "app");
-    if is_app
-        && app_roots
-            .iter()
-            .any(|r| matches!(depth_under(r), Some(1 | 2)))
-    {
+    if is_app && app_roots.iter().any(|r| matches!(depth_under(r), Some(1 | 2))) {
         return true;
     }
     // at least one folder below ~/Library (never ~/Library/Caches itself)
     if matches!(depth_under(&roots.user_library), Some(n) if n >= 2) {
         return true;
     }
-    [
-        "Library/LaunchAgents",
-        "Library/LaunchDaemons",
-        "Library/PrivilegedHelperTools",
-    ]
-    .iter()
-    .any(|d| matches!(depth_under(&roots.system.join(d)), Some(1)))
+    ["Library/LaunchAgents", "Library/LaunchDaemons", "Library/PrivilegedHelperTools"].iter().any(|d| matches!(depth_under(&roots.system.join(d)), Some(1)))
 }
 
 /// A free name for `name` in the Trash folder.
@@ -92,16 +82,8 @@ fn trash_dest(trash: &Path, name: &str) -> PathBuf {
 }
 
 /// Remove `targets`. `progress` gets a line for the UI as it goes.
-pub fn run(
-    targets: &[Target],
-    roots: &Roots,
-    app_roots: &[PathBuf],
-    mut progress: impl FnMut(String),
-) -> Report {
-    let mut rep = Report {
-        reset: targets.iter().all(|t| t.reset),
-        ..Default::default()
-    };
+pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progress: impl FnMut(String)) -> Report {
+    let mut rep = Report { reset: targets.iter().all(|t| t.reset), ..Default::default() };
     let trash = crate::kit::fs::home().join(".Trash");
     // items that need the admin password, done together at the end
     let mut admin: Vec<(PathBuf, u64, Kind)> = Vec::new();
@@ -115,10 +97,7 @@ pub fn run(
                 std::thread::sleep(Duration::from_millis(250));
             }
             if mac::is_running(&t.id) {
-                rep.failed.push((
-                    t.name.clone(),
-                    "It is still open. Quit it, then try again.".into(),
-                ));
+                rep.failed.push((t.name.clone(), "It is still open. Quit it, then try again.".into()));
                 continue;
             }
         }
@@ -132,10 +111,7 @@ pub fn run(
                 continue;
             }
             if !movable(&it.path, roots, app_roots) {
-                rep.failed.push((
-                    it.path.display().to_string(),
-                    "Not a place apps keep their files; left alone".into(),
-                ));
+                rep.failed.push((it.path.display().to_string(), "Not a place apps keep their files; left alone".into()));
                 continue;
             }
             if it.admin {
@@ -144,35 +120,21 @@ pub fn run(
             }
             if it.kind == Kind::Launch {
                 // stop a running agent before its plist goes
-                let _ = std::process::Command::new("/bin/launchctl")
-                    .arg("bootout")
-                    .arg(format!("gui/{}", mac::uid()))
-                    .arg(&it.path)
-                    .output();
+                let _ = std::process::Command::new("/bin/launchctl").arg("bootout").arg(format!("gui/{}", mac::uid())).arg(&it.path).output();
             }
             match crate::kit::fs::move_to_trash_at(&it.path) {
                 Ok(to) => {
                     prefs |= it.kind == Kind::Preferences;
-                    rep.moved.push(Moved {
-                        from: it.path.clone(),
-                        to,
-                        admin: false,
-                        bytes: it.bytes,
-                    });
+                    rep.moved.push(Moved { from: it.path.clone(), to, admin: false, bytes: it.bytes });
                 }
                 // a bundle installed by an installer package can be root's
-                Err(_) if it.kind == Kind::App && !writable_parent(&it.path) => {
-                    admin.push((it.path.clone(), it.bytes, it.kind))
-                }
+                Err(_) if it.kind == Kind::App && !writable_parent(&it.path) => admin.push((it.path.clone(), it.bytes, it.kind)),
                 Err(e) => rep.failed.push((it.path.display().to_string(), e)),
             }
         }
         if t.reset && prefs && !t.id.is_empty() {
             // drop what the preferences daemon still holds in memory
-            let _ = std::process::Command::new("/usr/bin/defaults")
-                .arg("delete")
-                .arg(&t.id)
-                .output();
+            let _ = std::process::Command::new("/usr/bin/defaults").arg("delete").arg(&t.id).output();
         }
     }
     if !admin.is_empty() {
@@ -181,10 +143,7 @@ pub fn run(
         let mut planned = Vec::new();
         let mut taken: Vec<PathBuf> = Vec::new();
         for (p, bytes, kind) in &admin {
-            let name = p
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let mut dest = trash_dest(&trash, &name);
             let mut k = 1;
             while taken.contains(&dest) {
@@ -193,15 +152,8 @@ pub fn run(
             }
             taken.push(dest.clone());
             if *kind == Kind::Launch && p.extension().is_some_and(|e| e == "plist") {
-                let domain = if p.starts_with(roots.system.join("Library/LaunchDaemons")) {
-                    "system".to_string()
-                } else {
-                    format!("gui/{}", mac::uid())
-                };
-                cmd.push_str(&format!(
-                    "/bin/launchctl bootout {domain} {} 2>/dev/null; ",
-                    mac::sh_quote(&p.to_string_lossy())
-                ));
+                let domain = if p.starts_with(roots.system.join("Library/LaunchDaemons")) { "system".to_string() } else { format!("gui/{}", mac::uid()) };
+                cmd.push_str(&format!("/bin/launchctl bootout {domain} {} 2>/dev/null; ", mac::sh_quote(&p.to_string_lossy())));
             }
             cmd.push_str(&format!(
                 "/bin/mv -n {src} {dst} && /usr/sbin/chown -R {uid} {dst}; ",
@@ -209,25 +161,16 @@ pub fn run(
                 dst = mac::sh_quote(&dest.to_string_lossy()),
                 uid = mac::uid()
             ));
-            planned.push(Moved {
-                from: p.clone(),
-                to: dest,
-                admin: true,
-                bytes: *bytes,
-            });
+            planned.push(Moved { from: p.clone(), to: dest, admin: true, bytes: *bytes });
         }
         cmd.push_str("true");
-        match mac::run_admin(
-            &cmd,
-            "CleanMeBro wants to move app files that belong to the system to your Trash.",
-        ) {
+        match mac::run_admin(&cmd, "CleanMeBro wants to move app files that belong to the system to your Trash.") {
             Ok(_) => {
                 for m in planned {
                     if m.to.symlink_metadata().is_ok() && m.from.symlink_metadata().is_err() {
                         rep.moved.push(m);
                     } else {
-                        rep.failed
-                            .push((m.from.display().to_string(), "Couldn't be moved".into()));
+                        rep.failed.push((m.from.display().to_string(), "Couldn't be moved".into()));
                     }
                 }
             }
@@ -242,9 +185,7 @@ pub fn run(
 }
 
 fn writable_parent(p: &Path) -> bool {
-    let Some(parent) = p.parent() else {
-        return false;
-    };
+    let Some(parent) = p.parent() else { return false };
     let c = std::ffi::CString::new(parent.to_string_lossy().as_bytes()).unwrap_or_default();
     unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
 }
@@ -257,26 +198,15 @@ pub fn undo(rep: &Report) -> (usize, Vec<(String, String)>) {
     let mut admin_items = Vec::new();
     for m in rep.moved.iter().rev() {
         if m.from.symlink_metadata().is_ok() {
-            failed.push((
-                m.from.display().to_string(),
-                "Something new is already there".into(),
-            ));
+            failed.push((m.from.display().to_string(), "Something new is already there".into()));
             continue;
         }
         if m.to.symlink_metadata().is_err() {
-            failed.push((
-                m.from.display().to_string(),
-                "No longer in the Trash".into(),
-            ));
+            failed.push((m.from.display().to_string(), "No longer in the Trash".into()));
             continue;
         }
         if m.admin {
-            admin_cmd.push_str(&format!(
-                "/bin/mv -n {} {} && /usr/sbin/chown -R root:wheel {}; ",
-                mac::sh_quote(&m.to.to_string_lossy()),
-                mac::sh_quote(&m.from.to_string_lossy()),
-                mac::sh_quote(&m.from.to_string_lossy())
-            ));
+            admin_cmd.push_str(&format!("/bin/mv -n {} {} && /usr/sbin/chown -R root:wheel {}; ", mac::sh_quote(&m.to.to_string_lossy()), mac::sh_quote(&m.from.to_string_lossy()), mac::sh_quote(&m.from.to_string_lossy())));
             admin_items.push(m);
             continue;
         }
@@ -300,11 +230,7 @@ pub fn undo(rep: &Report) -> (usize, Vec<(String, String)>) {
                     }
                 }
             }
-            Err(e) => failed.extend(
-                admin_items
-                    .iter()
-                    .map(|m| (m.from.display().to_string(), e.clone())),
-            ),
+            Err(e) => failed.extend(admin_items.iter().map(|m| (m.from.display().to_string(), e.clone()))),
         }
     }
     (ok, failed)
@@ -317,48 +243,18 @@ mod tests {
 
     #[test]
     fn only_app_places_are_movable() {
-        let roots = Roots {
-            user_library: PathBuf::from("/Users/a/Library"),
-            system: PathBuf::from("/"),
-        };
-        let apps = vec![
-            PathBuf::from("/Applications"),
-            PathBuf::from("/Users/a/Applications"),
-        ];
-        assert!(movable(
-            Path::new("/Applications/Docker.app"),
-            &roots,
-            &apps
-        ));
-        assert!(movable(
-            Path::new("/Applications/Setapp/X.app"),
-            &roots,
-            &apps
-        ));
+        let roots = Roots { user_library: PathBuf::from("/Users/a/Library"), system: PathBuf::from("/") };
+        let apps = vec![PathBuf::from("/Applications"), PathBuf::from("/Users/a/Applications")];
+        assert!(movable(Path::new("/Applications/Docker.app"), &roots, &apps));
+        assert!(movable(Path::new("/Applications/Setapp/X.app"), &roots, &apps));
         assert!(!movable(Path::new("/Applications"), &roots, &apps));
         assert!(!movable(Path::new("/Applications/Docs"), &roots, &apps));
-        assert!(movable(
-            Path::new("/Users/a/Library/Caches/com.x.y"),
-            &roots,
-            &apps
-        ));
-        assert!(!movable(
-            Path::new("/Users/a/Library/Caches"),
-            &roots,
-            &apps
-        ));
+        assert!(movable(Path::new("/Users/a/Library/Caches/com.x.y"), &roots, &apps));
+        assert!(!movable(Path::new("/Users/a/Library/Caches"), &roots, &apps));
         assert!(!movable(Path::new("/Users/a/Library"), &roots, &apps));
-        assert!(movable(
-            Path::new("/Library/LaunchDaemons/com.x.plist"),
-            &roots,
-            &apps
-        ));
+        assert!(movable(Path::new("/Library/LaunchDaemons/com.x.plist"), &roots, &apps));
         assert!(!movable(Path::new("/Library/LaunchDaemons"), &roots, &apps));
-        assert!(!movable(
-            Path::new("/Library/Application Support/x"),
-            &roots,
-            &apps
-        ));
+        assert!(!movable(Path::new("/Library/Application Support/x"), &roots, &apps));
         assert!(!movable(Path::new("/usr/bin/x.app"), &roots, &apps));
     }
 
@@ -375,34 +271,17 @@ mod tests {
     #[test]
     fn remove_then_undo_round_trips() {
         let f = Fake::new("remove");
-        let app = f
-            .file("apps/Thing.app/Contents/Info.plist", "x")
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
+        let app = f.file("apps/Thing.app/Contents/Info.plist", "x").parent().unwrap().parent().unwrap().to_path_buf();
         let cache = f.lib("Caches/com.thing.app/blob");
         let cache_dir = cache.parent().unwrap().to_path_buf();
         let prefs = f.lib("Preferences/com.thing.app.plist");
         let keep = f.lib("Logs/com.thing.app/log");
-        let item = |p: &Path, kind, selected| Item {
-            path: p.to_path_buf(),
-            kind,
-            bytes: 10,
-            admin: false,
-            selected,
-        };
+        let item = |p: &Path, kind, selected| Item { path: p.to_path_buf(), kind, bytes: 10, admin: false, selected };
         let t = Target {
             name: "Thing".into(),
             id: "com.thing.app".into(),
             app: Some(app.clone()),
-            items: vec![
-                item(&app, Kind::App, true),
-                item(&cache_dir, Kind::Caches, true),
-                item(&prefs, Kind::Preferences, true),
-                item(keep.parent().unwrap(), Kind::Logs, false),
-            ],
+            items: vec![item(&app, Kind::App, true), item(&cache_dir, Kind::Caches, true), item(&prefs, Kind::Preferences, true), item(keep.parent().unwrap(), Kind::Logs, false)],
             reset: false,
         };
         let mut lines = Vec::new();
@@ -421,29 +300,15 @@ mod tests {
     #[test]
     fn reset_keeps_the_app_and_refuses_odd_paths() {
         let f = Fake::new("reset");
-        let app = f
-            .file("apps/Thing.app/x", "x")
-            .parent()
-            .unwrap()
-            .to_path_buf();
+        let app = f.file("apps/Thing.app/x", "x").parent().unwrap().to_path_buf();
         let support = f.lib("Application Support/com.thing.app/db");
         let outside = f.file("elsewhere/file", "x");
-        let item = |p: &Path, kind| Item {
-            path: p.to_path_buf(),
-            kind,
-            bytes: 1,
-            admin: false,
-            selected: true,
-        };
+        let item = |p: &Path, kind| Item { path: p.to_path_buf(), kind, bytes: 1, admin: false, selected: true };
         let t = Target {
             name: "Thing".into(),
             id: "com.thing.app".into(),
             app: Some(app.clone()),
-            items: vec![
-                item(&app, Kind::App),
-                item(support.parent().unwrap(), Kind::Support),
-                item(&outside, Kind::Support),
-            ],
+            items: vec![item(&app, Kind::App), item(support.parent().unwrap(), Kind::Support), item(&outside, Kind::Support)],
             reset: true,
         };
         let rep = run(&[t], &f.roots, &[f.root.join("apps")], |_| {});

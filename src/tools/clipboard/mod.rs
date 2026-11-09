@@ -12,9 +12,7 @@ mod store;
 mod ui;
 mod watch;
 
-use crate::core::tool::{
-    Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES,
-};
+use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
 use crate::kit::glass::Icon;
 use crate::kit::hotkeys::Keys;
 use egui::{Color32, Rect, Ui};
@@ -81,15 +79,8 @@ fn thumb_image(png: &[u8]) -> Option<egui::ColorImage> {
     let img = image::load_from_memory(png).ok()?.to_rgba8();
     let (w, h) = img.dimensions();
     let k = (THUMB_PX as f32 / w.max(h).max(1) as f32).min(1.0);
-    let t = image::imageops::thumbnail(
-        &img,
-        ((w as f32 * k).round() as u32).max(1),
-        ((h as f32 * k).round() as u32).max(1),
-    );
-    Some(egui::ColorImage::from_rgba_unmultiplied(
-        [t.width() as usize, t.height() as usize],
-        t.as_raw(),
-    ))
+    let t = image::imageops::thumbnail(&img, ((w as f32 * k).round() as u32).max(1), ((h as f32 * k).round() as u32).max(1));
+    Some(egui::ColorImage::from_rgba_unmultiplied([t.width() as usize, t.height() as usize], t.as_raw()))
 }
 
 pub struct Clipboard {
@@ -143,21 +134,13 @@ impl Clipboard {
             (Settings::default(), None, demo_store())
         } else {
             let dir = settings::data_dir();
-            (
-                settings::load(&dir),
-                Some(dir.clone()),
-                Store::open(dir.join("history")),
-            )
+            (settings::load(&dir), Some(dir.clone()), Store::open(dir.join("history")))
         };
         let mut c = Clipboard {
             settings,
             dir,
             store,
-            keys: if env.demo {
-                None
-            } else {
-                Keys::new(env.ctx.clone())
-            },
+            keys: if env.demo { None } else { Keys::new(env.ctx.clone()) },
             key_error: None,
             recording: false,
             shared: Arc::new(watch::Shared::default()),
@@ -203,15 +186,9 @@ impl Clipboard {
     }
 
     fn sync_shared(&self) {
-        self.shared
-            .concealed
-            .store(self.settings.record_concealed, Ordering::Relaxed);
-        self.shared
-            .images
-            .store(self.settings.keep_images, Ordering::Relaxed);
-        self.shared
-            .paused
-            .store(self.pause.is_some(), Ordering::Relaxed);
+        self.shared.concealed.store(self.settings.record_concealed, Ordering::Relaxed);
+        self.shared.images.store(self.settings.keep_images, Ordering::Relaxed);
+        self.shared.paused.store(self.pause.is_some(), Ordering::Relaxed);
     }
 
     fn start_watching(&mut self) {
@@ -231,12 +208,7 @@ impl Clipboard {
 
     fn apply_keys(&mut self) {
         if let Some(k) = &mut self.keys {
-            let wanted: Vec<(Cmd, crate::kit::hotkeys::Shortcut)> = self
-                .settings
-                .shortcut
-                .iter()
-                .map(|s| (Cmd::Quick, s.clone()))
-                .collect();
+            let wanted: Vec<(Cmd, crate::kit::hotkeys::Shortcut)> = self.settings.shortcut.iter().map(|s| (Cmd::Quick, s.clone())).collect();
             self.key_error = k.apply(&wanted).into_iter().next().map(|(_, e)| e);
         }
     }
@@ -252,13 +224,7 @@ impl Clipboard {
 
     /// Pause for `mins` minutes (0: until resumed), or resume when paused.
     fn toggle_pause(&mut self, mins: u64) {
-        self.pause = if self.pause.is_some() {
-            None
-        } else {
-            Some(Pause(
-                (mins > 0).then(|| Instant::now() + Duration::from_secs(mins * 60)),
-            ))
-        };
+        self.pause = if self.pause.is_some() { None } else { Some(Pause((mins > 0).then(|| Instant::now() + Duration::from_secs(mins * 60)))) };
         self.sync_shared();
     }
 
@@ -276,10 +242,7 @@ impl Clipboard {
 
     /// A clip from the watcher: privacy rules, then history.
     fn take(&mut self, clip: Clip) {
-        if self.pause.is_some()
-            || self.settings.ignores(&clip.bundle)
-            || (clip.concealed && !self.settings.record_concealed)
-        {
+        if self.pause.is_some() || self.settings.ignores(&clip.bundle) || (clip.concealed && !self.settings.record_concealed) {
             return;
         }
         if clip.png.is_some() && !self.settings.keep_images {
@@ -318,14 +281,8 @@ impl Clipboard {
 
     /// Put an entry on the pasteboard. `plain` drops formatting.
     fn copy(&mut self, id: u64, plain: bool) -> bool {
-        let Some(e) = self.store.get(id).cloned() else {
-            return false;
-        };
-        let png = if e.kind == Kind::Image {
-            self.store.png(id)
-        } else {
-            None
-        };
+        let Some(e) = self.store.get(id).cloned() else { return false };
+        let png = if e.kind == Kind::Image { self.store.png(id) } else { None };
         if e.kind == Kind::Image && png.is_none() {
             self.hud("That image is gone");
             return false;
@@ -333,20 +290,8 @@ impl Clipboard {
         let rtf = if plain { None } else { self.store.rtf(id) };
         let html = if plain { None } else { self.store.html(id) };
         let files = e.files();
-        let text = if e.kind == Kind::File && plain {
-            Some(e.text.as_str())
-        } else if e.kind == Kind::Image {
-            None
-        } else {
-            Some(e.text.as_str())
-        };
-        let w = mac::Write {
-            text,
-            rtf: rtf.as_deref(),
-            html: html.as_deref(),
-            png: png.as_deref(),
-            files: if plain { &[] } else { &files },
-        };
+        let text = if e.kind == Kind::File && plain { Some(e.text.as_str()) } else if e.kind == Kind::Image { None } else { Some(e.text.as_str()) };
+        let w = mac::Write { text, rtf: rtf.as_deref(), html: html.as_deref(), png: png.as_deref(), files: if plain { &[] } else { &files } };
         match mac::write(&w) {
             Some(n) => {
                 self.shared.own.store(n, Ordering::Relaxed);
@@ -392,11 +337,7 @@ impl Clipboard {
                 if let Some(pid) = into {
                     mac::activate_pid(pid);
                 }
-                self.hud(if plain {
-                    "Copied as plain text"
-                } else {
-                    "Copied"
-                });
+                self.hud(if plain { "Copied as plain text" } else { "Copied" });
             }
         }
     }
@@ -406,9 +347,7 @@ impl Clipboard {
             self.quick = None;
             return;
         }
-        let front = mac::front_app()
-            .filter(|(_, _, pid)| *pid != mac::own_pid())
-            .map(|(_, _, pid)| pid);
+        let front = mac::front_app().filter(|(_, _, pid)| *pid != mac::own_pid()).map(|(_, _, pid)| pid);
         self.quick = Some(quick::Quick::new(self.settings.layout, front));
         self.ctx.request_repaint();
     }
@@ -422,18 +361,8 @@ impl Clipboard {
                 return ids.clone();
             }
         }
-        let words: Vec<String> = query
-            .to_lowercase()
-            .split_whitespace()
-            .map(str::to_string)
-            .collect();
-        let ids: Vec<u64> = self
-            .store
-            .ordered()
-            .into_iter()
-            .filter(|e| filter.passes(e) && e.matches_words(&words))
-            .map(|e| e.id)
-            .collect();
+        let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
+        let ids: Vec<u64> = self.store.ordered().into_iter().filter(|e| filter.passes(e) && e.matches_words(&words)).map(|e| e.id).collect();
         *memo = Some((filter, query.to_string(), rev, ids.clone()));
         ids
     }
@@ -445,30 +374,19 @@ fn now_ms() -> i64 {
 
 /// Sample history for screenshots.
 fn demo_store() -> Store {
-    let dir =
-        std::env::temp_dir().join(format!("cleanmebro-clipboard-demo-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cleanmebro-clipboard-demo-{}", std::process::id()));
     let mut st = Store::open(dir.clone());
     st.entries.clear();
     let now = now_ms();
     let min = 60_000i64;
-    let lim = store::Limits {
-        keep: 500,
-        max_days: 0,
-        dedupe: true,
-    };
+    let lim = store::Limits { keep: 500, max_days: 0, dedupe: true };
     let mut png = Vec::new();
     let img = image::RgbaImage::from_fn(640, 420, |x, y| {
         // a small sunset: sky, sun, two hills
         let (fx, fy) = (x as f32 / 640.0, y as f32 / 420.0);
         let sun = ((fx - 0.72).powi(2) + (fy - 0.28).powi(2) * 2.4).sqrt() < 0.09;
-        let hill1 = fy
-            > 0.80
-                - 0.32 * (1.0 - ((fx - 0.25) * 3.2).abs()).max(0.0)
-                - 0.22 * (1.0 - ((fx - 0.62) * 3.0).abs()).max(0.0);
-        let hill2 = fy
-            > 0.90
-                - 0.18 * (1.0 - ((fx - 0.4) * 2.6).abs()).max(0.0)
-                - 0.16 * (1.0 - ((fx - 0.82) * 2.8).abs()).max(0.0);
+        let hill1 = fy > 0.80 - 0.32 * (1.0 - ((fx - 0.25) * 3.2).abs()).max(0.0) - 0.22 * (1.0 - ((fx - 0.62) * 3.0).abs()).max(0.0);
+        let hill2 = fy > 0.90 - 0.18 * (1.0 - ((fx - 0.4) * 2.6).abs()).max(0.0) - 0.16 * (1.0 - ((fx - 0.82) * 2.8).abs()).max(0.0);
         let c = if hill2 {
             [62, 46, 82]
         } else if hill1 {
@@ -477,21 +395,12 @@ fn demo_store() -> Store {
             [255, 227, 179]
         } else {
             let t = fy;
-            [
-                (242.0 - 40.0 * t) as u8,
-                (184.0 - 50.0 * t) as u8,
-                (128.0 + 10.0 * t) as u8,
-            ]
+            [(242.0 - 40.0 * t) as u8, (184.0 - 50.0 * t) as u8, (128.0 + 10.0 * t) as u8]
         };
         image::Rgba([c[0], c[1], c[2], 255])
     });
     let _ = img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png);
-    let clip = |t: &str, app: &str, bundle: &str| Clip {
-        text: Some(t.into()),
-        app: app.into(),
-        bundle: bundle.into(),
-        ..Default::default()
-    };
+    let clip = |t: &str, app: &str, bundle: &str| Clip { text: Some(t.into()), app: app.into(), bundle: bundle.into(), ..Default::default() };
     let items: Vec<(i64, Clip, bool)> = vec![
         (60 * 24 + 5, clip("Thanks! I will check the build tonight and send notes.", "Mail", "com.apple.mail"), false),
         (60 * 22, clip("https://developer.apple.com/documentation/appkit/nspasteboard", "Safari", "com.apple.Safari"), false),
@@ -515,10 +424,7 @@ fn demo_store() -> Store {
 }
 
 fn badge() -> Badge {
-    Badge {
-        icon: Icon::Clipboard,
-        color: TINT,
-    }
+    Badge { icon: Icon::Clipboard, color: TINT }
 }
 
 impl Tool for Clipboard {
@@ -554,21 +460,10 @@ impl Tool for Clipboard {
         if self.paused() {
             return "Paused".into();
         }
-        self.settings
-            .shortcut
-            .as_ref()
-            .map(|s| s.display())
-            .unwrap_or_default()
+        self.settings.shortcut.as_ref().map(|s| s.display()).unwrap_or_default()
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec {
-            id: CARD,
-            title: "Clipboard",
-            about: "Your latest clips; click one to copy it again.",
-            sizes: ALL_SIZES,
-            size: Size::S11,
-            default_on: true,
-        }]
+        vec![WidgetSpec { id: CARD, title: "Clipboard", about: "Your latest clips; click one to copy it again.", sizes: ALL_SIZES, size: Size::S11, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(self, size, ui, rect, cx);
@@ -586,10 +481,7 @@ impl Tool for Clipboard {
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         if let Some(mut q) = self.demo_quick.take() {
             // the window's own size, as it shows over other apps
-            let r = Rect::from_min_size(
-                rect.min + egui::vec2(24.0, 24.0),
-                q.size().min(rect.size() - egui::vec2(48.0, 48.0)),
-            );
+            let r = Rect::from_min_size(rect.min + egui::vec2(24.0, 24.0), q.size().min(rect.size() - egui::vec2(48.0, 48.0)));
             quick::draw(self, &mut q, ui, r);
             self.demo_quick = Some(q);
             return;
@@ -604,13 +496,9 @@ impl Tool for Clipboard {
             priority: 35,
             badge: badge(),
             title: "Clipboard can't paste for you yet".into(),
-            body: "Allow Accessibility so quick paste can type ⌘V in the app you were using."
-                .into(),
+            body: "Allow Accessibility so quick paste can type ⌘V in the app you were using.".into(),
             action: "Settings".into(),
-            go: Action::OpenPage {
-                tool: ID.into(),
-                route: "settings".into(),
-            },
+            go: Action::OpenPage { tool: ID.into(), route: "settings".into() },
         }]
     }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
@@ -625,8 +513,7 @@ impl Tool for Clipboard {
         while let Ok((id, img)) = self.thumb_rx.try_recv() {
             self.thumbs.pending.remove(&id);
             if let Some(ci) = img {
-                let t =
-                    ctx.load_texture(format!("clip-thumb-{id}"), ci, egui::TextureOptions::LINEAR);
+                let t = ctx.load_texture(format!("clip-thumb-{id}"), ci, egui::TextureOptions::LINEAR);
                 self.thumbs.tex.insert(id, t);
             }
         }
@@ -666,12 +553,7 @@ impl Tool for Clipboard {
         match view {
             "clipboard" => {
                 self.tab = Tab::History;
-                self.selected = self
-                    .store
-                    .entries
-                    .iter()
-                    .find(|e| e.kind == Kind::Link)
-                    .map(|e| e.id);
+                self.selected = self.store.entries.iter().find(|e| e.kind == Kind::Link).map(|e| e.id);
                 Some(View::Page)
             }
             "clipboard-settings" => {
@@ -679,11 +561,7 @@ impl Tool for Clipboard {
                 Some(View::Page)
             }
             "clipboard-quick" | "clipboard-list" => {
-                let layout = if view == "clipboard-list" {
-                    Layout::List
-                } else {
-                    Layout::Cards
-                };
+                let layout = if view == "clipboard-list" { Layout::List } else { Layout::Cards };
                 self.demo_quick = Some(quick::Quick::new(layout, None));
                 Some(View::Page)
             }
@@ -697,20 +575,14 @@ mod tests {
     use super::*;
 
     fn demo() -> Clipboard {
-        Clipboard::new(&ToolEnv {
-            ctx: egui::Context::default(),
-            demo: true,
-        })
+        Clipboard::new(&ToolEnv { ctx: egui::Context::default(), demo: true })
     }
 
     #[test]
     fn sample_history_has_every_kind() {
         let c = demo();
         for k in Kind::ALL {
-            assert!(
-                c.store.entries.iter().any(|e| e.kind == k),
-                "no {k:?} sample"
-            );
+            assert!(c.store.entries.iter().any(|e| e.kind == k), "no {k:?} sample");
         }
         let v = c.visible(Filter::All, "");
         assert!(c.store.get(v[0]).unwrap().pinned, "pinned first");
@@ -722,25 +594,14 @@ mod tests {
     fn privacy_rules() {
         let mut c = demo();
         let n = c.store.entries.len();
-        let pw = Clip {
-            text: Some("hunter2".into()),
-            concealed: true,
-            ..Default::default()
-        };
+        let pw = Clip { text: Some("hunter2".into()), concealed: true, ..Default::default() };
         c.take(pw.clone());
         assert_eq!(c.store.entries.len(), n, "concealed skipped by default");
-        c.take(Clip {
-            text: Some("secret".into()),
-            bundle: "com.1password.1password".into(),
-            ..Default::default()
-        });
+        c.take(Clip { text: Some("secret".into()), bundle: "com.1password.1password".into(), ..Default::default() });
         assert_eq!(c.store.entries.len(), n, "ignored app");
         c.toggle_pause(15);
         assert!(c.paused());
-        c.take(Clip {
-            text: Some("while paused".into()),
-            ..Default::default()
-        });
+        c.take(Clip { text: Some("while paused".into()), ..Default::default() });
         assert_eq!(c.store.entries.len(), n);
         assert!(c.pause_label().unwrap().starts_with("Paused · 15 min"));
         c.toggle_pause(15);
@@ -752,9 +613,7 @@ mod tests {
     #[test]
     fn thumbnails_are_small() {
         let mut png = Vec::new();
-        image::RgbaImage::new(1600, 900)
-            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-            .unwrap();
+        image::RgbaImage::new(1600, 900).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
         let t = thumb_image(&png).unwrap();
         assert_eq!(t.size, [THUMB_PX as usize, 236]);
     }

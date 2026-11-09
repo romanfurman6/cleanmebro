@@ -75,10 +75,7 @@ impl App {
         install_fonts(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
         let demo = opts.screenshot.is_some();
-        let tools = crate::tools::all(&ToolEnv {
-            ctx: ctx.clone(),
-            demo,
-        });
+        let tools = crate::tools::all(&ToolEnv { ctx: ctx.clone(), demo });
 
         // the menu bar icon
         let (tx, tray_rx): (Sender<tray_icon::TrayIconEvent>, _) = std::sync::mpsc::channel();
@@ -100,26 +97,10 @@ impl App {
         };
 
         // screenshots always use the default widgets
-        let prefs: WidgetPrefs = if demo {
-            None
-        } else {
-            cc.storage
-                .and_then(|s| eframe::get_value(s, super::settings::STORAGE_KEY))
-        }
-        .unwrap_or_default();
-        let tools_off: Vec<String> = if demo {
-            None
-        } else {
-            cc.storage
-                .and_then(|s| eframe::get_value(s, super::settings::TOOLS_KEY))
-        }
-        .unwrap_or_default();
+        let prefs: WidgetPrefs = if demo { None } else { cc.storage.and_then(|s| eframe::get_value(s, super::settings::STORAGE_KEY)) }.unwrap_or_default();
+        let tools_off: Vec<String> = if demo { None } else { cc.storage.and_then(|s| eframe::get_value(s, super::settings::TOOLS_KEY)) }.unwrap_or_default();
         // the window opens on the sidebar's first page (Clean section first)
-        let page = tools
-            .iter()
-            .position(|t| t.has_page() && t.section() == "Clean")
-            .or_else(|| tools.iter().position(|t| t.has_page()))
-            .unwrap_or(0);
+        let page = tools.iter().position(|t| t.has_page() && t.section() == "Clean").or_else(|| tools.iter().position(|t| t.has_page())).unwrap_or(0);
         let mut app = App {
             tools,
             mode: Mode::Panel,
@@ -170,12 +151,7 @@ impl App {
         }
         v.push((widget_key(CORE, RECOMMENDATION), true, Size::S14));
         // the registry's preferred order first, the rest as the tools list them
-        let rank = |k: &str| {
-            crate::tools::DEFAULT_WIDGET_ORDER
-                .iter()
-                .position(|o| *o == k)
-                .unwrap_or(usize::MAX)
-        };
+        let rank = |k: &str| crate::tools::DEFAULT_WIDGET_ORDER.iter().position(|o| *o == k).unwrap_or(usize::MAX);
         v.sort_by_key(|(k, _, _)| rank(k));
         v
     }
@@ -184,17 +160,7 @@ impl App {
     pub fn widget_spec(&self, key: &str) -> Option<(Option<usize>, WidgetSpec)> {
         let (tool, id) = key.split_once('/')?;
         if tool == CORE && id == RECOMMENDATION {
-            return Some((
-                None,
-                WidgetSpec {
-                    id: RECOMMENDATION,
-                    title: "Today's Recommendation",
-                    about: "The most useful thing to do now, from every tool.",
-                    sizes: &[Size::S14],
-                    size: Size::S14,
-                    default_on: true,
-                },
-            ));
+            return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", about: "The most useful thing to do now, from every tool.", sizes: &[Size::S14], size: Size::S14, default_on: true }));
         }
         let i = self.tools.iter().position(|t| t.id() == tool)?;
         let spec = self.tools[i].widgets().into_iter().find(|w| w.id == id)?;
@@ -203,11 +169,7 @@ impl App {
 
     pub fn save_widgets(&self, storage: &mut dyn eframe::Storage) {
         if !self.demo {
-            eframe::set_value(
-                storage,
-                super::settings::STORAGE_KEY,
-                &WidgetPrefs::from_entries(&self.widgets),
-            );
+            eframe::set_value(storage, super::settings::STORAGE_KEY, &WidgetPrefs::from_entries(&self.widgets));
             eframe::set_value(storage, super::settings::TOOLS_KEY, &self.tools_off);
         }
     }
@@ -219,9 +181,7 @@ impl App {
 
     /// Whether the user left tool `i` on.
     pub fn tool_on(&self, i: usize) -> bool {
-        self.tools
-            .get(i)
-            .is_some_and(|t| !self.tools_off.iter().any(|id| id == t.id()))
+        self.tools.get(i).is_some_and(|t| !self.tools_off.iter().any(|id| id == t.id()))
     }
 
     pub fn set_tool_on(&mut self, i: usize, on: bool) {
@@ -262,10 +222,7 @@ impl App {
             }
             // one widget alone at one size: "widget-system/devices@4:4"
             v if v.starts_with("widget-") => {
-                if let Some((key, z)) = v["widget-".len()..]
-                    .split_once('@')
-                    .and_then(|(k, z)| Size::parse(z).map(|z| (k.to_string(), z)))
-                {
+                if let Some((key, z)) = v["widget-".len()..].split_once('@').and_then(|(k, z)| Size::parse(z).map(|z| (k.to_string(), z))) {
                     for e in &mut self.widgets {
                         e.on = false;
                     }
@@ -279,25 +236,9 @@ impl App {
                     t.demo_view("sizes");
                 }
                 let show: &[(&str, Size)] = if view == "sizes" {
-                    &[
-                        ("cleanup/clean", Size::S11),
-                        ("system/cpu", Size::S11),
-                        ("system/memory", Size::S12),
-                        ("fan/fans", Size::S14),
-                        ("capture/capture", Size::S14),
-                        ("keep_awake/card", Size::S24),
-                        ("clipboard/recent", Size::S24),
-                    ]
+                    &[("cleanup/clean", Size::S11), ("system/cpu", Size::S11), ("system/memory", Size::S12), ("fan/fans", Size::S14), ("capture/capture", Size::S14), ("keep_awake/card", Size::S24), ("clipboard/recent", Size::S24)]
                 } else {
-                    &[
-                        ("system/health", Size::S24),
-                        ("lens/map", Size::S24),
-                        ("claude/limits", Size::S24),
-                        ("system/storage", Size::S11),
-                        ("system/memory", Size::S11),
-                        ("system/battery", Size::S12),
-                        ("fan/fans", Size::S44),
-                    ]
+                    &[("system/health", Size::S24), ("lens/map", Size::S24), ("claude/limits", Size::S24), ("system/storage", Size::S11), ("system/memory", Size::S11), ("system/battery", Size::S12), ("fan/fans", Size::S44)]
                 };
                 for e in &mut self.widgets {
                     e.on = false;
@@ -315,17 +256,7 @@ impl App {
                 for e in &mut self.widgets {
                     e.on = false;
                 }
-                let keys: Vec<String> = self
-                    .tools
-                    .iter()
-                    .flat_map(|t| {
-                        t.widgets()
-                            .into_iter()
-                            .filter(|w| w.sizes.contains(&Size::S14))
-                            .map(|w| super::settings::widget_key(t.id(), w.id))
-                            .collect::<Vec<_>>()
-                    })
-                    .collect();
+                let keys: Vec<String> = self.tools.iter().flat_map(|t| t.widgets().into_iter().filter(|w| w.sizes.contains(&Size::S14)).map(|w| super::settings::widget_key(t.id(), w.id)).collect::<Vec<_>>()).collect();
                 for k in keys {
                     super::settings::add_entry(&mut self.widgets, &k, Size::S14, None);
                 }
@@ -361,18 +292,12 @@ impl App {
     }
 
     pub fn page_tools(&self) -> Vec<usize> {
-        (0..self.tools.len())
-            .filter(|&i| self.tools[i].has_page() && self.tool_on(i))
-            .collect()
+        (0..self.tools.len()).filter(|&i| self.tools[i].has_page() && self.tool_on(i)).collect()
     }
 
     /// A fresh per-frame context for tools.
     pub fn cx(&self) -> Cx {
-        Cx::new(
-            self.detail
-                .as_ref()
-                .map(|(i, d)| (self.tools[*i].id().to_string(), d.clone())),
-        )
+        Cx::new(self.detail.as_ref().map(|(i, d)| (self.tools[*i].id().to_string(), d.clone())))
     }
 
     /// Carry out what tools asked for this frame.
@@ -385,18 +310,10 @@ impl App {
                         self.open_window(ctx, i);
                     }
                 }
-                Action::ShowDetail {
-                    tool,
-                    detail,
-                    toggle,
-                } => {
+                Action::ShowDetail { tool, detail, toggle } => {
                     if let Some(i) = self.tool_index(&tool) {
                         let same = self.detail.as_ref() == Some(&(i, detail.clone()));
-                        self.detail = if same && toggle {
-                            None
-                        } else {
-                            Some((i, detail))
-                        };
+                        self.detail = if same && toggle { None } else { Some((i, detail)) };
                         self.reshape(ctx);
                     }
                 }
@@ -433,21 +350,14 @@ impl App {
     }
 
     pub fn max_panel_height(&self, ctx: &egui::Context) -> f32 {
-        let screen = ctx
-            .input(|i| i.viewport().monitor_size)
-            .unwrap_or(Vec2::new(1512.0, 982.0));
+        let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
         (screen.y - 40.0).max(400.0)
     }
 
     pub fn window_size(&self, ctx: &egui::Context) -> Vec2 {
         match self.mode {
             Mode::Panel => {
-                let w = m::PANEL_WIDTH
-                    + if self.sheet_open() {
-                        m::DETAIL_WIDTH + 12.0
-                    } else {
-                        0.0
-                    };
+                let w = m::PANEL_WIDTH + if self.sheet_open() { m::DETAIL_WIDTH + 12.0 } else { 0.0 };
                 Vec2::new(w, self.panel_height().min(self.max_panel_height(ctx)))
             }
             Mode::Window => Vec2::new(m::APP_WIDTH, m::APP_HEIGHT),
@@ -461,39 +371,20 @@ impl App {
         if self.screenshot.is_some() {
             return;
         }
-        let screen = ctx
-            .input(|i| i.viewport().monitor_size)
-            .unwrap_or(Vec2::new(1512.0, 982.0));
+        let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
         match self.mode {
             Mode::Panel => {
-                let anchor = self
-                    .anchor
-                    .unwrap_or(Pos2::new(screen.x - m::PANEL_WIDTH / 2.0 - 16.0, 30.0));
+                let anchor = self.anchor.unwrap_or(Pos2::new(screen.x - m::PANEL_WIDTH / 2.0 - 16.0, 30.0));
                 let right = (anchor.x + m::PANEL_WIDTH / 2.0).clamp(m::PANEL_WIDTH, screen.x - 8.0);
                 let x = (right - size.x).max(8.0);
-                ctx.send_viewport_cmd_to(
-                    egui::ViewportId::ROOT,
-                    ViewportCommand::OuterPosition(Pos2::new(x, anchor.y + 6.0)),
-                );
-                ctx.send_viewport_cmd_to(
-                    egui::ViewportId::ROOT,
-                    ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop),
-                );
+                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::OuterPosition(Pos2::new(x, anchor.y + 6.0)));
+                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
                 crate::kit::native::set_dock_icon(false);
             }
             Mode::Window => {
-                let pos = Pos2::new(
-                    ((screen.x - size.x) / 2.0).max(0.0),
-                    ((screen.y - size.y) / 2.0).max(30.0),
-                );
-                ctx.send_viewport_cmd_to(
-                    egui::ViewportId::ROOT,
-                    ViewportCommand::OuterPosition(pos),
-                );
-                ctx.send_viewport_cmd_to(
-                    egui::ViewportId::ROOT,
-                    ViewportCommand::WindowLevel(egui::WindowLevel::Normal),
-                );
+                let pos = Pos2::new(((screen.x - size.x) / 2.0).max(0.0), ((screen.y - size.y) / 2.0).max(30.0));
+                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::OuterPosition(pos));
+                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
                 crate::kit::native::set_dock_icon(true);
             }
         }
@@ -539,16 +430,8 @@ impl App {
 
     fn handle_tray(&mut self, ctx: &egui::Context) {
         while let Ok(ev) = self.tray_rx.try_recv() {
-            if let tray_icon::TrayIconEvent::Click {
-                rect,
-                button: tray_icon::MouseButton::Left,
-                button_state: tray_icon::MouseButtonState::Up,
-                ..
-            } = ev
-            {
-                let ppp = ctx
-                    .input(|i| i.viewport().native_pixels_per_point)
-                    .unwrap_or(2.0);
+            if let tray_icon::TrayIconEvent::Click { rect, button: tray_icon::MouseButton::Left, button_state: tray_icon::MouseButtonState::Up, .. } = ev {
+                let ppp = ctx.input(|i| i.viewport().native_pixels_per_point).unwrap_or(2.0);
                 let cx = (rect.position.x + rect.size.width as f64 / 2.0) as f32 / ppp;
                 let bottom = (rect.position.y + rect.size.height as f64) as f32 / ppp;
                 self.anchor = Some(Pos2::new(cx, bottom));
@@ -564,13 +447,7 @@ impl App {
 
     fn update_tray_title(&mut self) {
         let Some(tray) = &self.tray else { return };
-        let title = self
-            .tools
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| self.tool_on(*i))
-            .find_map(|(_, t)| t.tray_title())
-            .unwrap_or_default();
+        let title = self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).find_map(|(_, t)| t.tray_title()).unwrap_or_default();
         if title != self.tray_title {
             tray.set_title(if title.is_empty() { None } else { Some(&title) });
             self.tray_title = title;
@@ -606,10 +483,7 @@ impl eframe::App for App {
             self.reshape(ctx);
         }
         // closing the window keeps the app in the menu bar
-        if ctx.input(|i| i.viewport().close_requested())
-            && self.screenshot.is_none()
-            && !QUIT.load(std::sync::atomic::Ordering::SeqCst)
-        {
+        if ctx.input(|i| i.viewport().close_requested()) && self.screenshot.is_none() && !QUIT.load(std::sync::atomic::Ordering::SeqCst) {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.hide(ctx);
         }
@@ -618,12 +492,7 @@ impl eframe::App for App {
         if focused == Some(true) {
             self.had_focus = true;
         }
-        if self.mode == Mode::Panel
-            && self.visible
-            && self.had_focus
-            && focused == Some(false)
-            && self.screenshot.is_none()
-        {
+        if self.mode == Mode::Panel && self.visible && self.had_focus && focused == Some(false) && self.screenshot.is_none() {
             self.hide(ctx);
         }
     }
@@ -645,46 +514,27 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.frame += 1;
         if self.frame <= 3 || self.frame.is_multiple_of(30) {
-            let r = if self.mode == Mode::Panel {
-                m::CARD_RADIUS as f64 + 6.0
-            } else {
-                16.0
-            };
+            let r = if self.mode == Mode::Panel { m::CARD_RADIUS as f64 + 6.0 } else { 16.0 };
             if self.screenshot.is_none() {
                 crate::kit::native::apply_glass(r);
             }
         }
         if std::env::var("CLEANMEBRO_DEBUG").is_ok() {
             match self.frame {
-                30 => eprintln!(
-                    "== start screen {:?}\n{}",
-                    ui.max_rect(),
-                    crate::kit::native::debug_windows()
-                ),
-                120 => eprintln!(
-                    "== panel screen {:?}\n{}",
-                    ui.max_rect(),
-                    crate::kit::native::debug_windows()
-                ),
+                30 => eprintln!("== start screen {:?}\n{}", ui.max_rect(), crate::kit::native::debug_windows()),
+                120 => eprintln!("== panel screen {:?}\n{}", ui.max_rect(), crate::kit::native::debug_windows()),
                 150 => {
                     let p = self.page;
                     self.open_window(&ctx, p)
                 }
-                220 => eprintln!(
-                    "== app screen {:?}\n{}",
-                    ui.max_rect(),
-                    crate::kit::native::debug_windows()
-                ),
+                220 => eprintln!("== app screen {:?}\n{}", ui.max_rect(), crate::kit::native::debug_windows()),
                 _ => {}
             }
             ctx.request_repaint();
         }
         let full = ui.max_rect();
         // screenshots: wait until the window has its size for the chosen view
-        if self.screenshot.is_some()
-            && (full.size() - self.window_size(&ctx)).length() > 2.0
-            && self.frame < 60
-        {
+        if self.screenshot.is_some() && (full.size() - self.window_size(&ctx)).length() > 2.0 && self.frame < 60 {
             self.screenshot_step(&ctx);
             return;
         }
@@ -695,23 +545,11 @@ impl eframe::App for App {
             Mode::Panel => {
                 // one glass sheet; the detail opens on its left behind a hairline
                 glass::backdrop(ui.painter(), full, m::CARD_RADIUS + 2.0, opaque, t);
-                let panel = Rect::from_min_size(
-                    Pos2::new(full.right() - m::PANEL_WIDTH, full.top()),
-                    Vec2::new(m::PANEL_WIDTH, full.height()),
-                );
+                let panel = Rect::from_min_size(Pos2::new(full.right() - m::PANEL_WIDTH, full.top()), Vec2::new(m::PANEL_WIDTH, full.height()));
                 if self.sheet_open() {
-                    let sheet = Rect::from_min_size(
-                        full.left_top(),
-                        Vec2::new(m::DETAIL_WIDTH, full.height()),
-                    );
+                    let sheet = Rect::from_min_size(full.left_top(), Vec2::new(m::DETAIL_WIDTH, full.height()));
                     let x = panel.left() - 6.0;
-                    ui.painter().line_segment(
-                        [
-                            Pos2::new(x, full.top() + 18.0),
-                            Pos2::new(x, full.bottom() - 18.0),
-                        ],
-                        egui::Stroke::new(1.0, white(30)),
-                    );
+                    ui.painter().line_segment([Pos2::new(x, full.top() + 18.0), Pos2::new(x, full.bottom() - 18.0)], egui::Stroke::new(1.0, white(30)));
                     super::panel::detail(self, ui, sheet, &mut cx);
                 }
                 let before = self.widgets.clone();
@@ -744,10 +582,7 @@ impl eframe::App for App {
             if at.elapsed().as_secs_f32() < 3.0 {
                 let p = ui.painter();
                 let g = p.layout_no_wrap(msg.clone(), font(13.0), TEXT);
-                let r = Rect::from_center_size(
-                    Pos2::new(full.center().x, full.bottom() - 40.0),
-                    g.size() + Vec2::new(28.0, 16.0),
-                );
+                let r = Rect::from_center_size(Pos2::new(full.center().x, full.bottom() - 40.0), g.size() + Vec2::new(28.0, 16.0));
                 glass_card(p, r, r.height() / 2.0, 1.0, false);
                 p.galley(r.center() - g.size() / 2.0, g, TEXT);
                 ctx.request_repaint();
@@ -759,11 +594,7 @@ impl eframe::App for App {
             self.app_viewport(&ctx);
         }
         // keep animations and live numbers moving
-        ctx.request_repaint_after(std::time::Duration::from_millis(if self.visible {
-            500
-        } else {
-            2000
-        }));
+        ctx.request_repaint_after(std::time::Duration::from_millis(if self.visible { 500 } else { 2000 }));
         self.screenshot_step(&ctx);
     }
 }
@@ -815,17 +646,13 @@ impl App {
     }
 
     fn screenshot_step(&mut self, ctx: &egui::Context) {
-        let Some(path) = self.screenshot.clone() else {
-            return;
-        };
+        let Some(path) = self.screenshot.clone() else { return };
         ctx.request_repaint();
         if self.frame == 120 {
-            ctx.send_viewport_cmd(ViewportCommand::Screenshot(egui::ScreenshotCallback::new(
-                move |img| {
-                    save_png(&img, &path);
-                    std::process::exit(0);
-                },
-            )));
+            ctx.send_viewport_cmd(ViewportCommand::Screenshot(egui::ScreenshotCallback::new(move |img| {
+                save_png(&img, &path);
+                std::process::exit(0);
+            })));
         }
         if self.frame > 400 {
             eprintln!("screenshot was not delivered");
@@ -844,11 +671,7 @@ fn save_png(img: &egui::ColorImage, path: &std::path::Path) {
         let [r, g, b, a] = px.to_srgba_unmultiplied();
         let af = a as f32 / 255.0;
         let mix = |c: u8, k: u8| (c as f32 * af + k as f32 * (1.0 - af)).round() as u8;
-        buf.put_pixel(
-            (i % w) as u32,
-            (i / w) as u32,
-            image::Rgba([mix(r, bg[0]), mix(g, bg[1]), mix(b, bg[2]), 255]),
-        );
+        buf.put_pixel((i % w) as u32, (i / w) as u32, image::Rgba([mix(r, bg[0]), mix(g, bg[1]), mix(b, bg[2]), 255]));
     }
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -869,11 +692,7 @@ fn tray_image() -> tray_icon::Icon {
             let fy = y as f32 + 0.5 - c;
             // rounded-square outline
             let q = (fx.abs().max(fy.abs()) - 13.0).abs();
-            let mut a: f32 = if q < 1.4 {
-                1.0 - (q - 0.4).max(0.0)
-            } else {
-                0.0
-            };
+            let mut a: f32 = if q < 1.4 { 1.0 - (q - 0.4).max(0.0) } else { 0.0 };
             // four-point star in the middle
             let sx = fx.abs() / 8.5;
             let sy = fy.abs() / 8.5;
@@ -904,32 +723,16 @@ fn install_fonts(ctx: &egui::Context) {
         semibold.tweak.coords = VariationCoords::new([("wght", 620.0)]);
         fonts.font_data.insert("sf".into(), Arc::new(regular));
         fonts.font_data.insert("sf-bold".into(), Arc::new(semibold));
-        fonts
-            .families
-            .get_mut(&FontFamily::Proportional)
-            .unwrap()
-            .insert(0, "sf".into());
+        fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "sf".into());
         bold_family.push("sf-bold".to_string());
     }
     if let Some(bytes) = mono {
-        fonts
-            .font_data
-            .insert("sf-mono".into(), Arc::new(FontData::from_owned(bytes)));
-        fonts
-            .families
-            .get_mut(&FontFamily::Monospace)
-            .unwrap()
-            .insert(0, "sf-mono".into());
+        fonts.font_data.insert("sf-mono".into(), Arc::new(FontData::from_owned(bytes)));
+        fonts.families.get_mut(&FontFamily::Monospace).unwrap().insert(0, "sf-mono".into());
     }
-    let mut fallback = fonts
-        .families
-        .get(&FontFamily::Proportional)
-        .cloned()
-        .unwrap_or_default();
+    let mut fallback = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     bold_family.append(&mut fallback);
-    fonts
-        .families
-        .insert(FontFamily::Name("bold".into()), bold_family);
+    fonts.families.insert(FontFamily::Name("bold".into()), bold_family);
     ctx.set_fonts(fonts);
     ctx.set_visuals(egui::Visuals::dark());
     ctx.all_styles_mut(|s| {

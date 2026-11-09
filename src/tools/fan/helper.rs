@@ -36,9 +36,7 @@ pub const LEASE_SECS: u64 = 8;
 pub enum Request {
     Hello,
     /// Hold each fan at this rpm (`None` = Auto for that fan).
-    Set {
-        rpm: Vec<Option<f32>>,
-    },
+    Set { rpm: Vec<Option<f32>> },
     Auto,
 }
 
@@ -105,11 +103,7 @@ pub fn install() -> Result<(), String> {
         exe = sh_quote(&exe),
         plist = sh_quote(&plist_tmp),
     );
-    let r = run_admin(
-        &dir,
-        &script,
-        "CleanMeBro wants to add its fan helper so it can change fan speed.",
-    );
+    let r = run_admin(&dir, &script, "CleanMeBro wants to add its fan helper so it can change fan speed.");
     let _ = std::fs::remove_dir_all(&dir);
     r?;
     // give launchd a moment to start it
@@ -126,9 +120,7 @@ pub fn install() -> Result<(), String> {
 pub fn uninstall() -> Result<(), String> {
     let dir = std::env::temp_dir().join(format!("cleanmebro-fan-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let script = format!(
-        "launchctl bootout system/{LABEL} 2>/dev/null || true\nrm -f {PLIST} {BIN} {SOCKET}\n"
-    );
+    let script = format!("launchctl bootout system/{LABEL} 2>/dev/null || true\nrm -f {PLIST} {BIN} {SOCKET}\n");
     let r = run_admin(&dir, &script, "CleanMeBro wants to remove its fan helper.");
     let _ = std::fs::remove_dir_all(&dir);
     r
@@ -143,16 +135,8 @@ fn run_admin(dir: &Path, script: &str, prompt: &str) -> Result<(), String> {
     let file = dir.join("run.sh");
     std::fs::write(&file, script).map_err(|e| e.to_string())?;
     let cmd = format!("/bin/sh {}", sh_quote(&file));
-    let apple = format!(
-        "do shell script \"{}\" with prompt \"{}\" with administrator privileges",
-        cmd.replace('\\', "\\\\").replace('"', "\\\""),
-        prompt
-    );
-    let out = std::process::Command::new("/usr/bin/osascript")
-        .arg("-e")
-        .arg(apple)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let apple = format!("do shell script \"{}\" with prompt \"{}\" with administrator privileges", cmd.replace('\\', "\\\\").replace('"', "\\\""), prompt);
+    let out = std::process::Command::new("/usr/bin/osascript").arg("-e").arg(apple).output().map_err(|e| e.to_string())?;
     if out.status.success() {
         return Ok(());
     }
@@ -161,11 +145,7 @@ fn run_admin(dir: &Path, script: &str, prompt: &str) -> Result<(), String> {
     if err.contains("-128") {
         return Err(String::new());
     }
-    Err(if err.is_empty() {
-        "The helper couldn't be installed.".into()
-    } else {
-        err
-    })
+    Err(if err.is_empty() { "The helper couldn't be installed.".into() } else { err })
 }
 
 // ---------------------------------------------------------------- daemon
@@ -250,11 +230,7 @@ pub fn serve(uid: u32) -> ! {
                 apply(&mut ctl, &targets, hot, &mut manual);
             }
             let note = if hot { "hot" } else { "" }.to_string();
-            let reply = Reply {
-                version: VERSION,
-                manual,
-                note,
-            };
+            let reply = Reply { version: VERSION, manual, note };
             if let Ok(mut s) = serde_json::to_string(&reply) {
                 s.push('\n');
                 let _ = (&stream).write_all(s.as_bytes());
@@ -263,13 +239,8 @@ pub fn serve(uid: u32) -> ! {
         if last_tick.elapsed() >= Duration::from_secs(1) {
             last_tick = Instant::now();
             let r = probe.read();
-            let snap = Snapshot {
-                sensors: merge(r.hid, r.smc_temps),
-                ..Default::default()
-            };
-            hot = snap
-                .hottest()
-                .is_some_and(|(_, c)| c >= super::control::TRIP_C);
+            let snap = Snapshot { sensors: merge(r.hid, r.smc_temps), ..Default::default() };
+            hot = snap.hottest().is_some_and(|(_, c)| c >= super::control::TRIP_C);
             if SystemTime::now() > lease {
                 targets.clear();
             }
@@ -310,32 +281,17 @@ mod tests {
 
     #[test]
     fn protocol_round_trips() {
-        let r = Request::Set {
-            rpm: vec![Some(2400.0), None],
-        };
+        let r = Request::Set { rpm: vec![Some(2400.0), None] };
         let s = serde_json::to_string(&r).unwrap();
         assert_eq!(s, r#"{"op":"set","rpm":[2400.0,null]}"#);
         assert_eq!(serde_json::from_str::<Request>(&s).unwrap(), r);
-        assert_eq!(
-            serde_json::from_str::<Request>(r#"{"op":"auto"}"#).unwrap(),
-            Request::Auto
-        );
-        assert_eq!(
-            serde_json::from_str::<Reply>(r#"{"version":1,"manual":true}"#).unwrap(),
-            Reply {
-                version: 1,
-                manual: true,
-                note: String::new()
-            }
-        );
+        assert_eq!(serde_json::from_str::<Request>(r#"{"op":"auto"}"#).unwrap(), Request::Auto);
+        assert_eq!(serde_json::from_str::<Reply>(r#"{"version":1,"manual":true}"#).unwrap(), Reply { version: 1, manual: true, note: String::new() });
     }
 
     #[test]
     fn quotes_paths_for_sh() {
-        assert_eq!(
-            sh_quote(Path::new("/Applications/CleanMeBro Dev.app/x")),
-            "'/Applications/CleanMeBro Dev.app/x'"
-        );
+        assert_eq!(sh_quote(Path::new("/Applications/CleanMeBro Dev.app/x")), "'/Applications/CleanMeBro Dev.app/x'");
         assert_eq!(sh_quote(Path::new("/a'b")), r"'/a'\''b'");
     }
 }
