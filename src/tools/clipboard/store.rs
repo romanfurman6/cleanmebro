@@ -128,8 +128,17 @@ impl Entry {
 
     /// Whether the search words all appear in the entry.
     pub fn matches(&self, query: &str) -> bool {
+        let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
+        self.matches_words(&words)
+    }
+
+    /// [`Entry::matches`] with the query already lowercased and split.
+    pub fn matches_words(&self, words: &[String]) -> bool {
+        if words.is_empty() {
+            return true;
+        }
         let hay = format!("{} {}", self.text, self.app).to_lowercase();
-        query.to_lowercase().split_whitespace().all(|w| hay.contains(w))
+        words.iter().all(|w| hay.contains(w.as_str()))
     }
 
     /// Facts for the detail view: "2 lines · 92 characters".
@@ -285,18 +294,20 @@ pub struct Store {
     pub entries: Vec<Entry>,
     /// None: sample data that never saves.
     saves: bool,
+    /// Bumped on every change, so views can keep work keyed to it.
+    rev: u64,
 }
 
 impl Store {
     pub fn open(dir: PathBuf) -> Store {
         let entries = std::fs::read_to_string(dir.join("index.json")).ok().and_then(|s| serde_json::from_str::<Vec<Entry>>(&s).ok()).unwrap_or_default();
-        Store { dir, entries, saves: true }
+        Store { dir, entries, saves: true, rev: 0 }
     }
 
     /// In memory only (tests that don't touch the disk).
     #[cfg(test)]
     pub fn memory(dir: PathBuf) -> Store {
-        Store { dir, entries: Vec::new(), saves: false }
+        Store { dir, entries: Vec::new(), saves: false, rev: 0 }
     }
 
     fn blob(&self, id: u64, ext: &str) -> PathBuf {
@@ -327,7 +338,13 @@ impl Store {
         self.entries.iter().map(|e| e.bytes).sum()
     }
 
-    fn save(&self) {
+    /// Which version of the history this is (changes on every change).
+    pub fn rev(&self) -> u64 {
+        self.rev
+    }
+
+    fn save(&mut self) {
+        self.rev += 1;
         if !self.saves {
             return;
         }
