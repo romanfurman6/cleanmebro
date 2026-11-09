@@ -59,6 +59,21 @@ pub struct AppRow {
 }
 
 impl AppRow {
+    /// A copy for drawing a list row: everything but the files.
+    pub fn without_items(&self) -> AppRow {
+        AppRow {
+            path: self.path.clone(),
+            name: self.name.clone(),
+            id: self.id.clone(),
+            version: self.version.clone(),
+            source: self.source,
+            locked: self.locked,
+            last_used: self.last_used,
+            items: Vec::new(),
+            sized: self.sized,
+        }
+    }
+
     pub fn total(&self) -> u64 {
         self.items.iter().map(|i| i.bytes).sum()
     }
@@ -428,9 +443,11 @@ impl Uninstaller {
             })
             .collect();
         let apps = &g.apps;
+        // keys worked out once per app, not once per comparison: this runs
+        // several times every frame
         match self.sort {
-            Sort::Size => idx.sort_by(|&a, &b| apps[b].total().cmp(&apps[a].total()).then(apps[a].name.to_lowercase().cmp(&apps[b].name.to_lowercase()))),
-            Sort::Name => idx.sort_by_key(|&a| apps[a].name.to_lowercase()),
+            Sort::Size => idx.sort_by_cached_key(|&a| (std::cmp::Reverse(apps[a].total()), apps[a].name.to_lowercase())),
+            Sort::Name => idx.sort_by_cached_key(|&a| apps[a].name.to_lowercase()),
             Sort::LastUsed => idx.sort_by(|&a, &b| apps[a].last_used.unwrap_or(i64::MAX).cmp(&apps[b].last_used.unwrap_or(i64::MAX))),
         }
         // apps that can't be removed go last
