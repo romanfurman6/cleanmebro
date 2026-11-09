@@ -5,6 +5,7 @@
 
 pub mod capture;
 pub mod claude;
+pub mod clipboard;
 pub mod cleanup;
 pub mod lens;
 pub mod system;
@@ -18,6 +19,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
         Box::new(cleanup::Cleanup::new(env)),
         Box::new(lens::Lens::new(env)),
         Box::new(capture::Capture::new(env)),
+        Box::new(clipboard::Clipboard::new(env)),
         Box::new(claude::Claude::new(env)),
     ]
 }
@@ -29,6 +31,7 @@ pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "capture/tile",
     "core/planned",
     "capture/capture",
+    "clipboard/recent",
     "system/storage",
     "system/memory",
     "system/cpu",

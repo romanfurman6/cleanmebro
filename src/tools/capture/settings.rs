@@ -2,6 +2,7 @@
 //! where files go and how much history to keep. Saved as JSON in the app's
 //! data folder, separate from the shell's widget settings.
 
+pub use crate::kit::hotkeys::Shortcut;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -46,89 +47,6 @@ impl Command {
             Command::Delayed | Command::History => return None,
         };
         Some(Shortcut { cmd: true, shift: true, alt: false, ctrl: false, key: key.into() })
-    }
-}
-
-/// A key combination. `key` is egui's key name ("2", "A", "F5").
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Shortcut {
-    pub cmd: bool,
-    pub shift: bool,
-    pub alt: bool,
-    pub ctrl: bool,
-    pub key: String,
-}
-
-impl Shortcut {
-    /// The macOS way of writing it: ⌃⌥⇧⌘ then the key.
-    pub fn display(&self) -> String {
-        let mut s = String::new();
-        if self.ctrl {
-            s.push('⌃');
-        }
-        if self.alt {
-            s.push('⌥');
-        }
-        if self.shift {
-            s.push('⇧');
-        }
-        if self.cmd {
-            s.push('⌘');
-        }
-        s.push_str(&self.key);
-        s
-    }
-
-    pub fn has_modifier(&self) -> bool {
-        self.cmd || self.ctrl || self.alt
-    }
-
-    /// From a key press in our own window (the shortcut recorder).
-    pub fn from_press(key: egui::Key, m: egui::Modifiers) -> Option<Shortcut> {
-        let s = Shortcut { cmd: m.mac_cmd || m.command, shift: m.shift, alt: m.alt, ctrl: m.ctrl && !m.command, key: key.name().to_string() };
-        (s.has_modifier() && key_code(&s.key).is_some()).then_some(s)
-    }
-
-    /// Why this shortcut is a bad idea, if it is.
-    pub fn conflict(&self) -> Option<&'static str> {
-        let mac = self.cmd && self.shift && !self.alt && !self.ctrl;
-        match self.key.as_str() {
-            "3" | "4" | "5" if mac => Some("macOS uses this for its own screenshots"),
-            "Q" | "W" | "C" | "V" | "X" | "Z" | "A" | "S" | "Tab" if self.cmd && !self.shift && !self.alt && !self.ctrl => Some("apps use this; pick another"),
-            _ => None,
-        }
-    }
-}
-
-/// The `keyboard-types` code name for an egui key name, as the global
-/// shortcut library wants it. None for keys we don't offer.
-pub fn key_code(key: &str) -> Option<String> {
-    if key.len() == 1 {
-        let c = key.chars().next()?;
-        if c.is_ascii_digit() {
-            return Some(format!("Digit{c}"));
-        }
-        if c.is_ascii_uppercase() {
-            return Some(format!("Key{c}"));
-        }
-    }
-    if let Some(n) = key.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()) {
-        if (1..=20).contains(&n) {
-            return Some(format!("F{n}"));
-        }
-    }
-    match key {
-        "Space" => Some("Space".into()),
-        "Minus" => Some("Minus".into()),
-        "Equals" | "Plus" => Some("Equal".into()),
-        "Comma" => Some("Comma".into()),
-        "Period" => Some("Period".into()),
-        "Slash" => Some("Slash".into()),
-        "Semicolon" => Some("Semicolon".into()),
-        "OpenBracket" => Some("BracketLeft".into()),
-        "CloseBracket" => Some("BracketRight".into()),
-        "Backtick" => Some("Backquote".into()),
-        _ => None,
     }
 }
 
@@ -285,6 +203,7 @@ pub fn save(dir: &Path, s: &Settings) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kit::hotkeys::key_code;
 
     fn sc(key: &str) -> Shortcut {
         Shortcut { cmd: true, shift: true, alt: false, ctrl: false, key: key.into() }
