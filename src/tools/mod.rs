@@ -11,6 +11,7 @@ pub mod keep_awake;
 pub mod fan;
 pub mod lens;
 pub mod system;
+pub mod uninstaller;
 
 use crate::core::tool::{Tool, ToolEnv};
 
@@ -20,6 +21,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
         Box::new(system::System::new(env)),
         Box::new(cleanup::Cleanup::new(env)),
         Box::new(lens::Lens::new(env)),
+        Box::new(uninstaller::Uninstaller::new(env)),
         Box::new(capture::Capture::new(env)),
         Box::new(clipboard::Clipboard::new(env)),
         Box::new(claude::Claude::new(env)),

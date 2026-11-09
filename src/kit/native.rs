@@ -191,11 +191,19 @@ mod mac {
     /// Move a file or folder to the Trash the way Finder does: it lands in the
     /// Trash of its own volume (so external drives work) and can be put back.
     pub fn trash_item(p: &std::path::Path) -> Result<(), String> {
+        trash_item_at(p).map(|_| ())
+    }
+
+    /// Like `trash_item`, and says where in the Trash the item now is (so it
+    /// can be put back).
+    pub fn trash_item_at(p: &std::path::Path) -> Result<std::path::PathBuf, String> {
         use objc2_foundation::{NSFileManager, NSString, NSURL};
         let url = NSURL::fileURLWithPath(&NSString::from_str(&p.to_string_lossy()));
+        let mut out: Option<Retained<NSURL>> = None;
         NSFileManager::defaultManager()
-            .trashItemAtURL_resultingItemURL_error(&url, None)
-            .map_err(|e| e.localizedDescription().to_string())
+            .trashItemAtURL_resultingItemURL_error(&url, Some(&mut out))
+            .map_err(|e| e.localizedDescription().to_string())?;
+        out.and_then(|u| u.path()).map(|s| std::path::PathBuf::from(s.to_string())).ok_or_else(|| "Moved, but the Trash didn't say where".to_string())
     }
 }
 
@@ -230,6 +238,9 @@ mod other {
     /// Move into ~/.Trash. Refuses (instead of deleting) when the item is on
     /// another volume, so "Move to Trash" never turns into a permanent delete.
     pub fn trash_item(p: &std::path::Path) -> Result<(), String> {
+        trash_item_at(p).map(|_| ())
+    }
+    pub fn trash_item_at(p: &std::path::Path) -> Result<std::path::PathBuf, String> {
         let trash = dirs::home_dir().ok_or("No home folder")?.join(".Trash");
         std::fs::create_dir_all(&trash).map_err(|e| e.to_string())?;
         let base = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -239,7 +250,8 @@ mod other {
             dest = trash.join(format!("{base} {k}"));
             k += 1;
         }
-        std::fs::rename(p, &dest).map_err(|e| e.to_string())
+        std::fs::rename(p, &dest).map_err(|e| e.to_string())?;
+        Ok(dest)
     }
 }
 
