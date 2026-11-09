@@ -241,6 +241,9 @@ mod imp {
         audio_out_frames: u64,
         audio_not_ready: u64,
         audio_failed: u64,
+        /// The loudest sample read from each source (before mixing).
+        sys_peak: f32,
+        mic_peak: f32,
         first: [Option<f64>; 3],
         printed_at: f64,
     }
@@ -367,6 +370,11 @@ mod imp {
                     return;
                 }
             };
+            let peak = stereo.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            match src {
+                Src::System => self.stats.sys_peak = self.stats.sys_peak.max(peak),
+                Src::Mic => self.stats.mic_peak = self.stats.mic_peak.max(peak),
+            }
             let at = (vt * mixer::RATE as f64).round() as i64;
             self.mixer.push(src, at, &stereo);
             self.drain(false);
