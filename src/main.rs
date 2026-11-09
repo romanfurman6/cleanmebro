@@ -5,13 +5,18 @@
 //! window as a PNG and exits. `--view <name>` picks what it shows: panel,
 //! storage (default), memory, battery, cpu, network, devices, claude-detail,
 //! cleanup, cleanup-no-claude, results, lens, lens-live, claude, claude-missing,
-//! health, customize, settings-tools.
+//! health, customize, settings-tools, fan, fan-detail, fan-air, fan-air-detail.
+//! `--fan-report` prints every fan and temperature sensor this Mac reports.
 
 mod core;
 mod kit;
 mod tools;
 
 fn main() -> eframe::Result {
+    if std::env::args().any(|a| a == "--fan-report") {
+        tools::fan::probe::report();
+        return Ok(());
+    }
     if std::env::args().any(|a| a == "--scan-report") {
         tools::cleanup::scan_report(std::env::args().any(|a| a == "--ai"));
         return Ok(());

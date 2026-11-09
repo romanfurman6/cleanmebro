@@ -157,7 +157,9 @@ impl App {
             return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", span: 4, default_on: true, group: None }));
         }
         if tool == CORE && id == PLANNED {
-            return Some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span: super::panel::planned_span(self), default_on: true, group: None }));
+            // one column per planned tool still missing; gone once all exist
+            let span = super::panel::planned_count(self) as u8;
+            return (span > 0).then_some((None, WidgetSpec { id: PLANNED, title: "Planned tools", span, default_on: true, group: None }));
         }
         let i = self.tools.iter().position(|t| t.id() == tool)?;
         let spec = self.tools[i].widgets().into_iter().find(|w| w.id == id)?;
