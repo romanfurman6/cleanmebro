@@ -24,6 +24,8 @@ pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
         "Checking…".to_string()
     } else if !cl.installed && !cl.loading {
         "Not installed".to_string()
+    } else if cl.signed_out && cl.limits.is_empty() {
+        "Signed out".to_string()
     } else if cl.limits.is_empty() {
         cl.error.clone().unwrap_or_else(|| "No data yet".into())
     } else {

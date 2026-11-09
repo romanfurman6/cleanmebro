@@ -2,7 +2,7 @@
 //! (`claude auth status`, `claude -p /usage`, which spends no tokens), local
 //! activity comes from counting usage fields in ~/.claude/projects logs.
 
-use crate::kit::claude_code::{claude_bin, claude_cmd, projects_dir, scan_projects, Project};
+use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd, projects_dir, scan_projects, Project};
 use crate::kit::mechanics as m;
 use chrono::{DateTime, Local, Utc};
 use serde_json::Value;
@@ -39,6 +39,8 @@ pub struct ClaudeInfo {
     pub loading: bool,
     pub installed: bool,
     pub logged_in: bool,
+    /// `claude auth status` said plainly that nobody is signed in.
+    pub signed_out: bool,
     pub plan: String,
     pub limits: Vec<Limit>,
     pub contrib: Vec<Contrib>,
@@ -51,6 +53,18 @@ pub struct ClaudeInfo {
 }
 
 impl ClaudeInfo {
+    /// Claude Code is missing or signed out (known only after the first check).
+    pub fn unavailable(&self) -> Option<cc::Availability> {
+        if self.loading && self.fetched.is_none() {
+            None
+        } else if !self.installed {
+            Some(cc::Availability::NotInstalled)
+        } else if self.signed_out && self.limits.is_empty() {
+            Some(cc::Availability::SignedOut)
+        } else {
+            None
+        }
+    }
     pub fn session(&self) -> Option<&Limit> {
         self.limits.iter().find(|l| l.label.to_lowercase().contains("session"))
     }
@@ -94,6 +108,12 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
             // shortly after boot, when the monotonic clock is still small.)
             let mut last_limits: Option<Instant> = None;
             loop {
+                // turned off in Settings: no CLI calls, no log reading
+                if !cc::tool_on() {
+                    std::thread::sleep(Duration::from_millis(500));
+                    last_limits = None;
+                    continue;
+                }
                 let since = last_limits.map(|t| t.elapsed().as_secs());
                 let want_limits = since.is_none_or(|s| s >= m::CLAUDE_LIMITS_REFRESH_SECS)
                     || s.lock().unwrap().limits.is_empty() && since.is_some_and(|s| s > 60);
@@ -117,7 +137,7 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                 // wait, but wake early when someone asks for a refresh
                 for _ in 0..(m::CLAUDE_LOCAL_REFRESH_SECS * 2) {
                     std::thread::sleep(Duration::from_millis(500));
-                    if REFRESH.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                    if cc::take_recheck() || !cc::tool_on() {
                         last_limits = None;
                         break;
                     }
@@ -128,28 +148,31 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
     shared
 }
 
-static REFRESH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 pub fn request_refresh() {
-    REFRESH.store(true, std::sync::atomic::Ordering::SeqCst);
+    cc::request_recheck();
 }
 
 fn fetch_cli(s: &Shared) {
     let Some(bin) = claude_bin() else {
+        cc::set_signed_in(None);
         let mut g = s.lock().unwrap();
         g.installed = false;
-        g.error = Some("Claude Code isn't installed on this Mac.".into());
+        g.signed_out = false;
+        g.limits.clear();
+        g.error = Some(format!("Claude Code isn't installed on this Mac. {}", cc::Availability::NotInstalled.how()));
         return;
     };
     // plan + login
     let status = claude_cmd(&bin).args(["auth", "status", "--json"]).output();
-    let (logged_in, plan) = match status {
+    let (known, plan) = match status {
         Ok(o) => {
             let v: Value = serde_json::from_slice(&o.stdout).unwrap_or(Value::Null);
-            (v["loggedIn"].as_bool().unwrap_or(false), v["subscriptionType"].as_str().unwrap_or("").to_string())
+            (v["loggedIn"].as_bool(), v["subscriptionType"].as_str().unwrap_or("").to_string())
         }
-        Err(_) => (false, String::new()),
+        Err(_) => (None, String::new()),
     };
+    let logged_in = known.unwrap_or(false);
+    cc::set_signed_in(known);
     // limits (a local slash command: no model call, no tokens)
     let usage = claude_cmd(&bin)
         .args(["-p", "/usage", "--output-format", "json", "--no-session-persistence"])
@@ -157,6 +180,7 @@ fn fetch_cli(s: &Shared) {
     let mut g = s.lock().unwrap();
     g.installed = true;
     g.logged_in = logged_in;
+    g.signed_out = known == Some(false);
     if !plan.is_empty() {
         g.plan = plan;
     }
@@ -166,7 +190,10 @@ fn fetch_cli(s: &Shared) {
             let text = v["result"].as_str().unwrap_or("").to_string();
             let (limits, contrib, note) = parse_usage(&text);
             if limits.is_empty() {
-                g.error = Some(if logged_in { "Claude didn't report limits right now.".into() } else { "Sign in to Claude Code to see your limits.".into() });
+                g.error = Some(if logged_in { "Claude didn't report limits right now.".into() } else { format!("Sign in to Claude Code to see your limits. {}", cc::Availability::SignedOut.how()) });
+                if g.signed_out {
+                    g.limits.clear();
+                }
             } else {
                 g.error = None;
                 g.limits = limits;
@@ -357,6 +384,7 @@ fn demo_info() -> ClaudeInfo {
         loading: false,
         installed: true,
         logged_in: true,
+        signed_out: false,
         plan: "max".into(),
         limits,
         contrib,

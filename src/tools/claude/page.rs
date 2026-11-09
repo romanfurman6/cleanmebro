@@ -5,6 +5,7 @@
 use super::backend as claude;
 use super::ui::CLEANUP;
 use crate::core::tool::Cx;
+use crate::kit::claude_code::{self as cc, Availability};
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
 
@@ -33,8 +34,68 @@ pub fn day_bars(p: &egui::Painter, r: Rect, daily: &[u64], gap: f32) {
     }
 }
 
+/// The page when Claude Code is missing or signed out: what's wrong, how to
+/// turn it on, and that the rest of the app works without it.
+fn not_set_up(a: Availability, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+    let p = ui.painter().clone();
+    page_header(&p, r, "Claude", a.short(), TEXT_DIM);
+    let colw = 480.0f32.min(r.width() - 48.0);
+    let x = r.center().x - colw / 2.0;
+    let mut y = r.top() + PAGE_HEADER_H + 56.0;
+    tool_chip(&p, Rect::from_center_size(Pos2::new(r.center().x, y + 28.0), Vec2::splat(56.0)), Icon::Sparkle, tint::CLAUDE);
+    y += 56.0 + 20.0;
+    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, a.title(), bold(20.0), TEXT);
+    y += 32.0;
+    let intro = "Set it up to see your plan limits, token use and Claude Code projects here, and to let Cleanup ask Claude about each path.";
+    let g = p.layout(intro.into(), font(13.0), TEXT_DIM, colw);
+    let gh = g.size().y;
+    p.galley(Pos2::new(r.center().x - g.size().x / 2.0, y), g, TEXT_DIM);
+    y += gh + 20.0;
+
+    let steps: &[&str] = match a {
+        Availability::SignedOut => &["Open Terminal and run claude", "Sign in with your Claude account", "Come back and press Check again"],
+        _ => &["Install Claude Code from claude.com/claude-code", "Open Terminal and run claude once to sign in", "Come back and press Check again"],
+    };
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(colw, 12.0 + steps.len() as f32 * 34.0));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    for (i, s) in steps.iter().enumerate() {
+        let cy = card.top() + 6.0 + 17.0 + i as f32 * 34.0;
+        let c = Pos2::new(card.left() + 24.0, cy);
+        p.circle_filled(c, 10.0, white(18));
+        p.text(c, Align2::CENTER_CENTER, format!("{}", i + 1), bold(11.0), TEXT);
+        text_fit(&p, Pos2::new(card.left() + 44.0, cy), Align2::LEFT_CENTER, s, font(13.0), TEXT_SOFT, colw - 58.0);
+    }
+    y = card.bottom() + 20.0;
+
+    // buttons, centred
+    let primary = "Check again";
+    let second = if a == Availability::SignedOut { "Open Terminal" } else { "Get Claude Code" };
+    let pw = button_width(&p, primary, BTN_PRIMARY);
+    let sw = button_width(&p, second, BTN_SECONDARY);
+    let left = r.center().x - (pw + 8.0 + sw) / 2.0;
+    let sr = Rect::from_min_size(Pos2::new(left, y), Vec2::new(sw, 32.0));
+    let pr = Rect::from_min_size(Pos2::new(sr.right() + 8.0, y), Vec2::new(pw, 32.0));
+    if pill_button(ui, sr, second, BTN_SECONDARY, true).clicked() {
+        if a == Availability::SignedOut {
+            cc::open_terminal();
+        } else {
+            cc::open_download_page();
+        }
+    }
+    if pill_button(ui, pr, primary, BTN_PRIMARY, true).clicked() {
+        claude::request_refresh();
+        cx.toast("Looking for Claude Code…");
+    }
+    y += 32.0 + 18.0;
+    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, "Cleanup and the rest of the app work without it.", font(12.0), TEXT_FAINT);
+}
+
 pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let cl = info.lock().unwrap().clone();
+    if let Some(a) = cl.unavailable() {
+        not_set_up(a, ui, r, cx);
+        return;
+    }
     let p = ui.painter().clone();
     let mut sub = cl.plan_title();
     match (&cl.fetched, cl.loading) {

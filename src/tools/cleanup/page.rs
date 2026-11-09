@@ -3,6 +3,8 @@
 
 use super::engine::{self as cleanup, Group, Item, Phase, Verdict, Who};
 use super::Cleanup as App;
+use crate::core::tool::{Action, Cx};
+use crate::kit::claude_code::{self as cc, Availability};
 use crate::kit::glass::{self, *};
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
 use std::path::PathBuf;
@@ -10,14 +12,74 @@ use std::path::PathBuf;
 /// Window corner radius (the footer rounds its bottom-right corner to match).
 const WIN_R: f32 = 12.0;
 
-pub fn page(app: &mut App, ui: &mut Ui, r: Rect) {
+pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let phase = app.clean.lock().unwrap().phase.clone();
     match phase {
-        Phase::Intro => intro(app, ui, r),
+        Phase::Intro => intro(app, ui, r, cx),
         Phase::Scanning | Phase::Judging | Phase::Cleaning => working(app, ui, r, phase),
         Phase::Results => results(app, ui, r),
         Phase::Done => done(app, ui, r),
     }
+}
+
+/// Whether Claude can judge paths now (always in the demo).
+fn claude_now(app: &App) -> Availability {
+    if app.demo {
+        app.demo_claude.unwrap_or(Availability::Ready)
+    } else {
+        cc::availability()
+    }
+}
+
+/// A calm note in place of the Claude switch: what's missing, how to turn it
+/// on, and that the built-in rules are used meanwhile. Returns its height.
+fn claude_note(ui: &mut Ui, pos: Pos2, width: f32, a: Availability, cx: &mut Cx) -> f32 {
+    let p = ui.painter().clone();
+    let x = pos.x + 40.0;
+    let w = width - 54.0;
+    let body = format!("Cleanup still works with its built-in rules. {} Then Claude double-checks each path too.", a.how());
+    let text_h = p.layout(body.clone(), font(12.0), TEXT_DIM, w).size().y;
+    let r = Rect::from_min_size(pos, Vec2::new(width, 32.0 + text_h + 12.0 + 26.0 + 14.0));
+    glass_card(&p, r, R_CARD, 0.0, false);
+    icon(&p, Icon::Sparkle, Rect::from_min_size(r.min + Vec2::new(14.0, 14.0), Vec2::splat(16.0)), TEXT_FAINT);
+    text_fit(&p, Pos2::new(x, r.top() + 13.0), Align2::LEFT_TOP, a.title(), bold(13.0), TEXT, w);
+    paragraph(&p, Pos2::new(x, r.top() + 32.0), &body, font(12.0), TEXT_DIM, w);
+    // buttons, bottom left
+    let by = r.bottom() - 12.0 - 26.0;
+    let mut bx = x;
+    let mut btn = |ui: &mut Ui, label: &str, kind: u8| {
+        let bw = button_width(&p, label, kind);
+        let br = Rect::from_min_size(Pos2::new(bx, by), Vec2::new(bw, 26.0));
+        bx += bw + 8.0;
+        pill_button(ui, br, label, kind, true).clicked()
+    };
+    match a {
+        Availability::Off => {
+            if btn(ui, "Open Settings", BTN_SECONDARY) {
+                cx.push(Action::OpenSettings { tools: true });
+            }
+        }
+        Availability::NotInstalled => {
+            if btn(ui, "Get Claude Code", BTN_SECONDARY) {
+                cc::open_download_page();
+            }
+            if btn(ui, "Check again", BTN_SECONDARY) {
+                cc::request_recheck();
+                cx.toast("Looking for Claude Code…");
+            }
+        }
+        Availability::SignedOut => {
+            if btn(ui, "Open Terminal", BTN_SECONDARY) {
+                cc::open_terminal();
+            }
+            if btn(ui, "Check again", BTN_SECONDARY) {
+                cc::request_recheck();
+                cx.toast("Checking your Claude sign-in…");
+            }
+        }
+        Availability::Ready => {}
+    }
+    r.height()
 }
 
 fn home_str() -> String {
@@ -30,8 +92,9 @@ fn short_path(p: &std::path::Path) -> String {
 
 // ---------------------------------------------------------------- start
 
-fn intro(app: &mut App, ui: &mut Ui, r: Rect) {
+fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     let ctx = ui.ctx().clone();
+    let avail = claude_now(app);
     let p = ui.painter().clone();
     page_header(&p, r, "Cleanup", "Not scanned yet", TEXT_DIM);
     let colw = 560.0f32.min(r.width() - 48.0);
@@ -45,8 +108,13 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect) {
     y += (32.0 + h).max(56.0) + 22.0;
 
     // what happens
+    let first = if avail.ready() {
+        (Icon::Sparkle, "Claude checks every path", "Each item gets a verdict: safe, ask you, or keep.")
+    } else {
+        (Icon::Check, "Built-in rules check every path", "Each item gets a verdict: safe, ask you, or keep.")
+    };
     let points = [
-        (Icon::Sparkle, "Claude checks every path", "Each item gets a verdict: safe, ask you, or keep."),
+        first,
         (Icon::Question, "You decide on anything unclear", "Unsure items wait for your OK. Projects you use are never touched."),
         (Icon::Trash, "Goes to the Trash first", "You can put anything back until you empty the Trash."),
     ];
@@ -79,22 +147,22 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect) {
     }
     y += 24.0 + 22.0;
 
-    // AI switch
-    let has_claude = crate::kit::claude_code::claude_bin().is_some() || app.demo;
-    let sw = Rect::from_min_size(Pos2::new(x, y), Vec2::new(30.0, 18.0));
-    if switch(ui, sw, ui.id().with("use-ai"), app.use_ai && has_claude, has_claude).clicked() {
-        app.use_ai = !app.use_ai;
-    }
-    let (a, b) = if has_claude {
-        ("Let Claude judge what's safe ", "(it sees paths, sizes and dates, never file contents)")
+    // AI switch, or how to turn Claude on
+    let has_claude = avail.ready();
+    if has_claude {
+        let sw = Rect::from_min_size(Pos2::new(x, y), Vec2::new(30.0, 18.0));
+        if switch(ui, sw, ui.id().with("use-ai"), app.use_ai, true).clicked() {
+            app.use_ai = !app.use_ai;
+        }
+        let (a, b) = ("Let Claude judge what's safe ", "(it sees paths, sizes and dates, never file contents)");
+        let ga = p.layout_no_wrap(a.into(), font(13.0), TEXT);
+        let wa = ga.size().x;
+        p.galley(Pos2::new(x + 40.0, sw.center().y - ga.size().y / 2.0), ga, TEXT);
+        text_fit(&p, Pos2::new(x + 40.0 + wa, sw.center().y), Align2::LEFT_CENTER, b, font(13.0), TEXT_FAINT, colw - 40.0 - wa);
+        y += 18.0 + 22.0;
     } else {
-        ("Claude Code not found. ", "The built-in rules will be used.")
-    };
-    let ga = p.layout_no_wrap(a.into(), font(13.0), TEXT);
-    let wa = ga.size().x;
-    p.galley(Pos2::new(x + 40.0, sw.center().y - ga.size().y / 2.0), ga, TEXT);
-    text_fit(&p, Pos2::new(x + 40.0 + wa, sw.center().y), Align2::LEFT_CENTER, b, font(13.0), TEXT_FAINT, colw - 40.0 - wa);
-    y += 18.0 + 22.0;
+        y += claude_note(ui, Pos2::new(x, y), colw, avail, tcx) + 22.0;
+    }
 
     // scan
     let br = Rect::from_min_size(Pos2::new(x, y), Vec2::new(button_width(&p, "Scan", BTN_PRIMARY) + 28.0, 34.0));
@@ -114,6 +182,7 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
     let sub = match phase {
         Phase::Judging => "Step 2 of 2 · Asking Claude what's safe",
         Phase::Cleaning => "Cleaning…",
+        _ if !st.with_ai => "Looking for junk",
         _ => "Step 1 of 2 · Looking for junk",
     };
     let btns = page_header(&p, r, "Cleanup", sub, TEXT_DIM);
@@ -209,10 +278,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         let g = app.clean.lock().unwrap();
         (g.total(), g.pending_questions(), g.ai_used, g.ai_error.clone(), g.selected_bytes())
     };
+    let avail = claude_now(app);
     let mut sub = format!("{} found", human_bytes(total));
     match (&ai_error, ai_used) {
         (Some(e), _) => sub = format!("{sub} · {e}"),
         (None, true) => sub.push_str(" · Claude reviewed every path"),
+        (None, false) if !avail.ready() => sub.push_str(&format!(" · judged by the built-in rules ({})", avail.short())),
         (None, false) => sub.push_str(" · judged by the built-in rules"),
     }
     if pending > 0 {
@@ -222,7 +293,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let w = button_width(&p, "Scan again", BTN_SECONDARY);
     let sr = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
     if pill_button(ui, sr, "Scan again", BTN_SECONDARY, true).clicked() {
-        cleanup::start_scan(app.clean.clone(), ctx.clone(), app.use_ai);
+        cleanup::start_scan(app.clean.clone(), ctx.clone(), app.use_ai && avail.ready());
         return;
     }
 
