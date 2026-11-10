@@ -74,6 +74,8 @@ pub struct Live {
     pub settings_open: bool,
     /// Where the bar sits (global points); None until placed.
     pub bar_at: Option<Pos2>,
+    /// Said once that the microphone hears nothing.
+    pub mic_warned: bool,
 }
 
 pub enum Phase {
@@ -455,13 +457,14 @@ impl Recorder {
 
     /// Background results and timers; call once per pass.
     pub fn tick(&mut self, s: &mut RecSettings) {
+        crate::kit::activity::set_recording(!matches!(self.phase, Phase::Idle | Phase::Pick(_)));
         self.keep_meter(s);
         while let Ok(e) = self.rx.try_recv() {
             match e {
                 Event::Started(Ok(session)) => match std::mem::replace(&mut self.phase, Phase::Idle) {
                     Phase::Starting { chosen } => {
                         session.set_mic_muted(false);
-                        self.phase = Phase::Live(Box::new(Live { chosen, session, paused: false, mic_muted: false, confirm: None, settings_open: false, bar_at: None }));
+                        self.phase = Phase::Live(Box::new(Live { chosen, session, paused: false, mic_muted: false, confirm: None, settings_open: false, bar_at: None, mic_warned: false }));
                     }
                     // cancelled while starting
                     other => {
@@ -506,6 +509,14 @@ impl Recorder {
                     self.launch(chosen, s);
                 }
             }
+        }
+        let silent = matches!(&self.phase, Phase::Live(l) if !l.mic_warned && l.session.mic_silent());
+        if silent {
+            if let Phase::Live(l) = &mut self.phase {
+                l.mic_warned = true;
+            }
+            eprintln!("[rec] the microphone sends only silence");
+            self.hud("The microphone hears nothing: is the lid closed, or are the AirPods out?");
         }
         let failed = self.live().and_then(|l| l.session.failure());
         if let Some(why) = failed {

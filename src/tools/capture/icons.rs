@@ -43,6 +43,7 @@ pub enum Ico {
     Play,
     Restart,
     Gear,
+    Scissors,
 }
 
 fn symbol(i: Ico) -> &'static str {
@@ -84,6 +85,7 @@ fn symbol(i: Ico) -> &'static str {
         Ico::Play => "play.fill",
         Ico::Restart => "arrow.counterclockwise",
         Ico::Gear => "gearshape",
+        Ico::Scissors => "scissors",
     }
 }
 
@@ -251,6 +253,12 @@ pub fn draw(p: &Painter, i: Ico, rect: Rect, color: Color32) {
         Ico::Restart => {
             line(&[(4.0, 4.0), (4.0, 9.0), (9.0, 9.0)]);
             p.add(PathShape::line(arc(pt(12.0, 12.0), 8.0 * u, 200.0, 160.0, pt(4.0, 9.0)), PathStroke::new(w, color)));
+        }
+        Ico::Scissors => {
+            circle(7.0, 17.0, 3.0);
+            circle(17.0, 17.0, 3.0);
+            line(&[(9.0, 15.0), (18.0, 4.0)]);
+            line(&[(15.0, 15.0), (6.0, 4.0)]);
         }
         Ico::Gear => {
             circle(12.0, 12.0, 3.0);

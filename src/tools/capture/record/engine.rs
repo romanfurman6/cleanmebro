@@ -68,6 +68,9 @@ impl Session {
     pub fn failure(&self) -> Option<String> {
         None
     }
+    pub fn mic_silent(&self) -> bool {
+        false
+    }
     pub fn stop(self, done: Reply<Stopped>) {
         done(Err("Screen recording needs macOS".into()));
     }
@@ -241,6 +244,9 @@ mod imp {
         audio_out_frames: u64,
         audio_not_ready: u64,
         audio_failed: u64,
+        /// The loudest sample read from each source (before mixing).
+        sys_peak: f32,
+        mic_peak: f32,
         first: [Option<f64>; 3],
         printed_at: f64,
     }
@@ -253,6 +259,9 @@ mod imp {
         video: Retained<AVAssetWriterInput>,
         adaptor: Retained<AVAssetWriterInputPixelBufferAdaptor>,
         audio: Option<Retained<AVAssetWriterInput>>,
+        /// System sound and the microphone, each on its own (switched off)
+        /// track, for editing later; only when both are recorded.
+        parts: Option<[Retained<AVAssetWriterInput>; 2]>,
         /// The format of the mixed audio we hand the writer.
         audio_fmt: *mut c_void,
         clock: Clock,
@@ -364,6 +373,11 @@ mod imp {
                     return;
                 }
             };
+            let peak = stereo.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            match src {
+                Src::System => self.stats.sys_peak = self.stats.sys_peak.max(peak),
+                Src::Mic => self.stats.mic_peak = self.stats.mic_peak.max(peak),
+            }
             let at = (vt * mixer::RATE as f64).round() as i64;
             self.mixer.push(src, at, &stereo);
             self.drain(false);
@@ -371,13 +385,19 @@ mod imp {
 
         /// Hand the mixed audio that's ready to the writer.
         fn drain(&mut self, flush: bool) {
-            while let Some((at, frames)) = self.mixer.pull(flush) {
-                self.append_audio(at, &frames);
+            while let Some((at, mix, parts)) = self.mixer.pull_split(flush) {
+                if let Some(input) = self.audio.clone() {
+                    self.append_audio(&input, at, &mix);
+                }
+                if let Some(inputs) = self.parts.clone() {
+                    for (input, part) in inputs.iter().zip(parts.iter()) {
+                        self.append_audio(input, at, part);
+                    }
+                }
             }
         }
 
-        fn append_audio(&mut self, at: i64, stereo: &[f32]) {
-            let Some(input) = &self.audio else { return };
+        fn append_audio(&mut self, input: &AVAssetWriterInput, at: i64, stereo: &[f32]) {
             if stereo.is_empty() {
                 return;
             }
@@ -631,6 +651,12 @@ mod imp {
             self.shared.lock().ok().and_then(|s| s.failed.clone())
         }
 
+        /// The microphone has sent a good while of pure digital silence
+        /// (a closed lid, AirPods not worn): no real mic is ever that quiet.
+        pub fn mic_silent(&self) -> bool {
+            self.shared.lock().map(|s| s.stats.mic_in >= 200 && s.stats.mic_peak == 0.0).unwrap_or(false)
+        }
+
         /// Stop and finish the file; `done` runs on a background thread.
         pub fn stop(self, done: Reply<Stopped>) {
             let Session { stream, output, shared, path, size } = self;
@@ -681,6 +707,9 @@ mod imp {
         unsafe {
             s.video.markAsFinished();
             if let Some(a) = &s.audio {
+                a.markAsFinished();
+            }
+            for a in s.parts.iter().flatten() {
                 a.markAsFinished();
             }
             s.writer.endSessionAtSourceTime(cm_time(secs));
@@ -812,6 +841,27 @@ mod imp {
             } else {
                 None
             };
+            // both sources: each also on its own track, off by default
+            let parts = if audio.is_some() && cfg.system_audio && mic {
+                let (fmt, rate, ch, br) = (NSNumber::new_u32(AAC), num(mixer::RATE as f64), num(2.0), num(128_000.0));
+                let aset = dict(&[("AVFormatIDKey", any(&*fmt)), ("AVSampleRateKey", any(&*rate)), ("AVNumberOfChannelsKey", any(&*ch)), ("AVEncoderBitRateKey", any(&*br))]);
+                let make = || {
+                    let a = AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(AVMediaTypeAudio?, Some(&aset));
+                    a.setExpectsMediaDataInRealTime(true);
+                    a.setMarksOutputTrackAsEnabled(false);
+                    writer.canAddInput(&a).then_some(a)
+                };
+                match (make(), make()) {
+                    (Some(a), Some(b)) => {
+                        writer.addInput(&a);
+                        writer.addInput(&b);
+                        Some([a, b])
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
             if !writer.startWriting() {
                 return Err(writer.error().map(|e| ns_err(&e)).unwrap_or_else(|| "Couldn't start the video file".into()));
             }
@@ -822,6 +872,7 @@ mod imp {
                 video,
                 adaptor,
                 audio,
+                parts,
                 audio_fmt: std::ptr::null_mut(),
                 clock: Clock::default(),
                 mixer: Mixer::new(cfg.system_audio, mic),
@@ -833,7 +884,7 @@ mod imp {
                 done: false,
                 stats: Stats::default(),
             }));
-            rlog!("start: {:?} {}x{} @{} fps, system audio {}, mic {:?} (capture mic: {mic}), audio input {}", cfg.target, cfg.size.0, cfg.size.1, cfg.fps, cfg.system_audio, cfg.mic, shared.lock().map(|s| s.audio.is_some()).unwrap_or(false));
+            rlog!("start: {:?} {}x{} @{} fps, system audio {}, mic {:?} (capture mic: {mic}), audio input {}, separate tracks {}", cfg.target, cfg.size.0, cfg.size.1, cfg.fps, cfg.system_audio, cfg.mic, shared.lock().map(|s| s.audio.is_some()).unwrap_or(false), shared.lock().map(|s| s.parts.is_some()).unwrap_or(false));
             let output = Output::new(shared.clone());
             let delegate: &ProtocolObject<dyn SCStreamDelegate> = ProtocolObject::from_ref(&*output);
             let stream = SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &conf, Some(delegate));
