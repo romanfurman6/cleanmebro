@@ -713,6 +713,8 @@ pub enum Icon {
     Mouse,
     Keyboard,
     Trackpad,
+    /// A gauge with a needle: Claude usage limits.
+    Gauge,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -757,7 +759,7 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Pulse => "waveform.path.ecg",
         Icon::Crop => "crop",
         Icon::Clipboard => "doc.on.clipboard",
-        Icon::Fan => "fan",
+        Icon::Fan => "fanblades",
         Icon::Cup => "cup.and.saucer",
         Icon::Home => "house",
         Icon::Window => "macwindow",
@@ -769,6 +771,7 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Mouse => "magicmouse",
         Icon::Keyboard => "keyboard",
         Icon::Trackpad => "rectangle.and.hand.point.up.left",
+        Icon::Gauge => "gauge.with.needle",
     })
 }
 
@@ -880,6 +883,11 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             closed(&[(12.0, 3.0), (19.5, 6.0), (18.5, 13.0), (12.0, 21.0), (5.5, 13.0), (4.5, 6.0)]);
             open(&[(8.5, 12.0), (11.0, 14.5), (15.5, 9.5)]);
         }
+        Icon::Gauge => {
+            arc(12.0, 14.0, 8.0, PI, TAU);
+            open(&[(12.0, 14.0), (16.0, 9.0)]);
+            p.circle_filled(pt(12.0, 14.0), 1.4 * u, color);
+        }
         Icon::Sparkle => closed(&[(12.0, 3.0), (13.8, 8.2), (19.0, 10.0), (13.8, 11.8), (12.0, 17.0), (10.2, 11.8), (5.0, 10.0), (10.2, 8.2)]),
         Icon::Broom => {
             open(&[(18.0, 3.0), (12.0, 9.0)]);
@@ -984,15 +992,19 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             open(&[(7.0, 5.0), (5.0, 5.0), (5.0, 21.0), (19.0, 21.0), (19.0, 5.0), (17.0, 5.0)]);
         }
         Icon::Fan => {
-            p.circle_stroke(pt(12.0, 12.0), 2.0 * u, st);
-            for k in 0..4 {
-                let a0 = k as f32 * PI / 2.0 - PI / 2.0;
-                let d = Vec2::new(a0.cos(), a0.sin());
-                let n = Vec2::new(-d.y, d.x);
-                let base = pt(12.0, 12.0);
-                let tip = base + d * 9.0 * u;
-                let side = base + d * 5.0 * u + n * 3.5 * u;
-                p.add(PathShape::line(vec![base + d * 2.0 * u, side, tip, base + d * 2.5 * u + n * 0.5 * u], PathStroke::new(w, color)));
+            // six curved blades around a hub (four straight arms read wrong)
+            p.circle_stroke(pt(12.0, 12.0), 1.8 * u, st);
+            for k in 0..6 {
+                let a0 = k as f32 * TAU / 6.0;
+                let pts: Vec<Pos2> = (0..=6)
+                    .map(|i| {
+                        let t = i as f32 / 6.0;
+                        let rr = (2.6 + 6.6 * t) * u;
+                        let a = a0 + t * 0.9;
+                        pt(12.0, 12.0) + Vec2::new(a.cos(), a.sin()) * rr
+                    })
+                    .collect();
+                p.add(PathShape::line(pts, PathStroke::new(w, color)));
             }
         }
         Icon::Cup => {

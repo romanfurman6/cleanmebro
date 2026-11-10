@@ -67,9 +67,8 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel
         Size::S12 => {
             let x0 = r.left() + tile::PAD;
             let x1 = r.right() - tile::PAD;
-            tool_chip(p, Rect::from_min_size(Pos2::new(x0, r.top() + 9.0), Vec2::splat(18.0)), Icon::Bluetooth, tint::HEALTH);
-            p.text(Pos2::new(x1, r.top() + 18.0), Align2::RIGHT_CENTER, devs.len().to_string(), font(11.0), TEXT_FAINT);
-            text_fit(p, Pos2::new(x0 + 24.0, r.top() + 18.0), Align2::LEFT_CENTER, "Devices", font(11.0), TEXT_DIM, x1 - x0 - 40.0);
+            p.text(Pos2::new(x1, r.top() + 20.0), Align2::RIGHT_CENTER, devs.len().to_string(), ty::label(), white(166));
+            text_fit(p, Pos2::new(x0, r.top() + 20.0), Align2::LEFT_CENTER, "Devices", ty::title(), TEXT, x1 - x0 - 30.0);
             if devs.is_empty() {
                 text_fit(p, Pos2::new(x0, r.bottom() - 12.0), Align2::LEFT_BOTTOM, "None connected", font(12.0), TEXT_FAINT, x1 - x0);
                 return resp;

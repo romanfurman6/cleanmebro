@@ -92,7 +92,7 @@ const APP_ICON_64: &[u8] = include_bytes!("../../assets/icon/AppIcon-64.png");
 
 /// The app icon as a texture (loaded once per context).
 pub fn app_icon(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-    let id = egui::Id::new("cmdmeow-app-icon");
+    let id = egui::Id::NULL.with("cmdmeow-app-icon");
     if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return Some(t);
     }

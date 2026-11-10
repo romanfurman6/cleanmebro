@@ -511,9 +511,8 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
             let p = ui.painter().clone();
             let note = if loaded { format!("{} · {running} running", plural(total, "item")) } else { "Reading…".into() };
             let (x0, x1) = (rect.left() + tile::PAD, rect.right() - tile::PAD);
-            let cy = rect.top() + tile::PAD + tile::HEAD_H / 2.0;
-            tool_chip(&p, Rect::from_center_size(Pos2::new(x0 + 9.0, cy), Vec2::splat(18.0)), Icon::Power, tint::STARTUP);
-            let tr = p.text(Pos2::new(x0 + 26.0, cy), Align2::LEFT_CENTER, "Startup", bold(13.0), TEXT);
+            let cy = rect.top() + tile::PAD + 10.0;
+            let tr = p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, "Startup", ty::title(), TEXT);
             let mut right = x1;
             if undo.is_none() && n > 0 {
                 let label = format!("Turn off {n}");
@@ -524,8 +523,8 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
                 }
                 right = br.left() - 8.0;
             }
-            text_fit(&p, Pos2::new(tr.right() + 8.0, cy), Align2::LEFT_CENTER, &note, font(11.0), TEXT_FAINT, right - tr.right() - 8.0);
-            let body = Rect::from_min_max(Pos2::new(x0, rect.top() + tile::PAD + tile::HEAD_H + 6.0), Pos2::new(x1, rect.bottom() - tile::PAD));
+            text_fit(&p, Pos2::new(tr.right() + 8.0, cy), Align2::LEFT_CENTER, &note, ty::caption(), ty::caption_color(), right - tr.right() - 8.0);
+            let body = Rect::from_min_max(Pos2::new(x0, rect.top() + tile::PAD + 20.0 + sp::S), Pos2::new(x1, rect.bottom() - tile::PAD));
             if let Some(k) = undo {
                 let c = Pos2::new(body.left() + 20.0, body.center().y);
                 p.circle_filled(c, 18.0, with_alpha(GREEN, 0.16));

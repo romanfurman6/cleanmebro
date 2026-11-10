@@ -96,6 +96,10 @@ pub struct Snapshot {
     pub cpu_user: f32,
     pub cpu_system: f32,
     pub cpu_history: Vec<f32>,
+    /// Memory pressure, one sample per refresh (last 60).
+    pub mem_history: Vec<f32>,
+    /// Download + upload in bytes/s, one sample per refresh (last 60).
+    pub net_history: Vec<f32>,
     pub thermal: u8, // 0 nominal, 1 fair, 2 serious, 3 critical
     pub uptime_secs: u64,
     pub battery: Battery,
@@ -373,10 +377,20 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
             if s.cpu_history.len() > 60 {
                 s.cpu_history.remove(0);
             }
+            let pressure = s.mem_pressure;
+            s.mem_history.push(pressure);
+            if s.mem_history.len() > 60 {
+                s.mem_history.remove(0);
+            }
             s.thermal = thermal;
             s.uptime_secs = uptime;
             s.net_down = rx as f64 / dt;
             s.net_up = tx as f64 / dt;
+            let rate = (s.net_down + s.net_up) as f32;
+            s.net_history.push(rate);
+            if s.net_history.len() > 60 {
+                s.net_history.remove(0);
+            }
             s.net_recv_total = rx_total;
             s.net_sent_total = tx_total;
             s.online = rx_total + tx_total > 0;
@@ -794,7 +808,9 @@ pub fn demo_snapshot() -> Snapshot {
         cpu_load: 16.0,
         cpu_user: 11.0,
         cpu_system: 5.0,
-        cpu_history: (0..60).map(|i| 12.0 + ((i as f32) * 0.4).sin() * 6.0).collect(),
+        cpu_history: demo_series(60, 7, 14.0, 9.0, &[(22, 38.0), (41, 31.0)]),
+        mem_history: demo_series(60, 3, 17.0, 3.0, &[]),
+        net_history: demo_series(60, 11, 40_000.0, 60_000.0, &[(18, 3_200_000.0), (47, 900_000.0)]),
         thermal: 0,
         uptime_secs: 3 * 86_400 + 5 * 3600,
         battery: Battery {
@@ -932,4 +948,19 @@ mod tests {
     }
 
 
+}
+
+/// Sample data that looks like a real reading: noise around `base` plus a
+/// few spikes, not a smooth curve.
+fn demo_series(n: usize, seed: u32, base: f32, spread: f32, spikes: &[(usize, f32)]) -> Vec<f32> {
+    let mut x = seed.wrapping_mul(2_654_435_761).max(1);
+    (0..n)
+        .map(|i| {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            let noise = (x % 1000) as f32 / 1000.0;
+            spikes.iter().find(|(k, _)| *k == i).map(|(_, v)| *v).unwrap_or(base + noise * spread)
+        })
+        .collect()
 }
