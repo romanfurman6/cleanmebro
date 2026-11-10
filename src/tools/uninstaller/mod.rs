@@ -719,7 +719,7 @@ impl Tool for Uninstaller {
         "Uninstaller"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::Trash, color: TINT }
+        Badge { icon: Icon::AppRemove, color: TINT }
     }
     fn section(&self) -> &'static str {
         "Clean"

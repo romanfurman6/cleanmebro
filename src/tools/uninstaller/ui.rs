@@ -241,7 +241,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         p.rect_filled(r, CornerRadius { nw: 0, sw: 0, ne: WIN_R as u8, se: WIN_R as u8 }, Color32::from_black_alpha(140));
         p.rect_filled(pr, 16.0, with_alpha(TINT, 0.18));
         dashed_rect(&p, pr, 16.0, with_alpha(Color32::from_rgb(0x6F, 0xCF, 0x7A), 0.9));
-        tool_chip(&p, Rect::from_center_size(pr.center() - Vec2::new(0.0, 30.0), Vec2::splat(56.0)), Icon::Trash, TINT);
+        tool_chip(&p, Rect::from_center_size(pr.center() - Vec2::new(0.0, 30.0), Vec2::splat(56.0)), Icon::AppRemove, TINT);
         p.text(pr.center() + Vec2::new(0.0, 22.0), Align2::CENTER_CENTER, "Drop to uninstall", bold(20.0), TEXT);
         p.text(pr.center() + Vec2::new(0.0, 48.0), Align2::CENTER_CENTER, "You'll see everything that goes before it moves.", font(13.0), TEXT_DIM);
     }
@@ -790,7 +790,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     // hero
     let hero = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, 68.0));
     glass_card(&p, hero, R_CARD, 0.0, false);
-    tool_chip(&p, Rect::from_min_size(Pos2::new(hero.left() + 16.0, hero.center().y - 20.0), Vec2::splat(40.0)), Icon::Trash, TINT);
+    tool_chip(&p, Rect::from_min_size(Pos2::new(hero.left() + 16.0, hero.center().y - 20.0), Vec2::splat(40.0)), Icon::AppRemove, TINT);
     let busy = !matches!(phase, Phase::Ready);
     let title = if orphans.is_empty() {
         if busy { "Looking for leftovers…".to_string() } else { "No leftovers found".to_string() }
@@ -953,7 +953,7 @@ pub fn widget(u: &mut Uninstaller, size: Size, ui: &mut Ui, rect: Rect, cx: &mut
     let resp = if hovering {
         let resp = tile::glow_card(ui, rect, id, green, false);
         let c = rect.center();
-        tool_chip(&p, Rect::from_center_size(c - Vec2::new(0.0, if size == Size::S11 { 8.0 } else { 0.0 }), Vec2::splat(30.0)), Icon::Trash, TINT);
+        tool_chip(&p, Rect::from_center_size(c - Vec2::new(0.0, if size == Size::S11 { 8.0 } else { 0.0 }), Vec2::splat(30.0)), Icon::AppRemove, TINT);
         if size == Size::S11 {
             p.text(c + Vec2::new(0.0, 24.0), Align2::CENTER_CENTER, "Release", bold(11.0), Color32::from_rgb(0x8E, 0xE0, 0x9A));
         } else {
@@ -965,7 +965,7 @@ pub fn widget(u: &mut Uninstaller, size: Size, ui: &mut Ui, rect: Rect, cx: &mut
         dashed_rect(&p, rect.shrink(1.0), tile::R_TILE, white(56));
         match size {
             Size::S11 => {
-                tool_chip(&p, Rect::from_min_size(rect.min + Vec2::splat(9.0), Vec2::splat(24.0)), Icon::Trash, TINT);
+                tool_chip(&p, Rect::from_min_size(rect.min + Vec2::splat(9.0), Vec2::splat(24.0)), Icon::AppRemove, TINT);
                 tile::small_text(&p, rect, "Uninstall", "drop app", TEXT_DIM);
             }
             _ => {
@@ -1149,7 +1149,7 @@ fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
         }
         let names: Vec<String> = u.st.lock().unwrap().drag.apps.iter().filter_map(|a| a.file_stem().map(|s| s.to_string_lossy().into_owned())).collect();
         let first = names.first().cloned().unwrap_or_else(|| "the app".into());
-        tool_chip(&p, Rect::from_min_size(Pos2::new(r.left() + 16.0, r.center().y - 20.0), Vec2::splat(40.0)), Icon::Trash, TINT);
+        tool_chip(&p, Rect::from_min_size(Pos2::new(r.left() + 16.0, r.center().y - 20.0), Vec2::splat(40.0)), Icon::AppRemove, TINT);
         let x = r.left() + 70.0;
         text_fit(&p, Pos2::new(x, r.center().y - 9.0), Align2::LEFT_CENTER, if over { "Release to review" } else { "Drop here to uninstall" }, bold(14.0), if over { Color32::from_rgb(0x8E, 0xE0, 0x9A) } else { TEXT }, r.right() - x - 14.0);
         text_fit(&p, Pos2::new(x, r.center().y + 11.0), Align2::LEFT_CENTER, &format!("{first} and its files, after you confirm"), font(12.0), TEXT_DIM, r.right() - x - 14.0);
@@ -1185,7 +1185,7 @@ fn notice(u: &mut Uninstaller, ctx: &egui::Context, cx: &mut Cx) {
         p.rect_filled(r, 16.0, Color32::from_rgba_unmultiplied(58, 58, 62, 246));
         p.rect_stroke(r, 16.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
         let x0 = r.left() + 12.0;
-        tool_chip(&p, Rect::from_min_size(Pos2::new(x0, r.top() + 12.0), Vec2::splat(32.0)), Icon::Trash, TINT);
+        tool_chip(&p, Rect::from_min_size(Pos2::new(x0, r.top() + 12.0), Vec2::splat(32.0)), Icon::AppRemove, TINT);
         let tx = x0 + 42.0;
         p.text(Pos2::new(tx, r.top() + 12.0), Align2::LEFT_TOP, "Cmd+Meow", bold(12.0), TEXT_SOFT);
         p.text(Pos2::new(r.right() - 12.0, r.top() + 12.0), Align2::RIGHT_TOP, "now", font(11.0), TEXT_DIM);

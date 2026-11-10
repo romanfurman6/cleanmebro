@@ -715,6 +715,8 @@ pub enum Icon {
     Trackpad,
     /// A gauge with a needle: Claude usage limits.
     Gauge,
+    /// An app with a cross: the Uninstaller.
+    AppRemove,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -755,7 +757,7 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Monitor => "menubar.rectangle",
         Icon::Chart => "chart.bar",
         Icon::Power => "power",
-        Icon::Map => "square.split.2x2",
+        Icon::Map => "chart.pie",
         Icon::Pulse => "waveform.path.ecg",
         Icon::Crop => "crop",
         Icon::Clipboard => "doc.on.clipboard",
@@ -772,6 +774,7 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Keyboard => "keyboard",
         Icon::Trackpad => "rectangle.and.hand.point.up.left",
         Icon::Gauge => "gauge.with.needle",
+        Icon::AppRemove => "xmark.app",
     })
 }
 
@@ -837,6 +840,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
     };
     let dot = |x: f32, y: f32, r: f32| p.circle_filled(pt(x, y), r * u, color);
     match icon {
+        Icon::AppRemove => icon_drawn(p, Icon::Trash, rect, color),
         Icon::Disk => {
             boxr(3.0, 13.0, 21.0, 19.0, 1.5);
             open(&[(3.0, 13.0), (6.0, 5.0), (18.0, 5.0), (21.0, 13.0)]);
