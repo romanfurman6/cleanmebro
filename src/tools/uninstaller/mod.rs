@@ -623,6 +623,7 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
     std::thread::Builder::new()
         .name("uninstaller-watch".into())
         .spawn(move || {
+            crate::kit::activity::low_priority();
             let mut last = apps::find_bundles(&app_roots);
             loop {
                 std::thread::sleep(WATCH_EVERY);
