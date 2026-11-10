@@ -189,10 +189,10 @@ impl Ctx {
     }
     #[allow(clippy::too_many_arguments)]
     fn add(&mut self, group: Group, title: &str, path: PathBuf, kind: &'static str, verdict: Verdict, reason: &str) {
-        // CleanMeBro's own cache and logs: a few MB, and in use while it runs
+        // The app's own cache and logs (also under its first name, CleanMeBro): a few MB, and in use while it runs
         if path.file_name().is_some_and(|n| {
             let n = n.to_string_lossy().to_lowercase();
-            n == "cleanmebro" || n.starts_with("com.romanfurman6.cleanmebro")
+            n == "cmdmeow" || n == "cleanmebro" || n.starts_with("com.romanfurman6.cmdmeow") || n.starts_with("com.romanfurman6.cleanmebro")
         }) {
             return;
         }

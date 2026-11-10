@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn lists_images_newest_first() {
-        let dir = std::env::temp_dir().join(format!("cleanmebro-folder-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cmdmeow-folder-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let img = image::RgbaImage::from_pixel(4, 3, image::Rgba([1, 2, 3, 255]));

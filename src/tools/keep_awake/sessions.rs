@@ -118,9 +118,9 @@ mod tests {
     #[test]
     fn finds_sessions_and_subagent_logs() {
         let root = std::env::temp_dir().join(format!("cmb-awake-sessions-{}", std::process::id()));
-        let proj = root.join("-Users-me-work-cleanmebro");
+        let proj = root.join("-Users-me-work-cmdmeow");
         std::fs::create_dir_all(proj.join("abc/subagents")).unwrap();
-        std::fs::write(proj.join("abc.jsonl"), "{\"cwd\":\"/Users/me/work/cleanmebro\"}\n").unwrap();
+        std::fs::write(proj.join("abc.jsonl"), "{\"cwd\":\"/Users/me/work/cmdmeow\"}\n").unwrap();
         std::fs::write(proj.join("abc/subagents/agent-1.jsonl"), "{}\n").unwrap();
         std::fs::write(proj.join("def.jsonl"), "{}\n").unwrap();
         std::fs::write(proj.join("notes.txt"), "x").unwrap();
@@ -128,7 +128,7 @@ mod tests {
         let mut s = Scanner::default();
         let found = s.scan(&root, now);
         assert_eq!(found.len(), 2, "{found:?}");
-        assert!(found.iter().all(|x| x.project == "cleanmebro"));
+        assert!(found.iter().all(|x| x.project == "cmdmeow"));
         assert!(s.scan(&root, now + RECENT_SECS + 60).is_empty());
         let _ = std::fs::remove_dir_all(root);
     }

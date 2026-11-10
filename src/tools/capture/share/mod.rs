@@ -75,11 +75,22 @@ pub mod secret {
 
     #[cfg(target_os = "macos")]
     mod keychain {
-        const SERVICE: &str = "CleanMeBro sharing";
+        const SERVICE: &str = "Cmd+Meow sharing";
+        /// Where the key lived under the app's first name; moved over on first read.
+        const OLD_SERVICE: &str = "CleanMeBro sharing";
         const ACCOUNT: &str = "secret-key";
 
+        fn read(service: &str) -> Option<String> {
+            security_framework::passwords::get_generic_password(service, ACCOUNT).ok().and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty())
+        }
         pub fn get() -> Option<String> {
-            security_framework::passwords::get_generic_password(SERVICE, ACCOUNT).ok().and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty())
+            read(SERVICE).or_else(|| {
+                let v = read(OLD_SERVICE)?;
+                if set(&v).is_ok() {
+                    let _ = security_framework::passwords::delete_generic_password(OLD_SERVICE, ACCOUNT);
+                }
+                Some(v)
+            })
         }
         pub fn set(v: &str) -> Result<(), String> {
             if v.is_empty() {

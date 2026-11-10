@@ -1,4 +1,4 @@
-# CleanMeBro — mechanics sheet
+# Cmd+Meow — mechanics sheet
 
 What the rebuild does and where each rule or number came from. Sources are the
 reference app bundle, read statically.

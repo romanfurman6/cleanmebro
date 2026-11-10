@@ -37,7 +37,7 @@ mod mac {
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(title));
         content.setBody(&NSString::from_str(body));
-        let id = NSString::from_str(&format!("cleanmebro.{}.{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        let id = NSString::from_str(&format!("cmdmeow.{}.{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
         let req = UNNotificationRequest::requestWithIdentifier_content_trigger(&id, &content, None);
         center.addNotificationRequest_withCompletionHandler(&req, None);
     }

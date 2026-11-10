@@ -209,7 +209,7 @@ pub use native::file_storage::storage_dir;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod icon_data;
 
-/// CleanMeBro patch: skip eframe's 10 ms sleep after each pass while the
+/// Cmd+Meow patch: skip eframe's 10 ms sleep after each pass while the
 /// root window is hidden (on while other viewports animate over it).
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]

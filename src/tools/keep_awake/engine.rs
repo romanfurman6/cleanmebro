@@ -247,7 +247,7 @@ mod tests {
     use super::*;
 
     fn session(t: i64) -> Session {
-        Session { project: "cleanmebro".into(), last_write: t }
+        Session { project: "cmdmeow".into(), last_write: t }
     }
 
     #[test]

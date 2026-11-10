@@ -211,7 +211,7 @@ fn permission(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         p.rect_stroke(r, 14.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
         tool_chip(&p, Rect::from_min_size(r.min + Vec2::new(18.0, 18.0), Vec2::splat(32.0)), Icon::Crop, tint::CAPTURE);
         p.text(r.min + Vec2::new(62.0, 20.0), Align2::LEFT_TOP, "Capture needs Screen Recording", bold(15.0), TEXT);
-        paragraph(&p, r.min + Vec2::new(62.0, 44.0), "Without it, captures show only the desktop. Turn on cleanmebro in System Settings, then try again.", font(13.0), TEXT_DIM, r.width() - 80.0);
+        paragraph(&p, r.min + Vec2::new(62.0, 44.0), "Without it, captures show only the desktop. Turn on cmdmeow in System Settings, then try again.", font(13.0), TEXT_DIM, r.width() - 80.0);
         let y = r.bottom() - 46.0;
         let ow = button_width(&p, "Open System Settings", BTN_PRIMARY);
         let or = Rect::from_min_size(Pos2::new(r.right() - 18.0 - ow, y), Vec2::new(ow, 30.0));

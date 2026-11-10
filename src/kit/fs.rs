@@ -42,9 +42,31 @@ pub fn dir_size(path: &Path) -> u64 {
 // ---------------------------------------------------------------- app data
 
 /// A file or folder of the app's own data:
-/// `~/Library/Application Support/cleanmebro/<name>`.
+/// `~/Library/Application Support/cmdmeow/<name>`.
 pub fn data_path(name: &str) -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join(name)
+    data_root().join(name)
+}
+
+/// `~/Library/Application Support/cmdmeow`. The first call moves the folder
+/// over from the app's first name (`cleanmebro`), so settings, clipboard
+/// history and capture settings survive the rename.
+fn data_root() -> PathBuf {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        let base = dirs::data_dir().unwrap_or_else(std::env::temp_dir);
+        migrate_dir(&base.join("cleanmebro"), &base.join("cmdmeow"));
+        base.join("cmdmeow")
+    })
+    .clone()
+}
+
+/// Rename `old` to `new` when only `old` exists.
+fn migrate_dir(old: &Path, new: &Path) {
+    if old.is_dir() && !new.exists() {
+        if let Err(e) = std::fs::rename(old, new) {
+            eprintln!("[data] couldn't move {} to {}: {e}", old.display(), new.display());
+        }
+    }
 }
 
 /// A JSON file's value, or the default when it is missing or unreadable.
@@ -179,6 +201,22 @@ pub fn move_to_trash_at(p: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_folder_moves_over_from_the_old_name() {
+        let base = std::env::temp_dir().join(format!("cmdmeow-migrate-{}", std::process::id()));
+        let (old, new) = (base.join("cleanmebro"), base.join("cmdmeow"));
+        std::fs::create_dir_all(old.join("clipboard")).unwrap();
+        std::fs::write(old.join("clipboard/history.json"), "[]").unwrap();
+        migrate_dir(&old, &new);
+        assert!(!old.exists());
+        assert_eq!(std::fs::read_to_string(new.join("clipboard/history.json")).unwrap(), "[]");
+        // an existing new folder is never overwritten
+        std::fs::create_dir_all(&old).unwrap();
+        migrate_dir(&old, &new);
+        assert!(old.exists() && new.join("clipboard/history.json").exists());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 
     #[test]
     fn personal_folders_are_protected() {

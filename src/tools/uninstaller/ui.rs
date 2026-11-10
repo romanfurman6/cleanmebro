@@ -400,7 +400,7 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
                 let stale = a.last_used.is_some_and(|t| now - t > UNUSED_DAYS * 86400) && !dim;
                 p.text(Pos2::new(c_used, r.center().y), Align2::RIGHT_CENTER, ago(now, a.last_used), font(12.0), if stale { Color32::from_rgb(0xF2, 0xC4, 0x6B) } else { TEXT_FAINT });
                 let name_r = text_fit(&p, Pos2::new(c_name, r.center().y), Align2::LEFT_CENTER, &a.name, font(13.0), tc, c_used - 80.0 - c_name - 70.0);
-                let src = if dim && a.locked == Some("This is CleanMeBro") { None } else { Some(a.source) };
+                let src = if dim && a.locked == Some("This is Cmd+Meow") { None } else { Some(a.source) };
                 if let Some(s) = src {
                     source_chip(&p, Pos2::new(name_r.right() + 7.0, r.center().y), s);
                 }
@@ -1187,7 +1187,7 @@ fn notice(u: &mut Uninstaller, ctx: &egui::Context, cx: &mut Cx) {
         let x0 = r.left() + 12.0;
         tool_chip(&p, Rect::from_min_size(Pos2::new(x0, r.top() + 12.0), Vec2::splat(32.0)), Icon::Trash, TINT);
         let tx = x0 + 42.0;
-        p.text(Pos2::new(tx, r.top() + 12.0), Align2::LEFT_TOP, "CleanMeBro", bold(12.0), TEXT_SOFT);
+        p.text(Pos2::new(tx, r.top() + 12.0), Align2::LEFT_TOP, "Cmd+Meow", bold(12.0), TEXT_SOFT);
         p.text(Pos2::new(r.right() - 12.0, r.top() + 12.0), Align2::RIGHT_TOP, "now", font(11.0), TEXT_DIM);
         text_fit(&p, Pos2::new(tx, r.top() + 30.0), Align2::LEFT_TOP, &format!("{} was removed", n.target.name), bold(13.0), TEXT, r.right() - tx - 12.0);
         let k = n.target.items.len();

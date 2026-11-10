@@ -1,6 +1,6 @@
 //! Power assertions: the macOS way to say "don't sleep". Each one is held
 //! until released; macOS drops them by itself if the app quits or crashes.
-//! `pmset -g assertions` lists them under "CleanMeBro".
+//! `pmset -g assertions` lists them under "Cmd+Meow".
 
 /// What to hold right now.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -27,11 +27,11 @@ impl Power {
     /// Take or release assertions so that exactly `want` is held.
     pub fn apply(&mut self, want: Want) {
         if want.system != self.system.is_some() {
-            self.system = toggle(self.system.take(), want.system, "PreventUserIdleSystemSleep", "CleanMeBro Keep Awake");
+            self.system = toggle(self.system.take(), want.system, "PreventUserIdleSystemSleep", "Cmd+Meow Keep Awake");
         }
         let display = want.system && want.display;
         if display != self.display.is_some() {
-            self.display = toggle(self.display.take(), display, "PreventUserIdleDisplaySleep", "CleanMeBro Keep Awake (screen)");
+            self.display = toggle(self.display.take(), display, "PreventUserIdleDisplaySleep", "Cmd+Meow Keep Awake (screen)");
         }
         self.held = Want { system: want.system, display };
     }

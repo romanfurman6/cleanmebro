@@ -354,7 +354,7 @@ pub fn set_jobs(jobs: &[(Job, bool)]) -> Result<(), String> {
     }
     if !admin.is_empty() {
         let cmd: String = admin.iter().map(|(j, on)| switch_cmd(j, *on)).collect::<String>() + "true";
-        macos::run_admin(&cmd, "CleanMeBro wants to change what starts with your Mac.")?;
+        macos::run_admin(&cmd, "Cmd+Meow wants to change what starts with your Mac.")?;
     }
     Ok(())
 }
@@ -377,7 +377,7 @@ pub fn trash_job(job: &Job) -> Result<(), String> {
             dst = macos::sh_quote(&dest.to_string_lossy()),
             uid = macos::uid()
         );
-        macos::run_admin(&cmd, "CleanMeBro wants to move a leftover startup item to your Trash.").map(|_| ())
+        macos::run_admin(&cmd, "Cmd+Meow wants to move a leftover startup item to your Trash.").map(|_| ())
     } else {
         let _ = std::process::Command::new("/bin/sh").arg("-c").arg(format!("/bin/launchctl bootout {target} 2>/dev/null; true")).output();
         crate::kit::fs::move_to_trash(&job.plist)

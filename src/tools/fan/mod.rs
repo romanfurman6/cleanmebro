@@ -33,7 +33,7 @@ pub enum HelperState {
     #[default]
     Unknown,
     Missing,
-    /// Running, but from an older CleanMeBro.
+    /// Running, but from an older Cmd+Meow.
     Outdated,
     Ready,
 }

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Local dev loop: build, bundle as "CleanMeBro Dev.app" (bundle id
-# com.romanfurman6.cleanmebro.dev, so it never clashes with a release
+# Local dev loop: build, bundle as "CmdMeow Dev.app" (bundle id
+# com.romanfurman6.cmdmeow.dev, so it never clashes with a release
 # install), sign, install to /Applications and relaunch with logs in
-# ~/Library/Logs/CleanMeBro/dev.log.
+# ~/Library/Logs/CmdMeow/dev.log.
+#
+# The first install after the rename from CleanMeBro is a new app to macOS:
+# grant Screen Recording and Accessibility again and remove the old
+# "CleanMeBro Dev.app" from /Applications.
 #
 # Sign with a stable identity (SIGN_ID, e.g. your "Apple Development: …"
 # certificate name or SHA-1 from `security find-identity -v -p codesigning`)
@@ -17,13 +21,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 export SIGN_ID="${SIGN_ID:--}"
-export APP_NAME="CleanMeBro Dev"
-export BUNDLE_ID="com.romanfurman6.cleanmebro.dev"
+export APP_NAME="CmdMeow Dev"
+export DISPLAY_NAME="Cmd+Meow Dev"
+export BUNDLE_ID="com.romanfurman6.cmdmeow.dev"
 export PROFILE="${PROFILE:-release}"
 
 DEST="/Applications/$APP_NAME.app"
-BIN_PATH="$DEST/Contents/MacOS/cleanmebro"
-LOG_DIR="$HOME/Library/Logs/CleanMeBro"
+BIN_PATH="$DEST/Contents/MacOS/cmdmeow"
+LOG_DIR="$HOME/Library/Logs/CmdMeow"
 LOG="$LOG_DIR/dev.log"
 
 if [[ "${NO_PULL:-0}" != "1" ]]; then
@@ -52,7 +57,7 @@ echo "===== $(date '+%Y-%m-%d %H:%M:%S') dev-install: $(git rev-parse --abbrev-r
 open -n -a "$DEST" --stdout "$LOG" --stderr "$LOG" --env RUST_BACKTRACE=1 --env RUST_LOG=debug
 
 sleep 5
-pgrep -fl "$BIN_PATH" || echo "!! CleanMeBro Dev is NOT running"
+pgrep -fl "$BIN_PATH" || echo "!! CmdMeow Dev is NOT running"
 echo "--- last 30 lines of $LOG ---"
 tail -30 "$LOG"
 echo
