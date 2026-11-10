@@ -461,7 +461,7 @@ pub fn hairline(p: &Painter, a: Pos2, b: Pos2) {
 
 /// Small section header ("Clean", "Monitor", table column titles).
 pub fn section_header(p: &Painter, pos: Pos2, align: Align2, label: &str) -> Rect {
-    p.text(pos, align, label, bold(11.0), white(102))
+    p.text(pos, align, label, bold(11.0), white(120))
 }
 
 /// The header of a detail sheet: tint chip, title, subtitle, close button.
@@ -533,7 +533,7 @@ pub fn sidebar_item(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: C
     icon(p, glyph, chip_r, glyph_col);
     let mut right = rect.right() - 8.0;
     if !meta.is_empty() {
-        right = p.text(Pos2::new(right, rect.center().y), Align2::RIGHT_CENTER, meta, font(11.0), if selected { white(205) } else { white(102) }).left() - 6.0;
+        right = p.text(Pos2::new(right, rect.center().y), Align2::RIGHT_CENTER, meta, font(11.0), if selected { white(205) } else { white(120) }).left() - 6.0;
     }
     text_fit(p, Pos2::new(chip_r.right() + 9.0, rect.center().y), Align2::LEFT_CENTER, label, font(13.0), if planned { TEXT_FAINT } else if selected { Color32::WHITE } else { white(217) }, right - chip_r.right() - 9.0);
     if planned {
