@@ -40,9 +40,12 @@ jobs:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false # restore main's cache, don't save one per tag
 
+      # Release profile + arm64 target, so the bundle step reuses these deps.
       - name: Test
-        run: cargo test
+        run: cargo test --release --target aarch64-apple-darwin
 
       - name: Bundle CmdMeow.app (universal)
         run: UNIVERSAL=1 scripts/bundle-mac.sh
