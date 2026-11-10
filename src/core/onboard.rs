@@ -667,11 +667,25 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
         }
     }
     let ph = 20.0 + rows_n as f32 * 58.0 + (rows_n.max(1) as f32 - 1.0) * 8.0;
-    let top = body.center().y - ph / 2.0 + 12.0;
-    let bob = (t * 3.5).sin() * 2.0;
-    let dot = Rect::from_center_size(Pos2::new(px + pw / 2.0, top - 16.0 + bob), Vec2::splat(13.0));
-    p.rect_filled(dot.expand(4.0), 6.0, with_alpha(BLUE, 0.25));
-    p.rect_filled(dot, 3.0, BLUE);
+    let top = body.center().y - ph / 2.0 + 24.0;
+    // a strip of the menu bar with CleanMeBro's icon lit, the panel hanging under it
+    let bar = Rect::from_min_size(Pos2::new(px, top - 40.0), Vec2::new(pw, 24.0));
+    p.rect_filled(bar, 6.0, white(18));
+    let mut bx = bar.right() - 12.0;
+    let clock = p.text(Pos2::new(bx, bar.center().y), Align2::RIGHT_CENTER, "Tue 17:58", font(11.0), TEXT_FAINT);
+    bx = clock.left() - 14.0;
+    for ic in [Icon::Wifi, Icon::Battery(80)] {
+        icon(&p, ic, Rect::from_center_size(Pos2::new(bx - 7.0, bar.center().y), Vec2::splat(13.0)), TEXT_FAINT);
+        bx -= 24.0;
+    }
+    let me = Rect::from_center_size(Pos2::new(bx - 8.0, bar.center().y), Vec2::new(26.0, 20.0));
+    let glow = ((t * 3.0).sin() * 0.5 + 0.5) * 0.25 + 0.2;
+    p.rect_filled(me, 5.0, with_alpha(BLUE, glow));
+    tray_glyph(&p, me.center(), 14.0, Color32::WHITE);
+    p.text(Pos2::new(bar.left() + 10.0, bar.center().y), Align2::LEFT_CENTER, "Click this icon", font(11.0), TEXT_FAINT);
+    // a little caret from the icon to the panel
+    let c = Pos2::new(me.center().x, top);
+    p.add(egui::Shape::convex_polygon(vec![c + Vec2::new(-6.0, 0.5), c + Vec2::new(0.0, -6.0), c + Vec2::new(6.0, 0.5)], Color32::from_rgb(0x1E, 0x1E, 0x20), Stroke::NONE));
     let panel = Rect::from_min_size(Pos2::new(px, top), Vec2::new(pw, ph));
     p.rect_filled(panel, 12.0, Color32::from_rgb(0x1E, 0x1E, 0x20));
     p.rect_stroke(panel, 12.0, Stroke::new(1.0, white(36)), StrokeKind::Inside);
@@ -687,9 +701,11 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
         if a <= 0.0 {
             continue;
         }
-        let blue = app.tools[i].id() == "cleanup";
+        let blue = false;
         p.rect_filled(r, 9.0, (if blue { BLUE } else { SIDEBAR }).gamma_multiply(a.min(1.0)));
-        icon(&p, app.tools[i].badge().icon, Rect::from_center_size(r.center(), Vec2::splat(18.0 * a)), if blue { Color32::WHITE } else { TEXT_SOFT });
+        let fg = if blue { Color32::WHITE } else { TEXT_SOFT };
+        icon(&p, app.tools[i].badge().icon, Rect::from_center_size(r.center() - Vec2::new(0.0, 8.0), Vec2::splat(18.0 * a)), fg);
+        text_fit(&p, Pos2::new(r.center().x, r.bottom() - 9.0), Align2::CENTER_BOTTOM, app.tools[i].name(), font(10.0), fg.gamma_multiply(0.85 * a.min(1.0)), r.width() - 8.0);
     }
 }
 
@@ -755,4 +771,21 @@ pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
     icon(&p, Icon::Close, x.shrink(3.0), if r.hovered() { TEXT } else { TEXT_MUTED });
     ui.ctx().request_repaint();
     r.clicked()
+}
+
+/// The menu bar icon: a rounded square with a four-point star (as in the tray).
+fn tray_glyph(p: &egui::Painter, c: Pos2, size: f32, col: Color32) {
+    let r = Rect::from_center_size(c, Vec2::splat(size * 0.78));
+    p.rect_stroke(r, size * 0.18, Stroke::new(size * 0.07, col), StrokeKind::Middle);
+    let k = size * 0.25;
+    let n = 12;
+    let mut pts = Vec::new();
+    for i in 0..4 * n {
+        let a = i as f32 / (4 * n) as f32 * std::f32::consts::TAU;
+        let (x, y) = (a.cos(), a.sin());
+        // astroid: |x|^0.5 + |y|^0.5 = 1
+        let d = (x.abs().sqrt() + y.abs().sqrt()).powi(2);
+        pts.push(c + Vec2::new(x, y) * k / d);
+    }
+    p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
 }
