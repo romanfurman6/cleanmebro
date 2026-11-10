@@ -137,6 +137,8 @@ pub struct State {
     pub failed: Vec<(String, String)>,
     pub log: Vec<String>,
     pub stop: bool,
+    /// Found, but hidden: the person chose to keep them before.
+    pub hidden_kept: usize,
 }
 
 impl State {
@@ -166,6 +168,9 @@ type ScanStep = (&'static str, fn(&mut Ctx));
 
 struct Ctx {
     items: Vec<Item>,
+    /// Paths the person chose to keep in an earlier scan: not offered again.
+    kept: HashSet<PathBuf>,
+    hidden_kept: usize,
     running_ids: HashSet<String>,
     running_names: HashSet<String>,
     shared: Shared,
@@ -184,6 +189,10 @@ impl Ctx {
     }
     #[allow(clippy::too_many_arguments)]
     fn add(&mut self, group: Group, title: &str, path: PathBuf, kind: &'static str, verdict: Verdict, reason: &str) {
+        if self.kept.iter().any(|k| path.starts_with(k)) {
+            self.hidden_kept += 1;
+            return;
+        }
         if !path.exists() {
             return;
         }
@@ -304,7 +313,7 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
     }
     std::thread::spawn(move || {
         let (running_ids, running_names) = running_apps();
-        let mut c = Ctx { items: Vec::new(), running_ids, running_names, shared: shared.clone(), egui: ctx.clone() };
+        let mut c = Ctx { items: Vec::new(), kept: kept().into_iter().collect(), hidden_kept: 0, running_ids, running_names, shared: shared.clone(), egui: ctx.clone() };
         let steps: [ScanStep; 8] = [
             ("Claude", scan_claude),
             ("AI tools", scan_ai_tools),
@@ -337,6 +346,7 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
         {
             let mut g = shared.lock().unwrap();
             g.items = std::mem::take(&mut c.items);
+            g.hidden_kept = c.hidden_kept;
             g.phase = if use_ai && !stopped { Phase::Judging } else { Phase::Results };
         }
         ctx.request_repaint();
@@ -668,6 +678,15 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
         let g = shared.lock().unwrap();
         g.items.iter().enumerate().filter(|(_, it)| !it.hard_keep && it.bytes >= m::AI_MIN_BYTES).map(|(i, _)| i).collect()
     };
+    // what the person kept before tells Claude what they care about
+    let mut system = SYSTEM.to_string();
+    let before = kept();
+    if !before.is_empty() {
+        system.push_str(" The person chose to KEEP these paths in earlier cleanups; judge similar paths (same app, same kind of data) as keep or ask, never safe: ");
+        let list: Vec<String> = before.iter().rev().take(KEPT_IN_PROMPT).map(|p| p.display().to_string().replacen(&h, "~", 1)).collect();
+        system.push_str(&list.join("; "));
+        system.push('.');
+    }
     let batches: Vec<Vec<usize>> = candidates.chunks(m::AI_BATCH).map(|c| c.to_vec()).collect();
     let n = batches.len().max(1);
     for (bi, batch) in batches.iter().enumerate() {
@@ -702,7 +721,7 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
         ctx.request_repaint();
         let out = Command::new(&bin)
             .current_dir(std::env::temp_dir())
-            .args(["-p", &lines, "--system-prompt", SYSTEM, "--output-format", "json", "--no-session-persistence", "--model", m::AI_MODEL, "--tools", "", "--strict-mcp-config"])
+            .args(["-p", &lines, "--system-prompt", &system, "--output-format", "json", "--no-session-persistence", "--model", m::AI_MODEL, "--tools", "", "--strict-mcp-config"])
             .output();
         let text = match out {
             Ok(o) if !o.status.success() => {
@@ -739,6 +758,36 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
         drop(g);
         ctx.request_repaint();
     }
+}
+
+// ---------------------------------------------------------------- kept by you
+
+/// How many kept paths Claude is shown (the newest).
+const KEPT_IN_PROMPT: usize = 60;
+
+fn kept_file() -> PathBuf {
+    crate::kit::fs::data_path("cleanup-kept.json")
+}
+
+/// Paths the person chose to keep, oldest first.
+pub fn kept() -> Vec<PathBuf> {
+    crate::kit::fs::load_json(&kept_file())
+}
+
+/// Remember that the person keeps `paths`: later scans don't offer them.
+pub fn remember_kept(paths: impl IntoIterator<Item = PathBuf>) {
+    let mut all = kept();
+    for p in paths {
+        if !all.contains(&p) {
+            all.push(p);
+        }
+    }
+    crate::kit::fs::save_json(&kept_file(), &all, true);
+}
+
+/// Offer everything again.
+pub fn forget_kept() {
+    crate::kit::fs::save_json(&kept_file(), &Vec::<PathBuf>::new(), true);
 }
 
 /// Combine a rule's verdict with the AI's: the AI may always be more careful;
