@@ -53,6 +53,8 @@ pub struct App {
     pub edit_sel: Option<String>,
     /// The search text above the widget gallery in Settings › Widgets.
     pub widget_search: String,
+    /// The widget whose sizes the gallery shows.
+    pub gallery_pick: Option<String>,
     // window/tray state
     tray: Option<tray_icon::TrayIcon>,
     tray_rx: Receiver<tray_icon::TrayIconEvent>,
@@ -117,6 +119,7 @@ impl App {
             drag: None,
             edit_sel: None,
             widget_search: String::new(),
+            gallery_pick: None,
             tray,
             tray_rx,
             tray_title: String::new(),
