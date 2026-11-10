@@ -1,6 +1,7 @@
 [package]
 name = "cleanmebro"
 version = "0.1.0"
+license = "MIT"
 edition = "2021"
 description = "A glassy macOS menu bar health monitor with an AI-judged cleanup and Space Lens"
 

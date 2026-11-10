@@ -152,3 +152,7 @@ The images in `docs/images/` are rendered from sample data with
 
 - Some health thresholds are estimated (marked in `docs/MECHANICS.md`).
 - Live glass and tray behavior hasn't been visually verified end to end.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
