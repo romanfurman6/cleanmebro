@@ -1,0 +1,62 @@
+/* Shared base for the player page (dark, D6 tokens). */
+:root {
+  --bg: #0F1013;
+  --win: #1E1E20;
+  --card: #151517;
+  --line: rgba(255,255,255,.08);
+  --text: rgba(255,255,255,.92);
+  --dim: rgba(255,255,255,.62);
+  --faint: rgba(255,255,255,.5);
+  --blue: #0A84FF;
+  --blue-hi: #4BA3FF;
+  --amber: #E8A33D;
+  --orange: #FF9F0A;
+  --green: #30D158;
+  --r: 12px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--font); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+a { color: var(--blue-hi); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2, p { margin: 0; }
+code, .mono { font-family: var(--mono); font-size: .875em; }
+.num { font-variant-numeric: tabular-nums; }
+.dim { color: var(--dim); }
+.cap { font-size: 12px; line-height: 16px; color: var(--faint); }
+.sub { color: var(--dim); font-size: 15px; line-height: 22px; }
+.lead { font-size: 15px; font-weight: 600; line-height: 20px; }
+.big { font-size: 34px; line-height: 40px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.n22 { font-size: 22px; font-weight: 600; line-height: 26px; letter-spacing: -.01em; }
+.t { font-size: 13px; font-weight: 600; }
+.center { text-align: center; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: 32px; padding-right: 32px; }
+.row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.ic { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ph { fill: currentColor; flex: none; }
+.ic.b { color: var(--blue); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 32px; padding: 0 16px; border-radius: 8px; border: 0;
+  background: rgba(255,255,255,.12); color: #fff; font: 500 14px var(--font); cursor: pointer; white-space: nowrap; text-decoration: none !important; transition: background .15s, opacity .3s; }
+.btn:hover { background: rgba(255,255,255,.18); }
+.btn.p { background: var(--blue); font-weight: 600; }
+.btn.p:hover { background: #2490FF; }
+.btn.l { height: 48px; padding: 0 24px; font-size: 16px; border-radius: 12px; }
+.btn.sm { height: 28px; padding: 0 12px; font-size: 13px; border-radius: 7px; }
+.btn.xs { height: 22px; padding: 0 8px; font-size: 12px; border-radius: 6px; }
+.btn.off { opacity: .35; }
+.btn:focus-visible, a:focus-visible, button:focus-visible { outline: 2px solid var(--blue-hi); outline-offset: 2px; }
+kbd, .kc { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 5px;
+  background: rgba(255,255,255,.1); box-shadow: inset 0 -1px 0 rgba(0,0,0,.4); font: 12px var(--font); color: rgba(255,255,255,.8); }
+
+/* Header */
+.top { display: flex; align-items: center; gap: 24px; height: 64px; }
+.brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; font-size: 15px; }
+.brand:hover { text-decoration: none; }
+.mark { width: 22px; height: 22px; }
+.top nav { margin-left: auto; display: flex; gap: 24px; font-size: 14px; }
+.top nav a { color: var(--dim); }
+.top nav a:hover { color: var(--text); text-decoration: none; }
+

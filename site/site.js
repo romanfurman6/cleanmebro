@@ -1,17 +1,26 @@
-// Cmd+Meow site: live demos. Each demo starts when it scrolls into view and
-// loops while visible. With reduced motion every demo shows its final frame.
+// Cmd+Meow site: the live demo. The keys under the screen pick a tool; until you
+// press one, the demo walks through them. With reduced motion each demo shows its final frame.
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var wait = function (ms) { return new Promise(function (r) { setTimeout(r, still ? 0 : ms); }); };
+  // Every demo runs under the current token; switching tools swaps the token and
+  // the old demo stops at its next wait.
+  var token = {};
+  function stop() { var e = new Error('stopped'); e.stopped = true; return e; }
+  var wait = function (ms) {
+    var my = token;
+    return new Promise(function (r, j) { setTimeout(function () { my === token ? r() : j(stop()); }, still ? 0 : ms); });
+  };
   function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
   function gb(mb) { return mb >= 1000 ? (mb / 1000).toFixed(1) + ' GB' : Math.round(mb) + ' MB'; }
   function tween(ms, fn) {
-    return new Promise(function (done) {
+    var my = token;
+    return new Promise(function (done, fail) {
       if (still) { fn(1); return done(); }
       var t0 = performance.now();
       (function step(t) {
+        if (my !== token) return fail(stop());
         var k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
         fn(e); if (k < 1) requestAnimationFrame(step); else done();
       })(t0);
@@ -133,7 +142,7 @@
     var sel = $('cap-sel'), cross = $('cap-cross'), rec = $('cap-rec'), toast = $('cap-toast'), scr = $('cap-screen');
     var W = scr.clientWidth, H = scr.clientHeight;
     [sel, rec, toast].forEach(function (x) { x.classList.remove('on'); });
-    sel.classList.remove('rec'); cross.classList.add('on');
+    sel.classList.remove('recording'); cross.classList.add('on');
     var x0 = W * 0.18, y0 = H * 0.2, x1 = W * 0.78, y1 = H * 0.78;
     cross.style.transform = 'translate(' + x0 + 'px,' + y0 + 'px)';
     await wait(500);
@@ -147,9 +156,9 @@
     });
     cross.classList.remove('on');
     await wait(400);
-    sel.classList.add('rec'); rec.classList.add('on');
+    sel.classList.add('recording'); rec.classList.add('on');
     for (var t = 0; t <= 4; t++) { $('cap-time').textContent = '0:0' + t; await wait(600); }
-    rec.classList.remove('on'); sel.classList.remove('rec', 'on');
+    rec.classList.remove('on'); sel.classList.remove('recording', 'on');
     toast.classList.add('on');
   }
 
@@ -199,27 +208,61 @@
   aw.addEventListener('click', function () { setAwake(!aw.classList.contains('on')); });
   async function awake() { setAwake(false); await wait(500); setAwake(true); }
 
-  // ---- Run each demo while on screen ---------------------------------------
-  var DEMOS = { clean: [clean, 6000], map: [map, 0], capture: [capture, 3500], clip: [clip, 4000], awake: [awake, 0] };
-  var io = new IntersectionObserver(function (es) {
-    es.forEach(function (e) {
-      var st = e.target, d = DEMOS[st.dataset.demo];
-      st.visible = e.isIntersecting;
-      if (!e.isIntersecting || st.running) return;
-      st.running = true;
-      (async function loop() {
-        do { await d[0](); if (!d[1] || still) break; await wait(d[1]); } while (st.visible);
-        st.running = false;
-      })();
+  // ---- Keys pick the tool shown on the screen -------------------------------
+  async function panel() { await wait(6000); }
+  var DEMOS = {
+    panel: [panel, 0, 'Menu bar', 'CPU, memory and fans at a glance, with Clean Up and Keep Awake one click away'],
+    clean: [clean, 2500, 'Clean Up', 'Scans caches, logs and Xcode DerivedData. You tick what goes, and it goes to the Trash'],
+    map: [map, 3500, 'Disk Map', 'Each ring is a folder, sized by what is inside. Hover one to see its name'],
+    capture: [capture, 2500, 'Capture', 'Select an area, record it with sound, and share a link that opens in the Cmd+Meow player'],
+    clip: [clip, 2500, 'Clipboard', 'Everything you copied, one ⌥⌘V away. Anything that looks like a password stays hidden'],
+    awake: [awake, 3000, 'Keep Awake', 'One switch, or let it turn on by itself while Claude Code is working']
+  };
+  var ORDER = Object.keys(DEMOS), screen = $('screen'), keys = document.querySelectorAll('.key');
+  var cur = 'panel', pinned = false, visible = false;
+  function show(name) {
+    cur = name; token = {};
+    screen.dataset.on = name;
+    document.querySelectorAll('.pane').forEach(function (p) { p.hidden = p.dataset.pane !== name; });
+    keys.forEach(function (k) { k.setAttribute('aria-selected', String(k.dataset.key === name)); k.tabIndex = k.dataset.key === name ? 0 : -1; });
+    var d = DEMOS[name];
+    $('now').textContent = d[2] + ' · ' + d[3];
+    run(name);
+  }
+  async function run(name) {
+    var d = DEMOS[name];
+    try {
+      await d[0]();
+      await wait(d[1]);
+      if (!visible || still) return;
+      if (pinned) run(name);
+      else show(ORDER[(ORDER.indexOf(name) + 1) % ORDER.length]);
+    } catch (e) { if (!e.stopped) throw e; }
+  }
+  keys.forEach(function (k, i) {
+    k.addEventListener('click', function () { pinned = true; show(k.dataset.key); });
+    k.addEventListener('keydown', function (e) {
+      var n = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (n) { e.preventDefault(); var t = keys[(i + n + keys.length) % keys.length]; t.focus(); t.click(); }
     });
-  }, { threshold: 0.35 });
-  document.querySelectorAll('[data-demo]').forEach(function (s) { io.observe(s); });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || /input|textarea/i.test(e.target.tagName)) return;
+    var i = parseInt(e.key, 10);
+    if (i >= 1 && i <= ORDER.length && visible) { pinned = true; show(ORDER[i - 1]); }
+  });
+  new IntersectionObserver(function (es) {
+    var was = visible; visible = es[0].isIntersecting;
+    if (visible && !was) show(cur);
+    if (!visible) token = {};
+  }, { threshold: 0.3 }).observe(screen);
 
   document.querySelectorAll('[data-copy]').forEach(function (b) {
     b.addEventListener('click', function () {
+      var lab = b.querySelector('span') || b;
       navigator.clipboard.writeText($(b.dataset.copy).textContent).then(function () {
-        b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500);
-      });
+        lab.textContent = 'Copied'; setTimeout(function () { lab.textContent = 'Copy'; }, 1500);
+      }, function () { getSelection().selectAllChildren($(b.dataset.copy)); });
     });
   });
 })();
