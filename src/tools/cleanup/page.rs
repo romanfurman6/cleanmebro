@@ -348,7 +348,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     for (grp, title, bytes, q) in &rows {
         let rr = Rect::from_min_size(Pos2::new(lr.left() + 12.0, y), Vec2::new(lr.width() - 24.0, 34.0));
         let sel = app.clean_group == *grp;
-        let id = ui.id().with(("grp", title.as_str()));
+        let id = ui.scope_id().with(("grp", title.as_str()));
         let resp = ui.interact(rr, id, Sense::click());
         let hv = ctx.animate_bool(id, resp.hovered());
         if sel {
@@ -429,7 +429,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         }
     }
     let br = text_fit(&p, Pos2::new(c_name, hy + 20.0), Align2::LEFT_TOP, blurb, font(12.0), TEXT_FAINT, links_left - c_name - 16.0);
-    ui.interact(br, ui.id().with("blurb"), Sense::hover()).on_hover_text(blurb);
+    ui.interact(br, ui.scope_id().with("blurb"), Sense::hover()).on_hover_text(blurb);
     let head_bottom = tr.top() + 48.0;
     hairline(&p, Pos2::new(tr.left(), head_bottom), Pos2::new(tr.right(), head_bottom));
     let list = Rect::from_min_max(Pos2::new(tr.left(), head_bottom + 1.0), tr.max);
@@ -472,7 +472,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         app.clean_confirm = true;
     }
     let seg = Rect::from_min_size(Pos2::new(cr.left() - 16.0 - 200.0, fy - 14.0), Vec2::new(200.0, 28.0));
-    if let Some(k) = segmented(ui, seg, ui.id().with("removal"), &["Move to Trash", "Delete now"], app.delete_now as usize) {
+    if let Some(k) = segmented(ui, seg, ui.scope_id().with("removal"), &["Move to Trash", "Delete now"], app.delete_now as usize) {
         app.delete_now = k == 1;
     }
     if app.clean_confirm {
@@ -504,7 +504,7 @@ fn item_row(app: &mut App, ui: &mut Ui, i: usize, w: f32, cols: (f32, f32, f32))
     }
     let can_select = it.verdict != Verdict::Keep && !it.hard_keep;
     let cb = Rect::from_center_size(Pos2::new(rect.left() + 24.0 + 8.0, rect.center().y), Vec2::splat(16.0));
-    let cr = checkbox(ui, cb, ui.id().with(("sel", &it.path)), it.selected, can_select);
+    let cr = checkbox(ui, cb, ui.scope_id().with(("sel", &it.path)), it.selected, can_select);
     if cr.clicked() && can_select {
         let mut g = app.clean.lock().unwrap();
         let x = &mut g.items[i];
@@ -561,7 +561,7 @@ fn item_row(app: &mut App, ui: &mut Ui, i: usize, w: f32, cols: (f32, f32, f32))
 
 /// The 22 pt Allow / Keep buttons inside a row.
 fn small_button(ui: &mut Ui, r: Rect, label: &str, primary: bool) -> bool {
-    let id = ui.id().with(("small", label, r.min.x as i32, r.min.y as i32));
+    let id = ui.scope_id().with(("small", label, r.min.x as i32, r.min.y as i32));
     let resp = ui.interact(r, id, Sense::click());
     let h = ui.ctx().animate_bool(id, resp.hovered());
     let p = ui.painter();
@@ -580,7 +580,7 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     // block clicks to the page underneath
-    let _ = ui.interact(r, ui.id().with("confirm-scrim"), Sense::click());
+    let _ = ui.interact(r, ui.scope_id().with("confirm-scrim"), Sense::click());
     p.rect_filled(r, CornerRadius { nw: 0, sw: 0, ne: WIN_R as u8, se: WIN_R as u8 }, Color32::from_black_alpha(115));
     let (n, bytes, perm) = {
         let g = app.clean.lock().unwrap();

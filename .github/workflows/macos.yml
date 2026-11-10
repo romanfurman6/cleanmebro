@@ -10,27 +10,44 @@ on:
 permissions:
   contents: write
 
+# A new push to a pull request cancels its older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      # Only main saves the cache (~1.5 GB); pull requests restore it, so
+      # branch caches don't push main's out of the 10 GB limit.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # Release + explicit target: the bundle step below reuses these deps
+      # instead of compiling everything a second time in the dev profile.
       - name: Test
-        run: cargo test
+        run: cargo test --release --target aarch64-apple-darwin
 
-      - name: Bundle CmdMeow.app (universal)
-        run: UNIVERSAL=1 scripts/bundle-mac.sh
+      # Pull requests: Apple silicon only. main and tags: universal.
+      - name: Bundle CmdMeow.app
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            TARGET=aarch64-apple-darwin scripts/bundle-mac.sh
+          else
+            UNIVERSAL=1 scripts/bundle-mac.sh
+          fi
 
       - name: Upload app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: CmdMeow-macos
           path: target/bundle/*.zip
