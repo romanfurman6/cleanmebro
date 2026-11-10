@@ -10,7 +10,7 @@ mod page;
 pub mod probe;
 mod ui;
 
-use crate::core::tool::{Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
+use crate::core::tool::{Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::activity::{self, Kick};
 use crate::kit::glass::{tint, Icon};
 use control::{Guard, Mode, Settings};
@@ -258,7 +258,7 @@ impl Tool for FanControl {
         }
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: CARD, title: "Fans", about: "Fan speed and the hottest part, live.", sizes: ALL_SIZES, size: Size::S14, default_on: true }]
+        vec![WidgetSpec { id: CARD, title: "Fans", about: "Fan speed and the hottest part, live.", sizes: UP_TO_MEDIUM, size: Size::S14, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let s = self.snap.lock().unwrap().clone();

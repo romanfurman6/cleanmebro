@@ -476,25 +476,6 @@ pub fn sheet_header(ui: &mut Ui, rect: Rect, glyph: Icon, color: Color32, title:
 
 // ---------------------------------------------------------------- panel widgets
 
-/// The blue recommendation banner at the bottom of the panel. Returns its response.
-pub fn banner(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, title: &str, sub: &str, action: &str) -> Response {
-    let resp = ui.interact(rect, id, Sense::click());
-    let h = ui.ctx().animate_bool(id.with("h"), resp.hovered());
-    let p = ui.painter();
-    p.rect_filled(rect, R_CARD, with_alpha(BLUE, 0.16 + 0.06 * h));
-    p.rect_stroke(rect, R_CARD, Stroke::new(1.0, with_alpha(ACCENT, 0.30)), StrokeKind::Inside);
-    icon(p, glyph, Rect::from_center_size(Pos2::new(rect.left() + 21.0, rect.center().y), Vec2::splat(18.0)), ACCENT);
-    let ar = p.text(Pos2::new(rect.right() - 12.0, rect.center().y), Align2::RIGHT_CENTER, action, bold(12.0), ACCENT);
-    let x0 = rect.left() + 40.0;
-    let tw = ar.left() - x0 - 10.0;
-    text_fit(p, Pos2::new(x0, rect.top() + 10.0), Align2::LEFT_TOP, title, bold(13.0), TEXT, tw);
-    text_fit(p, Pos2::new(x0, rect.top() + 29.0), Align2::LEFT_TOP, sub, font(12.0), TEXT_DIM, tw);
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    resp
-}
-
 
 /// A sheet's big number: "1.44 TB free of 2 TB". Returns the height used.
 pub fn hero_number(p: &Painter, pos: Pos2, big: &str, unit: &str, caption: &str) -> f32 {
@@ -714,6 +695,8 @@ pub enum Icon {
     Trackpad,
     /// A gauge with a needle: Claude usage limits.
     Gauge,
+    /// An app with a cross: the Uninstaller.
+    AppRemove,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -754,7 +737,7 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Monitor => "menubar.rectangle",
         Icon::Chart => "chart.bar",
         Icon::Power => "power",
-        Icon::Map => "square.split.2x2",
+        Icon::Map => "chart.pie",
         Icon::Pulse => "waveform.path.ecg",
         Icon::Crop => "crop",
         Icon::Clipboard => "doc.on.clipboard",
@@ -771,6 +754,7 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Keyboard => "keyboard",
         Icon::Trackpad => "rectangle.and.hand.point.up.left",
         Icon::Gauge => "gauge.with.needle",
+        Icon::AppRemove => "xmark.app",
     })
 }
 
@@ -836,6 +820,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
     };
     let dot = |x: f32, y: f32, r: f32| p.circle_filled(pt(x, y), r * u, color);
     match icon {
+        Icon::AppRemove => icon_drawn(p, Icon::Trash, rect, color),
         Icon::Disk => {
             boxr(3.0, 13.0, 21.0, 19.0, 1.5);
             open(&[(3.0, 13.0), (6.0, 5.0), (18.0, 5.0), (21.0, 13.0)]);

@@ -5,8 +5,8 @@
 //! the sheet that opens beside the panel.
 
 use super::layout;
-use super::shell::{App, RECOMMENDATION};
-use super::tool::{Cx, Recommendation, Size, GRID_COLUMNS};
+use super::shell::App;
+use super::tool::{Cx, Size, GRID_COLUMNS};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
 use egui::{Align2, Color32, Id, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
@@ -81,7 +81,6 @@ pub fn draw_at(app: &mut App, ui: &mut Ui, owner: Option<usize>, id: &'static st
             let mut child = ui.new_child(UiBuilder::new().max_rect(r).id_salt((app.tools[i].id(), id, size.label())));
             app.tools[i].widget_ui(id, size, &mut child, r, cx);
         }
-        None if id == RECOMMENDATION => recommendation(app, ui, r, cx),
         None => {}
     }
 }
@@ -197,33 +196,6 @@ pub fn size_chips(ui: &mut Ui, rect: Rect, id: Id, offered: &[Size], cur: Size) 
     out
 }
 
-/// The banner with the highest-priority suggestion of any tool.
-fn recommendation(app: &App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-    let Some(rec) = best_recommendation(app.tools.iter().enumerate().filter(|(i, _)| app.tool_on(*i)).flat_map(|(_, t)| t.recommendations())) else {
-        let p = ui.painter();
-        glass_card(p, rect, R_CARD, 0.0, false);
-        icon(p, Icon::Check, Rect::from_center_size(Pos2::new(rect.left() + 21.0, rect.center().y), Vec2::splat(18.0)), GREEN);
-        p.text(Pos2::new(rect.left() + 40.0, rect.top() + 10.0), Align2::LEFT_TOP, "All good", bold(13.0), TEXT);
-        p.text(Pos2::new(rect.left() + 40.0, rect.top() + 29.0), Align2::LEFT_TOP, "Nothing needs your attention right now.", font(12.0), TEXT_DIM);
-        return;
-    };
-    let resp = banner(ui, rect, ui.scope_id().with("rec"), rec.badge.icon, &rec.title, &rec.body, &rec.action).on_hover_text(&rec.body);
-    if resp.clicked() {
-        cx.push(rec.go);
-    }
-}
-
-/// The highest priority wins; on a tie, the first offered.
-pub fn best_recommendation(recs: impl Iterator<Item = Recommendation>) -> Option<Recommendation> {
-    let mut best: Option<Recommendation> = None;
-    for r in recs {
-        if best.as_ref().is_none_or(|b| r.priority > b.priority) {
-            best = Some(r);
-        }
-    }
-    best
-}
-
 /// "Edit widgets…", centred under the widgets.
 fn footer(app: &mut App, ui: &mut Ui, rect: Rect) {
     let p = ui.painter().clone();
@@ -295,28 +267,4 @@ pub fn detail(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let Some((i, d)) = app.detail.clone() else { return };
     let mut child = ui.new_child(UiBuilder::new().max_rect(rect).id_salt(("detail", app.tools[i].id(), &d)));
     app.tools[i].detail_ui(&d, &mut child, rect, cx);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::tool::{Action, Badge};
-
-    fn rec(priority: u32, title: &str) -> Recommendation {
-        Recommendation {
-            priority,
-            badge: Badge { icon: Icon::Check, color: TEXT },
-            title: title.into(),
-            body: String::new(),
-            action: String::new(),
-            go: Action::CloseDetail,
-        }
-    }
-
-    #[test]
-    fn highest_priority_recommendation_wins() {
-        assert!(best_recommendation(std::iter::empty()).is_none());
-        let best = best_recommendation(vec![rec(5, "a"), rec(100, "b"), rec(100, "c"), rec(0, "d")].into_iter()).unwrap();
-        assert_eq!(best.title, "b");
-    }
 }

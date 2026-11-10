@@ -425,70 +425,6 @@ pub fn prune(node: &mut Node, removed: &[PathBuf]) -> u64 {
 
 // ---------------------------------------------------------------- treemap
 
-/// Squarified treemap: split `rect` into one block per value (same order,
-/// biggest first works best) with areas proportional to the values and
-/// sides as close to square as the order allows.
-pub fn squarify(values: &[f64], rect: egui::Rect) -> Vec<egui::Rect> {
-    let total: f64 = values.iter().sum();
-    if values.is_empty() || total <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
-        return values.iter().map(|_| egui::Rect::from_min_size(rect.min, egui::Vec2::ZERO)).collect();
-    }
-    let (mut x, mut y, mut w, mut h) = (rect.left() as f64, rect.top() as f64, rect.width() as f64, rect.height() as f64);
-    let areas: Vec<f64> = values.iter().map(|v| v.max(0.0) * w * h / total).collect();
-    let worst = |row: &[f64], side: f64| -> f64 {
-        if row.is_empty() {
-            return f64::INFINITY;
-        }
-        let s: f64 = row.iter().sum();
-        let mx = row.iter().cloned().fold(f64::MIN, f64::max);
-        let mn = row.iter().cloned().fold(f64::MAX, f64::min).max(1e-9);
-        (side * side * mx / (s * s)).max((s * s) / (side * side * mn))
-    };
-    let mut out = Vec::with_capacity(values.len());
-    let mut row: Vec<f64> = Vec::new();
-    let mut place = |row: &mut Vec<f64>, x: &mut f64, y: &mut f64, w: &mut f64, h: &mut f64| {
-        let s: f64 = row.iter().sum();
-        if *w >= *h {
-            let cw = if *h > 0.0 { s / *h } else { 0.0 };
-            let mut yy = *y;
-            for a in row.iter() {
-                let hh = if cw > 0.0 { a / cw } else { 0.0 };
-                out.push(egui::Rect::from_min_size(egui::pos2(*x as f32, yy as f32), egui::vec2(cw as f32, hh as f32)));
-                yy += hh;
-            }
-            *x += cw;
-            *w -= cw;
-        } else {
-            let rh = if *w > 0.0 { s / *w } else { 0.0 };
-            let mut xx = *x;
-            for a in row.iter() {
-                let ww = if rh > 0.0 { a / rh } else { 0.0 };
-                out.push(egui::Rect::from_min_size(egui::pos2(xx as f32, *y as f32), egui::vec2(ww as f32, rh as f32)));
-                xx += ww;
-            }
-            *y += rh;
-            *h -= rh;
-        }
-        row.clear();
-    };
-    let mut i = 0;
-    while i < areas.len() {
-        let side = w.min(h);
-        let mut next = row.clone();
-        next.push(areas[i]);
-        if row.is_empty() || worst(&next, side) <= worst(&row, side) {
-            row.push(areas[i]);
-            i += 1;
-        } else {
-            place(&mut row, &mut x, &mut y, &mut w, &mut h);
-        }
-    }
-    if !row.is_empty() {
-        place(&mut row, &mut x, &mut y, &mut w, &mut h);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,22 +518,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    #[test]
-    fn treemap_fills_the_rect_without_overlap() {
-        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(600.0, 500.0));
-        let vals = [182.0, 64.2, 38.4, 31.0, 22.5, 14.1, 6.3, 2.1, 4.4];
-        let r = squarify(&vals, rect);
-        assert_eq!(r.len(), vals.len());
-        let total: f64 = vals.iter().sum();
-        for (k, a) in r.iter().enumerate() {
-            assert!(rect.expand(0.01).contains_rect(*a), "block {k} outside");
-            let want = vals[k] / total * 600.0 * 500.0;
-            assert!(((a.area() as f64) - want).abs() < want * 0.01 + 1.0, "block {k} area");
-            for b in &r[k + 1..] {
-                assert!(a.intersect(*b).area() < 0.5, "blocks overlap");
-            }
-        }
-        assert!(squarify(&[], rect).is_empty());
-        assert_eq!(squarify(&[0.0, 0.0], rect).len(), 2);
-    }
 }

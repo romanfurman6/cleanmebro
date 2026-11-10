@@ -108,21 +108,12 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
     Some(Metric { glyph, label, big, unit, caption, bar: bar_ })
 }
 
-/// The six readings, in panel order.
-const METRICS: [&str; 6] = ["storage", "memory", "cpu", "battery", "network", "devices"];
 
 /// A Mac Health widget at `size`; a click opens its sheet (the overview
 /// opens the Mac Health page).
 pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let s = mon.lock().unwrap().clone();
     let wid = ui.scope_id().with(("metric", id));
-    if id == "health" {
-        if tile::card(ui, r, wid, false).clicked() {
-            cx.open_page(ID, "");
-        }
-        overview(&s, size, ui.painter(), r);
-        return;
-    }
     let sel = cx.is_detail_open(ID, id);
     if id == "devices" {
         if devices_ui::widget(&s, size, ui, r, wid, sel).clicked() {
@@ -223,41 +214,6 @@ fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rec
     for (k, (label, frac, value)) in lines.iter().enumerate() {
         let lr = Rect::from_min_size(Pos2::new(list.left(), list.top() + k as f32 * lh), egui::Vec2::new(list.width(), lh));
         tile::bar_line(p, lr, label, *frac, value);
-    }
-}
-
-/// The Mac Health overview: a ring per reading (Medium) or a line per
-/// reading with the CPU history (Large).
-fn overview(s: &Snapshot, size: Size, p: &egui::Painter, r: Rect) {
-    let status = header(s);
-    let body = tile::head(p, r, Icon::Pulse, tint::HEALTH, "Mac Health", &status.status);
-    let ms: Vec<Metric> = METRICS.iter().filter_map(|id| metric(s, id)).collect();
-    if size == Size::S44 {
-        let lh = 30.0;
-        for (k, mt) in ms.iter().enumerate() {
-            let lr = Rect::from_min_size(Pos2::new(body.left(), body.top() + k as f32 * lh), egui::Vec2::new(body.width(), lh));
-            icon(p, mt.glyph, Rect::from_center_size(Pos2::new(lr.left() + 9.0, lr.center().y), egui::Vec2::splat(16.0)), TEXT_SOFT);
-            tile::bar_line(p, Rect::from_min_max(Pos2::new(lr.left() + 26.0, lr.top()), lr.max), &mt.label, mt.bar, &mt.value());
-            if k > 0 {
-                hairline(p, Pos2::new(lr.left() + 26.0, lr.top()), Pos2::new(lr.right(), lr.top()));
-            }
-        }
-        let sr = Rect::from_min_max(Pos2::new(body.left(), body.top() + ms.len() as f32 * lh + 14.0), body.max);
-        p.text(sr.left_top(), Align2::LEFT_TOP, "CPU · last minute", font(11.0), TEXT_FAINT);
-        tile::spark(p, Rect::from_min_max(sr.left_top() + egui::Vec2::new(0.0, 18.0), sr.max), &s.cpu_history, BLUE, None);
-        return;
-    }
-    // Medium: three across, two down
-    let cw = body.width() / 3.0;
-    let ch = body.height() / 2.0;
-    for (k, mt) in ms.iter().enumerate() {
-        let c = Pos2::new(body.left() + cw * ((k % 3) as f32 + 0.5), body.top() + ch * ((k / 3) as f32) + 18.0);
-        let (f, col) = mt.bar.unwrap_or((0.0, TEXT_FAINT));
-        tile::ring(p, Pos2::new(body.left() + cw * (k % 3) as f32 + 18.0, c.y), 14.0, 3.5, f, col);
-        icon(p, mt.glyph, Rect::from_center_size(Pos2::new(body.left() + cw * (k % 3) as f32 + 18.0, c.y), egui::Vec2::splat(13.0)), TEXT_SOFT);
-        let x = body.left() + cw * (k % 3) as f32 + 38.0;
-        text_fit(p, Pos2::new(x, c.y - 7.0), Align2::LEFT_CENTER, &mt.value(), bold(12.0), TEXT, cw - 40.0);
-        text_fit(p, Pos2::new(x, c.y + 8.0), Align2::LEFT_CENTER, &mt.label, font(10.0), TEXT_FAINT, cw - 40.0);
     }
 }
 
