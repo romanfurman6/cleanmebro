@@ -4,12 +4,14 @@
 //! whatever it can't tell stays empty, so one UI shows any of them.
 
 pub mod claude;
+pub mod codex;
 
 use crate::kit::activity::Kick;
 use crate::kit::claude_code::{Availability, Project};
 use chrono::{DateTime, Local, Utc};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
@@ -128,6 +130,95 @@ pub trait Provider: Send {
     }
     /// Sample data for screenshots and demos.
     fn demo(&self) -> UsageInfo;
+}
+
+// ---------------------------------------------------------------- providers
+
+/// What the UI says about a provider when it's missing or signed out.
+pub struct Meta {
+    pub id: &'static str,
+    pub name: &'static str,
+    /// The command people type, e.g. "claude".
+    pub cli: &'static str,
+    pub install_url: &'static str,
+    pub install_steps: &'static [&'static str],
+    pub sign_in_steps: &'static [&'static str],
+}
+
+pub const PROVIDERS: &[Meta] = &[
+    Meta {
+        id: "claude",
+        name: claude::NAME,
+        cli: "claude",
+        install_url: "https://claude.com/claude-code",
+        install_steps: &["Install Claude Code from claude.com/claude-code", "Open Terminal and run claude once to sign in", "Come back and press Check again"],
+        sign_in_steps: &["Open Terminal and run claude", "Sign in with your Claude account", "Come back and press Check again"],
+    },
+    Meta {
+        id: "codex",
+        name: codex::NAME,
+        cli: "codex",
+        install_url: "https://developers.openai.com/codex/cli",
+        install_steps: &["Install Codex: npm i -g @openai/codex or brew install codex", "Open Terminal and run codex once to sign in", "Come back and press Check again"],
+        sign_in_steps: &["Open Terminal and run codex", "Sign in with your ChatGPT account", "Come back and press Check again"],
+    },
+];
+
+/// The provider the person picked, as an index into `PROVIDERS`.
+static SELECTED: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct Choice {
+    #[serde(default)]
+    provider: String,
+}
+
+fn choice_path() -> PathBuf {
+    crate::kit::fs::data_path("ai").join("settings.json")
+}
+
+/// Index into `PROVIDERS` of the main provider (Claude until one is picked).
+pub fn selected() -> usize {
+    let i = SELECTED.load(Ordering::Relaxed);
+    if i != usize::MAX {
+        return i;
+    }
+    let c: Choice = crate::kit::fs::load_json(&choice_path());
+    let i = index_of(&c.provider);
+    SELECTED.store(i, Ordering::Relaxed);
+    i
+}
+
+pub fn index_of(id: &str) -> usize {
+    PROVIDERS.iter().position(|m| m.id == id).unwrap_or(0)
+}
+
+pub fn selected_meta() -> &'static Meta {
+    &PROVIDERS[selected()]
+}
+
+/// The meta for a provider by display name (Claude when unknown).
+pub fn meta(name: &str) -> &'static Meta {
+    PROVIDERS.iter().find(|m| m.name == name).unwrap_or(&PROVIDERS[0])
+}
+
+/// Make `i` the main provider, save it (unless `save` is false, for
+/// demos), and wake the loop to switch.
+pub fn select(i: usize, save: bool) {
+    let i = i.min(PROVIDERS.len() - 1);
+    if SELECTED.swap(i, Ordering::Relaxed) == i || !save {
+        return;
+    }
+    crate::kit::fs::save_json(&choice_path(), &Choice { provider: PROVIDERS[i].id.into() }, true);
+    crate::kit::claude_code::request_recheck();
+}
+
+/// A fresh provider for index `i`.
+pub fn make(i: usize) -> Box<dyn Provider> {
+    match PROVIDERS.get(i).map(|m| m.id) {
+        Some("codex") => Box::new(codex::Codex::default()),
+        _ => Box::new(claude::ClaudeCode::default()),
+    }
 }
 
 // ---------------------------------------------------------------- session logs
@@ -318,6 +409,17 @@ mod tests {
         assert_eq!(i.plan_title(), "Claude");
         i.plan = "max".into();
         assert_eq!(i.plan_title(), "Claude Max");
+    }
+
+    #[test]
+    fn providers_by_id_and_name() {
+        assert_eq!(PROVIDERS[index_of("codex")].name, "Codex");
+        assert_eq!(index_of("nope"), 0);
+        assert_eq!(meta("Codex").cli, "codex");
+        assert_eq!(meta("").id, "claude");
+        for (i, m) in PROVIDERS.iter().enumerate() {
+            assert_eq!(make(i).name(), m.name);
+        }
     }
 
     #[test]
