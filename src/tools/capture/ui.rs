@@ -609,18 +609,18 @@ fn card_rows(p: &egui::Painter, x: f32, y: f32, w: f32, rows: usize) -> Rect {
 }
 
 /// Screen recording: frame rate, quality, cursor, clicks and the countdown.
-fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
+fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) -> f32 {
     use super::settings::{RecQuality, RECORD_FPS};
     let x0 = col.left();
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Screen recording", bold(15.0), TEXT);
-    let card = card_rows(p, x0, col.top() + 28.0, col.width(), 5);
+    let card = card_rows(p, x0, col.top() + 28.0, col.width(), 7);
     let id = ui.scope_id().with("rec-options");
     let mut s = c.settings.rec.clone();
     let seg = |ui: &mut Ui, k: usize, w: f32, labels: &[&str], cur: usize| {
         let y = row_y(card, k);
         segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - w, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0)), id.with(k), labels, cur)
     };
-    let labels = ["Frame rate", "Quality", "Countdown", "Show the cursor", "Highlight clicks"];
+    let labels = ["Frame rate", "Quality", "Countdown", "Show the cursor", "Highlight clicks", "When it's saved", "Hide the card after"];
     for (k, l) in labels.iter().enumerate() {
         p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT);
     }
@@ -648,9 +648,96 @@ fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect)
             }
         }
     }
+    if let Some(i) = seg(ui, 5, 190.0, &["Show a card", "Open editor"], s.open_editor as usize) {
+        s.open_editor = i == 1;
+    }
+    if let Some(i) = seg(ui, 6, 200.0, &["5 s", "8 s", "15 s", "Never"], secs_index(s.card_secs, &CARD_SECS)) {
+        s.card_secs = CARD_SECS.get(i).copied();
+    }
     p.text(Pos2::new(x0, card.bottom() + 10.0), Align2::LEFT_TOP, "Recordings are saved as mp4 to the same folder as captures.", font(12.0), TEXT_FAINT);
     if s != c.settings.rec {
         c.settings.rec = s;
+        c.save_settings();
+    }
+    card.bottom() + 30.0
+}
+
+/// "Hide after" choices; past the end means never.
+const PREVIEW_SECS: [u32; 3] = [3, 6, 10];
+const CARD_SECS: [u32; 3] = [5, 8, 15];
+
+fn secs_index(v: Option<u32>, choices: &[u32]) -> usize {
+    match v {
+        None => choices.len(),
+        Some(s) => choices.iter().position(|&c| c >= s).unwrap_or(choices.len() - 1),
+    }
+}
+
+/// One line of text input in a settings card (`secret` hides what's typed).
+fn field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, secret: bool) -> egui::Response {
+    ui.painter().rect_filled(r, 6.0, white(15));
+    let tr = r.shrink2(Vec2::new(8.0, 0.0));
+    let mut child = ui.new_child(UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT)).frame(egui::Frame::NONE).font(font(12.0)).text_color(TEXT).password(secret).desired_width(tr.width());
+    child.add(te)
+}
+
+/// Sharing: upload recordings to the person's S3-compatible storage
+/// (Hetzner Object Storage…) and copy the link.
+fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
+    use super::share::{secret, LinkKind};
+    let x0 = col.left();
+    let id = ui.scope_id().with("share");
+    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Sharing", bold(15.0), TEXT);
+    let card = card_rows(p, x0, col.top() + 28.0, col.width(), 9);
+    let mut s = c.settings.share.clone();
+    let labels = ["Upload each recording", "Copy the link when done", "Link", "Endpoint", "Bucket", "Folder", "Access key", "Secret key", "Region"];
+    for (k, l) in labels.iter().enumerate() {
+        p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT);
+    }
+    for (k, on) in [(0usize, s.auto), (1, s.copy_link)] {
+        let y = row_y(card, k);
+        if switch(ui, Rect::from_min_size(Pos2::new(card.right() - 12.0 - 30.0, y - 9.0), Vec2::new(30.0, 18.0)), id.with(("sw", k)), on, true).clicked() {
+            if k == 0 {
+                s.auto = !s.auto;
+            } else {
+                s.copy_link = !s.copy_link;
+            }
+        }
+    }
+    let y = row_y(card, 2);
+    if let Some(i) = segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - 210.0, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0)), id.with("link"), &["Public", "Expires in 7 days"], (s.link == LinkKind::Week) as usize) {
+        s.link = if i == 1 { LinkKind::Week } else { LinkKind::Public };
+    }
+    let fw = (card.width() * 0.6).min(260.0);
+    let frect = |k: usize| {
+        let y = row_y(card, k);
+        Rect::from_min_max(Pos2::new(card.right() - 12.0 - fw, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0))
+    };
+    field(ui, frect(3), &mut s.endpoint, "fsn1.your-objectstorage.com", false);
+    field(ui, frect(4), &mut s.bucket, "my-bucket", false);
+    field(ui, frect(5), &mut s.folder, "recordings/", false);
+    field(ui, frect(6), &mut s.access_key, "Access key", false);
+    // the secret goes straight to the Keychain and is never shown back
+    let has_secret = secret::get().is_some();
+    let resp = field(ui, frect(7), &mut c.share_secret, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
+    if resp.lost_focus() && !c.share_secret.is_empty() {
+        let v = std::mem::take(&mut c.share_secret);
+        match secret::set(v.trim()) {
+            Ok(()) => c.hud("Secret key saved in the Keychain"),
+            Err(e) => c.hud(format!("Couldn't save to the Keychain: {e}")),
+        }
+    }
+    field(ui, frect(8), &mut s.region, "From the endpoint", false);
+    let note = if s.ready() {
+        let b = s.bucket();
+        format!("Links look like https://{}/{}…", b.bucket_host(), s.folder.trim_start_matches('/'))
+    } else {
+        "Your own S3-compatible storage, e.g. Hetzner Object Storage. For Public links, the files are made public-read; their names are random.".into()
+    };
+    paragraph(p, Pos2::new(x0, card.bottom() + 10.0), &note, font(12.0), TEXT_FAINT, col.width());
+    if s != c.settings.share {
+        c.settings.share = s;
         c.save_settings();
     }
 }
@@ -663,14 +750,15 @@ fn settings_page(c: &mut Capture, ui: &mut Ui, body: Rect, cx: &mut Cx) {
     record_keys(c, ui, cx);
     let mut child = ui.new_child(UiBuilder::new().max_rect(body));
     ScrollArea::vertical().id_salt("capture-settings").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), 740.0), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), 1220.0), Sense::hover());
         let p = ui.painter().clone();
         let gap = 20.0;
         let x0 = area.left() + 24.0;
         let colw = (area.width() - 48.0 - gap) / 2.0;
         let below = shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())));
         let ry = below + 28.0;
-        recording_options(c, ui, &p, Rect::from_min_size(Pos2::new(x0, ry), Vec2::new(colw, area.bottom() - ry)));
+        let sy = recording_options(c, ui, &p, Rect::from_min_size(Pos2::new(x0, ry), Vec2::new(colw, area.bottom() - ry)));
+        sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0, sy), Vec2::new(colw, area.bottom() - sy)));
         options(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())));
     });
 }
@@ -807,14 +895,22 @@ fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
         c.settings.after = [After::Preview, After::Editor, After::Nothing][i];
         changed = true;
     }
-    let hide_hint = c.settings.preview_secs.map(|s| format!("{s} s")).unwrap_or_default();
+    let ry = row_y(card, 3);
+    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Hide preview after", font(13.0), TEXT);
+    if let Some(i) = segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - 200.0, ry - 12.0), Pos2::new(card.right() - 12.0, ry + 12.0)), id.with("hide"), &["3 s", "6 s", "10 s", "Never"], secs_index(c.settings.preview_secs, &PREVIEW_SECS)) {
+        c.settings.preview_secs = PREVIEW_SECS.get(i).copied();
+        changed = true;
+    }
     let switches: [(&str, &str, bool); 4] = [
         ("Copy to clipboard", "", c.settings.copy),
         ("Save to folder", "", c.settings.save),
-        ("Hide preview after", &hide_hint, c.settings.preview_secs.is_some()),
+        ("", "", false),
         ("Play sound", "", c.settings.sound),
     ];
     for (k, (label, hint, on)) in switches.iter().enumerate() {
+        if k == 2 {
+            continue;
+        }
         let ry = row_y(card, k + 1);
         p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, *label, font(13.0), TEXT);
         let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, ry), Vec2::new(30.0, 18.0));
@@ -825,7 +921,6 @@ fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
             match k {
                 0 => c.settings.copy = !c.settings.copy,
                 1 => c.settings.save = !c.settings.save,
-                2 => c.settings.preview_secs = if c.settings.preview_secs.is_some() { None } else { Some(6) },
                 _ => c.settings.sound = !c.settings.sound,
             }
             changed = true;

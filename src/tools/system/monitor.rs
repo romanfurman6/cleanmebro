@@ -81,6 +81,8 @@ pub struct Snapshot {
     pub smart_status: String,
     pub categories: Vec<(String, u64)>, // Applications, Documents, Downloads, Desktop
     pub trash_bytes: Option<u64>,
+    /// The folders are being measured ([`measure_folders`]).
+    pub sizing: bool,
     pub mem_total: u64,
     pub mem_pressure: f32,
     pub mem_pressure_level: u32,
@@ -224,18 +226,55 @@ const BT_PROFILE_EVERY: Cadence = Cadence::secs(60, Some(10 * 60));
 const WIFI_EVERY: Cadence = Cadence::secs(60, None);
 /// Channel, signal and so on (`system_profiler`, ~10 s as it may scan).
 const WIFI_DETAILS_EVERY: Cadence = Cadence::secs(10 * 60, None);
-/// Folder sizes for the storage chart (walks whole folders).
-const SIZES_EVERY: Cadence = Cadence::secs(600, None);
+/// The Trash's size, for the "Empty Trash" nudge (one folder only).
+const TRASH_EVERY: Cadence = Cadence::secs(600, None);
 /// A folder walk is running (on its own thread).
 static SIZING: AtomicBool = AtomicBool::new(false);
 
-/// Background priority: macOS runs it on the efficiency cores and slows its
-/// disk reads, so it never competes with the app or a recording.
-fn lowest_priority() {
-    #[cfg(target_os = "macos")]
-    unsafe {
-        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_BACKGROUND, 0);
+fn home_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// Run `f` on its own thread at background priority, one walk at a time.
+fn in_background(name: &str, f: impl FnOnce() + Send + 'static) {
+    if SIZING.swap(true, Ordering::Relaxed) {
+        return;
     }
+    let spawned = std::thread::Builder::new().name(name.into()).spawn(move || {
+        activity::low_priority();
+        f();
+        SIZING.store(false, Ordering::Relaxed);
+    });
+    if spawned.is_err() {
+        SIZING.store(false, Ordering::Relaxed);
+    }
+}
+
+/// Measure the storage chart's folders (Applications, Documents, Downloads,
+/// Desktop, Trash). Only on the user's click: it walks every file.
+pub fn measure_folders(shared: Shared, ctx: egui::Context) {
+    if SIZING.load(Ordering::Relaxed) {
+        return;
+    }
+    shared.lock().unwrap().sizing = true;
+    ctx.request_repaint();
+    let s = shared.clone();
+    in_background("folder-sizes", move || {
+        let home = home_dir();
+        let cats = vec![
+            ("Applications".to_string(), dir_size(Path::new("/Applications"))),
+            ("Documents".to_string(), dir_size(&home.join("Documents"))),
+            ("Downloads".to_string(), dir_size(&home.join("Downloads"))),
+            ("Desktop".to_string(), dir_size(&home.join("Desktop"))),
+        ];
+        let trash = std::fs::read_dir(home.join(".Trash")).ok().map(|_| dir_size(&home.join(".Trash")));
+        let mut g = s.lock().unwrap();
+        g.categories = cats;
+        g.trash_bytes = trash;
+        g.sizing = false;
+        drop(g);
+        ctx.request_repaint();
+    });
 }
 
 fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
@@ -361,30 +400,16 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
         }
         activity::repaint(&ctx);
 
-        // never during a recording: the walk can take a whole core for a while
-        if !activity::recording() && !SIZING.load(Ordering::Relaxed) && SIZES_EVERY.due(&mut sizes_at) {
-            SIZING.store(true, Ordering::Relaxed);
+        // only the Trash is measured on its own (for the "Empty Trash" nudge);
+        // the big folders wait for a click ([`measure_folders`])
+        if !activity::recording() && !SIZING.load(Ordering::Relaxed) && TRASH_EVERY.due(&mut sizes_at) {
             let (shared, ctx) = (shared.clone(), ctx.clone());
-            let walk = std::thread::Builder::new().name("folder-sizes".into()).spawn(move || {
-                lowest_priority();
-                let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-                let cats = vec![
-                    ("Applications".to_string(), dir_size(Path::new("/Applications"))),
-                    ("Documents".to_string(), dir_size(&home.join("Documents"))),
-                    ("Downloads".to_string(), dir_size(&home.join("Downloads"))),
-                    ("Desktop".to_string(), dir_size(&home.join("Desktop"))),
-                ];
-                let trash = std::fs::read_dir(home.join(".Trash")).ok().map(|_| dir_size(&home.join(".Trash")));
-                let mut s = shared.lock().unwrap();
-                s.categories = cats;
-                s.trash_bytes = trash;
-                drop(s);
-                SIZING.store(false, Ordering::Relaxed);
+            in_background("trash-size", move || {
+                let trash = home_dir().join(".Trash");
+                let bytes = std::fs::read_dir(&trash).ok().map(|_| dir_size(&trash));
+                shared.lock().unwrap().trash_bytes = bytes;
                 activity::repaint(&ctx);
             });
-            if walk.is_err() {
-                SIZING.store(false, Ordering::Relaxed);
-            }
         }
         // the panel opening ends the nap: it shows fresh numbers right away
         activity::nap(Duration::from_millis(m::MONITOR_REFRESH_MS), None);
@@ -756,6 +781,7 @@ pub fn demo_snapshot() -> Snapshot {
             ("Desktop".into(), 188_000),
         ],
         trash_bytes: Some(46_100_000),
+        sizing: false,
         mem_total: 68_719_476_736,
         mem_pressure: 17.0,
         mem_pressure_level: 1,

@@ -73,9 +73,10 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             page_header(&ui.painter().clone(), r, "Disk Map", "Opening the last map…", TEXT_DIM);
             return;
         }
-        if shared.result.lock().unwrap().is_none() {
+        // nothing mapped yet: mapping walks the whole disk, so it waits
+        // for a click
+        if shared.result.lock().unwrap().is_none() && intro(ui, r) {
             begin(app, ui.ctx());
-            start(app, ui, r);
         }
         return;
     };
@@ -114,6 +115,19 @@ fn tilde(p: &Path) -> String {
 }
 
 // ---------------------------------------------------------------- start
+
+/// Before the first map: what it does, and the button that starts it.
+fn intro(ui: &mut Ui, r: Rect) -> bool {
+    let p = ui.painter().clone();
+    page_header(&p, r, "Disk Map", "See what takes space and remove it by hand", TEXT_DIM);
+    let w = (r.width() - 48.0).min(520.0);
+    let pr = Rect::from_center_size(Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + 28.0 + 70.0), Vec2::new(w, 140.0));
+    glass_card(&p, pr, R_CARD, 0.0, false);
+    p.text(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), Align2::LEFT_TOP, "Map Macintosh HD", bold(15.0), TEXT);
+    paragraph(&p, Pos2::new(pr.left() + 16.0, pr.top() + 40.0), "Measures every folder on the disk, so it takes a few minutes and keeps the Mac busy. Nothing is removed.", font(13.0), TEXT_DIM, pr.width() - 32.0);
+    let bw = button_width(&p, "Map disk", BTN_PRIMARY) + 28.0;
+    pill_button(ui, Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 48.0), Vec2::new(bw, 32.0)), "Map disk", BTN_PRIMARY, true).clicked()
+}
 
 /// The first moments of a map, before the disk's top folders are listed:
 /// what's being measured, with Stop. There is nothing to choose: Disk Map

@@ -27,6 +27,7 @@ pub enum Action {
     /// Open another tool's page by id ("cleanup", "lens").
     Open(&'static str),
     SpeedTest,
+    MeasureFolders,
     ToggleAlerts,
     ToggleMenuBar,
     OpenBluetooth,
@@ -134,7 +135,8 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 }
                 None => sp.facts.push(fact("Trash", "—", TEXT, "Allow Full Disk Access to measure it.")),
             }
-            sp.buttons = vec![("Disk Map", BTN_SECONDARY, Action::Open("lens")), ("Free up space", BTN_PRIMARY, Action::Open("cleanup"))];
+            let measure = if s.categories.is_empty() { "Measure folders" } else { "Measure again" };
+            sp.buttons = vec![(measure, BTN_SECONDARY, Action::MeasureFolders), ("Disk Map", BTN_SECONDARY, Action::Open("lens")), ("Free up space", BTN_PRIMARY, Action::Open("cleanup"))];
             sp
         }
         Sheet::Memory => {
@@ -279,6 +281,19 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
 }
 
 /// Draw one sheet into `rect` and report what was clicked.
+/// A button whose work is already running.
+fn busy(act: Action, s: &Snapshot) -> bool {
+    (act == Action::SpeedTest && s.speed.running) || (act == Action::MeasureFolders && s.sizing)
+}
+
+fn busy_label(act: Action) -> &'static str {
+    if act == Action::MeasureFolders {
+        "Measuring…"
+    } else {
+        "Testing…"
+    }
+}
+
 pub fn sheet(ui: &mut Ui, rect: Rect, kind: Sheet, s: &Snapshot) -> Action {
     let sp = spec(kind, s);
     let mut action = Action::None;
@@ -335,8 +350,8 @@ impl Section {
         for (label, kind_, act) in self.sp.buttons.iter().rev() {
             let bw = button_width(&p, label, *kind_);
             let br = Rect::from_min_size(Pos2::new(bx - bw, r.top() + 2.0), Vec2::new(bw, 28.0));
-            let enabled = !(*act == Action::SpeedTest && s.speed.running);
-            if pill_button(ui, br, if enabled { label } else { "Testing…" }, *kind_, enabled).clicked() {
+            let enabled = !busy(*act, s);
+            if pill_button(ui, br, if enabled { label } else { busy_label(*act) }, *kind_, enabled).clicked() {
                 action = *act;
             }
             bx -= bw + 8.0;
@@ -505,8 +520,8 @@ fn buttons(ui: &mut Ui, sp: &Spec, s: &Snapshot, right: f32, bottom: f32) -> Act
     for (label, kind_, act) in sp.buttons.iter().rev() {
         let bw = button_width(&p, label, *kind_);
         let br = Rect::from_min_size(Pos2::new(bx - bw, by), Vec2::new(bw, 30.0));
-        let enabled = !(*act == Action::SpeedTest && s.speed.running);
-        if pill_button(ui, br, if enabled { label } else { "Testing…" }, *kind_, enabled).clicked() {
+        let enabled = !busy(*act, s);
+        if pill_button(ui, br, if enabled { label } else { busy_label(*act) }, *kind_, enabled).clicked() {
             action = *act;
         }
         bx -= bw + 8.0;

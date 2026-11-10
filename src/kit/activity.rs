@@ -34,9 +34,13 @@ pub fn set_visible(v: bool) {
 static RECORDING: AtomicBool = AtomicBool::new(false);
 
 /// Called by the recorder: is a recording counting down, live or saving?
-/// Heavy background work (folder walks) waits until it's over.
+/// Until it's over, the app counts as hidden (widgets and monitors slow to
+/// their hidden pace) and heavy work (folder walks) waits.
 pub fn set_recording(v: bool) {
-    RECORDING.store(v, Ordering::Relaxed);
+    let was = RECORDING.swap(v, Ordering::Relaxed);
+    if was && !v {
+        bump();
+    }
 }
 
 /// Whether a recording is under way.
@@ -44,9 +48,19 @@ pub fn recording() -> bool {
     RECORDING.load(Ordering::Relaxed)
 }
 
-/// Whether anything of the app is on screen.
+/// Run the current thread at background priority: macOS keeps it on the
+/// efficiency cores and slows its disk reads, so it never competes with
+/// the app or a recording. For watchers and folder walks.
+pub fn low_priority() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_BACKGROUND, 0);
+    }
+}
+
+/// Whether anything of the app is on screen (and no recording is under way).
 pub fn visible() -> bool {
-    VISIBLE.load(Ordering::Relaxed)
+    VISIBLE.load(Ordering::Relaxed) && !recording()
 }
 
 /// Ask for a frame if someone can see it.

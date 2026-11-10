@@ -296,6 +296,17 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         cleanup::start_scan(app.clean.clone(), ctx.clone(), app.use_ai && avail.ready());
         return;
     }
+    let hidden = app.clean.lock().unwrap().hidden_kept;
+    if hidden > 0 {
+        let label = format!("Show {hidden} kept");
+        let kw = button_width(&p, &label, BTN_SECONDARY);
+        let kr = Rect::from_min_max(Pos2::new(sr.left() - 8.0 - kw, btns.top()), Pos2::new(sr.left() - 8.0, btns.bottom()));
+        if pill_button(ui, kr, &label, BTN_SECONDARY, true).on_hover_text("You chose to keep these before, so they are hidden. Show them again and scan.").clicked() {
+            cleanup::forget_kept();
+            cleanup::start_scan(app.clean.clone(), ctx.clone(), app.use_ai && avail.ready());
+            return;
+        }
+    }
 
     if total == 0 && pending == 0 {
         let c = Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + 150.0);
@@ -388,11 +399,18 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
             answer = Some(Verdict::Keep);
         }
         if let Some(v) = answer {
+            let mut kept = Vec::new();
             for it in app.clean.lock().unwrap().items.iter_mut().filter(|i| i.verdict == Verdict::Ask && i.by != Who::You) {
+                if v == Verdict::Keep {
+                    kept.push(it.path.clone());
+                }
                 it.verdict = v;
                 it.by = Who::You;
                 it.selected = v == Verdict::Safe;
                 it.reason = if v == Verdict::Safe { "You allowed it".into() } else { "You chose to keep it".into() };
+            }
+            if !kept.is_empty() {
+                cleanup::remember_kept(kept);
             }
         }
     } else if let Some(g) = app.clean_group {
@@ -532,6 +550,7 @@ fn item_row(app: &mut App, ui: &mut Ui, i: usize, w: f32, cols: (f32, f32, f32))
             x.by = Who::You;
             x.selected = false;
             x.reason = "You chose to keep it".into();
+            cleanup::remember_kept([x.path.clone()]);
         }
     }
     p.line_segment([Pos2::new(rect.left() + 24.0, rect.bottom() - 0.5), Pos2::new(rect.right() - 24.0, rect.bottom() - 0.5)], Stroke::new(1.0, white(10)));

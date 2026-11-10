@@ -117,6 +117,7 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
     std::thread::Builder::new()
         .name("claude".into())
         .spawn(move || {
+            activity::low_priority();
             let mut cache: UsageCache = HashMap::new();
             // due right away the first time
             let mut limits_at = Every::default();
@@ -142,7 +143,11 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                 if (activity::visible() || local_at.age().is_none()) && local_at.due(Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS)) {
                     let projects = scan_projects();
                     let local = local_usage(&mut cache);
-                    let data = size_at.due(Duration::from_secs(CLAUDE_DATA_SIZE_SECS)).then(|| crate::kit::fs::dir_size(&dirs::home_dir().unwrap_or_default().join(".claude")));
+                    // ~/.claude walks every file: once per launch, and again on Refresh
+                    let data = (size_at.age().is_none() && !activity::recording()).then(|| {
+                        size_at.mark();
+                        crate::kit::fs::dir_size(&dirs::home_dir().unwrap_or_default().join(".claude"))
+                    });
                     let mut g = s.lock().unwrap();
                     g.projects = projects;
                     g.local = local;
@@ -157,15 +162,13 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                 if activity::nap(Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS), Some(cc::recheck())) == Wake::Kicked {
                     limits_at.reset();
                     local_at.reset();
+                    size_at.reset();
                 }
             }
         })
         .ok();
     shared
 }
-
-/// How often the size of `~/.claude` is measured (it walks every file).
-const CLAUDE_DATA_SIZE_SECS: u64 = 600;
 
 pub fn request_refresh() {
     cc::request_recheck();

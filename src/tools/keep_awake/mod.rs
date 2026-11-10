@@ -67,6 +67,7 @@ impl KeepAwake {
 /// The background loop: read Claude Code's logs and keep the assertions in
 /// line, also while every window is hidden.
 fn watch(engine: Shared, ctx: egui::Context) {
+    crate::kit::activity::low_priority();
     let mut scanner = sessions::Scanner::default();
     let root = crate::kit::claude_code::projects_dir();
     loop {

@@ -144,7 +144,13 @@ impl Startup {
         }
         st.lock().unwrap().settings = Settings::load();
         let ctx = env.ctx.clone();
-        std::thread::Builder::new().name("startup-watch".into()).spawn(move || watch(st, user_library, ctx)).ok();
+        std::thread::Builder::new()
+            .name("startup-watch".into())
+            .spawn(move || {
+                crate::kit::activity::low_priority();
+                watch(st, user_library, ctx)
+            })
+            .ok();
         me
     }
 

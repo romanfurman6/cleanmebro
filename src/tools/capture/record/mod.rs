@@ -142,8 +142,6 @@ pub struct Recorder {
 
 /// Seconds a recording must run before Delete and Restart ask first.
 pub const CONFIRM_AFTER: f64 = 5.0;
-/// How long the saved card stays up.
-pub const SAVED_SECS: f32 = 8.0;
 
 impl Recorder {
     pub fn new(ctx: egui::Context) -> Recorder {
@@ -524,8 +522,8 @@ impl Recorder {
             self.hud(format!("Recording stopped: {why}"));
             self.stop();
         }
-        if let Some(sv) = &self.saved {
-            if sv.born.elapsed().as_secs_f32() > SAVED_SECS {
+        if let (Some(sv), Some(secs)) = (&self.saved, s.card_secs) {
+            if sv.born.elapsed().as_secs_f32() > secs as f32 {
                 self.saved = None;
             }
         }
