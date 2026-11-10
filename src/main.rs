@@ -6,7 +6,8 @@
 //! storage (default), memory, battery, cpu, network, devices, claude-detail,
 //! cleanup, cleanup-no-claude, results, lens, lens-live, claude, claude-missing,
 //! health, customize, settings-tools, fan, fan-detail, fan-air, fan-air-detail,
-//! fan-curve, fan-fixed, fan-install,
+//! fan-curve, fan-fixed, fan-install, setup, setup-tools, setup-perms,
+//! setup-ready, settings-general,
 //! or widget-<tool>/<widget>@<size> for one widget alone (widget-system/devices@4:4).
 //! `--fan-report` prints every fan and temperature sensor this Mac reports.
 //! `--fan-install` / `--fan-uninstall` add or remove the fan helper,

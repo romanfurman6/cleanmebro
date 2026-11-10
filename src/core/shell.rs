@@ -19,6 +19,11 @@ const HIDDEN_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(5);
 pub enum Mode {
     Panel,
     Window,
+    /// First-run setup drawn in the root window (screenshots only; the real
+    /// app shows setup in its own window).
+    Setup,
+    /// The Full Disk Access helper card alone (screenshots only).
+    FdaHelp,
 }
 
 pub struct Options {
@@ -66,6 +71,12 @@ pub struct App {
     screenshot: Option<PathBuf>,
     frame: u64,
     pub toast: Option<(String, Instant)>,
+    /// First-run setup, while its window is open.
+    pub setup: Option<super::onboard::Setup>,
+    /// Live permission statuses (setup and Settings › General).
+    pub perm_watch: super::onboard::PermWatch,
+    /// Keep the panel hidden at launch (setup opens instead).
+    start_hidden: bool,
 }
 
 impl App {
@@ -99,7 +110,17 @@ impl App {
 
         // screenshots always use the default widgets
         let prefs: WidgetPrefs = if demo { None } else { cc.storage.and_then(|s| eframe::get_value(s, super::settings::STORAGE_KEY)) }.unwrap_or_default();
-        let tools_off: Vec<String> = if demo { None } else { cc.storage.and_then(|s| eframe::get_value(s, super::settings::TOOLS_KEY)) }.unwrap_or_default();
+        let stored_off: Option<Vec<String>> = if demo { None } else { cc.storage.and_then(|s| eframe::get_value(s, super::settings::TOOLS_KEY)) };
+        // a fresh install shows setup and starts with a few tools off
+        let first_run = !demo && !super::onboard::done_marker().exists();
+        let tools_off: Vec<String> = match stored_off {
+            Some(v) => v,
+            None if first_run => super::onboard::OFF_AT_FIRST.iter().map(|s| s.to_string()).collect(),
+            None => Vec::new(),
+        };
+        // what macOS said about Screen Recording at launch (it only applies
+        // a later grant after a restart)
+        let _ = crate::kit::perms::screen_at_launch();
         // the window opens on the sidebar's first page (Clean section first)
         let page = tools.iter().position(|t| t.has_page() && t.section() == "Clean").or_else(|| tools.iter().position(|t| t.has_page())).unwrap_or(0);
         let mut app = App {
@@ -130,6 +151,9 @@ impl App {
             screenshot: opts.screenshot,
             frame: 0,
             toast: None,
+            setup: first_run.then(|| super::onboard::Setup::new(super::onboard::saved_step())),
+            perm_watch: Default::default(),
+            start_hidden: first_run,
         };
         app.widgets = prefs.resolve(&app.available_widgets());
         for i in 0..app.tools.len() {
@@ -260,10 +284,32 @@ impl App {
                 }
                 return;
             }
-            "customize" | "settings-tools" => {
+            // first-run setup, one step each
+            "setup" | "setup-tools" | "setup-perms" | "setup-ready" => {
+                self.mode = Mode::Setup;
+                let step = ["setup", "setup-tools", "setup-perms", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
+                self.setup = Some(super::onboard::Setup::new(step));
+                use crate::kit::perms::{Perm, Status};
+                self.perm_watch.demo = Some([(Perm::Screen, Status::Allowed), (Perm::Accessibility, Status::Allowed), (Perm::FullDisk, Status::NotAsked), (Perm::SystemEvents, Status::Denied), (Perm::Microphone, Status::Allowed)].into_iter().collect());
+                for id in super::onboard::OFF_AT_FIRST {
+                    if let Some(i) = self.tool_index(id) {
+                        self.set_tool_on(i, false);
+                    }
+                }
+                return;
+            }
+            "fda-help" => {
+                self.mode = Mode::FdaHelp;
+                return;
+            }
+            "customize" | "settings-tools" | "settings-general" => {
                 self.mode = Mode::Window;
                 self.settings_open = true;
-                self.settings_tab = if view == "customize" { 0 } else { 1 };
+                self.settings_tab = match view {
+                    "customize" => 0,
+                    "settings-tools" => 1,
+                    _ => 2,
+                };
                 return;
             }
             _ => {}
@@ -359,6 +405,8 @@ impl App {
                 Vec2::new(w, self.panel_height().min(self.max_panel_height(ctx)))
             }
             Mode::Window => Vec2::new(m::APP_WIDTH, m::APP_HEIGHT),
+            Mode::Setup => Vec2::new(super::onboard::SETUP_W, super::onboard::SETUP_H),
+            Mode::FdaHelp => Vec2::new(360.0, 132.0),
         }
     }
 
@@ -379,7 +427,7 @@ impl App {
                 ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
                 crate::kit::native::set_dock_icon(false);
             }
-            Mode::Window => {
+            Mode::Window | Mode::Setup | Mode::FdaHelp => {
                 let pos = Pos2::new(((screen.x - size.x) / 2.0).max(0.0), ((screen.y - size.y) / 2.0).max(30.0));
                 ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::OuterPosition(pos));
                 ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
@@ -462,17 +510,21 @@ impl eframe::App for App {
                 tools_need_frames |= self.tools[i].tick(ctx);
             }
         }
-        if (self.app_open || tools_need_frames) && !self.visible {
+        if (self.app_open || self.setup.is_some() || tools_need_frames) && !self.visible {
             ctx.send_viewport_cmd(ViewportCommand::RequestPaintWhileHidden);
         }
         // background work slows down and stops asking for frames while
         // neither the panel nor the window is on screen (a tool's own small
         // windows, like a pinned capture, show none of it); this heartbeat
         // still runs the ticks and keeps the menu-bar title current
-        let on_screen = self.visible || self.app_open;
+        let on_screen = self.visible || self.app_open || self.setup.is_some();
         crate::kit::activity::set_visible(on_screen);
         if !on_screen {
             ctx.request_repaint_after(HIDDEN_HEARTBEAT);
+        }
+        if self.start_hidden {
+            self.start_hidden = false;
+            self.hide(ctx);
         }
         self.handle_tray(ctx);
         self.update_tray_title();
@@ -559,6 +611,14 @@ impl eframe::App for App {
                     self.reshape(&ctx);
                 }
             }
+            Mode::FdaHelp => {
+                let now = ctx.input(|i| i.time);
+                super::onboard::help_card(ui, full, now + 0.9);
+            }
+            Mode::Setup => {
+                glass::backdrop(ui.painter(), full, 14.0, opaque, t);
+                super::onboard::setup_ui(self, ui, full);
+            }
             Mode::Window => {
                 glass::backdrop(ui.painter(), full, 14.0, opaque, t);
                 let before = (self.widgets.clone(), self.tools_off.clone());
@@ -588,8 +648,20 @@ impl eframe::App for App {
                 self.toast = None;
             }
         }
+        let off_before = self.tools_off.clone();
         if self.app_open {
             self.app_viewport(&ctx);
+        }
+        if self.setup.is_some() && self.mode != Mode::Setup {
+            self.setup_viewport(&ctx);
+        }
+        if self.screenshot.is_none() {
+            super::onboard::fda_helper(self, &ctx);
+        }
+        if self.tools_off != off_before {
+            if let Some(s) = frame.storage_mut() {
+                self.save_widgets(s);
+            }
         }
         // keep animations and live numbers moving
         ctx.request_repaint_after(std::time::Duration::from_millis(if self.visible { 500 } else { 2000 }));
@@ -642,6 +714,60 @@ impl App {
             self.run_actions(&vctx, &mut cx);
             vctx.request_repaint_after(std::time::Duration::from_millis(500));
         });
+    }
+
+    /// Open first-run setup again (Settings › General).
+    pub fn open_setup(&mut self) {
+        self.setup = Some(super::onboard::Setup::new(0));
+        self.app_open = false;
+    }
+
+    /// First-run setup in its own window.
+    fn setup_viewport(&mut self, ctx: &egui::Context) {
+        use super::onboard::{Finish, SETUP_H, SETUP_W};
+        let builder = egui::ViewportBuilder::default()
+            .with_title("Cmd+Meow Setup")
+            .with_inner_size([SETUP_W, SETUP_H])
+            .with_resizable(false)
+            .with_transparent(true)
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false)
+            .with_has_shadow(true)
+            .with_active(true);
+        let id = egui::ViewportId::from_hash_of("cmdmeow-setup");
+        let mut finish = Finish::No;
+        let mut closed = false;
+        crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
+            let vctx = ui.ctx().clone();
+            if vctx.input(|i| i.viewport().close_requested()) {
+                closed = true;
+                return;
+            }
+            if let Some(s) = self.setup.as_mut().filter(|s| s.focus) {
+                s.focus = false;
+                crate::kit::native::set_dock_icon(true);
+                vctx.send_viewport_cmd(ViewportCommand::Focus);
+                crate::kit::native::activate();
+            }
+            crate::kit::native::apply_glass(16.0);
+            let full = ui.max_rect();
+            glass::backdrop(ui.painter(), full, 16.0, false, vctx.input(|i| i.time));
+            finish = super::onboard::setup_ui(self, ui, full);
+        });
+        if closed || finish != Finish::No {
+            super::onboard::mark_done();
+            self.setup = None;
+            crate::kit::native::set_dock_icon(self.app_open);
+            match finish {
+                Finish::Restart => {
+                    crate::kit::perms::relaunch();
+                    self.quit(ctx);
+                }
+                Finish::Panel => self.open_panel(ctx),
+                Finish::No => {}
+            }
+        }
     }
 
     fn screenshot_step(&mut self, ctx: &egui::Context) {

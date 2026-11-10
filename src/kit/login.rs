@@ -1,6 +1,6 @@
 //! Opening Cmd+Meow at login, through macOS's own login items
 //! (SMAppService, macOS 13+). On by default the first time the app runs
-//! from its bundle; the switch is in Settings › Tools.
+//! from its bundle; the switch is in Settings › General.
 
 /// Whether the app opens at login.
 pub fn enabled() -> bool {

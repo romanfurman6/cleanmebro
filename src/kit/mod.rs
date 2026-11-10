@@ -14,6 +14,7 @@ pub mod macos;
 pub mod mechanics;
 pub mod native;
 pub mod notify;
+pub mod perms;
 pub mod plist;
 pub mod tile;
 pub mod viewport;

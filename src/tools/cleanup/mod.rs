@@ -59,6 +59,11 @@ impl Tool for Cleanup {
     fn badge(&self) -> Badge {
         badge()
     }
+    fn needs(&self) -> Vec<crate::kit::perms::Need> {
+        use crate::kit::perms::{Need, Perm};
+        vec![Need::must(Perm::FullDisk)]
+    }
+
     fn section(&self) -> &'static str {
         "Clean"
     }

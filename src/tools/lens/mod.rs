@@ -76,6 +76,11 @@ impl Tool for Lens {
     fn badge(&self) -> Badge {
         Badge { icon: Icon::Map, color: tint::DISK_MAP }
     }
+    fn needs(&self) -> Vec<crate::kit::perms::Need> {
+        use crate::kit::perms::{Need, Perm};
+        vec![Need::must(Perm::FullDisk)]
+    }
+
     fn section(&self) -> &'static str {
         "Clean"
     }

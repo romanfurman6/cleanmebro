@@ -67,7 +67,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <!-- Menu bar app: no Dock icon until the full window opens. -->
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>$DISPLAY_NAME asks Finder to pick a folder for saved captures.</string>
+  <key>NSAppleEventsUsageDescription</key><string>$DISPLAY_NAME asks Finder to pick a folder for saved captures, and System Events for the apps that open at login.</string>
   <key>NSMicrophoneUsageDescription</key><string>$DISPLAY_NAME records your voice in screen recordings when you turn the microphone on.</string>
   <key>NSCameraUsageDescription</key><string>$DISPLAY_NAME shows your camera in screen recordings when you turn the camera on.</string>
 </dict>
