@@ -19,10 +19,22 @@ pub const BLADE: Color32 = Color32::from_rgb(0x7F, 0xD3, 0xE8);
 pub const LINE: Color32 = Color32::from_rgb(0x3F, 0xB8, 0xD8);
 pub const HOT_LINE: Color32 = Color32::from_rgb(0xF0, 0x8A, 0x2C);
 
-/// Blade angle at time `t`: one turn takes 2400 / rpm seconds, slow enough
-/// to read while still following the real speed.
-pub fn spin(t: f64, rpm: f32) -> f32 {
-    ((t * rpm as f64 / 2400.0).fract() as f32) * TAU
+/// Blade angle of the fan drawn as `key` at time `t`: one turn takes
+/// 2400 / rpm seconds, slow enough to read while still following the real
+/// speed. The angle is carried forward frame by frame, so a new speed
+/// reading (every 2 s) changes how fast the blades turn, not where they are.
+pub fn spin(key: &str, t: f64, rpm: f32) -> f32 {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static TURNS: Mutex<Option<HashMap<String, (f64, f64)>>> = Mutex::new(None);
+    let mut g = TURNS.lock().unwrap_or_else(|e| e.into_inner());
+    let map = g.get_or_insert_with(HashMap::new);
+    let (last, turns) = map.entry(key.to_string()).or_insert((t, 0.0));
+    // a long gap (panel was hidden): carry on from where it stopped
+    let dt = (t - *last).clamp(0.0, 0.1);
+    *turns = (*turns + dt * rpm as f64 / 2400.0).fract();
+    *last = t;
+    (*turns as f32) * TAU
 }
 
 /// Ask for the next frame soon while any blade is turning.
@@ -189,7 +201,7 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
             let p = ui.painter();
             let c = Pos2::new(rect.center().x, rect.top() + 32.0);
             ring(p, c, 22.0, 4.0, frac, LINE);
-            blades(p, c, 16.0, spin(t, rpm.unwrap_or(0.0)), BLADE, CARD);
+            blades(p, c, 16.0, spin("fan-avg", t, rpm.unwrap_or(0.0)), BLADE, CARD);
             text_fit(p, Pos2::new(rect.center().x, rect.bottom() - 9.0), Align2::CENTER_BOTTOM, &value, font(11.0), TEXT_SOFT, rect.width() - 10.0);
             resp
         }
@@ -215,7 +227,7 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         };
         if let Some(chip) = chip {
             p.rect_filled(chip, chip.width() * 0.28, tint::FAN);
-            blades(p, chip.center(), chip.width() * 0.36, spin(t, r), Color32::WHITE, tint::FAN);
+            blades(p, chip.center(), chip.width() * 0.36, spin("fan-avg", t, r), Color32::WHITE, tint::FAN);
         }
     }
     keep_spinning(ui, s);
@@ -297,7 +309,7 @@ fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str, t: f64) {
     p.rect_filled(r, 10.0, white(10));
     let c = Pos2::new(r.left() + 8.0 + 18.0, r.center().y);
     ring(p, c, 17.0, 3.0, f.frac(), LINE);
-    blades(p, c, 12.0, spin(t, f.rpm), BLADE, CARD);
+    blades(p, c, 12.0, spin(name, t, f.rpm), BLADE, CARD);
     let x = c.x + 26.0;
     p.text(Pos2::new(x, r.center().y - 9.0), Align2::LEFT_CENTER, name, font(11.0), TEXT_DIM);
     let g = p.text(Pos2::new(x, r.center().y + 8.0), Align2::LEFT_CENTER, rpm_text(f.rpm), bold(15.0), TEXT);
