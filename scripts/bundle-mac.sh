@@ -14,6 +14,10 @@ DISPLAY_NAME="${DISPLAY_NAME:-Cmd+Meow}"
 BIN="cmdmeow"
 BUNDLE_ID="${BUNDLE_ID:-com.romanfurman6.cmdmeow}"
 VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
+# Build number (CFBundleVersion): commit count, so every build on main is higher
+# than the last. BUILD_NUMBER overrides it. The app shows it in Settings.
+BUILD="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
+export CMDMEOW_BUILD="$BUILD"
 OUT="target/bundle"
 APP="$OUT/$APP_NAME.app"
 
@@ -50,7 +54,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$BUILD</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
@@ -71,5 +75,5 @@ codesign --force --deep --sign "${SIGN_ID:--}" "$APP"
 ZIP="$OUT/$APP_NAME-$VERSION-macos.zip"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
-echo "Built $APP"
+echo "Built $APP ($VERSION, build $BUILD)"
 echo "Zipped $ZIP"

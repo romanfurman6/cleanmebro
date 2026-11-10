@@ -51,7 +51,24 @@ UNIVERSAL=1 scripts/bundle-mac.sh  # Apple silicon + Intel
 
 CI (`.github/workflows/macos.yml`) runs the tests and builds a universal
 `CmdMeow.app` on every push and PR; download it from the run's
-**Artifacts**. Pushing a `v*` tag also attaches the zip to a GitHub Release.
+**Artifacts**.
+
+### Releases
+
+Versions follow semver; `Cargo.toml` is the source of truth. The app's
+Info.plist gets it as `CFBundleShortVersionString`, the commit count as
+`CFBundleVersion`, and Settings › General shows both ("Cmd+Meow 0.2.0 (57)").
+
+```sh
+scripts/release.sh patch   # or minor, major, or an exact 0.2.0
+```
+
+On a clean, up-to-date `main` this bumps the version, commits, tags `vX.Y.Z`
+and pushes. The tag runs `.github/workflows/release.yml`: tests, universal
+build, then a GitHub Release with generated notes and `CmdMeow.dmg`,
+`CmdMeow.zip`, `SHA256SUMS.txt`. The asset names never change, so
+`https://github.com/romanfurman6/cmdmeow/releases/latest/download/CmdMeow.zip`
+always points to the newest version (the website's Download button uses it).
 
 The app is ad-hoc signed, not notarized. On first launch, right-click it and
 choose **Open**, or run `xattr -dr com.apple.quarantine CmdMeow.app`.

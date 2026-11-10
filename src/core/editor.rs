@@ -528,6 +528,15 @@ fn dist(r: Rect, q: Pos2) -> f32 {
 
 // ---------------------------------------------------------------- tools
 
+/// "Cmd+Meow 0.2.0 (57)": the Cargo.toml version plus the build number that
+/// scripts/bundle-mac.sh passes in as CMDMEOW_BUILD (commit count).
+pub fn version_label() -> String {
+    match option_env!("CMDMEOW_BUILD") {
+        Some(b) if !b.is_empty() => format!("Cmd+Meow {} ({b})", env!("CARGO_PKG_VERSION")),
+        _ => format!("Cmd+Meow {}", env!("CARGO_PKG_VERSION")),
+    }
+}
+
 fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let p = ui.painter().clone();
     let w = 560.0f32.min(body.width() - 48.0);
@@ -547,7 +556,8 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
             eprintln!("[login] {e}");
         }
     }
-    y = card.bottom() + 28.0;
+    p.text(Pos2::new(x + 2.0, card.bottom() + 8.0), Align2::LEFT_TOP, version_label(), font(11.0), TEXT_FAINT);
+    y = card.bottom() + 44.0;
     p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Tools", bold(15.0), TEXT);
     p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, "Each tool is separate. Turning one off hides its widgets and its page.", font(12.0), TEXT_DIM);
     y += 50.0;

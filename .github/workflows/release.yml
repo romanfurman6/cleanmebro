@@ -1,0 +1,74 @@
+name: Release
+
+# Push a tag like v0.2.0 (scripts/release.sh does it) to build Cmd+Meow and
+# publish a GitHub Release with CmdMeow.zip and CmdMeow.dmg.
+# The website downloads releases/latest/download/CmdMeow.zip, so the asset
+# names must stay the same from release to release.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: build number = commit count
+
+      - name: Check tag matches Cargo.toml
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [[ "$TAG" != "$VER" ]]; then
+            echo "::error::Tag v$TAG does not match Cargo.toml version $VER"
+            exit 1
+          fi
+          echo "VERSION=$VER" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test
+
+      - name: Bundle CmdMeow.app (universal)
+        run: UNIVERSAL=1 scripts/bundle-mac.sh
+
+      - name: Make zip and dmg
+        run: |
+          cd target/bundle
+          cp "CmdMeow-$VERSION-macos.zip" CmdMeow.zip
+          mkdir dmg
+          cp -R CmdMeow.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Cmd+Meow" -srcfolder dmg -fs HFS+ -format UDZO -ov CmdMeow.dmg
+          shasum -a 256 CmdMeow.zip CmdMeow.dmg | tee SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Cmd+Meow ${{ env.VERSION }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            Download **CmdMeow.dmg** (or CmdMeow.zip), move Cmd+Meow to Applications.
+
+            The app is not notarized yet: open it the first time with right-click › Open, or run
+            `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`.
+          files: |
+            target/bundle/CmdMeow.zip
+            target/bundle/CmdMeow.dmg
+            target/bundle/SHA256SUMS.txt
