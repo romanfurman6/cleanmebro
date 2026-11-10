@@ -5,7 +5,7 @@ edition = "2021"
 description = "A glassy macOS menu bar health monitor with an AI-judged cleanup and Space Lens"
 
 [dependencies]
-eframe = { version = "0.37", default-features = false, features = ["accesskit", "default_fonts", "wgpu", "persistence"] }
+eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "wgpu", "persistence"] }
 egui = "0.37"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 global-hotkey = "0.7"
