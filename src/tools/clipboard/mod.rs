@@ -27,7 +27,7 @@ use store::{Clip, Kind, Store};
 
 pub const ID: ToolId = "clipboard";
 const CARD: &str = "recent";
-pub const TINT: Color32 = Color32::from_rgb(0xC7, 0x80, 0x1F);
+pub const TINT: Color32 = crate::kit::glass::BLUE;
 
 /// What the global shortcut starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

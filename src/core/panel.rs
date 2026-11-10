@@ -119,9 +119,12 @@ pub fn panel(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
 pub fn title_line(app: &App, p: &egui::Painter, x0: f32, top: f32, width: f32) {
     match app.tools.iter().enumerate().filter(|(i, _)| app.tool_on(*i)).find_map(|(_, t)| t.panel_header()) {
         Some(h) => {
-            text_fit(p, Pos2::new(x0, top + 15.0), Align2::LEFT_TOP, &h.title, bold(15.0), TEXT, width);
-            p.circle_filled(Pos2::new(x0 + 3.5, top + 42.0), 3.5, h.dot);
-            text_fit(p, Pos2::new(x0 + 13.0, top + 42.0), Align2::LEFT_CENTER, &h.status, font(12.0), TEXT_DIM, width - 13.0);
+            // one line: "MacBook Pro  • All good"
+            let cy = top + 31.0;
+            let t = text_fit(p, Pos2::new(x0, cy), Align2::LEFT_CENTER, &h.title, ty::lead(), TEXT, width * 0.65);
+            let dx = t.right() + 10.0;
+            p.circle_filled(Pos2::new(dx + 3.0, cy + 1.0), 3.0, h.dot);
+            text_fit(p, Pos2::new(dx + 11.0, cy + 1.0), Align2::LEFT_CENTER, &h.status, ty::label(), ty::caption_color(), x0 + width - dx - 11.0);
         }
         None => {
             text_fit(p, Pos2::new(x0, top + 31.0), Align2::LEFT_CENTER, "Cmd+Meow", bold(15.0), TEXT, width);

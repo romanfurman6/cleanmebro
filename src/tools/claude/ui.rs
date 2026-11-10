@@ -21,11 +21,11 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &backend::ClaudeInfo, sel: b
     let col = super::page::usage_color(pct);
     let value = session.as_ref().map(|_| format!("{pct:.0}%")).unwrap_or_else(|| "–".into());
     match size {
-        Size::S11 => tile::small_ring(ui, r, id, Icon::Sparkle, pct / 100.0, col, &format!("Session {value}"), sel),
+        Size::S11 => tile::small_ring(ui, r, id, Icon::Gauge, pct / 100.0, col, &format!("Session {value}"), sel),
         Size::S12 => {
             let st = status(cl);
             let bar_or = if session.is_some() { Ok(((pct / 100.0).max(0.01), col)) } else { Err(st.as_str()) };
-            tile::wide(ui, r, id, Icon::Sparkle, tint::CLAUDE, "Claude · session", &value, bar_or, sel)
+            tile::wide(ui, r, id, Icon::Gauge, tint::CLAUDE, "Claude · session", &value, bar_or, sel)
         }
         Size::S14 => {
             let resp = tile::card(ui, r, id, sel);
@@ -35,7 +35,7 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &backend::ClaudeInfo, sel: b
         _ => {
             let resp = tile::card(ui, r, id, sel);
             let p = ui.painter();
-            let body = tile::head(p, r, Icon::Sparkle, tint::CLAUDE, &cl.plan_title(), &status(cl));
+            let body = tile::head(p, r, Icon::Gauge, tint::CLAUDE, &cl.plan_title(), &status(cl));
             for (k, (label, l)) in [("Session", cl.session()), ("Week", cl.weekly())].into_iter().enumerate() {
                 let lr = Rect::from_min_size(Pos2::new(body.left(), body.top() + k as f32 * 22.0), Vec2::new(body.width(), 22.0));
                 let v = l.map(|l| format!("{:.0}% · {}", l.pct, short_reset(&l.resets).trim_start_matches("resets "))).unwrap_or_default();
@@ -68,10 +68,9 @@ pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
     let x0 = r.left() + 12.0;
     let x1 = r.right() - 12.0;
     let hy = r.top() + 17.0;
-    icon(p, Icon::Sparkle, Rect::from_center_size(Pos2::new(x0 + 8.0, hy), Vec2::splat(16.0)), CLAUDE);
     let status = status(cl);
-    let sw = text_fit(p, Pos2::new(x1, hy), Align2::RIGHT_CENTER, &status, font(12.0), TEXT_DIM, 170.0).width();
-    text_fit(p, Pos2::new(x0 + 24.0, hy), Align2::LEFT_CENTER, &cl.plan_title(), bold(13.0), TEXT, (x1 - sw - 12.0) - (x0 + 24.0));
+    let sw = text_fit(p, Pos2::new(x1, hy), Align2::RIGHT_CENTER, &status, ty::label(), white(166), 170.0).width();
+    text_fit(p, Pos2::new(x0, hy), Align2::LEFT_CENTER, &cl.plan_title(), ty::title(), TEXT, (x1 - sw - 12.0) - x0);
     if cl.limits.is_empty() && cl.loading {
         spinner(p, Pos2::new(x1 - 8.0, r.top() + 56.0), 7.0, t, TEXT_DIM);
     }
@@ -111,7 +110,7 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         (Some(f), _) => format!("Limits updated {}", f.format("%H:%M")),
         _ => String::new(),
     };
-    if sheet_header(ui, rect, Icon::Sparkle, tint::CLAUDE, &cl.plan_title(), &sub) {
+    if sheet_header(ui, rect, Icon::Gauge, tint::CLAUDE, &cl.plan_title(), &sub) {
         cx.close_detail();
     }
     let rb = Rect::from_center_size(Pos2::new(rect.right() - 27.0 - 34.0, rect.top() + 29.0), Vec2::splat(26.0));

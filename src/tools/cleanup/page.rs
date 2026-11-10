@@ -41,7 +41,7 @@ fn claude_note(ui: &mut Ui, pos: Pos2, width: f32, a: Availability, cx: &mut Cx)
     let text_h = p.layout(body.clone(), font(12.0), TEXT_DIM, w).size().y;
     let r = Rect::from_min_size(pos, Vec2::new(width, 32.0 + text_h + 12.0 + 26.0 + 14.0));
     glass_card(&p, r, R_CARD, 0.0, false);
-    icon(&p, Icon::Sparkle, Rect::from_min_size(r.min + Vec2::new(14.0, 14.0), Vec2::splat(16.0)), TEXT_FAINT);
+    icon(&p, Icon::Gauge, Rect::from_min_size(r.min + Vec2::new(14.0, 14.0), Vec2::splat(16.0)), TEXT_FAINT);
     text_fit(&p, Pos2::new(x, r.top() + 13.0), Align2::LEFT_TOP, a.title(), bold(13.0), TEXT, w);
     paragraph(&p, Pos2::new(x, r.top() + 32.0), &body, font(12.0), TEXT_DIM, w);
     // buttons, bottom left
@@ -95,81 +95,117 @@ fn short_path(p: &std::path::Path) -> String {
 fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let avail = claude_now(app);
+    let has_claude = avail.ready();
     let p = ui.painter().clone();
-    page_header(&p, r, "Cleanup", "Not scanned yet", TEXT_DIM);
-    let colw = 560.0f32.min(r.width() - 48.0);
-    let x = r.center().x - colw / 2.0;
-    let mut y = r.top() + PAGE_HEADER_H + 40.0;
+    page_header(&p, r, "Cleanup", "Caches, logs and leftovers", TEXT_DIM);
+    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
+    let cw = (body.width() - sp::L) / 2.0;
+    let left = Rect::from_min_size(body.min, Vec2::new(cw, body.height()));
+    let right = Rect::from_min_max(Pos2::new(left.right() + sp::L, body.top()), body.max);
+    glass_card(&p, left, R_CARD, 0.0, false);
+    glass_card(&p, right, R_CARD, 0.0, false);
 
-    // hero line
-    tool_chip(&p, Rect::from_min_size(Pos2::new(x, y), Vec2::splat(56.0)), Icon::Broom, tint::CLEANUP);
-    p.text(Pos2::new(x + 72.0, y + 2.0), Align2::LEFT_TOP, "Find junk you can safely remove", bold(22.0), TEXT);
-    let h = paragraph(&p, Pos2::new(x + 72.0, y + 32.0), "Caches, logs and leftovers from Xcode, Claude, Electron apps, npm, Gradle and more.", font(13.0), TEXT_DIM, colw - 72.0);
-    y += (32.0 + h).max(56.0) + 22.0;
-
-    // what happens
-    let first = if avail.ready() {
-        (Icon::Sparkle, "Claude checks every path", "Each item gets a verdict: safe, ask you, or keep.")
+    // left: the disk, how it works, Scan
+    let li = left.shrink(sp::L);
+    let (total, free) = crate::kit::fs::volume_space("/");
+    p.text(li.left_top(), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT);
+    p.text(li.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, "Startup disk", ty::caption(), ty::caption_color());
+    let mut y = li.top() + 34.0 + sp::M;
+    let g = p.layout_no_wrap(human_bytes(free), ty::hero(), TEXT);
+    let gw = g.size().x;
+    p.galley(Pos2::new(li.left(), y), g, TEXT);
+    if total > 0 {
+        p.text(Pos2::new(li.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
+    }
+    y += 34.0 + sp::M;
+    let used = if total > 0 { 1.0 - free as f32 / total as f32 } else { 0.0 };
+    bar(&p, Rect::from_min_size(Pos2::new(li.left(), y), Vec2::new(li.width(), 8.0)), used, BLUE);
+    y += 8.0 + sp::XL;
+    let first = if has_claude && app.use_ai {
+        (Icon::Gauge, "Claude checks every path", "Safe, ask you, or keep. It sees paths, never contents.")
     } else {
-        (Icon::Check, "Built-in rules check every path", "Each item gets a verdict: safe, ask you, or keep.")
+        (Icon::Check, "Built-in rules check every path", "Safe, ask you, or keep.")
     };
     let points = [
         first,
-        (Icon::Question, "You decide on anything unclear", "Unsure items wait for your OK. Projects you use are never touched."),
-        (Icon::Trash, "Goes to the Trash first", "You can put anything back until you empty the Trash."),
+        (Icon::Question, "You decide on anything unclear", "Projects you use are never touched."),
+        (Icon::Trash, "Goes to the Trash first", "Put anything back until you empty it."),
     ];
-    let card_r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(colw, 8.0 + points.len() as f32 * 52.0));
-    glass_card(&p, card_r, R_CARD, 0.0, false);
-    let mut py = card_r.top() + 4.0;
-    for (ic, title, body) in points {
-        icon(&p, ic, Rect::from_min_size(Pos2::new(x + 14.0, py + 10.0), Vec2::splat(18.0)), ACCENT);
-        p.text(Pos2::new(x + 44.0, py + 10.0), Align2::LEFT_TOP, title, bold(13.0), TEXT);
-        text_fit(&p, Pos2::new(x + 44.0, py + 28.0), Align2::LEFT_TOP, body, font(13.0), TEXT_DIM, colw - 58.0);
-        py += 52.0;
-    }
-    y = card_r.bottom() + 22.0;
-
-    // where it looks
-    section_header(&p, Pos2::new(x, y), Align2::LEFT_TOP, "LOOKS IN");
-    y += 22.0;
-    let mut cx = x;
-    for g in Group::ALL {
-        let gl = p.layout_no_wrap(g.title().to_string(), font(12.0), TEXT_SOFT);
-        let w = gl.size().x + 20.0;
-        if cx + w > x + colw {
-            cx = x;
-            y += 30.0;
+    for (ic, title, line) in points {
+        if y + 36.0 > li.bottom() - 44.0 - 16.0 - sp::XL {
+            break;
         }
-        let pr = Rect::from_min_size(Pos2::new(cx, y), Vec2::new(w, 24.0));
-        p.rect_filled(pr, 12.0, white(15));
-        p.galley(pr.center() - gl.size() / 2.0, gl, TEXT_SOFT);
-        cx += w + 6.0;
+        icon(&p, ic, Rect::from_min_size(Pos2::new(li.left(), y + 1.0), Vec2::splat(16.0)), ACCENT);
+        text_fit(&p, Pos2::new(li.left() + 16.0 + sp::M, y), Align2::LEFT_TOP, title, ty::body(), TEXT, li.width() - 28.0);
+        text_fit(&p, Pos2::new(li.left() + 16.0 + sp::M, y + 18.0), Align2::LEFT_TOP, line, ty::label(), ty::caption_color(), li.width() - 28.0);
+        y += 36.0 + sp::M;
     }
-    y += 24.0 + 22.0;
-
-    // AI switch, or how to turn Claude on
-    let has_claude = avail.ready();
-    if has_claude {
-        let sw = Rect::from_min_size(Pos2::new(x, y), Vec2::new(30.0, 18.0));
-        if switch(ui, sw, ui.id().with("use-ai"), app.use_ai, true).clicked() {
-            app.use_ai = !app.use_ai;
+    // what is never touched (the hard-kept places in kit::fs)
+    let scan_top = li.bottom() - 16.0 - sp::S - 44.0;
+    if y + 16.0 + sp::M + 24.0 < scan_top - sp::XL {
+        y += sp::S;
+        p.text(Pos2::new(li.left(), y), Align2::LEFT_TOP, "Never touched", ty::title(), TEXT);
+        y += 16.0 + sp::M;
+        let mut cx = li.left();
+        for name in ["Documents", "Desktop", "Pictures", "Projects", "iCloud Drive", "Mail", "Messages", "Keychains", ".ssh", "Claude settings", "Folders with .git"] {
+            let gl = p.layout_no_wrap(name.to_string(), ty::label(), TEXT_SOFT);
+            let w = gl.size().x + 2.0 * sp::S + 4.0;
+            if cx + w > li.right() {
+                cx = li.left();
+                y += 24.0 + sp::S;
+                if y + 24.0 > scan_top - sp::L {
+                    break;
+                }
+            }
+            let pr = Rect::from_min_size(Pos2::new(cx, y), Vec2::new(w, 24.0));
+            p.rect_filled(pr, 12.0, white(15));
+            p.galley(pr.center() - gl.size() / 2.0, gl, TEXT_SOFT);
+            cx += w + sp::S;
         }
-        let (a, b) = ("Let Claude judge what's safe ", "(it sees paths, sizes and dates, never file contents)");
-        let ga = p.layout_no_wrap(a.into(), font(13.0), TEXT);
-        let wa = ga.size().x;
-        p.galley(Pos2::new(x + 40.0, sw.center().y - ga.size().y / 2.0), ga, TEXT);
-        text_fit(&p, Pos2::new(x + 40.0 + wa, sw.center().y), Align2::LEFT_CENTER, b, font(13.0), TEXT_FAINT, colw - 40.0 - wa);
-        y += 18.0 + 22.0;
-    } else {
-        y += claude_note(ui, Pos2::new(x, y), colw, avail, tcx) + 22.0;
     }
-
-    // scan
-    let br = Rect::from_min_size(Pos2::new(x, y), Vec2::new(button_width(&p, "Scan", BTN_PRIMARY) + 28.0, 34.0));
+    let bw = 220.0f32.min(li.width());
+    let br = Rect::from_min_size(Pos2::new(li.center().x - bw / 2.0, scan_top), Vec2::new(bw, 44.0));
     if pill_button(ui, br, "Scan", BTN_PRIMARY, true).clicked() {
         cleanup::start_scan(app.clean.clone(), ctx, app.use_ai && has_claude);
     }
-    text_fit(&p, Pos2::new(br.right() + 12.0, br.center().y), Align2::LEFT_CENTER, "Usually takes under a minute. Nothing is removed without your OK.", font(12.0), TEXT_FAINT, colw - br.width() - 12.0);
+    p.text(Pos2::new(li.center().x, li.bottom()), Align2::CENTER_BOTTOM, "About a minute. Nothing is removed until you confirm.", ty::caption(), ty::caption_color());
+
+    // right: where it looks, and Claude
+    let ri = right.shrink(sp::L);
+    p.text(ri.left_top(), Align2::LEFT_TOP, "Where it looks", ty::title(), TEXT);
+    p.text(ri.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} places", Group::ALL.len()), ty::caption(), ty::caption_color());
+    let foot_h = if has_claude {
+        18.0 + sp::M
+    } else {
+        let w = ri.width();
+        let body = format!("Cleanup still works with its built-in rules. {} Then Claude double-checks each path too.", avail.how());
+        p.layout(body, font(12.0), TEXT_DIM, w - 54.0).size().y + 32.0 + 12.0 + 26.0 + 14.0 + sp::M
+    };
+    let list_top = ri.top() + 34.0 + sp::S;
+    let list_bottom = ri.bottom() - foot_h;
+    let rh = ((list_bottom - list_top) / Group::ALL.len() as f32).min(sp::ROW_H);
+    for (k, g) in Group::ALL.iter().enumerate() {
+        let row = Rect::from_min_size(Pos2::new(ri.left(), list_top + k as f32 * rh), Vec2::new(ri.width(), rh));
+        if k > 0 {
+            p.line_segment([row.left_top(), row.right_top()], Stroke::new(1.0, white(15)));
+        }
+        if rh >= 40.0 {
+            text_fit(&p, Pos2::new(row.left(), row.center().y - 1.0), Align2::LEFT_BOTTOM, g.title(), ty::body(), TEXT, row.width());
+            text_fit(&p, Pos2::new(row.left(), row.center().y + 1.0), Align2::LEFT_TOP, g.blurb(), ty::caption(), ty::caption_color(), row.width());
+        } else {
+            text_fit(&p, Pos2::new(row.left(), row.center().y), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT, row.width());
+        }
+        ui.interact(row, ui.scope_id().with(("look", k)), Sense::hover()).on_hover_text(g.blurb());
+    }
+    if has_claude {
+        let sw = Rect::from_min_size(Pos2::new(ri.left(), ri.bottom() - 18.0), Vec2::new(30.0, 18.0));
+        if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
+            app.use_ai = !app.use_ai;
+        }
+        text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Let Claude judge what's safe", ty::body(), TEXT, ri.width() - 40.0);
+    } else {
+        claude_note(ui, Pos2::new(right.left(), ri.bottom() - foot_h + sp::M), right.width(), avail, tcx);
+    }
 }
 
 // ---------------------------------------------------------------- scanning / judging / cleaning
@@ -623,63 +659,102 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     let st = app.clean.lock().unwrap().clone();
     page_header(&p, r, "Cleanup", "Finished", TEXT_DIM);
     let ok = st.failed.is_empty();
-    let colw = 600.0f32.min(r.width() - 48.0);
-    let x = r.center().x - colw / 2.0;
-    let mut y = r.top() + PAGE_HEADER_H + 36.0;
+    let failed: std::collections::HashSet<&str> = st.failed.iter().map(|(n, _)| n.as_str()).collect();
+    let mut rows: Vec<(Group, usize, u64)> = Group::ALL
+        .iter()
+        .map(|g| {
+            let it: Vec<&Item> = st.items.iter().filter(|i| i.group == *g && i.selected && !failed.contains(i.title.as_str())).collect();
+            (*g, it.len(), it.iter().map(|i| i.bytes).sum())
+        })
+        .filter(|r| r.1 > 0)
+        .collect();
+    rows.sort_by(|a, b| b.2.cmp(&a.2));
+    // cards fit their content (no stretched empty boxes); the log gets the full height
+    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
+    let left_h = 2.0 * sp::L + 44.0 + sp::L + 34.0 + sp::XS + 16.0 + sp::XL + 34.0 + if ok { 0.0 } else { 16.0 + sp::S + st.failed.len().min(4) as f32 * 18.0 + 20.0 + sp::L };
+    let right_h = 2.0 * sp::L + 34.0 + sp::S + rows.len().max(1) as f32 * sp::ROW_H;
+    let h = if app.clean_log { body.height() } else { left_h.max(right_h).min(body.height()) };
+    let left = Rect::from_min_size(body.min, Vec2::new(340.0f32.min(body.width() * 0.4), h));
+    let right = Rect::from_min_size(Pos2::new(left.right() + sp::L, body.top()), Vec2::new(body.right() - left.right() - sp::L, h));
+    glass_card(&p, left, R_CARD, 0.0, false);
+    glass_card(&p, right, R_CARD, 0.0, false);
 
-    let c = Pos2::new(x + 28.0, y + 28.0);
-    p.circle_filled(c, 28.0, if ok { tint::HEALTH } else { Color32::from_rgb(0xC9, 0x87, 0x1E) });
-    icon(&p, if ok { Icon::Check } else { Icon::Info }, Rect::from_center_size(c, Vec2::splat(28.0)), Color32::WHITE);
-    let title = if app.delete_now { format!("{} deleted", human_bytes(st.cleaned_bytes)) } else { format!("{} moved to the Trash", human_bytes(st.cleaned_bytes)) };
-    p.text(Pos2::new(x + 72.0, y + 8.0), Align2::LEFT_TOP, title, bold(22.0), TEXT);
+    // left: the result
+    let li = left.shrink(sp::L);
+    let c = Pos2::new(li.left() + 22.0, li.top() + 22.0);
+    let col = if ok { GREEN } else { AMBER };
+    crate::kit::tile::ring(&p, c, 19.0, 4.0, 1.0, col);
+    icon(&p, if ok { Icon::Check } else { Icon::Info }, Rect::from_center_size(c, Vec2::splat(18.0)), col);
+    let tx = c.x + 22.0 + sp::M;
     let total = st.cleaned_count + st.failed.len();
-    let mut sub = format!("{} of {} items cleaned.", st.cleaned_count, total);
-    if !app.delete_now && st.cleaned_bytes > 0 {
-        sub.push_str(" Empty the Trash to get the space back.");
-    }
-    text_fit(&p, Pos2::new(x + 72.0, y + 36.0), Align2::LEFT_TOP, &sub, font(13.0), TEXT_DIM, colw - 72.0);
-    y += 56.0 + 18.0;
-
+    p.text(Pos2::new(tx, c.y - 1.0), Align2::LEFT_BOTTOM, "Cleanup finished", ty::title(), TEXT);
+    p.text(Pos2::new(tx, c.y + 3.0), Align2::LEFT_TOP, format!("{} of {} items", st.cleaned_count, total), ty::caption(), ty::caption_color());
+    let mut y = li.top() + 44.0 + sp::L;
+    let g = p.layout_no_wrap(human_bytes(st.cleaned_bytes), ty::hero(), TEXT);
+    let gw = g.size().x;
+    p.galley(Pos2::new(li.left(), y), g, TEXT);
+    p.text(Pos2::new(li.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, if app.delete_now { "deleted" } else { "to the Trash" }, ty::body(), ty::caption_color());
+    y += 34.0 + sp::XS;
+    let note = if app.delete_now { "Removed for good." } else { "Empty the Trash to get the space back." };
+    text_fit(&p, Pos2::new(li.left(), y), Align2::LEFT_TOP, note, ty::caption(), ty::caption_color(), li.width());
+    y += 16.0 + sp::L;
     if !ok {
-        let lines = st.failed.len().min(3);
-        let fr = Rect::from_min_size(Pos2::new(x, y), Vec2::new(colw, 52.0 + lines as f32 * 18.0));
-        p.rect_filled(fr, R_CARD, with_alpha(AMBER, 0.10));
-        p.rect_stroke(fr, R_CARD, Stroke::new(1.0, with_alpha(AMBER, 0.30)), StrokeKind::Inside);
         let n = st.failed.len();
-        p.text(fr.min + Vec2::new(14.0, 12.0), Align2::LEFT_TOP, format!("{n} item{} couldn't be removed", if n == 1 { "" } else { "s" }), bold(13.0), Color32::from_rgb(0xFF, 0xC2, 0x66));
-        for (k, (name, err)) in st.failed.iter().take(3).enumerate() {
-            text_fit(&p, fr.min + Vec2::new(14.0, 32.0 + k as f32 * 18.0), Align2::LEFT_TOP, &format!("{name}: {err}"), mono(11.0), TEXT_SOFT, colw - 28.0);
+        p.text(Pos2::new(li.left(), y), Align2::LEFT_TOP, format!("{n} item{} couldn't be removed", if n == 1 { "" } else { "s" }), ty::title(), AMBER);
+        y += 16.0 + sp::S;
+        for (name, err) in st.failed.iter().take(4) {
+            text_fit(&p, Pos2::new(li.left(), y), Align2::LEFT_TOP, &format!("{name}: {err}"), mono(11.0), TEXT_SOFT, li.width());
+            y += 18.0;
         }
-        text_fit(&p, Pos2::new(fr.left() + 14.0, fr.bottom() - 10.0), Align2::LEFT_BOTTOM, "Quit the apps involved and scan again.", font(12.0), TEXT_DIM, colw - 28.0);
-        y = fr.bottom() + 18.0;
+        text_fit(&p, Pos2::new(li.left(), y + sp::XS), Align2::LEFT_TOP, "Quit the apps involved and scan again.", ty::caption(), ty::caption_color(), li.width());
     }
-
-    let btn_y = (r.bottom() - 32.0 - 36.0).min(if app.clean_log { r.bottom() } else { y + 8.0 });
-    if app.clean_log {
-        let lr = Rect::from_min_max(Pos2::new(x, y), Pos2::new(x + colw, r.bottom() - 32.0 - 36.0 - 18.0));
-        glass_card(&p, lr, R_CARD, 0.0, false);
-        p.text(lr.min + Vec2::new(14.0, 12.0), Align2::LEFT_TOP, "Cleanup log", bold(13.0), TEXT);
-        p.text(Pos2::new(lr.right() - 14.0, lr.top() + 12.0), Align2::RIGHT_TOP, format!("{} entries", st.log.len()), font(12.0), TEXT_FAINT);
-        hairline(&p, Pos2::new(lr.left(), lr.top() + 38.0), Pos2::new(lr.right(), lr.top() + 38.0));
-        let inner = Rect::from_min_max(lr.min + Vec2::new(14.0, 46.0), lr.max - Vec2::new(10.0, 8.0));
-        let mut child = ui.new_child(UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
-        child.set_clip_rect(inner);
-        ScrollArea::vertical().id_salt("log").auto_shrink([false, false]).show(&mut child, |ui| {
-            for l in &st.log {
-                let col = if l.starts_with("Couldn't") { Color32::from_rgb(0xFF, 0xC2, 0x66) } else { TEXT_DIM };
-                ui.label(egui::RichText::new(l.replacen(&home_str(), "~", 1)).font(glass::mono(11.0)).color(col));
-            }
-        });
-    }
-    let lw = button_width(&p, "Show log", BTN_SECONDARY);
-    let lb = Rect::from_min_size(Pos2::new(x, btn_y), Vec2::new(lw, 32.0));
-    if pill_button(ui, lb, if app.clean_log { "Hide log" } else { "Show log" }, BTN_SECONDARY, true).clicked() {
-        app.clean_log = !app.clean_log;
-    }
-    let db = Rect::from_min_size(Pos2::new(x + colw - 88.0, btn_y), Vec2::new(88.0, 32.0));
+    let db = Rect::from_min_size(Pos2::new(li.left(), li.bottom() - 34.0), Vec2::new(li.width(), 34.0));
     if pill_button(ui, db, "Done", BTN_PRIMARY, true).clicked() {
         app.clean.lock().unwrap().phase = Phase::Intro;
         app.clean_log = false;
+    }
+
+    // right: what was cleaned, or the log
+    let ri = right.shrink(sp::L);
+    let log_label = if app.clean_log { "Hide log" } else { "Show log" };
+    let lw = button_width(&p, log_label, BTN_SECONDARY);
+    let lb = Rect::from_min_size(Pos2::new(ri.right() - lw, ri.top() - 4.0), Vec2::new(lw, 26.0));
+    if pill_button(ui, lb, log_label, BTN_SECONDARY, true).clicked() {
+        app.clean_log = !app.clean_log;
+    }
+    let list = Rect::from_min_max(Pos2::new(ri.left(), ri.top() + 34.0 + sp::S), ri.max);
+    if app.clean_log {
+        p.text(ri.left_top(), Align2::LEFT_TOP, "Cleanup log", ty::title(), TEXT);
+        p.text(ri.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} entries", st.log.len()), ty::caption(), ty::caption_color());
+        let mut child = ui.new_child(UiBuilder::new().max_rect(list).layout(egui::Layout::top_down(egui::Align::Min)));
+        child.set_clip_rect(list);
+        ScrollArea::vertical().id_salt("log").auto_shrink([false, false]).show(&mut child, |ui| {
+            for l in &st.log {
+                let col = if l.starts_with("Couldn't") { AMBER } else { TEXT_DIM };
+                ui.label(egui::RichText::new(l.replacen(&home_str(), "~", 1)).font(glass::mono(11.0)).color(col));
+            }
+        });
+        return;
+    }
+    p.text(ri.left_top(), Align2::LEFT_TOP, "What was cleaned", ty::title(), TEXT);
+    let sub = if app.delete_now { "Caches and logs are rebuilt by the apps that need them" } else { "Everything here can be put back from the Trash" };
+    text_fit(&p, ri.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, sub, ty::caption(), ty::caption_color(), lb.left() - ri.left() - sp::S);
+    for (k, (g, n, b)) in rows.iter().enumerate() {
+        let row = Rect::from_min_size(Pos2::new(list.left(), list.top() + k as f32 * sp::ROW_H), Vec2::new(list.width(), sp::ROW_H));
+        if row.bottom() > list.bottom() {
+            break;
+        }
+        if k > 0 {
+            p.line_segment([row.left_top(), row.right_top()], Stroke::new(1.0, white(15)));
+        }
+        icon(&p, Icon::Check, Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(14.0)), GREEN);
+        let vr = p.text(Pos2::new(row.right(), row.center().y), Align2::RIGHT_CENTER, human_bytes(*b), ty::body(), white(166));
+        let x = row.left() + 14.0 + sp::M;
+        text_fit(&p, Pos2::new(x, row.center().y - 1.0), Align2::LEFT_BOTTOM, g.title(), ty::body(), TEXT, vr.left() - x - sp::S);
+        text_fit(&p, Pos2::new(x, row.center().y + 1.0), Align2::LEFT_TOP, &format!("{n} item{}", if *n == 1 { "" } else { "s" }), ty::caption(), ty::caption_color(), vr.left() - x - sp::S);
+    }
+    if rows.is_empty() {
+        text_fit(&p, Pos2::new(list.left(), list.top() + sp::M), Align2::LEFT_TOP, "Nothing was selected.", ty::body(), TEXT_DIM, list.width());
     }
 }
 
@@ -715,4 +790,15 @@ pub fn demo_results() -> cleanup::State {
         mk(Group::Developer, "npm cache", "~/.npm/_cacache", 640_000_000, "Caches", Verdict::Safe, "npm downloads, fetched again when needed", Who::Ai),
     ];
     cleanup::State { phase: Phase::Results, items, ai_used: true, ..Default::default() }
+}
+
+/// The Done screen with sample results (screenshots).
+pub fn demo_done() -> cleanup::State {
+    let mut st = demo_results();
+    st.phase = Phase::Done;
+    let sel: Vec<&Item> = st.items.iter().filter(|i| i.selected).collect();
+    st.cleaned_count = sel.len();
+    st.cleaned_bytes = sel.iter().map(|i| i.bytes).sum();
+    st.log = sel.iter().map(|i| format!("Moved to Trash: {}", i.path.display())).collect();
+    st
 }
