@@ -59,7 +59,7 @@ impl Default for Settings {
 }
 
 fn data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("cleanmebro").join("startup")
+    crate::kit::fs::data_path("startup")
 }
 
 impl Settings {
@@ -374,7 +374,7 @@ fn watch(st: Shared, lib: PathBuf, ctx: egui::Context) {
         }
         for j in announce {
             let app = j.owner_name().unwrap_or_else(|| j.name.clone());
-            crate::kit::notify::send(&format!("{app} added itself to startup"), &format!("{} · runs {}. Turn it off in CleanMeBro › Startup.", j.label, j.when.label(j.scope)));
+            crate::kit::notify::send(&format!("{app} added itself to startup"), &format!("{} · runs {}. Turn it off in Cmd+Meow › Startup.", j.label, j.when.label(j.scope)));
         }
         ctx.request_repaint();
         std::thread::sleep(POLL);

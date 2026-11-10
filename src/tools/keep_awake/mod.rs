@@ -114,7 +114,7 @@ fn demo_engine(state: State) -> (Engine, i64) {
         }
         State::Claude => {
             e.sessions = vec![
-                Session { project: "cleanmebro".into(), last_write: h(11.9) },
+                Session { project: "cmdmeow".into(), last_write: h(11.9) },
                 Session { project: "api-server".into(), last_write: h(11.9) },
                 idle.clone(),
             ];
@@ -123,7 +123,7 @@ fn demo_engine(state: State) -> (Engine, i64) {
             e.sessions[1].last_write = t - 48;
         }
         State::WindDown { .. } => {
-            e.sessions = vec![Session { project: "cleanmebro".into(), last_write: t - 300 }, idle];
+            e.sessions = vec![Session { project: "cmdmeow".into(), last_write: t - 300 }, idle];
             e.step(t - 300);
         }
     }

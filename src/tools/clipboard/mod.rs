@@ -378,7 +378,7 @@ fn now_ms() -> i64 {
 
 /// Sample history for screenshots.
 fn demo_store() -> Store {
-    let dir = std::env::temp_dir().join(format!("cleanmebro-clipboard-demo-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cmdmeow-clipboard-demo-{}", std::process::id()));
     let mut st = Store::open(dir.clone());
     st.entries.clear();
     let now = now_ms();
@@ -413,7 +413,7 @@ fn demo_store() -> Store {
         (20, clip("#0B6BD8", "Figma", "com.figma.Desktop"), false),
         (12, Clip { png: Some(png), app: "Photos".into(), bundle: "com.apple.Photos".into(), ..Default::default() }, false),
         (6, clip("fn main() {\n    let app = App::new();\n    app.tool(\"clipboard\")\n       .run()?;\n}", "Zed", "dev.zed.Zed"), true),
-        (2, clip("https://github.com/romanfurman6/cleanmebro/pull/9", "Safari", "com.apple.Safari"), false),
+        (2, clip("https://github.com/romanfurman6/cmdmeow/pull/9", "Safari", "com.apple.Safari"), false),
         (0, clip("Ship the clipboard widget before Friday, then we test it on the real Mac together.", "Slack", "com.tinyspeck.slackmacgap"), false),
     ];
     let _ = std::fs::create_dir_all(dir.join("blobs"));

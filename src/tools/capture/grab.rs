@@ -58,7 +58,7 @@ pub fn load(path: &std::path::Path) -> Result<Grabbed, String> {
 
 fn temp_path() -> PathBuf {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    std::env::temp_dir().join(format!("cleanmebro-grab-{}-{n}.png", std::process::id()))
+    std::env::temp_dir().join(format!("cmdmeow-grab-{}-{n}.png", std::process::id()))
 }
 
 /// A picture of a fake app window, for screenshots of the tool's own UI

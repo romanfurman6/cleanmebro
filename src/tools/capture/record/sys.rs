@@ -230,7 +230,7 @@ mod imp {
             fn CGPathAddArc(path: *mut c_void, m: *const c_void, x: f64, y: f64, r: f64, start: f64, end: f64, clockwise: bool);
             fn CGPathRelease(path: *mut c_void);
         }
-        const NAME: &str = "cleanmebro-countdown-ring";
+        const NAME: &str = "cmdmeow-countdown-ring";
         let Some(mtm) = MainThreadMarker::new() else { return false };
         let Some(w) = NSApplication::sharedApplication(mtm).windows().iter().find(|w| w.title().to_string() == title) else { return false };
         let Some(view) = w.contentView() else { return false };

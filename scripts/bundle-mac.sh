@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# Build CleanMeBro.app (and a zip of it) from this repo. macOS only.
+# Build CmdMeow.app (shown as "Cmd+Meow") and a zip of it from this repo. macOS only.
 #
 #   scripts/bundle-mac.sh              # native arch
 #   UNIVERSAL=1 scripts/bundle-mac.sh  # Apple silicon + Intel in one binary
-#   SIGN_ID=... APP_NAME=... BUNDLE_ID=... PROFILE=debug override the defaults
+#   SIGN_ID=... APP_NAME=... DISPLAY_NAME=... BUNDLE_ID=... PROFILE=debug override the defaults
 #
-# Output: target/bundle/CleanMeBro.app and target/bundle/CleanMeBro-<version>-macos.zip
+# Output: target/bundle/CmdMeow.app and target/bundle/CmdMeow-<version>-macos.zip
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-APP_NAME="${APP_NAME:-CleanMeBro}"
-BIN="cleanmebro"
-BUNDLE_ID="${BUNDLE_ID:-com.romanfurman6.cleanmebro}"
+APP_NAME="${APP_NAME:-CmdMeow}"
+DISPLAY_NAME="${DISPLAY_NAME:-Cmd+Meow}"
+BIN="cmdmeow"
+BUNDLE_ID="${BUNDLE_ID:-com.romanfurman6.cmdmeow}"
 VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
 OUT="target/bundle"
 APP="$OUT/$APP_NAME.app"
@@ -43,7 +44,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key><string>$APP_NAME</string>
-  <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+  <key>CFBundleDisplayName</key><string>$DISPLAY_NAME</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleExecutable</key><string>$BIN</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -56,9 +57,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <!-- Menu bar app: no Dock icon until the full window opens. -->
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>CleanMeBro asks Finder to pick a folder for saved captures.</string>
-  <key>NSMicrophoneUsageDescription</key><string>CleanMeBro records your voice in screen recordings when you turn the microphone on.</string>
-  <key>NSCameraUsageDescription</key><string>CleanMeBro shows your camera in screen recordings when you turn the camera on.</string>
+  <key>NSAppleEventsUsageDescription</key><string>$DISPLAY_NAME asks Finder to pick a folder for saved captures.</string>
+  <key>NSMicrophoneUsageDescription</key><string>$DISPLAY_NAME records your voice in screen recordings when you turn the microphone on.</string>
+  <key>NSCameraUsageDescription</key><string>$DISPLAY_NAME shows your camera in screen recordings when you turn the camera on.</string>
 </dict>
 </plist>
 PLIST

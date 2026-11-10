@@ -1,4 +1,13 @@
-# CleanMeBro
+<p align="center">
+  <img src="docs/images/icon.png" width="128" alt="Cmd+Meow icon">
+</p>
+
+<h1 align="center">Cmd+Meow</h1>
+
+<p align="center">
+  <a href="https://github.com/romanfurman6/cmdmeow/releases/latest">Download</a> ·
+  <a href="https://github.com/romanfurman6/cmdmeow/actions/workflows/macos.yml">Latest build</a>
+</p>
 
 A macOS menu bar app that keeps a Mac in shape: cleaner, uninstaller, startup
 items, disk map, fan control, screenshots and screen recording, clipboard
@@ -27,6 +36,8 @@ history and keep-awake in one place. Written in Rust; everything runs locally.
 ## Build and run
 
 ```bash
+git clone https://github.com/romanfurman6/cmdmeow
+cd cmdmeow
 cargo run --release            # menu bar app
 cargo test                     # unit tests
 ```
@@ -34,19 +45,27 @@ cargo test                     # unit tests
 ### Build the app
 
 ```bash
-scripts/bundle-mac.sh              # target/bundle/CleanMeBro.app + .zip
+scripts/bundle-mac.sh              # target/bundle/CmdMeow.app + .zip
 UNIVERSAL=1 scripts/bundle-mac.sh  # Apple silicon + Intel
 ```
 
 CI (`.github/workflows/macos.yml`) runs the tests and builds a universal
-`CleanMeBro.app` on every push and PR; download it from the run's
+`CmdMeow.app` on every push and PR; download it from the run's
 **Artifacts**. Pushing a `v*` tag also attaches the zip to a GitHub Release.
 
 The app is ad-hoc signed, not notarized. On first launch, right-click it and
-choose **Open**, or run `xattr -dr com.apple.quarantine CleanMeBro.app`.
+choose **Open**, or run `xattr -dr com.apple.quarantine CmdMeow.app`.
 
-The icon source is `assets/icon/AppIcon.svg`; regenerate `assets/AppIcon.icns`
-with `python3 scripts/make-icon.py` (needs `pip install cairosvg pillow`).
+Coming from CleanMeBro (the old name; bundle id is now
+`com.romanfurman6.cmdmeow`): the new bundle id makes it a new app to macOS. Grant
+Screen Recording, Accessibility and Full Disk Access again, turn **Open at
+login** back on, and delete the old app. Settings, clipboard history and the
+sharing key move over on first launch. The fan helper keeps its old id, so an
+installed helper keeps working.
+
+The icon artwork is `assets/icon/AppIcon-art.png`; regenerate `assets/AppIcon.icns`
+with `python3 scripts/make-icon.py` (needs `pip install pillow`). The menu bar
+icon is drawn from vector paths in `src/kit/brand.rs`.
 
 ### Test and preview modes
 
@@ -93,7 +112,7 @@ entry. Nothing in `src/core/` changes.
 ## Project layout
 
 ```
-.
+cmdmeow/
 ├── Cargo.toml / Cargo.lock
 ├── src/
 │   ├── main.rs              entry point, CLI flags
@@ -107,6 +126,7 @@ entry. Nothing in `src/core/` changes.
 │   │   └── settings.rs      saved widget order, visibility and tools turned off
 │   ├── kit/                 shared by all tools
 │   │   ├── glass.rs         drawing kit: glass cards, gradients, glows, vector icons
+│   │   ├── brand.rs         the Cmd+Meow mark as vector paths (menu bar icon)
 │   │   ├── controls.rs      shared page controls (round action button)
 │   │   ├── native.rs        macOS: glass material, menu-bar app, thermal state, Trash
 │   │   ├── fs.rs            folder sizes, protected paths, move to Trash, disk space
@@ -131,10 +151,10 @@ entry. Nothing in `src/core/` changes.
 │   └── mechanics.json   same data, machine-readable
 ├── assets/
 │   ├── AppIcon.icns     app icon, all sizes (generated)
-│   └── icon/AppIcon.svg icon source
+│   └── icon/AppIcon-art.png icon artwork
 ├── scripts/
-│   ├── bundle-mac.sh    build CleanMeBro.app + zip
-│   └── make-icon.py     SVG → AppIcon.icns
+│   ├── bundle-mac.sh    build CmdMeow.app + zip
+│   └── make-icon.py     artwork → AppIcon.icns
 └── .github/workflows/macos.yml   CI: test, build, upload the app
 ```
 

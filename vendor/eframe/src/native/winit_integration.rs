@@ -23,7 +23,7 @@ pub fn is_invisible_or_minimized(window: &Window) -> bool {
 /// On Windows, an invisible window also uses up all CPU:
 /// <https://github.com/emilk/egui/issues/7776>
 ///
-/// CleanMeBro patch: the app draws overlays (recording countdown, frame,
+/// Cmd+Meow patch: the app draws overlays (recording countdown, frame,
 /// control bar) as immediate viewports while its root window is hidden.
 /// They present with vsync themselves, so this sleep only cost them frames.
 /// The app turns it off while such overlays are up.

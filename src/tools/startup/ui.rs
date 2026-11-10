@@ -155,7 +155,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         if !a.is_empty() || (s.filter == Filter::All && needle.is_empty()) {
             rows.push(Row::Head("OPEN AT LOGIN", "Apps macOS opens when you log in", true));
             match (&apps_err, apps_loaded) {
-                (Some(e), _) => rows.push(Row::Note(format!("Couldn't read the list ({e}). Allow CleanMeBro to control System Events in System Settings › Privacy & Security › Automation."))),
+                (Some(e), _) => rows.push(Row::Note(format!("Couldn't read the list ({e}). Allow Cmd+Meow to control System Events in System Settings › Privacy & Security › Automation."))),
                 (None, false) => rows.push(Row::Note("Reading…".into())),
                 (None, true) if a.is_empty() => rows.push(Row::Note("No apps open at login.".into())),
                 _ => rows.extend(a.into_iter().cloned().map(Row::App)),

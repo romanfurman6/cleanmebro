@@ -41,7 +41,7 @@ mod imp {
     // Buffers have to be taken for the levels to move; nothing else to do.
     define_class!(
         #[unsafe(super(NSObject))]
-        #[name = "CleanMeBroMicMeterSink"]
+        #[name = "CmdMeowMicMeterSink"]
         struct Sink;
 
         unsafe impl NSObjectProtocol for Sink {}
@@ -83,7 +83,7 @@ mod imp {
                 session.addInput(&input);
                 session.addOutput(&output);
                 let sink = Sink::new();
-                let queue = DispatchQueue::new("cleanmebro.mic-meter", None);
+                let queue = DispatchQueue::new("cmdmeow.mic-meter", None);
                 output.setSampleBufferDelegate_queue(Some(ProtocolObject::from_ref(&*sink)), Some(&queue));
                 // starting takes a moment; not on the UI thread
                 let s = SendBox(session.clone());

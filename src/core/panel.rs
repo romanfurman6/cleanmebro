@@ -124,7 +124,7 @@ pub fn title_line(app: &App, p: &egui::Painter, x0: f32, top: f32, width: f32) {
             text_fit(p, Pos2::new(x0 + 13.0, top + 42.0), Align2::LEFT_CENTER, &h.status, font(12.0), TEXT_DIM, width - 13.0);
         }
         None => {
-            text_fit(p, Pos2::new(x0, top + 31.0), Align2::LEFT_CENTER, "CleanMeBro", bold(15.0), TEXT, width);
+            text_fit(p, Pos2::new(x0, top + 31.0), Align2::LEFT_CENTER, "Cmd+Meow", bold(15.0), TEXT, width);
         }
     }
 }
@@ -139,7 +139,7 @@ fn header(app: &mut App, ui: &mut Ui, rect: Rect) {
     let x0 = rect.left() + 16.0;
     title_line(app, &p, x0, rect.top(), win.left() - x0 - 10.0);
     let pages = app.page_tools();
-    if !pages.is_empty() && icon_button(ui, win, Icon::Window, "Open CleanMeBro").clicked() {
+    if !pages.is_empty() && icon_button(ui, win, Icon::Window, "Open Cmd+Meow").clicked() {
         let page = if app.tools.get(app.page).is_some_and(|t| t.has_page()) { app.page } else { pages[0] };
         app.open_window(&ctx, page);
     }
@@ -232,7 +232,7 @@ fn footer(app: &mut App, ui: &mut Ui, rect: Rect) {
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    if resp.on_hover_text("Edit the panel's widgets in the CleanMeBro window").clicked() {
+    if resp.on_hover_text("Edit the panel's widgets in the Cmd+Meow window").clicked() {
         let ctx = ui.ctx().clone();
         app.open_settings(&ctx, false);
     }
@@ -251,7 +251,7 @@ fn gear_menu(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
             rows.push((Row::Tool(i, item.id), item.label));
         }
     }
-    rows.push((Row::Quit, "Quit CleanMeBro".into()));
+    rows.push((Row::Quit, "Quit Cmd+Meow".into()));
     let rh = 28.0;
     let h = rows.len() as f32 * rh + 10.0;
     let menu = Rect::from_min_size(Pos2::new(rect.right() - 14.0 - 210.0, rect.top() + 52.0), Vec2::new(210.0, h));

@@ -184,8 +184,8 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
         p.rect_stroke(ir, 10.0, Stroke::new(1.0, with_alpha(tint::FAN, 0.35)), egui::StrokeKind::Inside);
         let (label, msg) = match l.helper {
             _ if l.busy => ("Waiting…", "macOS is asking for your password."),
-            HelperState::Outdated => ("Update helper…", "CleanMeBro was updated. Approve the new helper once."),
-            _ => ("Install helper…", "To change fan speed, CleanMeBro adds a small helper that runs with admin rights. macOS asks for your password once."),
+            HelperState::Outdated => ("Update helper…", "Cmd+Meow was updated. Approve the new helper once."),
+            _ => ("Install helper…", "To change fan speed, Cmd+Meow adds a small helper that runs with admin rights. macOS asks for your password once."),
         };
         let bw = button_width(&p, label, BTN_PRIMARY);
         let br = Rect::from_min_size(Pos2::new(ir.right() - 8.0 - bw, ir.center().y - 14.0), Vec2::new(bw, 28.0));

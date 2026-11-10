@@ -96,7 +96,7 @@ impl Settings {
     }
 }
 
-/// `~/Library/Application Support/cleanmebro/clipboard` (the platform's data dir elsewhere).
+/// `~/Library/Application Support/cmdmeow/clipboard` (the platform's data dir elsewhere).
 pub fn data_dir() -> PathBuf {
     crate::kit::fs::data_path("clipboard")
 }

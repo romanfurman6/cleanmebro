@@ -64,7 +64,7 @@ pub fn sound_path(video: &Path) -> PathBuf {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     video.hash(&mut h);
-    std::env::temp_dir().join(format!("cleanmebro-voice-{:016x}.m4a", h.finish()))
+    std::env::temp_dir().join(format!("cmdmeow-voice-{:016x}.m4a", h.finish()))
 }
 
 /// Clean the voice of `video` and write the new sound (the mix first, then

@@ -119,7 +119,7 @@ pub enum Phase {
     Ready,
 }
 
-/// An app that left /Applications while CleanMeBro watched, with what it
+/// An app that left /Applications while Cmd+Meow watched, with what it
 /// left behind.
 #[derive(Clone, Debug)]
 pub struct Notice {

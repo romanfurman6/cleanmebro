@@ -540,7 +540,7 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     glass_card(&p, card, R_CARD, 0.0, false);
     let sw = Rect::from_min_size(Pos2::new(card.right() - 42.0, card.center().y - 9.0), Vec2::new(30.0, 18.0));
     p.text(Pos2::new(card.left() + 16.0, card.top() + 11.0), Align2::LEFT_TOP, "Open at login", font(13.0), TEXT);
-    p.text(Pos2::new(card.left() + 16.0, card.top() + 29.0), Align2::LEFT_TOP, "Start CleanMeBro in the menu bar when you log in to your Mac", font(11.0), TEXT_FAINT);
+    p.text(Pos2::new(card.left() + 16.0, card.top() + 29.0), Align2::LEFT_TOP, "Start Cmd+Meow in the menu bar when you log in to your Mac", font(11.0), TEXT_FAINT);
     let on = crate::kit::login::enabled();
     if switch(ui, sw, ui.scope_id().with("open-at-login"), on, true).clicked() {
         if let Err(e) = crate::kit::login::set(!on) {

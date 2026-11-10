@@ -26,13 +26,13 @@ jobs:
       - name: Test
         run: cargo test
 
-      - name: Bundle CleanMeBro.app (universal)
+      - name: Bundle CmdMeow.app (universal)
         run: UNIVERSAL=1 scripts/bundle-mac.sh
 
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
-          name: CleanMeBro-macos
+          name: CmdMeow-macos
           path: target/bundle/*.zip
           if-no-files-found: error
 

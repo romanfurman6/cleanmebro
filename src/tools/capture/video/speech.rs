@@ -107,7 +107,7 @@ pub fn download(m: Model, p: &Progress) -> Result<(), String> {
     let part = part_path(m);
     let have = std::fs::metadata(&part).map(|x| x.len()).unwrap_or(0);
     let agent = ureq::Agent::new_with_config(ureq::Agent::config_builder().timeout_connect(Some(std::time::Duration::from_secs(20))).http_status_as_error(false).build());
-    let mut req = agent.get(&m.url()).header("User-Agent", "CleanMeBro");
+    let mut req = agent.get(&m.url()).header("User-Agent", "Cmd+Meow");
     if have > 0 {
         req = req.header("Range", format!("bytes={have}-"));
     }
