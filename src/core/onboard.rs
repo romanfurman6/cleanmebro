@@ -36,7 +36,18 @@ pub fn done_marker() -> std::path::PathBuf {
     crate::kit::fs::data_path("setup-done")
 }
 
+fn step_file() -> std::path::PathBuf {
+    crate::kit::fs::data_path("setup-step")
+}
+
+/// The step setup was on when the app last quit: some permissions make macOS
+/// restart the app, and setup picks up where it was.
+pub fn saved_step() -> usize {
+    std::fs::read_to_string(step_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0).min(STEPS - 1)
+}
+
 pub fn mark_done() {
+    let _ = std::fs::remove_file(step_file());
     let m = done_marker();
     if let Some(d) = m.parent() {
         let _ = std::fs::create_dir_all(d);
@@ -120,7 +131,7 @@ impl PermWatch {
         self.status.get(&p).copied().unwrap_or(Status::NotAsked)
     }
 
-    fn waiting(&self, p: Perm, now: f64) -> bool {
+    pub fn waiting(&self, p: Perm, now: f64) -> bool {
         self.asked.get(&p).is_some_and(|t| now - t < 60.0) && self.status(p) != Status::Allowed
     }
 
@@ -246,6 +257,13 @@ fn go(app: &mut App, step: usize) {
     if let Some(s) = app.setup.as_mut() {
         s.step = step.min(STEPS - 1);
         s.since = f64::NEG_INFINITY;
+        if !app.demo {
+            let f = step_file();
+            if let Some(d) = f.parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+            let _ = std::fs::write(f, s.step.to_string());
+        }
     }
 }
 
@@ -473,7 +491,7 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         } else if waiting {
             let c = Pos2::new(right - 8.0, rr.center().y);
             spinner(&p, c, 6.0, now, BLUE);
-            let hint = if r.perm == Perm::FullDisk { "Drag CleanMeBro into the list" } else { "System Settings" };
+            let hint = if r.perm == Perm::FullDisk { "Switch it on in System Settings" } else { "System Settings" };
             p.text(Pos2::new(c.x - 16.0, c.y), Align2::RIGHT_CENTER, hint, font(12.0), TEXT_FAINT);
         } else {
             let (label, kind) = if st == Status::Denied { ("Open Settings", BTN_SECONDARY) } else { (r.perm.ask_label(), BTN_SECONDARY) };
@@ -607,4 +625,68 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
         p.rect_filled(r, 9.0, (if blue { BLUE } else { SIDEBAR }).gamma_multiply(a.min(1.0)));
         icon(&p, app.tools[i].badge().icon, Rect::from_center_size(r.center(), Vec2::splat(18.0 * a)), if blue { Color32::WHITE } else { TEXT_SOFT });
     }
+}
+
+// ---------------------------------------------------------------- Full Disk Access helper
+
+const HELP_W: f32 = 360.0;
+const HELP_H: f32 = 132.0;
+
+/// While Full Disk Access is being set up, a small card floats on top of
+/// System Settings showing what to do: find the app in the list and switch
+/// it on (or drag it in from Finder when it isn't listed).
+pub fn fda_helper(app: &mut App, ctx: &egui::Context) {
+    let now = ctx.input(|i| i.time);
+    let show = app.perm_watch.waiting(Perm::FullDisk, now) && (app.demo || app.perm_watch.status(Perm::FullDisk) != Status::Allowed);
+    if !show {
+        return;
+    }
+    let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
+    let builder = egui::ViewportBuilder::default()
+        .with_title("Full Disk Access")
+        .with_inner_size([HELP_W, HELP_H])
+        .with_position([screen.x - HELP_W - 24.0, screen.y - HELP_H - 90.0])
+        .with_decorations(false)
+        .with_transparent(true)
+        .with_resizable(false)
+        .with_has_shadow(true)
+        .with_window_level(egui::WindowLevel::AlwaysOnTop);
+    let id = egui::ViewportId::from_hash_of("cleanmebro-fda-help");
+    let mut close = false;
+    crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
+        close = help_card(ui, ui.max_rect(), now);
+    });
+    if close {
+        app.perm_watch.asked.remove(&Perm::FullDisk);
+    }
+}
+
+/// The helper's card. Returns true when its close button was clicked.
+pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
+    let p = ui.painter().clone();
+    p.rect_filled(full, 12.0, Color32::from_rgb(0x1E, 0x1E, 0x20));
+    p.rect_stroke(full, 12.0, Stroke::new(1.0, white(40)), StrokeKind::Inside);
+    let name = perms::app_name();
+    // a copy of the Settings row, its switch flipping on and off
+    let row = Rect::from_min_size(full.min + Vec2::new(14.0, 14.0), Vec2::new(full.width() - 28.0, 40.0));
+    p.rect_filled(row, 8.0, white(14));
+    app_mark(&p, Pos2::new(row.left() + 20.0, row.center().y), 22.0, 0.75);
+    p.text(Pos2::new(row.left() + 40.0, row.center().y), Align2::LEFT_CENTER, &name, font(13.0), TEXT);
+    let cycle = (now % 2.4) as f32 / 2.4;
+    let on = ease(((cycle - 0.25) / 0.25).clamp(0.0, 1.0)) * (1.0 - ease(((cycle - 0.85) / 0.15).clamp(0.0, 1.0)));
+    let sw = Rect::from_min_size(Pos2::new(row.right() - 50.0, row.center().y - 11.0), Vec2::new(38.0, 22.0));
+    p.rect_filled(sw, 11.0, lerp_color(white(46), BLUE, on));
+    p.circle_filled(Pos2::new(sw.left() + 11.0 + 16.0 * on, sw.center().y), 9.0, Color32::WHITE);
+    // a pointer that clicks the switch
+    let tip = sw.center() + Vec2::new(4.0, 6.0) + Vec2::new(14.0, 12.0) * (1.0 - ease((cycle / 0.25).clamp(0.0, 1.0)));
+    let arrow = vec![tip, tip + Vec2::new(0.0, 13.0), tip + Vec2::new(3.5, 9.5), tip + Vec2::new(8.5, 10.0)];
+    p.add(egui::Shape::convex_polygon(arrow, Color32::WHITE, Stroke::new(1.0, Color32::BLACK)));
+    let y = row.bottom() + 14.0;
+    p.text(Pos2::new(full.left() + 16.0, y), Align2::LEFT_TOP, format!("Switch on {name} in the list"), bold(13.0), TEXT);
+    p.text(Pos2::new(full.left() + 16.0, y + 20.0), Align2::LEFT_TOP, "Not there? Drag it in from the Finder window.", font(12.0), TEXT_FAINT);
+    let x = Rect::from_min_size(Pos2::new(full.right() - 26.0, full.bottom() - 26.0), Vec2::splat(18.0));
+    let r = ui.interact(x, ui.scope_id().with("fda-help-close"), Sense::click());
+    icon(&p, Icon::Close, x.shrink(3.0), if r.hovered() { TEXT } else { TEXT_MUTED });
+    ui.ctx().request_repaint();
+    r.clicked()
 }

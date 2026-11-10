@@ -144,6 +144,11 @@ pub fn app_bundle() -> Option<std::path::PathBuf> {
     exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app")).map(|p| p.to_path_buf())
 }
 
+/// The name the app has in System Settings lists ("CleanMeBro Dev").
+pub fn app_name() -> String {
+    app_bundle().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_else(|| "CleanMeBro".into())
+}
+
 /// Screen Recording as macOS reported it when the app started. macOS only
 /// applies a new grant to a fresh process, so a grant made later needs a
 /// restart before capture works.

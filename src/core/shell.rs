@@ -26,6 +26,8 @@ pub enum Mode {
     /// First-run setup drawn in the root window (screenshots only; the real
     /// app shows setup in its own window).
     Setup,
+    /// The Full Disk Access helper card alone (screenshots only).
+    FdaHelp,
 }
 
 pub struct Options {
@@ -150,7 +152,7 @@ impl App {
             screenshot: opts.screenshot,
             frame: 0,
             toast: None,
-            setup: first_run.then(|| super::onboard::Setup::new(0)),
+            setup: first_run.then(|| super::onboard::Setup::new(super::onboard::saved_step())),
             perm_watch: Default::default(),
             start_hidden: first_run,
         };
@@ -301,6 +303,10 @@ impl App {
                 }
                 return;
             }
+            "fda-help" => {
+                self.mode = Mode::FdaHelp;
+                return;
+            }
             "customize" | "settings-tools" | "settings-general" => {
                 self.mode = Mode::Window;
                 self.settings_open = true;
@@ -405,6 +411,7 @@ impl App {
             }
             Mode::Window => Vec2::new(m::APP_WIDTH, m::APP_HEIGHT),
             Mode::Setup => Vec2::new(super::onboard::SETUP_W, super::onboard::SETUP_H),
+            Mode::FdaHelp => Vec2::new(360.0, 132.0),
         }
     }
 
@@ -425,7 +432,7 @@ impl App {
                 ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
                 crate::kit::native::set_dock_icon(false);
             }
-            Mode::Window | Mode::Setup => {
+            Mode::Window | Mode::Setup | Mode::FdaHelp => {
                 let pos = Pos2::new(((screen.x - size.x) / 2.0).max(0.0), ((screen.y - size.y) / 2.0).max(30.0));
                 ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::OuterPosition(pos));
                 ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
@@ -609,6 +616,10 @@ impl eframe::App for App {
                     self.reshape(&ctx);
                 }
             }
+            Mode::FdaHelp => {
+                let now = ctx.input(|i| i.time);
+                super::onboard::help_card(ui, full, now + 0.9);
+            }
             Mode::Setup => {
                 glass::backdrop(ui.painter(), full, 14.0, opaque, t);
                 super::onboard::setup_ui(self, ui, full);
@@ -648,6 +659,9 @@ impl eframe::App for App {
         }
         if self.setup.is_some() && self.mode != Mode::Setup {
             self.setup_viewport(&ctx);
+        }
+        if self.screenshot.is_none() {
+            super::onboard::fda_helper(self, &ctx);
         }
         if self.tools_off != off_before {
             if let Some(s) = frame.storage_mut() {
