@@ -217,6 +217,21 @@ pub trait Tool {
         String::new()
     }
 
+    // ---- what it needs from macOS (setup and Settings › Permissions)
+    fn needs(&self) -> Vec<crate::kit::perms::Need> {
+        Vec::new()
+    }
+    /// Status of a need the tool sets up itself ([`crate::kit::perms::Perm::Own`]).
+    fn own_status(&self, _id: &str) -> crate::kit::perms::Status {
+        crate::kit::perms::Status::NotAsked
+    }
+    /// Start setting up an own need (may show an admin prompt; never blocks).
+    fn ask_own(&mut self, _id: &str) {}
+    /// Global shortcuts worth showing at the end of setup: (label, keys).
+    fn setup_shortcuts(&self) -> Vec<(&'static str, String)> {
+        Vec::new()
+    }
+
     // ---- panel widgets
     fn panel_header(&self) -> Option<PanelHeader> {
         None

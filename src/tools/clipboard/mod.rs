@@ -441,6 +441,15 @@ impl Tool for Clipboard {
     fn badge(&self) -> Badge {
         badge()
     }
+    fn needs(&self) -> Vec<crate::kit::perms::Need> {
+        use crate::kit::perms::{Need, Perm};
+        vec![Need::must(Perm::Accessibility)]
+    }
+
+    fn setup_shortcuts(&self) -> Vec<(&'static str, String)> {
+        self.settings.shortcut.iter().map(|s| ("Clipboard", s.display())).collect()
+    }
+
     fn section(&self) -> &'static str {
         "Create"
     }

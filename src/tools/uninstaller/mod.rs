@@ -721,6 +721,11 @@ impl Tool for Uninstaller {
     fn badge(&self) -> Badge {
         Badge { icon: Icon::Trash, color: TINT }
     }
+    fn needs(&self) -> Vec<crate::kit::perms::Need> {
+        use crate::kit::perms::{Need, Perm};
+        vec![Need::must(Perm::FullDisk)]
+    }
+
     fn section(&self) -> &'static str {
         "Clean"
     }

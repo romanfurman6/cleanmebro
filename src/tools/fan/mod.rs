@@ -68,6 +68,9 @@ pub enum Cmd {
     Uninstall,
 }
 
+/// Fan Control's privileged helper, as a setup step.
+const HELPER: crate::kit::perms::Perm = crate::kit::perms::Perm::Own { id: "fan-helper", name: "Fan helper", icon: crate::kit::glass::Icon::Lock };
+
 pub struct FanControl {
     snap: Shared,
     live: Arc<Mutex<Live>>,
@@ -75,6 +78,7 @@ pub struct FanControl {
     /// Wakes the background thread early after a change.
     kick: Arc<Kick>,
     demo: bool,
+    ctx: egui::Context,
 }
 
 impl FanControl {
@@ -83,7 +87,7 @@ impl FanControl {
         let kick = Arc::new(Kick::new());
         let live = Arc::new(Mutex::new(Live { settings: if env.demo { Settings::default() } else { control::load() }, ..Default::default() }));
         let snap = if env.demo { Arc::new(Mutex::new(data::demo())) } else { start(env.ctx.clone(), on.clone(), live.clone(), kick.clone()) };
-        FanControl { snap, live, on, kick, demo: env.demo }
+        FanControl { snap, live, on, kick, demo: env.demo, ctx: env.ctx.clone() }
     }
 
     fn run(&mut self, cmds: Vec<Cmd>, ctx: &egui::Context) {
@@ -246,6 +250,29 @@ impl Tool for FanControl {
     fn badge(&self) -> Badge {
         badge()
     }
+    fn needs(&self) -> Vec<crate::kit::perms::Need> {
+        use crate::kit::perms::Need;
+        vec![Need::may(HELPER)]
+    }
+
+    fn own_status(&self, id: &str) -> crate::kit::perms::Status {
+        let l = self.live.lock().unwrap();
+        if id != "fan-helper" || l.busy {
+            crate::kit::perms::Status::NotAsked
+        } else if l.helper == HelperState::Ready {
+            crate::kit::perms::Status::Allowed
+        } else {
+            crate::kit::perms::Status::NotAsked
+        }
+    }
+
+    fn ask_own(&mut self, id: &str) {
+        if id == "fan-helper" {
+            let ctx = self.ctx.clone();
+            self.run(vec![Cmd::Install], &ctx);
+        }
+    }
+
     fn section(&self) -> &'static str {
         "Monitor"
     }

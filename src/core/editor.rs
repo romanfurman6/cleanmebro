@@ -48,16 +48,16 @@ pub fn settings_page(app: &mut App, ui: &mut Ui, r: Rect) {
     let top = Rect::from_min_size(r.min, Vec2::new(r.width(), TOP_H));
     hairline(&p, top.left_bottom(), top.right_bottom());
     p.text(Pos2::new(top.left() + 24.0, top.center().y), Align2::LEFT_CENTER, "Settings", bold(15.0), TEXT);
-    let tabs = Rect::from_center_size(top.center(), Vec2::new(180.0, 28.0));
-    if let Some(t) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &["Widgets", "Tools"], app.settings_tab) {
+    let tabs = Rect::from_center_size(top.center(), Vec2::new(270.0, 28.0));
+    if let Some(t) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &["Widgets", "Tools", "General"], app.settings_tab) {
         app.settings_tab = t;
         app.drag = None;
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), top.bottom() + 1.0), r.max);
-    if app.settings_tab == 0 {
-        widgets_tab(app, ui, body);
-    } else {
-        tools_tab(app, ui, body);
+    match app.settings_tab {
+        0 => widgets_tab(app, ui, body),
+        1 => tools_tab(app, ui, body),
+        _ => general_tab(app, ui, body),
     }
 }
 
@@ -533,21 +533,6 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let w = 560.0f32.min(body.width() - 48.0);
     let x = body.center().x - w / 2.0;
     let mut y = body.top() + 24.0;
-    // general
-    p.text(Pos2::new(x, y), Align2::LEFT_TOP, "General", bold(15.0), TEXT);
-    y += 28.0;
-    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 54.0));
-    glass_card(&p, card, R_CARD, 0.0, false);
-    let sw = Rect::from_min_size(Pos2::new(card.right() - 42.0, card.center().y - 9.0), Vec2::new(30.0, 18.0));
-    p.text(Pos2::new(card.left() + 16.0, card.top() + 11.0), Align2::LEFT_TOP, "Open at login", font(13.0), TEXT);
-    p.text(Pos2::new(card.left() + 16.0, card.top() + 29.0), Align2::LEFT_TOP, "Start CleanMeBro in the menu bar when you log in to your Mac", font(11.0), TEXT_FAINT);
-    let on = crate::kit::login::enabled();
-    if switch(ui, sw, ui.scope_id().with("open-at-login"), on, true).clicked() {
-        if let Err(e) = crate::kit::login::set(!on) {
-            eprintln!("[login] {e}");
-        }
-    }
-    y = card.bottom() + 28.0;
     p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Tools", bold(15.0), TEXT);
     p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, "Each tool is separate. Turning one off hides its widgets and its page.", font(12.0), TEXT_DIM);
     y += 50.0;
@@ -580,4 +565,42 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     if let Some((i, on)) = flip {
         app.set_tool_on(i, on);
     }
+}
+
+/// Open at login, what macOS allows the tools (live), and setup again.
+fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
+    let p = ui.painter().clone();
+    let w = 600.0f32.min(body.width() - 48.0);
+    let x = body.center().x - w / 2.0;
+    let mut y = body.top() + 24.0;
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 54.0));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    let sw = Rect::from_min_size(Pos2::new(card.right() - 42.0, card.center().y - 9.0), Vec2::new(30.0, 18.0));
+    p.text(Pos2::new(card.left() + 16.0, card.top() + 11.0), Align2::LEFT_TOP, "Open at login", font(13.0), TEXT);
+    p.text(Pos2::new(card.left() + 16.0, card.top() + 29.0), Align2::LEFT_TOP, "Start CleanMeBro in the menu bar when you log in to your Mac", font(11.0), TEXT_FAINT);
+    let on = if app.demo { true } else { crate::kit::login::enabled() };
+    if switch(ui, sw, ui.scope_id().with("open-at-login"), on, true).clicked() && !app.demo {
+        if let Err(e) = crate::kit::login::set(!on) {
+            eprintln!("[login] {e}");
+        }
+    }
+    y = card.bottom() + 28.0;
+    p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Permissions", bold(15.0), TEXT);
+    p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, "What the tools you use need from macOS. Updates live.", font(12.0), TEXT_DIM);
+    y += 50.0;
+    let now = ui.ctx().input(|i| i.time);
+    let list = super::onboard::rows(app);
+    {
+        let (tools, watch) = (&app.tools, &mut app.perm_watch);
+        watch.poll(tools, &list, now);
+    }
+    let area = Rect::from_min_max(Pos2::new(x, y), Pos2::new(x + w, body.bottom()));
+    let used = super::onboard::perm_list(app, ui, area, &list, 10.0, now);
+    y += used + 16.0;
+    let label = "Run setup again";
+    let bw = button_width(&p, label, BTN_SECONDARY);
+    if pill_button(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(bw, 30.0)), label, BTN_SECONDARY, true).clicked() {
+        app.open_setup();
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
 }

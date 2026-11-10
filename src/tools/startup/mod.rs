@@ -435,6 +435,11 @@ impl Tool for Startup {
     fn badge(&self) -> Badge {
         badge()
     }
+    fn needs(&self) -> Vec<crate::kit::perms::Need> {
+        use crate::kit::perms::{Need, Perm};
+        vec![Need::must(Perm::SystemEvents), Need::may(Perm::Notifications)]
+    }
+
     fn section(&self) -> &'static str {
         "Clean"
     }

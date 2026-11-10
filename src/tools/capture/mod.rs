@@ -801,6 +801,15 @@ impl Tool for Capture {
     fn badge(&self) -> Badge {
         badge()
     }
+    fn needs(&self) -> Vec<crate::kit::perms::Need> {
+        use crate::kit::perms::{Need, Perm};
+        vec![Need::must(Perm::Screen), Need::may(Perm::Microphone), Need::may(Perm::Camera)]
+    }
+
+    fn setup_shortcuts(&self) -> Vec<(&'static str, String)> {
+        [(Command::Area, "Capture area"), (Command::Record, "Record screen")].into_iter().filter_map(|(c, l)| self.settings.shortcut(c).map(|s| (l, s.display()))).collect()
+    }
+
     fn section(&self) -> &'static str {
         "Create"
     }

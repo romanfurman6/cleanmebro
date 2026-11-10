@@ -601,7 +601,7 @@ pub const PARAGRAPH_MAX: usize = 4000;
 
 // ---------------------------------------------------------------- icons
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Icon {
     Disk,
     Memory,
@@ -650,6 +650,13 @@ pub enum Icon {
     Mouse,
     Keyboard,
     Trackpad,
+    // permissions
+    ScreenRec,
+    Access,
+    Script,
+    Mic,
+    Camera,
+    Bell,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -706,6 +713,12 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Mouse => "magicmouse",
         Icon::Keyboard => "keyboard",
         Icon::Trackpad => "rectangle.and.hand.point.up.left",
+        Icon::ScreenRec => "rectangle.dashed.badge.record",
+        Icon::Access => "accessibility",
+        Icon::Script => "applescript",
+        Icon::Mic => "mic",
+        Icon::Camera => "video",
+        Icon::Bell => "bell",
     })
 }
 
@@ -975,6 +988,37 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             boxr(4.0, 5.0, 20.0, 19.0, 2.5);
             open(&[(4.0, 15.0), (20.0, 15.0)]);
             open(&[(12.0, 15.0), (12.0, 19.0)]);
+        }
+        Icon::ScreenRec => {
+            boxr(3.0, 5.0, 21.0, 17.0, 2.0);
+            open(&[(9.0, 21.0), (15.0, 21.0)]);
+            dot(12.0, 11.0, 2.4);
+        }
+        Icon::Access => {
+            dot(12.0, 4.5, 1.6);
+            open(&[(5.0, 8.5), (12.0, 10.0), (19.0, 8.5)]);
+            open(&[(12.0, 10.0), (12.0, 14.0)]);
+            open(&[(8.5, 21.0), (12.0, 14.0), (15.5, 21.0)]);
+        }
+        Icon::Script => {
+            open(&[(7.0, 5.0), (3.0, 12.0), (7.0, 19.0)]);
+            open(&[(17.0, 5.0), (21.0, 12.0), (17.0, 19.0)]);
+            open(&[(14.0, 4.0), (10.0, 20.0)]);
+        }
+        Icon::Mic => {
+            boxr(9.0, 3.0, 15.0, 14.0, 3.0);
+            arc(12.0, 11.0, 6.0, 0.0, std::f32::consts::PI);
+            open(&[(12.0, 17.0), (12.0, 21.0)]);
+        }
+        Icon::Camera => {
+            boxr(3.0, 7.0, 15.0, 17.0, 2.0);
+            closed(&[(15.0, 11.0), (21.0, 8.0), (21.0, 16.0), (15.0, 13.0)]);
+        }
+        Icon::Bell => {
+            open(&[(5.0, 17.0), (7.0, 15.0), (7.0, 10.0)]);
+            arc(12.0, 10.0, 5.0, std::f32::consts::PI, std::f32::consts::TAU);
+            open(&[(17.0, 10.0), (17.0, 15.0), (19.0, 17.0), (5.0, 17.0)]);
+            open(&[(10.0, 20.0), (14.0, 20.0)]);
         }
     }
 }
