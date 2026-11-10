@@ -69,12 +69,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .nav nav a:hover { color: var(--t1); }
 
 /* Hero scene */
-.hero { position: relative; margin-top: -64px; padding-top: 64px; }
-.scene { position: absolute; inset: 0 0 auto; height: 700px; overflow: hidden; pointer-events: none; }
-.scene img { position: absolute; right: 0; top: 0; height: 100%; width: auto; max-width: none;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 38%), linear-gradient(transparent 70%, #000);
-  mask-image: linear-gradient(90deg, transparent 0%, #000 30%), linear-gradient(180deg, #000 55%, transparent 100%);
-  -webkit-mask-composite: source-in; mask-composite: intersect; }
+.hero { position: relative; }
+.hero-icon { position: absolute; right: 32px; top: 168px; width: 320px; height: 320px; }
 .hero-in { position: relative; padding-top: 120px; padding-bottom: 96px; }
 .hero h1 { max-width: 11em; font: 500 60px/66px var(--font); letter-spacing: -.03em; text-wrap: balance; }
 .sub { max-width: 34rem; margin-top: 24px; font-size: 19px; line-height: 30px; color: var(--t2); text-wrap: pretty; }
@@ -268,8 +264,7 @@ td { padding: 20px 0; vertical-align: top; color: var(--t2); }
   .sec-head { grid-template-columns: 1fr; gap: 12px; }
   .hero h1 { font-size: 52px; line-height: 56px; }
   .hero-in { padding-top: 96px; }
-  .scene { height: 620px; }
-  .scene img { opacity: .55; }
+  .hero-icon { width: 200px; height: 200px; top: 40px; opacity: .9; }
   .keys { grid-template-columns: repeat(3, 1fr); }
   .screen { height: 480px; }
 }
@@ -278,8 +273,7 @@ td { padding: 20px 0; vertical-align: top; color: var(--t2); }
   .nav { gap: 16px; }
   .nav nav { display: none; }
   .nav .btn { margin-left: auto; }
-  .scene { height: 420px; }
-  .scene img { opacity: .35; right: -40%; }
+  .hero-icon { position: static; display: block; width: 96px; height: 96px; margin-bottom: 24px; }
   .hero-in { padding-top: 56px; padding-bottom: 48px; }
   .hero h1 { font-size: 38px; line-height: 44px; }
   .sub { font-size: 17px; line-height: 28px; }
