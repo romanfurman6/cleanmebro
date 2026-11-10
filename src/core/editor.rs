@@ -578,17 +578,15 @@ fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let sw = Rect::from_min_size(Pos2::new(card.right() - 42.0, card.center().y - 9.0), Vec2::new(30.0, 18.0));
     p.text(Pos2::new(card.left() + 16.0, card.top() + 11.0), Align2::LEFT_TOP, "Open at login", font(13.0), TEXT);
     p.text(Pos2::new(card.left() + 16.0, card.top() + 29.0), Align2::LEFT_TOP, "Start CleanMeBro in the menu bar when you log in to your Mac", font(11.0), TEXT_FAINT);
-    let on = if app.demo { true } else { crate::kit::login::enabled() };
+    let now = ui.ctx().input(|i| i.time);
+    let on = app.perm_watch.login_on(app.demo, now);
     if switch(ui, sw, ui.scope_id().with("open-at-login"), on, true).clicked() && !app.demo {
-        if let Err(e) = crate::kit::login::set(!on) {
-            eprintln!("[login] {e}");
-        }
+        app.perm_watch.set_login(!on);
     }
     y = card.bottom() + 28.0;
     p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Permissions", bold(15.0), TEXT);
     p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, "What the tools you use need from macOS. Updates live.", font(12.0), TEXT_DIM);
     y += 50.0;
-    let now = ui.ctx().input(|i| i.time);
     let list = super::onboard::rows(app);
     {
         let (tools, watch) = (&app.tools, &mut app.perm_watch);

@@ -66,6 +66,16 @@ pub struct PermWatch {
     allowed_at: HashMap<Perm, f64>,
     /// Sample statuses for screenshots.
     pub demo: Option<HashMap<Perm, Status>>,
+    /// Open at login, as last read (None until the first read lands).
+    login: Option<bool>,
+    /// macOS answers slowly enough to drop frames, so reads run off the ui thread.
+    bg: std::sync::Arc<std::sync::Mutex<Bg>>,
+}
+
+#[derive(Default)]
+struct Bg {
+    running: bool,
+    result: Option<(Vec<(Perm, Status)>, bool)>,
 }
 
 /// One row: a permission and the enabled tools that want it.
@@ -99,31 +109,88 @@ pub fn rows(app: &App) -> Vec<Row> {
 }
 
 impl PermWatch {
-    /// Refresh statuses for `rows` (at most once a second).
-    pub fn poll(&mut self, app_tools: &[Box<dyn super::tool::Tool>], rows: &[Row], now: f64) {
-        if now - self.polled < 1.0 && !self.status.is_empty() {
+    /// Start a background read of `perms` and Open at login (at most once a second).
+    fn kick(&mut self, perms: Vec<Perm>, now: f64) {
+        if now - self.polled < 1.0 && self.polled > 0.0 {
             return;
         }
+        {
+            let mut b = self.bg.lock().unwrap();
+            if b.running {
+                return;
+            }
+            b.running = true;
+        }
         self.polled = now;
-        for r in rows {
-            let s = if let Some(d) = &self.demo {
-                d.get(&r.perm).copied().unwrap_or(Status::NotAsked)
-            } else {
-                match r.perm {
-                    Perm::Own { id, .. } => r.tools.first().map(|&i| app_tools[i].own_status(id)).unwrap_or(Status::NotAsked),
-                    p => p.status(),
-                }
-            };
-            let before = self.status.insert(r.perm, s);
-            if s == Status::Allowed && before.is_some_and(|b| b != Status::Allowed) {
-                self.allowed_at.insert(r.perm, now);
+        let bg = self.bg.clone();
+        std::thread::spawn(move || {
+            let v: Vec<(Perm, Status)> = perms.into_iter().map(|p| (p, p.status())).collect();
+            let login = crate::kit::login::enabled();
+            let mut b = bg.lock().unwrap();
+            b.result = Some((v, login));
+            b.running = false;
+        });
+    }
+
+    fn apply(&mut self, perm: Perm, s: Status, now: f64) {
+        let before = self.status.insert(perm, s);
+        if s == Status::Allowed && before.is_some_and(|b| b != Status::Allowed) {
+            self.allowed_at.insert(perm, now);
+        }
+        // allowed, or refused a while after asking: the wait is over
+        if s == Status::Allowed || (s == Status::Denied && self.asked.get(&perm).is_some_and(|t| now - t > 3.0)) {
+            self.asked.remove(&perm);
+        }
+    }
+
+    /// Refresh statuses for `rows`: system ones in the background, at most
+    /// once a second; a tool's own ones here (they're cheap).
+    pub fn poll(&mut self, app_tools: &[Box<dyn super::tool::Tool>], rows: &[Row], now: f64) {
+        if let Some(d) = self.demo.clone() {
+            for r in rows {
+                self.apply(r.perm, d.get(&r.perm).copied().unwrap_or(Status::NotAsked), now);
             }
-            if s != Status::NotAsked {
-                // a refusal ends the wait too
-                if s == Status::Allowed || self.asked.get(&r.perm).is_some_and(|t| now - t > 3.0) {
-                    self.asked.remove(&r.perm);
+            return;
+        }
+        let landed = self.bg.lock().unwrap().result.take();
+        if let Some((v, login)) = landed {
+            self.login = Some(login);
+            for (p, st) in v {
+                self.apply(p, st, now);
+            }
+        }
+        let due = now - self.polled >= 1.0 || self.polled == 0.0;
+        if due {
+            for r in rows {
+                if let Perm::Own { id, .. } = r.perm {
+                    if let Some(&i) = r.tools.first() {
+                        let st = app_tools[i].own_status(id);
+                        self.apply(r.perm, st, now);
+                    }
                 }
             }
+        }
+        let sys: Vec<Perm> = rows.iter().map(|r| r.perm).filter(|p| !matches!(p, Perm::Own { .. })).collect();
+        self.kick(sys, now);
+    }
+
+    /// Open at login, read in the background (macOS is slow to answer).
+    pub fn login_on(&mut self, demo: bool, now: f64) -> bool {
+        if demo {
+            return true;
+        }
+        if let Some((_, login)) = self.bg.lock().unwrap().result.as_ref() {
+            self.login = Some(*login);
+        }
+        self.kick(Vec::new(), now);
+        self.login.unwrap_or(false)
+    }
+
+    /// Turn Open at login on or off, and show it at once.
+    pub fn set_login(&mut self, on: bool) {
+        match crate::kit::login::set(on) {
+            Ok(()) => self.login = Some(on),
+            Err(e) => eprintln!("[login] {e}"),
         }
     }
 
@@ -554,12 +621,11 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     p.rect_filled(row, 10.0, SIDEBAR);
     icon(&p, Icon::Power, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), TEXT_SOFT);
     p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, "Open at login", bold(13.0), TEXT);
-    let on = if app.demo { true } else { crate::kit::login::enabled() };
+    let now = ui.ctx().input(|i| i.time);
+    let on = app.perm_watch.login_on(app.demo, now);
     let sw = Rect::from_min_size(Pos2::new(row.right() - 50.0, row.center().y - 11.0), Vec2::new(38.0, 22.0));
     if switch(ui, sw, ui.scope_id().with("setup-login"), on, true).clicked() && !app.demo {
-        if let Err(e) = crate::kit::login::set(!on) {
-            eprintln!("[login] {e}");
-        }
+        app.perm_watch.set_login(!on);
     }
     y += 62.0;
     // shortcuts of the enabled tools
