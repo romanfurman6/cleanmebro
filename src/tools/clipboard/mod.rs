@@ -1,22 +1,19 @@
 //! Clipboard: a history of everything copied (text, links, code, colors,
-//! images, files), a quick paste window on a system-wide shortcut, pinned
-//! entries, and privacy controls (password managers and concealed items are
+//! images, files), pinned entries, and privacy controls (password managers and concealed items are
 //! skipped, apps can be excluded, recording can be paused).
 //!
 //! Page routes: "" (as left), "history", "settings".
 
 mod mac;
-mod quick;
 mod settings;
 mod store;
 mod ui;
 mod watch;
 
-use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
+use crate::core::tool::{Action, Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
 use crate::kit::glass::Icon;
-use crate::kit::hotkeys::Keys;
 use egui::{Color32, Rect, Ui};
-use settings::{Layout, Settings};
+use settings::Settings;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -28,12 +25,6 @@ use store::{Clip, Kind, Store};
 pub const ID: ToolId = "clipboard";
 const CARD: &str = "recent";
 pub const TINT: Color32 = crate::kit::glass::BLUE;
-
-/// What the global shortcut starts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cmd {
-    Quick,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -89,18 +80,11 @@ pub struct Clipboard {
     /// Where settings live; None for sample data (screenshots), which never saves.
     dir: Option<PathBuf>,
     store: Store,
-    keys: Option<Keys<Cmd>>,
-    key_error: Option<String>,
-    /// Recording a new shortcut.
-    recording: bool,
     shared: Arc<watch::Shared>,
     clips_tx: Sender<Clip>,
     clips: Receiver<Clip>,
     watching: bool,
     pause: Option<Pause>,
-    quick: Option<quick::Quick>,
-    /// Open quick paste on the next ui pass.
-    want_quick: bool,
     tab: Tab,
     filter: Filter,
     search: String,
@@ -120,10 +104,6 @@ pub struct Clipboard {
     rows_memo: std::cell::RefCell<Option<RowsMemo>>,
     /// Shell requests made outside a ui pass.
     actions: Vec<Action>,
-    /// Asked for paste but Accessibility is off: show the hint in the panel.
-    needs_access: bool,
-    /// Screenshots only: draw quick paste inside the page.
-    demo_quick: Option<quick::Quick>,
     ctx: egui::Context,
     demo: bool,
 }
@@ -143,16 +123,11 @@ impl Clipboard {
             settings,
             dir,
             store,
-            keys: if env.demo { None } else { Keys::new(env.ctx.clone()) },
-            key_error: None,
-            recording: false,
             shared: Arc::new(watch::Shared::default()),
             clips_tx,
             clips,
             watching: false,
             pause: None,
-            quick: None,
-            want_quick: false,
             tab: Tab::History,
             filter: Filter::All,
             search: String::new(),
@@ -167,15 +142,12 @@ impl Clipboard {
             visible_memo: Default::default(),
             rows_memo: Default::default(),
             actions: Vec::new(),
-            needs_access: false,
-            demo_quick: None,
             ctx: env.ctx.clone(),
             demo: env.demo,
         };
         let now = now_ms();
         c.store.trim(c.settings.limits(), now);
         c.sync_shared();
-        c.apply_keys();
         c.start_watching();
         c
     }
@@ -208,13 +180,6 @@ impl Clipboard {
     fn stop_watching(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
         self.watching = false;
-    }
-
-    fn apply_keys(&mut self) {
-        if let Some(k) = &mut self.keys {
-            let wanted: Vec<(Cmd, crate::kit::hotkeys::Shortcut)> = self.settings.shortcut.iter().map(|s| (Cmd::Quick, s.clone())).collect();
-            self.key_error = k.apply(&wanted).into_iter().next().map(|(_, e)| e);
-        }
     }
 
     fn hud(&mut self, msg: impl Into<String>) {
@@ -315,47 +280,6 @@ impl Clipboard {
         }
     }
 
-    /// Copy, then paste into the app that was in front (when allowed).
-    fn paste(&mut self, id: u64, plain: bool, into: Option<i32>) {
-        if !self.copy(id, plain) {
-            return;
-        }
-        let can = mac::can_paste();
-        match into {
-            Some(pid) if self.settings.paste_now && can => {
-                mac::activate_pid(pid);
-                std::thread::spawn(|| {
-                    // let the app come to the front first
-                    std::thread::sleep(Duration::from_millis(160));
-                    mac::press_paste();
-                });
-            }
-            _ if self.settings.paste_now && !can && !self.demo => {
-                self.needs_access = true;
-                if let Some(pid) = into {
-                    mac::activate_pid(pid);
-                }
-                self.hud("Copied. Allow Accessibility in Settings to paste right away.");
-            }
-            _ => {
-                if let Some(pid) = into {
-                    mac::activate_pid(pid);
-                }
-                self.hud(if plain { "Copied as plain text" } else { "Copied" });
-            }
-        }
-    }
-
-    fn open_quick(&mut self) {
-        if self.quick.is_some() {
-            self.quick = None;
-            return;
-        }
-        let front = mac::front_app().filter(|(_, _, pid)| *pid != mac::own_pid()).map(|(_, _, pid)| pid);
-        self.quick = Some(quick::Quick::new(self.settings.layout, front));
-        self.ctx.request_repaint();
-    }
-
     /// Entries that pass the filter and search, pinned first.
     fn visible(&self, filter: Filter, query: &str) -> Vec<u64> {
         let rev = self.store.rev();
@@ -445,26 +369,17 @@ impl Tool for Clipboard {
         "Create"
     }
     fn about(&self) -> &'static str {
-        "History of everything you copy, with quick paste"
+        "History of everything you copy"
     }
     fn set_on(&mut self, on: bool) {
         if on {
-            self.apply_keys();
             self.start_watching();
         } else {
-            if let Some(k) = &mut self.keys {
-                k.clear();
-            }
             self.stop_watching();
-            self.quick = None;
-            self.recording = false;
         }
     }
     fn sidebar_meta(&self) -> String {
-        if self.paused() {
-            return "Paused".into();
-        }
-        self.settings.shortcut.as_ref().map(|s| s.display()).unwrap_or_default()
+        if self.paused() { "Paused".into() } else { String::new() }
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
         vec![WidgetSpec { id: CARD, title: "Clipboard", about: "Your latest clips; click one to copy it again.", sizes: ALL_SIZES, size: Size::S11, default_on: true }]
@@ -483,34 +398,9 @@ impl Tool for Clipboard {
         }
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        if let Some(mut q) = self.demo_quick.take() {
-            // the window's own size, as it shows over other apps
-            let r = Rect::from_min_size(rect.min + egui::vec2(24.0, 24.0), q.size().min(rect.size() - egui::vec2(48.0, 48.0)));
-            quick::draw(self, &mut q, ui, r);
-            self.demo_quick = Some(q);
-            return;
-        }
         ui::page(self, ui, rect, cx);
     }
-    fn recommendations(&self) -> Vec<Recommendation> {
-        if !self.needs_access || mac::can_paste() {
-            return Vec::new();
-        }
-        vec![Recommendation {
-            priority: 35,
-            badge: badge(),
-            title: "Clipboard can't paste for you yet".into(),
-            body: "Allow Accessibility so quick paste can type ⌘V in the app you were using.".into(),
-            action: "Settings".into(),
-            go: Action::OpenPage { tool: ID.into(), route: "settings".into() },
-        }]
-    }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
-        if let Some(k) = &self.keys {
-            if !self.recording && k.poll().contains(&Cmd::Quick) {
-                self.want_quick = true;
-            }
-        }
         while let Ok(c) = self.clips.try_recv() {
             self.take(c);
         }
@@ -537,20 +427,15 @@ impl Tool for Clipboard {
                 ctx.request_repaint_after(Duration::from_secs(30));
             }
         }
-        if self.want_quick {
-            self.want_quick = false;
-            self.open_quick();
-        }
         if self.hud.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
-        self.quick.is_some() || self.hud.is_some() || !self.actions.is_empty()
+        self.hud.is_some() || !self.actions.is_empty()
     }
     fn windows(&mut self, ctx: &egui::Context, cx: &mut Cx) {
         for a in self.actions.drain(..) {
             cx.push(a);
         }
-        quick::show(self, ctx);
         ui::hud(self, ctx);
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {
@@ -562,11 +447,6 @@ impl Tool for Clipboard {
             }
             "clipboard-settings" => {
                 self.tab = Tab::Settings;
-                Some(View::Page)
-            }
-            "clipboard-quick" | "clipboard-list" => {
-                let layout = if view == "clipboard-list" { Layout::List } else { Layout::Cards };
-                self.demo_quick = Some(quick::Quick::new(layout, None));
                 Some(View::Page)
             }
             _ => None,

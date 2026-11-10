@@ -32,15 +32,11 @@ impl Kind {
         }
     }
 
-    /// The color strip on the entry's card.
+    /// The kind's mark: blue for links, grey for the rest (no rainbow).
     pub fn tint(self) -> Color32 {
         match self {
-            Kind::Text => Color32::from_rgb(0x63, 0x63, 0x66),
-            Kind::Code => Color32::from_rgb(0x24, 0x8A, 0x3D),
-            Kind::Link => Color32::from_rgb(0x0B, 0x6B, 0xD8),
-            Kind::Image => Color32::from_rgb(0x8E, 0x44, 0xAD),
-            Kind::Color => Color32::from_rgb(0x2E, 0x9E, 0x8F),
-            Kind::File => Color32::from_rgb(0xC7, 0x80, 0x1F),
+            Kind::Link => Color32::from_rgb(0x0A, 0x84, 0xFF),
+            _ => Color32::from_rgb(0x8E, 0x8E, 0x93),
         }
     }
 }

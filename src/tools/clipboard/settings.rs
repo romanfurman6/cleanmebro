@@ -1,18 +1,8 @@
 //! Clipboard's own settings, saved as JSON in the app's data folder.
 
 use super::store::Limits;
-use crate::kit::hotkeys::Shortcut;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-
-/// How the quick paste window shows entries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Layout {
-    /// A shelf of big preview cards.
-    Cards,
-    /// A compact list with a preview beside it.
-    List,
-}
 
 /// History length choices bound the stepper.
 pub const KEEP_MIN: usize = 20;
@@ -32,12 +22,6 @@ pub struct Ignored {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// Opens quick paste.
-    pub shortcut: Option<Shortcut>,
-    pub layout: Layout,
-    /// Paste into the app in front right after choosing (needs Accessibility);
-    /// off, choosing only copies.
-    pub paste_now: bool,
     pub keep: usize,
     pub max_days: u32,
     pub keep_images: bool,
@@ -64,9 +48,6 @@ pub fn default_ignored() -> Vec<Ignored> {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            shortcut: Some(Shortcut { cmd: true, shift: false, alt: true, ctrl: false, key: "V".into() }),
-            layout: Layout::Cards,
-            paste_now: true,
             keep: 200,
             max_days: 30,
             keep_images: true,
@@ -116,23 +97,20 @@ mod tests {
     #[test]
     fn defaults() {
         let s = Settings::default();
-        assert_eq!(s.shortcut.as_ref().unwrap().display(), "⌥⌘V");
-        assert!(s.shortcut.as_ref().unwrap().conflict().is_none());
         assert!(!s.record_concealed, "passwords stay out unless turned on");
         assert!(s.ignores("com.1password.1password"));
         assert!(!s.ignores(""));
-        assert_eq!(s.layout, Layout::Cards);
     }
 
     #[test]
     fn saves_and_loads() {
         let dir = std::env::temp_dir().join(format!("cmb-clip-settings-{}", std::process::id()));
-        let s = Settings { keep: 5, max_days: 3, layout: Layout::List, ..Default::default() };
+        let s = Settings { keep: 5, max_days: 3, dedupe: false, ..Default::default() };
         save(&dir, &s);
         let back = load(&dir);
         assert_eq!(back.keep, KEEP_MIN);
         assert_eq!(back.max_days, 30);
-        assert_eq!(back.layout, Layout::List);
+        assert!(!back.dedupe);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
