@@ -596,6 +596,7 @@ impl eframe::App for App {
         // keep animations and live numbers moving
         ctx.request_repaint_after(std::time::Duration::from_millis(if self.visible { 500 } else { 2000 }));
         self.screenshot_step(&ctx);
+        crate::kit::viewport::end_pass();
     }
 }
 
