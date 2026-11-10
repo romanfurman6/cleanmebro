@@ -1,17 +1,111 @@
 # CleanMeBro
 
-A glassy macOS menu bar companion written in Rust (eframe/egui). It combines a
-Mac health panel, Claude plan limits, an AI-judged Cleanup and Disk Map.
+One menu bar app for keeping a Mac in shape. It puts a disk cleaner, an app
+uninstaller, startup items, a disk map, fan control, a screenshot and screen
+recording tool, clipboard history and keep-awake in one place, and every part
+can be turned off.
 
-## Features
+Written in Rust (eframe/egui) with native AppKit, ScreenCaptureKit and Core
+Animation where it matters. Everything runs locally. The optional Claude
+integration only ever sees file paths, never file contents.
 
-| Area | What it does |
-|---|---|
-| **Menu bar panel** | Tray icon (title = Claude session %) opens a 440 pt glass panel of widgets: Mac Health verdict, Claude card, tiles for disk, memory, battery, CPU, network, connected devices, plus "Today's Recommendation". Clicking a tile opens a detail sheet beside the panel. Gear → **Customize widgets…** turns widgets on/off and reorders them; the choice is saved. |
-| **Claude** | Plan and limits from the Claude CLI (`claude auth status`, `claude -p /usage`, which spends no tokens). Local token activity is counted from `~/.claude/projects` logs (counts only). |
-| **Cleanup** | Finds junk by rule (System Junk, Xcode, app and developer caches, AI clutter). Claude judges each **path** (never file contents) as safe / ask / keep. Anything unclear waits for your OK. Items go to the Trash by default. |
-| **Disk Map** | Measures a folder tree, then shows it as a drill-down treemap. Selected items go to the Trash after review. |
-| **Clipboard** | History of what you copy (text, links, code, colors, images, files), kept on this Mac. ⌥⌘V opens quick paste over any app: big preview cards or a list, type to search, ↵ pastes (needs Accessibility), ⇧↵ pastes plain text, ⌘1–9 pick directly. Pin entries, pause recording, exclude apps. Password managers and items apps mark as concealed are skipped unless turned on. |
+<p align="center">
+  <img src="docs/images/panel.png" width="380" alt="The menu bar panel">
+</p>
+
+## What it does
+
+### The menu bar panel
+
+Click the menu bar icon for a panel of widgets: disk, memory, CPU, battery,
+network, Bluetooth device batteries, startup items, Claude limits and fans,
+plus one recommendation for today. Widgets come in several sizes; drag them
+around and pick which to show in **Settings › Widgets**. Clicking a widget
+opens its detail sheet or its tool page in the full window.
+
+### Cleanup
+
+Finds junk by rule: user and app caches, logs, Xcode data, package manager
+downloads, leftovers of AI tools and the Trash. Claude can review every path
+and mark it **Safe**, **Ask** or **Keep**; anything unclear waits for your OK.
+What you keep is remembered and hidden next time. Items go to the Trash by
+default.
+
+![Cleanup results](docs/images/results.png)
+
+### Disk Map
+
+Measures a disk or folder and shows it as a treemap you can drill into. Pick
+what to remove and send it to the Trash after a review. It runs only when you
+ask.
+
+![Disk Map](docs/images/lens.png)
+
+### Uninstaller
+
+Lists your apps with size and last use. Removing one also removes its
+support files, caches, preferences, containers and launch agents, which are
+all shown before anything moves. It also finds leftovers of apps that are
+already gone, and you can drop an app on a widget to uninstall it.
+
+![Uninstaller](docs/images/uninstaller.png)
+
+### Startup
+
+Login items, launch agents and launch daemons in one list, with what each one
+runs and when. It suggests what's safe to turn off (updaters, helpers of
+removed apps) and turns them off in one click, with undo. It tells you when
+something new adds itself.
+
+![Startup items](docs/images/startup.png)
+
+### Capture
+
+Screenshots of an area, a window or the whole screen (⇧⌘2), with an editor
+for arrows, shapes, text, numbered steps, highlight, blur, crop, a
+ruler and a color picker. Screen recording
+(⇧⌘0) records a display, a window or an area with system audio, microphone
+and a camera bubble. Recordings open in a small editor with trim, local
+speech-to-text (Whisper) and noise removal, and can be uploaded to your own
+S3-compatible storage for a share link.
+
+![Screenshot editor](docs/images/capture-editor.png)
+
+### Clipboard
+
+A history of what you copy (text, links, code, colors, images and files),
+kept on this Mac. ⌥⌘V opens quick paste over any app: type to search, ↵ to
+paste. Password managers and concealed items are skipped.
+
+### Fan Control
+
+Fan speeds and temperatures, with Auto, Quiet, Fixed, Curve and Max modes.
+Changing speed uses a small privileged helper that you install once.
+
+![Fan Control](docs/images/fan-detail.png)
+
+### Keep Awake
+
+Keeps the Mac awake with one switch, or by itself while Claude Code is
+working (and a few minutes after, so a pause between prompts doesn't put it
+to sleep). It uses the same power assertions as `caffeinate`.
+
+![Keep Awake](docs/images/awake.png)
+
+### Claude
+
+Your Claude plan limits (session, week, Opus) and how many tokens were used on
+this Mac, read from the Claude CLI without spending tokens. The session
+percentage can sit in the menu bar.
+
+![Claude limits](docs/images/claude.png)
+
+### Settings
+
+Turn any tool off and it disappears with its widgets and pages. CleanMeBro
+opens at login by default; you can turn that off here.
+
+![Settings](docs/images/settings-tools.png)
 
 Every rule and threshold, with its source, is in [docs/MECHANICS.md](docs/MECHANICS.md).
 
@@ -111,11 +205,19 @@ entry. Nothing in `src/core/` changes.
 │   │   └── mechanics.rs     numbers/thresholds from docs/MECHANICS.md
 │   └── tools/
 │       ├── mod.rs           the tool list (the only place that names tools)
-│       ├── system/          Mac health: readings, widgets, detail sheets
-│       ├── claude/          Claude limits: card, sheet, page, tray title
-│       ├── cleanup/         junk rules, AI judge, removal, Cleanup page, --scan-report
-│       └── lens/            Disk Map: folder measuring and page
+│       ├── system/          Mac Health: readings, widgets, detail sheets
+│       ├── cleanup/         junk rules, AI judge, removal, --scan-report
+│       ├── lens/            Disk Map: folder measuring and treemap
+│       ├── uninstaller/     apps, leftovers, drop-to-uninstall widget
+│       ├── startup/         login items, launch agents and daemons
+│       ├── capture/         screenshots, editor, screen recording, sharing
+│       ├── clipboard/       clipboard history and quick paste
+│       ├── fan/             fan speeds, temperatures, helper
+│       ├── keep_awake/      keep the Mac awake, also while Claude works
+│       └── claude/          Claude limits: card, sheet, page, tray title
+├── vendor/eframe/        eframe 0.37 with one patch (see Cargo.toml)
 ├── docs/
+│   ├── images/          README screenshots
 │   ├── MECHANICS.md     rules, thresholds and where each came from
 │   └── mechanics.json   same data, machine-readable
 ├── assets/
@@ -127,7 +229,7 @@ entry. Nothing in `src/core/` changes.
 └── .github/workflows/macos.yml   CI: test, build, upload the app
 ```
 
-Screenshots are not kept in git. Render any view locally with
+The images in `docs/images/` are rendered from sample data with
 `--screenshot <file.png> --view <name>`.
 
 ## Safety
