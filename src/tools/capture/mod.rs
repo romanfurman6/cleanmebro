@@ -696,6 +696,10 @@ impl Capture {
     fn shown_folder(&self) -> String {
         let home = dirs::home_dir().map(|h| h.display().to_string()).unwrap_or_default();
         let f = self.settings.folder.display().to_string();
+        // sample data for screenshots lives in a temp folder
+        if f.contains("cleanmebro-capture-demo") {
+            return "~/Pictures/Screenshots".into();
+        }
         if !home.is_empty() && f.starts_with(&home) {
             f.replacen(&home, "~", 1)
         } else {

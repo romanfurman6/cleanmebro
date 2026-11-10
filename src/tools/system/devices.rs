@@ -366,10 +366,10 @@ mod tests {
     use super::*;
 
     const PROFILER: &str = r#"{"SPBluetoothDataType":[{"controller_properties":{},"device_connected":[
-        {"Roman's AirPods Pro":{"device_address":"AA:BB:CC:DD:EE:01","device_batteryLevelCase":"71%","device_batteryLevelLeft":"42%","device_batteryLevelRight":"38%","device_minorType":"Headphones"}},
+        {"Alex's AirPods Pro":{"device_address":"AA:BB:CC:DD:EE:01","device_batteryLevelCase":"71%","device_batteryLevelLeft":"42%","device_batteryLevelRight":"38%","device_minorType":"Headphones"}},
         {"Magic Keyboard":{"device_address":"AA:BB:CC:DD:EE:02","device_batteryLevelMain":"82%","device_minorType":"Keyboard"}},
         {"MX Master 3S":{"device_address":"AA:BB:CC:DD:EE:03","device_minorType":"Mouse"}},
-        {"Roman's iPhone":{"device_address":"AA:BB:CC:DD:EE:04","device_minorType":"Smartphone"}},
+        {"Alex's iPhone":{"device_address":"AA:BB:CC:DD:EE:04","device_minorType":"Smartphone"}},
         {"AirPods Max":{"device_batteryLevelMain":"37%","device_minorType":"Headphones"}}
     ]}]}"#;
 
