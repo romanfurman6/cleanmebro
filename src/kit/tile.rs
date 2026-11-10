@@ -10,8 +10,6 @@ use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKi
 pub const R_TILE: f32 = 12.0;
 /// Inner padding of a widget.
 pub const PAD: f32 = 12.0;
-/// Height of the title line of a Medium or Large widget (no caption).
-pub const HEAD_H: f32 = 16.0;
 
 /// The card behind a widget. Hover lifts it; `selected` (its sheet is
 /// open) adds the blue ring. A click is the widget's main action.

@@ -478,7 +478,6 @@ impl Tool for Startup {
         let more = if list.len() > 2 { format!(" and {} more", list.len() - 2) } else { String::new() };
         vec![Recommendation {
             priority: 8,
-            badge: badge(),
             title: format!("{} start with your Mac for nothing", plural(list.len(), "item")),
             body: format!("{}{more}. Turning them off removes nothing.", names.join(", ")),
             action: "Review".into(),
