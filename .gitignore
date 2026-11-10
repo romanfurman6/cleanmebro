@@ -30,3 +30,6 @@ docs/feedback/
 
 # Local research notes
 research/
+
+# Vendored crates keep their own assets
+!vendor/**/*.png
