@@ -882,7 +882,6 @@ impl Tool for Capture {
         }
         vec![Recommendation {
             priority: 40,
-            badge: badge(),
             title: "Capture needs Screen Recording".into(),
             body: "Without it, captures show only the desktop. Turn it on in System Settings.".into(),
             action: "Settings".into(),

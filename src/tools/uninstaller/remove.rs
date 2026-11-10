@@ -301,12 +301,12 @@ mod tests {
     fn reset_keeps_the_app_and_refuses_odd_paths() {
         let f = Fake::new("reset");
         let app = f.file("apps/Thing.app/x", "x").parent().unwrap().to_path_buf();
-        let support = f.lib("Application Support/com.thing.app/db");
+        let support = f.lib("Application Support/com.reset.app/db");
         let outside = f.file("elsewhere/file", "x");
         let item = |p: &Path, kind| Item { path: p.to_path_buf(), kind, bytes: 1, admin: false, selected: true };
         let t = Target {
             name: "Thing".into(),
-            id: "com.thing.app".into(),
+            id: "com.reset.app".into(),
             app: Some(app.clone()),
             items: vec![item(&app, Kind::App), item(support.parent().unwrap(), Kind::Support), item(&outside, Kind::Support)],
             reset: true,

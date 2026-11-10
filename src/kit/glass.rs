@@ -73,8 +73,6 @@ pub mod sp {
     pub const L: f32 = 16.0;
     /// Between sections.
     pub const XL: f32 = 24.0;
-    /// Page margin.
-    pub const XXL: f32 = 32.0;
     /// A row in a list.
     pub const ROW_H: f32 = 44.0;
     /// A legend row.
@@ -443,13 +441,6 @@ pub fn tool_chip(p: &Painter, rect: Rect, glyph: Icon, color: Color32) {
 /// A tint made readable as a glyph or text on a dark card (blue → lighter blue).
 pub fn lift(c: Color32) -> Color32 {
     if c == BLUE { ACCENT } else { c }
-}
-
-/// The dashed chip of a planned tool.
-pub fn planned_chip(p: &Painter, rect: Rect, glyph: Icon) {
-    let r = (rect.width() * 0.27).round();
-    dashed_rect(p, rect, r, white(72));
-    icon(p, glyph, Rect::from_center_size(rect.center(), rect.size() * 0.6), TEXT_FAINT);
 }
 
 /// 1 pt separator line.

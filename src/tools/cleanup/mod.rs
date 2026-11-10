@@ -141,12 +141,10 @@ impl Tool for Cleanup {
         page::page(self, ui, rect, cx);
     }
     fn recommendations(&self) -> Vec<Recommendation> {
-        let blue = tint::CLEANUP;
         let go = Action::OpenPage { tool: ID.into(), route: String::new() };
         // always on offer, at the lowest priority
         let mut v = vec![Recommendation {
             priority: 0,
-            badge: Badge { icon: Icon::Broom, color: blue },
             title: "Let's give your Mac a quick clean".into(),
             body: if self.demo || crate::kit::claude_code::availability().ready() {
                 "Claude checks each cache and log path and tells you what's safe to remove.".into()
@@ -160,7 +158,6 @@ impl Tool for Cleanup {
         if claude_junk > 50_000_000 {
             v.push(Recommendation {
                 priority: 4,
-                badge: Badge { icon: Icon::Broom, color: blue },
                 title: "Claude caches can be trimmed".into(),
                 body: format!("{} of old Claude caches, logs and versions are safe to remove.", human_bytes(claude_junk)),
                 action: "Review Cleanup".into(),

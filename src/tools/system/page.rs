@@ -59,7 +59,7 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     if let Some(rec) = recs.first() {
         let bw = button_width(&p, &rec.action, BTN_PRIMARY);
         let br = Rect::from_min_max(Pos2::new(right - bw, btns.top()), Pos2::new(right, btns.bottom()));
-        if pill_button(ui, br, &rec.action, BTN_PRIMARY, true).clicked() {
+        if pill_button(ui, br, &rec.action, BTN_PRIMARY, true).on_hover_text(&rec.body).clicked() {
             cx.push(rec.go.clone());
         }
     }

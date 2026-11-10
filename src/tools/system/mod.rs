@@ -9,7 +9,7 @@ mod sheets;
 mod ui;
 
 use crate::core::tool::{Action, Badge, Cx, PanelHeader, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
-use crate::kit::glass::{human_bytes, tint, Icon, BLUE};
+use crate::kit::glass::{human_bytes, tint, Icon};
 use crate::kit::mechanics as m;
 use egui::{Rect, Ui};
 use monitor::Level;
@@ -87,27 +87,26 @@ impl Tool for System {
     /// overfill 5); memory and restart are slotted in by us.
     fn recommendations(&self) -> Vec<Recommendation> {
         let s = self.mon.lock().unwrap().clone();
-        let blue = |icon| Badge { icon, color: BLUE };
         let detail = |d: &str| Action::ShowDetail { tool: ID.into(), detail: d.into(), toggle: true };
         let page = |t: &str| Action::OpenPage { tool: t.into(), route: String::new() };
         let mut v = Vec::new();
         if !s.smart_status.is_empty() && !s.smart_status.eq_ignore_ascii_case("Verified") {
-            v.push(Recommendation { priority: m::PRIORITY_DRIVE_HEALTH, badge: blue(Icon::Disk), title: "Your drive needs attention".into(), body: "Back up immediately. This drive is in bad condition and should be replaced.".into(), action: "Show Disk".into(), go: detail("storage") });
+            v.push(Recommendation { priority: m::PRIORITY_DRIVE_HEALTH, title: "Your drive needs attention".into(), body: "Back up immediately. This drive is in bad condition and should be replaced.".into(), action: "Show Disk".into(), go: detail("storage") });
         }
         if s.battery_level() == Level::Critical {
-            v.push(Recommendation { priority: m::PRIORITY_BATTERY_HEALTH, badge: blue(Icon::Battery(s.battery.percent)), title: "Battery health is critical".into(), body: "Your battery is in bad condition and should be replaced soon.".into(), action: "Show Battery".into(), go: detail("battery") });
+            v.push(Recommendation { priority: m::PRIORITY_BATTERY_HEALTH, title: "Battery health is critical".into(), body: "Your battery is in bad condition and should be replaced soon.".into(), action: "Show Battery".into(), go: detail("battery") });
         }
         if s.disk_level() != Level::Good {
-            v.push(Recommendation { priority: m::PRIORITY_OUT_OF_DISK, badge: blue(Icon::Map), title: "Low disk space".into(), body: format!("Less than {} is free. See what takes the most space.", human_bytes(m::disk_alert_threshold(s.disk_total))), action: "Open Disk Map".into(), go: page("lens") });
+            v.push(Recommendation { priority: m::PRIORITY_OUT_OF_DISK, title: "Low disk space".into(), body: format!("Less than {} is free. See what takes the most space.", human_bytes(m::disk_alert_threshold(s.disk_total))), action: "Open Disk Map".into(), go: page("lens") });
         }
         if s.mem_level() != Level::Good {
-            v.push(Recommendation { priority: 15, badge: blue(Icon::Memory), title: "Memory is under pressure".into(), body: "Quitting a few unused apps will give your Mac room to breathe.".into(), action: "Show Memory".into(), go: detail("memory") });
+            v.push(Recommendation { priority: 15, title: "Memory is under pressure".into(), body: "Quitting a few unused apps will give your Mac room to breathe.".into(), action: "Show Memory".into(), go: detail("memory") });
         }
         if s.uptime_warning() {
-            v.push(Recommendation { priority: 10, badge: blue(Icon::Power), title: "Time for a restart".into(), body: format!("Your Mac has been running for {} days. A restart clears temporary files and memory.", s.uptime_days()), action: "Show CPU".into(), go: detail("cpu") });
+            v.push(Recommendation { priority: 10, title: "Time for a restart".into(), body: format!("Your Mac has been running for {} days. A restart clears temporary files and memory.", s.uptime_days()), action: "Show CPU".into(), go: detail("cpu") });
         }
         if s.trash_overfill() {
-            v.push(Recommendation { priority: m::PRIORITY_TRASH_OVERFILL, badge: blue(Icon::Trash), title: "Empty Trash Bins".into(), body: format!("Your Trash holds {}. Empty it to get the space back.", human_bytes(s.trash_bytes.unwrap_or(0))), action: "Review Cleanup".into(), go: page("cleanup") });
+            v.push(Recommendation { priority: m::PRIORITY_TRASH_OVERFILL, title: "Empty Trash Bins".into(), body: format!("Your Trash holds {}. Empty it to get the space back.", human_bytes(s.trash_bytes.unwrap_or(0))), action: "Review Cleanup".into(), go: page("cleanup") });
         }
         v
     }

@@ -118,7 +118,6 @@ pub struct PanelHeader {
 /// priority across all tools wins.
 pub struct Recommendation {
     pub priority: u32,
-    pub badge: Badge,
     pub title: String,
     pub body: String,
     /// Button label.

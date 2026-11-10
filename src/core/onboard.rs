@@ -405,11 +405,6 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT);
     p.text(Pos2::new(c.x, c.y + 156.0), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(14.0), TEXT_FAINT);
     let r = Rect::from_center_size(Pos2::new(c.x, c.y + 214.0), Vec2::new(128.0, 40.0));
-    // breathing glow once everything has landed
-    if t > 1.8 {
-        let g = ((t - 1.8) * 2.4).sin() * 0.5 + 0.5;
-        p.rect_filled(r.expand(6.0 * g), 14.0, with_alpha(BLUE, 0.18 * g));
-    }
     pill_button(ui, r, "Set up", BTN_PRIMARY, true).clicked()
 }
 
@@ -459,9 +454,8 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
             let o = app.tool_on(i);
             let s = ui.ctx().animate_bool_with_time(id.with("on"), o, 0.18);
             let hov = ui.ctx().animate_bool(id.with("h"), resp.hovered());
-            let fill = lerp_color(SIDEBAR, Color32::from_rgb(0x14, 0x2A, 0x45), s);
-            p.rect_filled(r, 10.0, lerp_color(fill, white(30), hov * 0.15).gamma_multiply(a));
-            p.rect_stroke(r, 10.0, Stroke::new(1.0, lerp_color(white(12), with_alpha(BLUE, 0.7), s).gamma_multiply(a)), StrokeKind::Inside);
+            p.rect_filled(r, 10.0, lerp_color(CARD, white(30), hov * 0.15).gamma_multiply(a));
+            p.rect_stroke(r, 10.0, Stroke::new(1.0, white(12).gamma_multiply(a)), StrokeKind::Inside);
             let ib = Rect::from_min_size(Pos2::new(r.left() + 12.0, r.center().y - 17.0), Vec2::splat(34.0));
             p.rect_filled(ib, 9.0, lerp_color(white(16), BLUE, s));
             let b = app.tools[i].badge();
@@ -544,14 +538,14 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         let st = app.perm_watch.status(r.perm);
         let waiting = app.perm_watch.waiting(r.perm, now);
         let ok = st == Status::Allowed;
-        p.rect_filled(rr, 10.0, SIDEBAR.gamma_multiply(a));
+        p.rect_filled(rr, 10.0, CARD.gamma_multiply(a));
         let ib = Rect::from_min_size(Pos2::new(rr.left() + 12.0, rr.center().y - 15.0), Vec2::splat(30.0));
         let tint = match st {
             Status::Allowed => GREEN,
             Status::Denied => Color32::from_rgb(0xFF, 0x9F, 0x0A),
             Status::NotAsked => TEXT_SOFT,
         };
-        p.rect_filled(ib, 8.0, if st == Status::NotAsked { white(16) } else { with_alpha(tint, 0.16) });
+        p.rect_filled(ib, 8.0, white(16));
         icon(&p, r.perm.icon(), ib.shrink(7.0), tint);
         p.text(Pos2::new(ib.right() + 12.0, rr.center().y), Align2::LEFT_CENTER, r.perm.name(), bold(13.0), TEXT.gamma_multiply(a));
         // the tools that want it
@@ -566,7 +560,6 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
             let since = app.perm_watch.allowed_at.get(&r.perm).map(|t0| (now - t0) as f32).unwrap_or(1.0);
             let z = pop(since / 0.45);
             let c = Pos2::new(right - 13.0, rr.center().y);
-            p.circle_filled(c, 13.0 * z, with_alpha(GREEN, 0.18));
             check(&p, c, 12.0 * z, GREEN);
         } else if waiting {
             let c = Pos2::new(right - 8.0, rr.center().y);
@@ -631,7 +624,7 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     y += 46.0;
     // open at login
     let row = Rect::from_min_size(Pos2::new(left.left(), y), Vec2::new(left.width(), 52.0));
-    p.rect_filled(row, 10.0, SIDEBAR);
+    p.rect_filled(row, 10.0, CARD);
     icon(&p, Icon::Power, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), TEXT_SOFT);
     p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, "Open at login", bold(13.0), TEXT);
     let now = ui.ctx().input(|i| i.time);
@@ -649,7 +642,7 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     for (k, (ic, label, keys)) in keys.iter().enumerate() {
         let a = ease((t - 0.08 * (k + 1) as f32) / 0.4);
         let row = Rect::from_min_size(Pos2::new(left.left(), y - (1.0 - a) * 8.0), Vec2::new(left.width(), 44.0));
-        p.rect_filled(row, 10.0, SIDEBAR.gamma_multiply(a));
+        p.rect_filled(row, 10.0, CARD.gamma_multiply(a));
         icon(&p, *ic, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), TEXT_SOFT.gamma_multiply(a));
         p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, *label, font(13.0), TEXT.gamma_multiply(a));
         keycaps(&p, Pos2::new(row.right() - 12.0, row.center().y), keys);

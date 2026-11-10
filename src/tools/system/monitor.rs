@@ -517,6 +517,7 @@ fn vm_counts() -> Option<(u64, u64, u64)> {
 }
 
 /// (app memory, wired, compressed) bytes from page counts.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn mem_split(internal: u64, purgeable: u64, wired: u64, compressed: u64, page: u64) -> (u64, u64, u64) {
     (internal.saturating_sub(purgeable) * page, wired * page, compressed * page)
 }

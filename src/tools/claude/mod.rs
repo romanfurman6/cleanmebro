@@ -81,7 +81,6 @@ impl Tool for Claude {
         let Some(l) = info.session().filter(|l| l.pct >= 80.0) else { return Vec::new() };
         vec![Recommendation {
             priority: 60,
-            badge: badge(),
             title: format!("Your {} session is almost used up", info.provider),
             body: format!("{:.0}% of the current 5-hour session is used. It {}.", l.pct, ui::short_reset(&l.resets)),
             action: "See Limits".into(),
