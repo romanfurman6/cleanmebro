@@ -515,7 +515,7 @@ fn keycaps(p: &egui::Painter, right: Pos2, keys: &str) {
         v
     };
     for c in caps.iter().rev() {
-        let f: FontId = mono(12.0);
+        let f: FontId = font(13.0);
         let w = p.layout_no_wrap(c.clone(), f.clone(), TEXT).size().x.max(10.0) + 12.0;
         let r = Rect::from_min_size(Pos2::new(x - w, right.y - 11.0), Vec2::new(w, 22.0));
         p.rect_filled(r, 5.0, white(26));
