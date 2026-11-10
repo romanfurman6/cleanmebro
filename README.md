@@ -69,6 +69,8 @@ and a camera bubble. Recordings open in a small editor with trim, local
 speech-to-text (Whisper) and noise removal, and can be uploaded to your own
 S3-compatible storage for a share link.
 
+![Capture history](docs/images/capture.png)
+
 ![Screenshot editor](docs/images/capture-editor.png)
 
 ### Clipboard
@@ -76,6 +78,8 @@ S3-compatible storage for a share link.
 A history of what you copy (text, links, code, colors, images and files),
 kept on this Mac. ⌥⌘V opens quick paste over any app: type to search, ↵ to
 paste. Password managers and concealed items are skipped.
+
+![Clipboard history](docs/images/clipboard.png)
 
 ### Fan Control
 
