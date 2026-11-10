@@ -1,9 +1,9 @@
 /* Cmd+Meow home page.
    Direction (unslop): a menu bar Mac app for people who live on their Mac.
    Character: exact, handy, a little cheeky. World: a desk at night, a keyboard.
-   Moments: the cat-ear keycap scene in the hero, and the live app rising under it.
+   Moment: the live app right under the headline.
    Signature: keycaps. Quiet graphite chrome, one accent: the amber of the ⌘ in the logo.
-   Layout: scene hero with the headline on its dark left side, then a reference
+   Layout: split hero (headline left, pitch and buttons right), the live app, then a reference
    table of every tool, then numbered install steps. */
 :root {
   --deep: #0F0F10;
@@ -70,9 +70,10 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 
 /* Hero scene */
 .hero { position: relative; }
-.hero-icon { position: absolute; right: 32px; top: 168px; width: 320px; height: 320px; }
-.hero-in { position: relative; padding-top: 120px; padding-bottom: 96px; }
-.hero h1 { max-width: 11em; font: 500 60px/66px var(--font); letter-spacing: -.03em; text-wrap: balance; }
+.hero-in { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); grid-template-areas: "h sub" "h cta"; column-gap: 64px; align-items: end; padding-top: 96px; padding-bottom: 56px; }
+.hero h1 { grid-area: h; font: 500 64px/70px var(--font); letter-spacing: -.03em; text-wrap: balance; }
+.hero .sub { grid-area: sub; margin-top: 0; }
+.hero .cta { grid-area: cta; margin-top: 32px; }
 .sub { max-width: 34rem; margin-top: 24px; font-size: 19px; line-height: 30px; color: var(--t2); text-wrap: pretty; }
 .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 40px; }
 
@@ -262,9 +263,8 @@ td { padding: 20px 0; vertical-align: top; color: var(--t2); }
 
 @media (max-width: 960px) {
   .sec-head { grid-template-columns: 1fr; gap: 12px; }
-  .hero h1 { font-size: 52px; line-height: 56px; }
-  .hero-in { padding-top: 96px; }
-  .hero-icon { width: 200px; height: 200px; top: 40px; opacity: .9; }
+  .hero-in { grid-template-columns: 1fr; grid-template-areas: "h" "sub" "cta"; padding-top: 64px; }
+  .hero h1 { font-size: 52px; line-height: 56px; margin-bottom: 24px; }
   .keys { grid-template-columns: repeat(3, 1fr); }
   .screen { height: 480px; }
 }
@@ -273,7 +273,6 @@ td { padding: 20px 0; vertical-align: top; color: var(--t2); }
   .nav { gap: 16px; }
   .nav nav { display: none; }
   .nav .btn { margin-left: auto; }
-  .hero-icon { position: static; display: block; width: 96px; height: 96px; margin-bottom: 24px; }
   .hero-in { padding-top: 56px; padding-bottom: 48px; }
   .hero h1 { font-size: 38px; line-height: 44px; }
   .sub { font-size: 17px; line-height: 28px; }
