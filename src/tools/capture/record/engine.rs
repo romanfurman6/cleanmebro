@@ -569,7 +569,7 @@ mod imp {
 
     define_class!(
         #[unsafe(super(NSObject))]
-        #[name = "CleanMeBroRecordOutput"]
+        #[name = "CmdMeowRecordOutput"]
         #[ivars = Arc<Mutex<Shared>>]
         struct Output;
 
@@ -888,7 +888,7 @@ mod imp {
             let output = Output::new(shared.clone());
             let delegate: &ProtocolObject<dyn SCStreamDelegate> = ProtocolObject::from_ref(&*output);
             let stream = SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &conf, Some(delegate));
-            let queue = DispatchQueue::new("cleanmebro.record", None);
+            let queue = DispatchQueue::new("cmdmeow.record", None);
             let out: &ProtocolObject<dyn SCStreamOutput> = ProtocolObject::from_ref(&*output);
             stream.addStreamOutput_type_sampleHandlerQueue_error(out, SCStreamOutputType::Screen, Some(&queue)).map_err(|e| ns_err(&e))?;
             if cfg.system_audio {

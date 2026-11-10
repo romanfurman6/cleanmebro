@@ -2,6 +2,18 @@
 //! viewports), opened safely while the menu panel is hidden.
 
 use egui::{Context, Ui, ViewportBuilder, ViewportClass, ViewportId};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// A window was drawn in this pass.
+static SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// Call once at the end of each pass. eframe sleeps 10 ms after every pass
+/// of a hidden main window; while our own windows (recorder, editor,
+/// screenshot tools) are drawn in that pass, the sleep only costs them
+/// frames, so it is off then.
+pub fn end_pass() {
+    eframe::skip_hidden_sleep(SHOWN.swap(false, Ordering::Relaxed));
+}
 
 /// Like `ctx.show_viewport_immediate`, but never crashes when the window
 /// doesn't exist yet. Returns None on the pass that only asks for the window.
@@ -15,6 +27,7 @@ use egui::{Context, Ui, ViewportBuilder, ViewportClass, ViewportId};
 /// its next pass, with the event loop. Once the window is there, it is drawn
 /// as an immediate viewport as before.
 pub fn show<T>(ctx: &Context, id: ViewportId, builder: ViewportBuilder, ui: impl FnMut(&mut Ui, ViewportClass) -> T) -> Option<T> {
+    SHOWN.store(true, Ordering::Relaxed);
     if ctx.embed_viewports() || has_window(ctx, id) {
         return Some(ctx.show_viewport_immediate(id, builder, ui));
     }

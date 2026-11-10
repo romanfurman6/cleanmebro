@@ -120,12 +120,12 @@ pub fn source(app: &Path, id: &str, casks: &[String]) -> Source {
 const APPLE_REMOVABLE: &[&str] = &["com.apple.dt.Xcode", "com.apple.dt.Instruments", "com.apple.iWork.Pages", "com.apple.iWork.Keynote", "com.apple.iWork.Numbers", "com.apple.iMovieApp", "com.apple.garageband10"];
 
 /// Our own bundle ids (release and dev build).
-const OWN_ID: &str = "com.romanfurman6.cleanmebro";
+const OWN_ID: &str = "com.romanfurman6.cmdmeow";
 
 /// Why `app` may never be removed, if so.
 pub fn locked(app: &Path, id: &str, source: Source) -> Option<&'static str> {
     if id == OWN_ID || id.starts_with(&format!("{OWN_ID}.")) || own_bundle().is_some_and(|b| b == app) {
-        return Some("This is CleanMeBro");
+        return Some("This is Cmd+Meow");
     }
     if source == Source::Apple && !APPLE_REMOVABLE.contains(&id) {
         return Some("Part of macOS");
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(locked(&safari, "com.apple.Safari", Source::Apple), Some("Part of macOS"));
         assert_eq!(locked(&mas, "com.apple.iWork.Pages", Source::AppStore), None);
         assert_eq!(locked(Path::new("/Applications/Xcode.app"), "com.apple.dt.Xcode", Source::Apple), None);
-        assert_eq!(locked(Path::new("/Applications/CleanMeBro Dev.app"), "com.romanfurman6.cleanmebro.dev", Source::Direct), Some("This is CleanMeBro"));
+        assert_eq!(locked(Path::new("/Applications/CmdMeow Dev.app"), "com.romanfurman6.cmdmeow.dev", Source::Direct), Some("This is Cmd+Meow"));
         assert_eq!(locked(&zoom, "us.zoom.xos", Source::Homebrew), None);
         std::fs::remove_dir_all(&root).unwrap();
     }

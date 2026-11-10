@@ -20,6 +20,8 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
+// The helper keeps the ids from the app's first name (CleanMeBro), so a
+// helper that is already installed keeps working after the rename.
 pub const LABEL: &str = "com.romanfurman6.cleanmebro.fanhelper";
 pub const SOCKET: &str = "/var/run/com.romanfurman6.cleanmebro.fan.sock";
 const BIN: &str = "/Library/PrivilegedHelperTools/com.romanfurman6.cleanmebro.fanhelper";
@@ -85,7 +87,7 @@ pub fn install() -> Result<(), String> {
 </plist>
 "#
     );
-    let dir = std::env::temp_dir().join(format!("cleanmebro-fan-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cmdmeow-fan-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let plist_tmp = dir.join("helper.plist");
     std::fs::write(&plist_tmp, plist).map_err(|e| e.to_string())?;
@@ -103,7 +105,7 @@ pub fn install() -> Result<(), String> {
         exe = sh_quote(&exe),
         plist = sh_quote(&plist_tmp),
     );
-    let r = run_admin(&dir, &script, "CleanMeBro wants to add its fan helper so it can change fan speed.");
+    let r = run_admin(&dir, &script, "Cmd+Meow wants to add its fan helper so it can change fan speed.");
     let _ = std::fs::remove_dir_all(&dir);
     r?;
     // give launchd a moment to start it
@@ -118,10 +120,10 @@ pub fn install() -> Result<(), String> {
 
 /// Stop and remove the helper (fans go back to Auto as it stops).
 pub fn uninstall() -> Result<(), String> {
-    let dir = std::env::temp_dir().join(format!("cleanmebro-fan-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cmdmeow-fan-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let script = format!("launchctl bootout system/{LABEL} 2>/dev/null || true\nrm -f {PLIST} {BIN} {SOCKET}\n");
-    let r = run_admin(&dir, &script, "CleanMeBro wants to remove its fan helper.");
+    let r = run_admin(&dir, &script, "Cmd+Meow wants to remove its fan helper.");
     let _ = std::fs::remove_dir_all(&dir);
     r
 }
@@ -291,7 +293,7 @@ mod tests {
 
     #[test]
     fn quotes_paths_for_sh() {
-        assert_eq!(sh_quote(Path::new("/Applications/CleanMeBro Dev.app/x")), "'/Applications/CleanMeBro Dev.app/x'");
+        assert_eq!(sh_quote(Path::new("/Applications/CmdMeow Dev.app/x")), "'/Applications/CmdMeow Dev.app/x'");
         assert_eq!(sh_quote(Path::new("/a'b")), r"'/a'\''b'");
     }
 }

@@ -348,20 +348,33 @@ fn ghost_button(ui: &mut Ui, r: Rect, label: &str) -> egui::Response {
     resp
 }
 
-/// The app's mark: the icon's dark squircle with the blue gauge arc.
+/// The app's mark: a dark squircle with the Cmd+Meow glyph, fading in with `sweep`.
 fn app_mark(p: &egui::Painter, c: Pos2, size: f32, sweep: f32) {
     let r = Rect::from_center_size(c, Vec2::splat(size));
     p.rect_filled(r, size * 0.225, Color32::from_rgb(0x22, 0x22, 0x26));
     p.rect_stroke(r, size * 0.225, Stroke::new(1.0, white(36)), StrokeKind::Inside);
-    let rad = size * 0.3;
-    let start = -std::f32::consts::FRAC_PI_2 - 0.9;
-    let track = arc_points(c, rad, start, start + 300f32.to_radians(), 48);
-    p.add(egui::Shape::line(track, Stroke::new(size * 0.075, white(20))));
-    let a1 = start + 300f32.to_radians() * sweep;
-    if sweep > 0.01 {
-        p.add(egui::Shape::line(arc_points(c, rad, start, a1, 48), Stroke::new(size * 0.075, BLUE)));
-    }
-    p.circle_filled(c, size * 0.06, white(200));
+    let a = (0.35 + 0.65 * sweep.clamp(0.0, 1.0)) * 255.0;
+    brand_glyph(p, c, size * 0.6, Color32::from_white_alpha(a as u8));
+}
+
+/// The Cmd+Meow glyph (as in the menu bar), tinted `col`.
+fn brand_glyph(p: &egui::Painter, c: Pos2, size: f32, col: Color32) {
+    let id = egui::Id::NULL.with("cmdmeow-brand-glyph");
+    let tex = p.ctx().data_mut(|d| d.get_temp::<egui::TextureHandle>(id)).unwrap_or_else(|| {
+        let n = 128;
+        let mut px = crate::kit::brand::glyph_rgba(n);
+        for c in px.chunks_mut(4) {
+            c[0] = 255;
+            c[1] = 255;
+            c[2] = 255;
+        }
+        let img = egui::ColorImage::from_rgba_unmultiplied([n as usize, n as usize], &px);
+        let t = p.ctx().load_texture("cmdmeow-brand-glyph", img, egui::TextureOptions::LINEAR);
+        p.ctx().data_mut(|d| d.insert_temp(id, t.clone()));
+        t
+    });
+    let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+    p.image(tex.id(), Rect::from_center_size(c, Vec2::splat(size)), uv, col);
 }
 
 fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
@@ -389,7 +402,7 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     }
     let bob = if t > 1.8 { ((t - 1.8) * 1.6).sin() * 3.0 } else { 0.0 };
     app_mark(&p, c + Vec2::new(0.0, bob), 96.0, ease((t - 0.3) / 1.2));
-    p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "CleanMeBro", bold(28.0), TEXT);
+    p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT);
     p.text(Pos2::new(c.x, c.y + 156.0), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(14.0), TEXT_FAINT);
     let r = Rect::from_center_size(Pos2::new(c.x, c.y + 214.0), Vec2::new(128.0, 40.0));
     // breathing glow once everything has landed
@@ -668,7 +681,7 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     }
     let ph = 20.0 + rows_n as f32 * 58.0 + (rows_n.max(1) as f32 - 1.0) * 8.0;
     let top = body.center().y - ph / 2.0 + 24.0;
-    // a strip of the menu bar with CleanMeBro's icon lit, the panel hanging under it
+    // a strip of the menu bar with the app icon lit, the panel hanging under it
     let bar = Rect::from_min_size(Pos2::new(px, top - 40.0), Vec2::new(pw, 24.0));
     p.rect_filled(bar, 6.0, white(18));
     let mut bx = bar.right() - 12.0;
@@ -681,7 +694,7 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let me = Rect::from_center_size(Pos2::new(bx - 8.0, bar.center().y), Vec2::new(26.0, 20.0));
     let glow = ((t * 3.0).sin() * 0.5 + 0.5) * 0.25 + 0.2;
     p.rect_filled(me, 5.0, with_alpha(BLUE, glow));
-    tray_glyph(&p, me.center(), 14.0, Color32::WHITE);
+    brand_glyph(&p, me.center(), 15.0, Color32::WHITE);
     p.text(Pos2::new(bar.left() + 10.0, bar.center().y), Align2::LEFT_CENTER, "Click this icon", font(11.0), TEXT_FAINT);
     // a little caret from the icon to the panel
     let c = Pos2::new(me.center().x, top);
@@ -733,7 +746,7 @@ pub fn fda_helper(app: &mut App, ctx: &egui::Context) {
         .with_resizable(false)
         .with_has_shadow(true)
         .with_window_level(egui::WindowLevel::AlwaysOnTop);
-    let id = egui::ViewportId::from_hash_of("cleanmebro-fda-help");
+    let id = egui::ViewportId::from_hash_of("cmdmeow-fda-help");
     let mut close = false;
     crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
         close = help_card(ui, ui.max_rect(), now);
@@ -773,19 +786,3 @@ pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
     r.clicked()
 }
 
-/// The menu bar icon: a rounded square with a four-point star (as in the tray).
-fn tray_glyph(p: &egui::Painter, c: Pos2, size: f32, col: Color32) {
-    let r = Rect::from_center_size(c, Vec2::splat(size * 0.78));
-    p.rect_stroke(r, size * 0.18, Stroke::new(size * 0.07, col), StrokeKind::Middle);
-    let k = size * 0.25;
-    let n = 12;
-    let mut pts = Vec::new();
-    for i in 0..4 * n {
-        let a = i as f32 / (4 * n) as f32 * std::f32::consts::TAU;
-        let (x, y) = (a.cos(), a.sin());
-        // astroid: |x|^0.5 + |y|^0.5 = 1
-        let d = (x.abs().sqrt() + y.abs().sqrt()).powi(2);
-        pts.push(c + Vec2::new(x, y) * k / d);
-    }
-    p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
-}

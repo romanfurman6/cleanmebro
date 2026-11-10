@@ -104,7 +104,7 @@ impl App {
             tray_icon::TrayIconBuilder::new()
                 .with_icon(tray_image())
                 .with_icon_as_template(true)
-                .with_tooltip("CleanMeBro")
+                .with_tooltip("Cmd+Meow")
                 .with_menu_on_left_click(false)
                 .build()
                 .ok()
@@ -574,7 +574,7 @@ impl eframe::App for App {
                 crate::kit::native::apply_glass(r);
             }
         }
-        if std::env::var("CLEANMEBRO_DEBUG").is_ok() {
+        if std::env::var("CMDMEOW_DEBUG").is_ok() {
             match self.frame {
                 30 => eprintln!("== start screen {:?}\n{}", ui.max_rect(), crate::kit::native::debug_windows()),
                 120 => eprintln!("== panel screen {:?}\n{}", ui.max_rect(), crate::kit::native::debug_windows()),
@@ -671,6 +671,7 @@ impl eframe::App for App {
         // keep animations and live numbers moving
         ctx.request_repaint_after(std::time::Duration::from_millis(if self.visible { 500 } else { 2000 }));
         self.screenshot_step(&ctx);
+        crate::kit::viewport::end_pass();
     }
 }
 
@@ -685,7 +686,7 @@ impl App {
     /// The full app in its own native window (traffic lights, resizable).
     fn app_viewport(&mut self, ctx: &egui::Context) {
         let mut builder = egui::ViewportBuilder::default()
-            .with_title("CleanMeBro")
+            .with_title("Cmd+Meow")
             .with_inner_size([m::APP_WIDTH, m::APP_HEIGHT])
             .with_min_inner_size([980.0, 640.0])
             .with_transparent(true)
@@ -696,7 +697,7 @@ impl App {
         if self.app_focus {
             builder = builder.with_active(true);
         }
-        let id = egui::ViewportId::from_hash_of("cleanmebro-app");
+        let id = egui::ViewportId::from_hash_of("cmdmeow-app");
         crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
             let vctx = ui.ctx().clone();
             if self.app_focus {
@@ -730,7 +731,7 @@ impl App {
     fn setup_viewport(&mut self, ctx: &egui::Context) {
         use super::onboard::{Finish, SETUP_H, SETUP_W};
         let builder = egui::ViewportBuilder::default()
-            .with_title("CleanMeBro Setup")
+            .with_title("Cmd+Meow Setup")
             .with_inner_size([SETUP_W, SETUP_H])
             .with_resizable(false)
             .with_transparent(true)
@@ -739,7 +740,7 @@ impl App {
             .with_title_shown(false)
             .with_has_shadow(true)
             .with_active(true);
-        let id = egui::ViewportId::from_hash_of("cleanmebro-setup");
+        let id = egui::ViewportId::from_hash_of("cmdmeow-setup");
         let mut finish = Finish::No;
         let mut closed = false;
         crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
@@ -810,32 +811,11 @@ fn save_png(img: &egui::ColorImage, path: &std::path::Path) {
     }
 }
 
-/// A 36x36 template image for the menu bar: a sparkle inside a rounded square.
+/// The menu bar icon: the Cmd+Meow keycap cat with ⌘ cut out, drawn from
+/// vector paths at 36 px (18 pt @2x) and set as a template so macOS tints it.
 fn tray_image() -> tray_icon::Icon {
-    let n = 36usize;
-    let mut px = vec![0u8; n * n * 4];
-    let c = n as f32 / 2.0;
-    for y in 0..n {
-        for x in 0..n {
-            let fx = x as f32 + 0.5 - c;
-            let fy = y as f32 + 0.5 - c;
-            // rounded-square outline
-            let q = (fx.abs().max(fy.abs()) - 13.0).abs();
-            let mut a: f32 = if q < 1.4 { 1.0 - (q - 0.4).max(0.0) } else { 0.0 };
-            // four-point star in the middle
-            let sx = fx.abs() / 8.5;
-            let sy = fy.abs() / 8.5;
-            let star = sx.sqrt() + sy.sqrt();
-            if star < 1.0 {
-                a = 1.0;
-            } else if star < 1.08 {
-                a = a.max((1.08 - star) / 0.08);
-            }
-            let i = (y * n + x) * 4;
-            px[i + 3] = (a.clamp(0.0, 1.0) * 255.0) as u8;
-        }
-    }
-    tray_icon::Icon::from_rgba(px, n as u32, n as u32).expect("tray icon")
+    let n = 36;
+    tray_icon::Icon::from_rgba(crate::kit::brand::glyph_rgba(n), n, n).expect("tray icon")
 }
 
 fn install_fonts(ctx: &egui::Context) {

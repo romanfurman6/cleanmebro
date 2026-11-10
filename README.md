@@ -1,19 +1,31 @@
-# CleanMeBro
+<p align="center">
+  <img src="docs/images/icon.png" width="128" alt="Cmd+Meow icon">
+</p>
 
-A glassy macOS menu bar companion written in Rust (eframe/egui). It combines a
-Mac health panel, Claude plan limits, an AI-judged Cleanup and Disk Map.
+<h1 align="center">Cmd+Meow</h1>
 
-## Features
+<p align="center">
+  <a href="https://github.com/romanfurman6/cmdmeow/releases/latest">Download</a> ·
+  <a href="https://github.com/romanfurman6/cmdmeow/actions/workflows/macos.yml">Latest build</a>
+</p>
 
-| Area | What it does |
-|---|---|
-| **Menu bar panel** | Tray icon (title = Claude session %) opens a 440 pt glass panel of widgets: Mac Health verdict, Claude card, tiles for disk, memory, battery, CPU, network, connected devices, plus "Today's Recommendation". Clicking a tile opens a detail sheet beside the panel. Gear → **Customize widgets…** turns widgets on/off and reorders them; the choice is saved. |
-| **Claude** | Plan and limits from the Claude CLI (`claude auth status`, `claude -p /usage`, which spends no tokens). Local token activity is counted from `~/.claude/projects` logs (counts only). |
-| **Cleanup** | Finds junk by rule (System Junk, Xcode, app and developer caches, AI clutter). Claude judges each **path** (never file contents) as safe / ask / keep. Anything unclear waits for your OK. Items go to the Trash by default. |
-| **Disk Map** | Measures a folder tree, then shows it as a drill-down treemap. Selected items go to the Trash after review. |
-| **Clipboard** | History of what you copy (text, links, code, colors, images, files), kept on this Mac. ⌥⌘V opens quick paste over any app: big preview cards or a list, type to search, ↵ pastes (needs Accessibility), ⇧↵ pastes plain text, ⌘1–9 pick directly. Pin entries, pause recording, exclude apps. Password managers and items apps mark as concealed are skipped unless turned on. |
+A macOS menu bar app that keeps a Mac in shape: cleaner, uninstaller, startup
+items, disk map, fan control, screenshots and screen recording, clipboard
+history and keep-awake in one place. Written in Rust; everything runs locally.
 
-Every rule and threshold, with its source, is in [docs/MECHANICS.md](docs/MECHANICS.md).
+<p align="center">
+  <img src="docs/images/panel.png" width="380" alt="The menu bar panel">
+</p>
+
+## What it does
+
+- **Cleanup** finds caches, logs and other junk; Claude can review each path (never file contents). Items go to the Trash.
+- **Disk Map** shows what takes space as a treemap.
+- **Uninstaller** removes apps with their leftovers; **Startup** turns off what starts with your Mac.
+- **Capture** takes screenshots with an editor and records the screen with audio and camera.
+- **Clipboard**, **Fan Control**, **Keep Awake** and **Claude** limits round it out. Any tool can be turned off.
+
+![Disk Map](docs/images/lens.png)
 
 ## Requirements
 
@@ -24,6 +36,8 @@ Every rule and threshold, with its source, is in [docs/MECHANICS.md](docs/MECHAN
 ## Build and run
 
 ```bash
+git clone https://github.com/romanfurman6/cmdmeow
+cd cmdmeow
 cargo run --release            # menu bar app
 cargo test                     # unit tests
 ```
@@ -31,19 +45,27 @@ cargo test                     # unit tests
 ### Build the app
 
 ```bash
-scripts/bundle-mac.sh              # target/bundle/CleanMeBro.app + .zip
+scripts/bundle-mac.sh              # target/bundle/CmdMeow.app + .zip
 UNIVERSAL=1 scripts/bundle-mac.sh  # Apple silicon + Intel
 ```
 
 CI (`.github/workflows/macos.yml`) runs the tests and builds a universal
-`CleanMeBro.app` on every push and PR; download it from the run's
+`CmdMeow.app` on every push and PR; download it from the run's
 **Artifacts**. Pushing a `v*` tag also attaches the zip to a GitHub Release.
 
 The app is ad-hoc signed, not notarized. On first launch, right-click it and
-choose **Open**, or run `xattr -dr com.apple.quarantine CleanMeBro.app`.
+choose **Open**, or run `xattr -dr com.apple.quarantine CmdMeow.app`.
 
-The icon source is `assets/icon/AppIcon.svg`; regenerate `assets/AppIcon.icns`
-with `python3 scripts/make-icon.py` (needs `pip install cairosvg pillow`).
+Coming from CleanMeBro (the old name; bundle id is now
+`com.romanfurman6.cmdmeow`): the new bundle id makes it a new app to macOS. Grant
+Screen Recording, Accessibility and Full Disk Access again, turn **Open at
+login** back on, and delete the old app. Settings, clipboard history and the
+sharing key move over on first launch. The fan helper keeps its old id, so an
+installed helper keeps working.
+
+The icon artwork is `assets/icon/AppIcon-art.png`; regenerate `assets/AppIcon.icns`
+with `python3 scripts/make-icon.py` (needs `pip install pillow`). The menu bar
+icon is drawn from vector paths in `src/kit/brand.rs`.
 
 ### Test and preview modes
 
@@ -90,7 +112,7 @@ entry. Nothing in `src/core/` changes.
 ## Project layout
 
 ```
-.
+cmdmeow/
 ├── Cargo.toml / Cargo.lock
 ├── src/
 │   ├── main.rs              entry point, CLI flags
@@ -104,6 +126,7 @@ entry. Nothing in `src/core/` changes.
 │   │   └── settings.rs      saved widget order, visibility and tools turned off
 │   ├── kit/                 shared by all tools
 │   │   ├── glass.rs         drawing kit: glass cards, gradients, glows, vector icons
+│   │   ├── brand.rs         the Cmd+Meow mark as vector paths (menu bar icon)
 │   │   ├── controls.rs      shared page controls (round action button)
 │   │   ├── native.rs        macOS: glass material, menu-bar app, thermal state, Trash
 │   │   ├── fs.rs            folder sizes, protected paths, move to Trash, disk space
@@ -111,23 +134,31 @@ entry. Nothing in `src/core/` changes.
 │   │   └── mechanics.rs     numbers/thresholds from docs/MECHANICS.md
 │   └── tools/
 │       ├── mod.rs           the tool list (the only place that names tools)
-│       ├── system/          Mac health: readings, widgets, detail sheets
-│       ├── claude/          Claude limits: card, sheet, page, tray title
-│       ├── cleanup/         junk rules, AI judge, removal, Cleanup page, --scan-report
-│       └── lens/            Disk Map: folder measuring and page
+│       ├── system/          Mac Health: readings, widgets, detail sheets
+│       ├── cleanup/         junk rules, AI judge, removal, --scan-report
+│       ├── lens/            Disk Map: folder measuring and treemap
+│       ├── uninstaller/     apps, leftovers, drop-to-uninstall widget
+│       ├── startup/         login items, launch agents and daemons
+│       ├── capture/         screenshots, editor, screen recording, sharing
+│       ├── clipboard/       clipboard history and quick paste
+│       ├── fan/             fan speeds, temperatures, helper
+│       ├── keep_awake/      keep the Mac awake, also while Claude works
+│       └── claude/          Claude limits: card, sheet, page, tray title
+├── vendor/eframe/        eframe 0.37 with one patch (see Cargo.toml)
 ├── docs/
+│   ├── images/          README screenshots
 │   ├── MECHANICS.md     rules, thresholds and where each came from
 │   └── mechanics.json   same data, machine-readable
 ├── assets/
 │   ├── AppIcon.icns     app icon, all sizes (generated)
-│   └── icon/AppIcon.svg icon source
+│   └── icon/AppIcon-art.png icon artwork
 ├── scripts/
-│   ├── bundle-mac.sh    build CleanMeBro.app + zip
-│   └── make-icon.py     SVG → AppIcon.icns
+│   ├── bundle-mac.sh    build CmdMeow.app + zip
+│   └── make-icon.py     artwork → AppIcon.icns
 └── .github/workflows/macos.yml   CI: test, build, upload the app
 ```
 
-Screenshots are not kept in git. Render any view locally with
+The images in `docs/images/` are rendered from sample data with
 `--screenshot <file.png> --view <name>`.
 
 ## Safety
@@ -141,3 +172,7 @@ Screenshots are not kept in git. Render any view locally with
 
 - Some health thresholds are estimated (marked in `docs/MECHANICS.md`).
 - Live glass and tray behavior hasn't been visually verified end to end.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

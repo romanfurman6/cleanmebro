@@ -283,7 +283,7 @@ impl Capture {
                     if !mac::can_record_screen() {
                         self.perm_needed = true;
                         mac::ask_to_record_screen();
-                        self.hud("Allow Screen Recording for CleanMeBro, then try again");
+                        self.hud("Allow Screen Recording for Cmd+Meow, then try again");
                         return;
                     }
                 }
@@ -696,6 +696,10 @@ impl Capture {
     fn shown_folder(&self) -> String {
         let home = dirs::home_dir().map(|h| h.display().to_string()).unwrap_or_default();
         let f = self.settings.folder.display().to_string();
+        // sample data for screenshots lives in a temp folder
+        if f.contains("cmdmeow-capture-demo") {
+            return "~/Pictures/Screenshots".into();
+        }
         if !home.is_empty() && f.starts_with(&home) {
             f.replacen(&home, "~", 1)
         } else {
@@ -750,7 +754,7 @@ impl Capture {
 
 /// Sample history for screenshots, in a throwaway folder.
 fn demo_store() -> Store {
-    let dir = std::env::temp_dir().join(format!("cleanmebro-capture-demo-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cmdmeow-capture-demo-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let mut st = Store::open(dir);
     let now = chrono::Local::now().timestamp_millis() as u64;
@@ -777,7 +781,7 @@ fn demo_store() -> Store {
 
 /// A sample screenshot folder for screenshots of the tool.
 fn demo_folder() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("cleanmebro-capture-demo-{}-folder", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cmdmeow-capture-demo-{}-folder", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     for (k, (w, h)) in [(794, 446), (640, 410), (920, 300), (794, 520), (760, 520), (900, 560)].iter().enumerate() {
         let name = format!("Capture 2026-11-08 at 1{}.{:02}.12.png", 7 - k / 3, 41 - k * 6);

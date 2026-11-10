@@ -53,7 +53,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
             dial(&p, c, 58.0, 7.0, f.frac(), tint::FAN);
             p.circle_filled(c, 44.0, BG);
             p.circle_stroke(c, 44.0, Stroke::new(1.0, white(15)));
-            blades(&p, c, 40.0, spin(t, f.rpm), BLADE, RAISED);
+            blades(&p, c, 40.0, spin(&format!("fan-{i}"), t, f.rpm), BLADE, RAISED);
             let g = p.layout_no_wrap(rpm_text(f.rpm), bold(26.0), TEXT);
             let u = p.layout_no_wrap("rpm".into(), font(13.0), TEXT_DIM);
             let tw = g.size().x + 4.0 + u.size().x;
@@ -184,8 +184,8 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
         p.rect_stroke(ir, 10.0, Stroke::new(1.0, with_alpha(tint::FAN, 0.35)), egui::StrokeKind::Inside);
         let (label, msg) = match l.helper {
             _ if l.busy => ("Waiting…", "macOS is asking for your password."),
-            HelperState::Outdated => ("Update helper…", "CleanMeBro was updated. Approve the new helper once."),
-            _ => ("Install helper…", "To change fan speed, CleanMeBro adds a small helper that runs with admin rights. macOS asks for your password once."),
+            HelperState::Outdated => ("Update helper…", "Cmd+Meow was updated. Approve the new helper once."),
+            _ => ("Install helper…", "To change fan speed, Cmd+Meow adds a small helper that runs with admin rights. macOS asks for your password once."),
         };
         let bw = button_width(&p, label, BTN_PRIMARY);
         let br = Rect::from_min_size(Pos2::new(ir.right() - 8.0 - bw, ir.center().y - 14.0), Vec2::new(bw, 28.0));

@@ -158,8 +158,8 @@ fn start(app: &mut App, ui: &mut Ui, r: Rect) {
     if pill_button(ui, Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 44.0), Vec2::new(sw, 28.0)), "Stop", BTN_SECONDARY, true).clicked() {
         app.lens.stop.store(true, Ordering::SeqCst);
     }
-    paragraph(&p, Pos2::new(pr.left(), pr.bottom() + 14.0), "Mapping the whole disk takes a few minutes. Give CleanMeBro Full Disk Access in System Settings for complete results.", font(12.0), TEXT_FAINT, pr.width());
-    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    paragraph(&p, Pos2::new(pr.left(), pr.bottom() + 14.0), "Mapping the whole disk takes a few minutes. Give Cmd+Meow Full Disk Access in System Settings for complete results.", font(12.0), TEXT_FAINT, pr.width());
+    crate::kit::glass::animate(&ctx);
 }
 
 /// Map the whole startup disk from scratch.
@@ -352,8 +352,7 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     if moving {
         ctx.request_repaint();
     } else {
-        // the spinner and progress strip only need a calm frame rate
-        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        crate::kit::glass::animate(&ctx);
     }
 
     // aside
@@ -875,7 +874,7 @@ pub fn demo_tree(app: &mut App) {
         365.0,
         vec![
             ("Library", 182.0, vec![("Containers", 61.0), ("Application Support", 48.0), ("Caches", 34.0), ("Developer", 27.0), ("Mail", 7.0), ("Logs", 5.0)]),
-            ("Projects", 64.2, vec![("web-app", 22.0), ("cleanmebro", 18.0), ("api-server", 14.0), ("notes", 10.2)]),
+            ("Projects", 64.2, vec![("web-app", 22.0), ("cmdmeow", 18.0), ("api-server", 14.0), ("notes", 10.2)]),
             ("Downloads", 38.4, vec![("Xcode_16.xip", 12.0), ("old-movies.zip", 9.4), ("Installers", 8.0), ("Archive", 9.0)]),
             ("Movies", 31.0, vec![("Screen recordings", 19.0), ("Final Cut", 12.0)]),
             ("Pictures", 22.5, vec![("Photos Library", 21.0), ("Wallpapers", 1.5)]),

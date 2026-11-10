@@ -1,22 +1,32 @@
 #!/usr/bin/env python3
-"""Render assets/icon/AppIcon.svg into assets/AppIcon.icns.
+"""Build assets/AppIcon.icns from the icon artwork assets/icon/AppIcon-art.png.
 
-Needs: pip install cairosvg pillow
-Each size is rendered from the vector source (not downscaled), then gets the
-standard macOS icon drop shadow. The .icns is written directly, so this runs
-on Linux too; on a Mac `iconutil` is not required.
+Needs: pip install pillow
+The artwork is a full-bleed 1024 square: the cream keycap cat on the ink
+ground. This script fits it to the macOS icon grid (an 824 px rounded square
+inside the 1024 canvas, keycap scaled down so the ears clear the edge), clips
+it to the squircle, adds the standard drop shadow and writes every size
+straight into the .icns, so it runs on Linux too (no `iconutil`).
+
+    python3 scripts/make-icon.py               # write assets/AppIcon.icns
+    python3 scripts/make-icon.py preview.png   # also save the 1024 render
 """
 import io
+import math
 import struct
 import sys
 from pathlib import Path
 
-import cairosvg
-from PIL import Image, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
-SVG = ROOT / "assets/icon/AppIcon.svg"
+ART = ROOT / "assets/icon/AppIcon-art.png"
 OUT = ROOT / "assets/AppIcon.icns"
+
+CANVAS = 1024
+BODY = 824            # macOS icon grid: an 824x824 shape centered in 1024
+KEYCAP_H = 600        # keycap height inside the shape (in the art: ~780 of 1024)
+INK = (13, 14, 21, 255)
 
 # (icns type, pixel size)
 ENTRIES = [
@@ -28,9 +38,44 @@ ENTRIES = [
 ]
 
 
-def render(px: int) -> Image.Image:
-    svg = SVG.read_bytes()
-    art = Image.open(io.BytesIO(cairosvg.svg2png(bytestring=svg, output_width=px, output_height=px))).convert("RGBA")
+def squircle_mask(size: int, ss: int = 4) -> Image.Image:
+    """Superellipse (n = 5), close to the macOS icon shape; supersampled for smooth edges."""
+    big = size * ss
+    r = big / 2
+    pts = []
+    for i in range(1440):
+        t = 2 * math.pi * i / 1440
+        c, s = math.cos(t), math.sin(t)
+        pts.append((r + r * math.copysign(abs(c) ** 0.4, c), r + r * math.copysign(abs(s) ** 0.4, s)))
+    m = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(m).polygon(pts, fill=255)
+    return m.resize((size, size), Image.LANCZOS)
+
+
+def content_box(art: Image.Image) -> tuple:
+    """Bounding box of everything that is not the ink ground."""
+    ground = Image.new("RGB", art.size, INK[:3])
+    diff = ImageChops.difference(art.convert("RGB"), ground).convert("L").point(lambda v: 255 if v > 40 else 0)
+    return diff.getbbox()
+
+
+def master() -> Image.Image:
+    art = Image.open(ART).convert("RGBA")
+    x0, y0, x1, y1 = content_box(art)
+    scale = KEYCAP_H / (y1 - y0)
+    art = art.resize((round(art.width * scale), round(art.height * scale)), Image.LANCZOS)
+    cx, cy = (x0 + x1) / 2 * scale, (y0 + y1) / 2 * scale
+    shape = Image.new("RGBA", (BODY, BODY), INK)
+    shape.alpha_composite(art, (round(BODY / 2 - cx), round(BODY / 2 - cy)))
+    shape.putalpha(squircle_mask(BODY))
+    out = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
+    off = (CANVAS - BODY) // 2
+    out.alpha_composite(shape, (off, off))
+    return out
+
+
+def render(base: Image.Image, px: int) -> Image.Image:
+    art = base.resize((px, px), Image.LANCZOS)
     # macOS template shadow: black 30%, y +10, blur 10 (in 1024 units).
     s = px / 1024
     alpha = art.getchannel("A").point(lambda a: int(a * 0.30))
@@ -52,12 +97,13 @@ def png_bytes(img: Image.Image) -> bytes:
 
 
 def main() -> None:
-    cache = {px: png_bytes(render(px)) for px in sorted({px for _, px in ENTRIES})}
+    base = master()
+    cache = {px: png_bytes(render(base, px)) for px in sorted({px for _, px in ENTRIES})}
     body = b"".join(t + struct.pack(">I", len(cache[px]) + 8) + cache[px] for t, px in ENTRIES)
     OUT.write_bytes(b"icns" + struct.pack(">I", len(body) + 8) + body)
     print(f"wrote {OUT.relative_to(ROOT)} ({OUT.stat().st_size // 1024} KB)")
-    if len(sys.argv) > 1:  # optional preview: make-icon.py preview.png
-        render(1024).save(sys.argv[1])
+    if len(sys.argv) > 1:
+        render(base, 1024).save(sys.argv[1])
 
 
 if __name__ == "__main__":

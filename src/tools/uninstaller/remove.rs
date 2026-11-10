@@ -164,7 +164,7 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
             planned.push(Moved { from: p.clone(), to: dest, admin: true, bytes: *bytes });
         }
         cmd.push_str("true");
-        match mac::run_admin(&cmd, "CleanMeBro wants to move app files that belong to the system to your Trash.") {
+        match mac::run_admin(&cmd, "Cmd+Meow wants to move app files that belong to the system to your Trash.") {
             Ok(_) => {
                 for m in planned {
                     if m.to.symlink_metadata().is_ok() && m.from.symlink_metadata().is_err() {
@@ -220,7 +220,7 @@ pub fn undo(rep: &Report) -> (usize, Vec<(String, String)>) {
     }
     if !admin_items.is_empty() {
         admin_cmd.push_str("true");
-        match mac::run_admin(&admin_cmd, "CleanMeBro wants to put system app files back.") {
+        match mac::run_admin(&admin_cmd, "Cmd+Meow wants to put system app files back.") {
             Ok(_) => {
                 for m in admin_items {
                     if m.from.symlink_metadata().is_ok() {

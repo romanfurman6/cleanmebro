@@ -1,4 +1,4 @@
-//! What CleanMeBro needs from macOS (privacy permissions), with a live status
+//! What Cmd+Meow needs from macOS (privacy permissions), with a live status
 //! and a way to ask for each. Tools declare their needs; setup and Settings ›
 //! Permissions show them.
 
@@ -130,7 +130,7 @@ pub fn open_settings(p: Perm) {
     let _ = std::process::Command::new("open").arg(url).spawn();
 }
 
-/// Show CleanMeBro.app in Finder, so it can be dragged into a Settings list
+/// Show the app in Finder, so it can be dragged into a Settings list
 /// (Full Disk Access has no macOS question; the app is added by hand).
 pub fn reveal_app() {
     if let Some(app) = app_bundle() {
@@ -144,9 +144,9 @@ pub fn app_bundle() -> Option<std::path::PathBuf> {
     exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app")).map(|p| p.to_path_buf())
 }
 
-/// The name the app has in System Settings lists ("CleanMeBro Dev").
+/// The name the app has in System Settings lists ("CmdMeow Dev").
 pub fn app_name() -> String {
-    app_bundle().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_else(|| "CleanMeBro".into())
+    app_bundle().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_else(|| "CmdMeow".into())
 }
 
 /// Screen Recording as macOS reported it when the app started. macOS only

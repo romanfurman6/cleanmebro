@@ -1,4 +1,4 @@
-//! CleanMeBro — a glassy menu bar companion built from isolated tools (Mac
+//! Cmd+Meow — a glassy menu bar companion built from isolated tools (Mac
 //! health, Claude limits, Cleanup, Disk Map) behind one panel of widgets.
 //!
 //! `--screenshot <file.png>` draws ~120 frames with sample data, saves the
@@ -88,13 +88,13 @@ fn main() -> eframe::Result {
     let opts = core::shell::Options { screenshot, view };
     // the shell sizes the window for the chosen view on its first frame
     let viewport = egui::ViewportBuilder::default()
-        .with_title("CleanMeBro")
-        .with_app_id("com.cleanmebro.app")
+        .with_title("Cmd+Meow")
+        .with_app_id("com.romanfurman6.cmdmeow")
         .with_inner_size([kit::mechanics::PANEL_WIDTH, kit::mechanics::PANEL_HEIGHT])
         .with_transparent(true)
         .with_decorations(false)
         .with_resizable(false)
         .with_has_shadow(true);
     let options = eframe::NativeOptions { viewport, ..Default::default() };
-    eframe::run_native("CleanMeBro", options, Box::new(move |cc| Ok(Box::new(core::shell::App::new(cc, opts)))))
+    eframe::run_native("Cmd+Meow", options, Box::new(move |cc| Ok(Box::new(core::shell::App::new(cc, opts)))))
 }

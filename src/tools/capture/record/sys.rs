@@ -217,6 +217,69 @@ mod imp {
 
     /// Lift our window titled `title` over everything on every Space; with
     /// `cover`, also over the menu bar and sized to that display.
+    /// A countdown ring drawn by Core Animation on the window `title`: it
+    /// runs out from `from` (0..1) to nothing in `secs`, moving on every
+    /// display frame whatever our own frame rate. Added once per window;
+    /// later calls only say it is there. False while the window isn't up.
+    pub fn countdown_ring(title: &str, radius: f64, width: f64, rgb: [u8; 3], from: f64, secs: f64) -> bool {
+        use objc2::{class, msg_send};
+        use objc2_app_kit::{NSApplication, NSColor};
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGPathCreateMutable() -> *mut c_void;
+            fn CGPathAddArc(path: *mut c_void, m: *const c_void, x: f64, y: f64, r: f64, start: f64, end: f64, clockwise: bool);
+            fn CGPathRelease(path: *mut c_void);
+        }
+        const NAME: &str = "cmdmeow-countdown-ring";
+        let Some(mtm) = MainThreadMarker::new() else { return false };
+        let Some(w) = NSApplication::sharedApplication(mtm).windows().iter().find(|w| w.title().to_string() == title) else { return false };
+        let Some(view) = w.contentView() else { return false };
+        let Some(root) = view.layer() else { return false };
+        unsafe {
+            let root: &AnyObject = &root;
+            let subs: Option<Retained<NSArray<AnyObject>>> = msg_send![root, sublayers];
+            if let Some(subs) = subs {
+                for l in subs.iter() {
+                    let n: Option<Retained<NSString>> = msg_send![&*l, name];
+                    if n.is_some_and(|n| n.to_string() == NAME) {
+                        return true;
+                    }
+                }
+            }
+            let bounds: objc2_foundation::NSRect = msg_send![root, bounds];
+            let (cx, cy) = (bounds.origin.x + bounds.size.width / 2.0, bounds.origin.y + bounds.size.height / 2.0);
+            // start at 12 o'clock and go clockwise, as seen on screen
+            let flipped: bool = msg_send![root, contentsAreFlipped];
+            let path = CGPathCreateMutable();
+            let half = std::f64::consts::FRAC_PI_2;
+            let tau = std::f64::consts::TAU;
+            if flipped {
+                CGPathAddArc(path, std::ptr::null(), cx, cy, radius, -half, tau - half, false);
+            } else {
+                CGPathAddArc(path, std::ptr::null(), cx, cy, radius, half, half - tau, true);
+            }
+            let ring: Retained<AnyObject> = msg_send![class!(CAShapeLayer), layer];
+            let _: () = msg_send![&*ring, setName: &*NSString::from_str(NAME)];
+            let _: () = msg_send![&*ring, setFrame: bounds];
+            let _: () = msg_send![&*ring, setContentsScale: w.backingScaleFactor()];
+            let _: () = msg_send![&*ring, setPath: path as *const c_void];
+            CGPathRelease(path);
+            let color = NSColor::colorWithSRGBRed_green_blue_alpha(rgb[0] as f64 / 255.0, rgb[1] as f64 / 255.0, rgb[2] as f64 / 255.0, 1.0);
+            let cg: *const c_void = msg_send![&*color, CGColor];
+            let _: () = msg_send![&*ring, setStrokeColor: cg];
+            let _: () = msg_send![&*ring, setFillColor: std::ptr::null::<c_void>()];
+            let _: () = msg_send![&*ring, setLineWidth: width];
+            let _: () = msg_send![&*ring, setStrokeEnd: 0.0f64];
+            let anim: Retained<AnyObject> = msg_send![class!(CABasicAnimation), animationWithKeyPath: &*NSString::from_str("strokeEnd")];
+            let _: () = msg_send![&*anim, setFromValue: &*NSNumber::new_f64(from.clamp(0.0, 1.0))];
+            let _: () = msg_send![&*anim, setToValue: &*NSNumber::new_f64(0.0)];
+            let _: () = msg_send![&*anim, setDuration: secs.max(0.01)];
+            let _: () = msg_send![&*ring, addAnimation: &*anim, forKey: &*NSString::from_str("countdown")];
+            let _: () = msg_send![root, addSublayer: &*ring];
+        }
+        true
+    }
+
     pub fn lift(title: &str, cover: Option<u32>) {
         use objc2_app_kit::{NSApplication, NSWindowCollectionBehavior};
         let Some(mtm) = MainThreadMarker::new() else { return };
@@ -277,6 +340,9 @@ mod other {
     }
     pub fn reveal(_p: &std::path::Path) {}
     pub fn lift(_title: &str, _cover: Option<u32>) {}
+    pub fn countdown_ring(_title: &str, _radius: f64, _width: f64, _rgb: [u8; 3], _from: f64, _secs: f64) -> bool {
+        false
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

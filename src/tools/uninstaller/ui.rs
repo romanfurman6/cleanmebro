@@ -400,7 +400,7 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
                 let stale = a.last_used.is_some_and(|t| now - t > UNUSED_DAYS * 86400) && !dim;
                 p.text(Pos2::new(c_used, r.center().y), Align2::RIGHT_CENTER, ago(now, a.last_used), font(12.0), if stale { Color32::from_rgb(0xF2, 0xC4, 0x6B) } else { TEXT_FAINT });
                 let name_r = text_fit(&p, Pos2::new(c_name, r.center().y), Align2::LEFT_CENTER, &a.name, font(13.0), tc, c_used - 80.0 - c_name - 70.0);
-                let src = if dim && a.locked == Some("This is CleanMeBro") { None } else { Some(a.source) };
+                let src = if dim && a.locked == Some("This is Cmd+Meow") { None } else { Some(a.source) };
                 if let Some(s) = src {
                     source_chip(&p, Pos2::new(name_r.right() + 7.0, r.center().y), s);
                 }
@@ -473,7 +473,7 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
     if !a.sized {
         spinner(&p, Pos2::new(x0 + 8.0, y + 10.0), 7.0, ctx.input(|i| i.time), ACCENT);
         p.text(Pos2::new(x0 + 24.0, y + 10.0), Align2::LEFT_CENTER, "Finding its files…", font(13.0), TEXT_DIM);
-        ctx.request_repaint_after(Duration::from_millis(60));
+        crate::kit::glass::animate(&ctx);
         return;
     }
     // size
@@ -710,7 +710,7 @@ fn working(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
     modal_card(&p, m);
     spinner(&p, Pos2::new(m.left() + 30.0, m.center().y), 9.0, ctx.input(|i| i.time), ACCENT);
     text_fit(&p, Pos2::new(m.left() + 52.0, m.center().y), Align2::LEFT_CENTER, &line, font(13.0), TEXT, m.width() - 70.0);
-    ctx.request_repaint_after(Duration::from_millis(50));
+    crate::kit::glass::animate(&ctx);
 }
 
 /// One line on the last removal, for the bar and the drop zone.
@@ -1002,7 +1002,7 @@ fn inline_confirm(u: &mut Uninstaller, ui: &mut Ui, rect: Rect, d: &Drop) {
             spinner(&p, Pos2::new(x0 + 14.0, rect.center().y), 8.0, ctx.input(|i| i.time), ACCENT);
             let name = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             text_fit(&p, Pos2::new(x0 + 34.0, rect.center().y), Align2::LEFT_CENTER, &format!("Finding {name}'s files…"), font(13.0), TEXT_DIM, x1 - x0 - 34.0);
-            ctx.request_repaint_after(Duration::from_millis(60));
+            crate::kit::glass::animate(&ctx);
         }
         Drop::Refused(name, why) => {
             icon(&p, Icon::Info, Rect::from_min_size(Pos2::new(x0, rect.top() + 12.0), Vec2::splat(16.0)), Color32::from_rgb(0xF2, 0xC4, 0x6B));
@@ -1117,7 +1117,7 @@ fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
             spinner(&p, Pos2::new(r.left() + 30.0, r.center().y), 9.0, ictx.input(|i| i.time), ACCENT);
             let line = u.st.lock().unwrap().working.clone().unwrap_or_default();
             text_fit(&p, Pos2::new(r.left() + 52.0, r.center().y), Align2::LEFT_CENTER, &line, font(13.0), TEXT, r.width() - 70.0);
-            ictx.request_repaint_after(Duration::from_millis(50));
+            crate::kit::glass::animate(&ictx);
             return;
         }
         if showing_done && !dragging {
@@ -1187,7 +1187,7 @@ fn notice(u: &mut Uninstaller, ctx: &egui::Context, cx: &mut Cx) {
         let x0 = r.left() + 12.0;
         tool_chip(&p, Rect::from_min_size(Pos2::new(x0, r.top() + 12.0), Vec2::splat(32.0)), Icon::Trash, TINT);
         let tx = x0 + 42.0;
-        p.text(Pos2::new(tx, r.top() + 12.0), Align2::LEFT_TOP, "CleanMeBro", bold(12.0), TEXT_SOFT);
+        p.text(Pos2::new(tx, r.top() + 12.0), Align2::LEFT_TOP, "Cmd+Meow", bold(12.0), TEXT_SOFT);
         p.text(Pos2::new(r.right() - 12.0, r.top() + 12.0), Align2::RIGHT_TOP, "now", font(11.0), TEXT_DIM);
         text_fit(&p, Pos2::new(tx, r.top() + 30.0), Align2::LEFT_TOP, &format!("{} was removed", n.target.name), bold(13.0), TEXT, r.right() - tx - 12.0);
         let k = n.target.items.len();

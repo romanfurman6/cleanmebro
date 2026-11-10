@@ -175,7 +175,7 @@ pub fn recognize_image(img: &image::RgbaImage) -> Vec<TextLine> {
 }
 
 fn recognize_image_inner(img: &image::RgbaImage) -> Vec<TextLine> {
-    let path = std::env::temp_dir().join(format!("cleanmebro-ocr-{}-{}.png", std::process::id(), rand_id()));
+    let path = std::env::temp_dir().join(format!("cmdmeow-ocr-{}-{}.png", std::process::id(), rand_id()));
     if std::fs::write(&path, super::store::png_bytes(img)).is_err() {
         return Vec::new();
     }

@@ -290,7 +290,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
         ctx.request_repaint();
     }
     // the panel's widgets jiggle while editing
-    ctx.request_repaint_after(std::time::Duration::from_millis(33));
+    crate::kit::glass::animate(&ctx);
 }
 
 fn rows_height(items: &[Item]) -> f32 {
@@ -533,6 +533,21 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let w = 560.0f32.min(body.width() - 48.0);
     let x = body.center().x - w / 2.0;
     let mut y = body.top() + 24.0;
+    // general
+    p.text(Pos2::new(x, y), Align2::LEFT_TOP, "General", bold(15.0), TEXT);
+    y += 28.0;
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 54.0));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    let sw = Rect::from_min_size(Pos2::new(card.right() - 42.0, card.center().y - 9.0), Vec2::new(30.0, 18.0));
+    p.text(Pos2::new(card.left() + 16.0, card.top() + 11.0), Align2::LEFT_TOP, "Open at login", font(13.0), TEXT);
+    p.text(Pos2::new(card.left() + 16.0, card.top() + 29.0), Align2::LEFT_TOP, "Start Cmd+Meow in the menu bar when you log in to your Mac", font(11.0), TEXT_FAINT);
+    let on = crate::kit::login::enabled();
+    if switch(ui, sw, ui.scope_id().with("open-at-login"), on, true).clicked() {
+        if let Err(e) = crate::kit::login::set(!on) {
+            eprintln!("[login] {e}");
+        }
+    }
+    y = card.bottom() + 28.0;
     p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Tools", bold(15.0), TEXT);
     p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, "Each tool is separate. Turning one off hides its widgets and its page.", font(12.0), TEXT_DIM);
     y += 50.0;
@@ -577,7 +592,7 @@ fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     glass_card(&p, card, R_CARD, 0.0, false);
     let sw = Rect::from_min_size(Pos2::new(card.right() - 42.0, card.center().y - 9.0), Vec2::new(30.0, 18.0));
     p.text(Pos2::new(card.left() + 16.0, card.top() + 11.0), Align2::LEFT_TOP, "Open at login", font(13.0), TEXT);
-    p.text(Pos2::new(card.left() + 16.0, card.top() + 29.0), Align2::LEFT_TOP, "Start CleanMeBro in the menu bar when you log in to your Mac", font(11.0), TEXT_FAINT);
+    p.text(Pos2::new(card.left() + 16.0, card.top() + 29.0), Align2::LEFT_TOP, "Start Cmd+Meow in the menu bar when you log in to your Mac", font(11.0), TEXT_FAINT);
     let now = ui.ctx().input(|i| i.time);
     let on = app.perm_watch.login_on(app.demo, now);
     if switch(ui, sw, ui.scope_id().with("open-at-login"), on, true).clicked() && !app.demo {

@@ -114,7 +114,7 @@ fn demo_engine(state: State) -> (Engine, i64) {
         }
         State::Claude => {
             e.sessions = vec![
-                Session { project: "cleanmebro".into(), last_write: h(11.9) },
+                Session { project: "cmdmeow".into(), last_write: h(11.9) },
                 Session { project: "api-server".into(), last_write: h(11.9) },
                 idle.clone(),
             ];
@@ -123,7 +123,7 @@ fn demo_engine(state: State) -> (Engine, i64) {
             e.sessions[1].last_write = t - 48;
         }
         State::WindDown { .. } => {
-            e.sessions = vec![Session { project: "cleanmebro".into(), last_write: t - 300 }, idle];
+            e.sessions = vec![Session { project: "cmdmeow".into(), last_write: t - 300 }, idle];
             e.step(t - 300);
         }
     }
@@ -179,7 +179,7 @@ impl Tool for KeepAwake {
         // steam and countdowns move while awake and on screen; the watcher
         // thread does the rest (hidden, these frames would only burn CPU)
         if crate::kit::activity::visible() && self.state().awake() {
-            ctx.request_repaint_after(Duration::from_millis(80));
+            crate::kit::glass::animate(ctx);
         }
         false
     }
