@@ -1,13 +1,8 @@
 # CleanMeBro
 
-One menu bar app for keeping a Mac in shape. It puts a disk cleaner, an app
-uninstaller, startup items, a disk map, fan control, a screenshot and screen
-recording tool, clipboard history and keep-awake in one place, and every part
-can be turned off.
-
-Written in Rust (eframe/egui) with native AppKit, ScreenCaptureKit and Core
-Animation where it matters. Everything runs locally. The optional Claude
-integration only ever sees file paths, never file contents.
+A macOS menu bar app that keeps a Mac in shape: cleaner, uninstaller, startup
+items, disk map, fan control, screenshots and screen recording, clipboard
+history and keep-awake in one place. Written in Rust; everything runs locally.
 
 <p align="center">
   <img src="docs/images/panel.png" width="380" alt="The menu bar panel">
@@ -15,103 +10,13 @@ integration only ever sees file paths, never file contents.
 
 ## What it does
 
-### The menu bar panel
-
-Click the menu bar icon for a panel of widgets: disk, memory, CPU, battery,
-network, Bluetooth device batteries, startup items, Claude limits and fans,
-plus one recommendation for today. Widgets come in several sizes; drag them
-around and pick which to show in **Settings › Widgets**. Clicking a widget
-opens its detail sheet or its tool page in the full window.
-
-### Cleanup
-
-Finds junk by rule: user and app caches, logs, Xcode data, package manager
-downloads, leftovers of AI tools and the Trash. Claude can review every path
-and mark it **Safe**, **Ask** or **Keep**; anything unclear waits for your OK.
-What you keep is remembered and hidden next time. Items go to the Trash by
-default.
-
-![Cleanup results](docs/images/results.png)
-
-### Disk Map
-
-Measures a disk or folder and shows it as a treemap you can drill into. Pick
-what to remove and send it to the Trash after a review. It runs only when you
-ask.
+- **Cleanup** finds caches, logs and other junk; Claude can review each path (never file contents). Items go to the Trash.
+- **Disk Map** shows what takes space as a treemap.
+- **Uninstaller** removes apps with their leftovers; **Startup** turns off what starts with your Mac.
+- **Capture** takes screenshots with an editor and records the screen with audio and camera.
+- **Clipboard**, **Fan Control**, **Keep Awake** and **Claude** limits round it out. Any tool can be turned off.
 
 ![Disk Map](docs/images/lens.png)
-
-### Uninstaller
-
-Lists your apps with size and last use. Removing one also removes its
-support files, caches, preferences, containers and launch agents, which are
-all shown before anything moves. It also finds leftovers of apps that are
-already gone, and you can drop an app on a widget to uninstall it.
-
-![Uninstaller](docs/images/uninstaller.png)
-
-### Startup
-
-Login items, launch agents and launch daemons in one list, with what each one
-runs and when. It suggests what's safe to turn off (updaters, helpers of
-removed apps) and turns them off in one click, with undo. It tells you when
-something new adds itself.
-
-![Startup items](docs/images/startup.png)
-
-### Capture
-
-Screenshots of an area, a window or the whole screen (⇧⌘2), with an editor
-for arrows, shapes, text, numbered steps, highlight, blur, crop, a
-ruler and a color picker. Screen recording
-(⇧⌘0) records a display, a window or an area with system audio, microphone
-and a camera bubble. Recordings open in a small editor with trim, local
-speech-to-text (Whisper) and noise removal, and can be uploaded to your own
-S3-compatible storage for a share link.
-
-![Capture history](docs/images/capture.png)
-
-![Screenshot editor](docs/images/capture-editor.png)
-
-### Clipboard
-
-A history of what you copy (text, links, code, colors, images and files),
-kept on this Mac. ⌥⌘V opens quick paste over any app: type to search, ↵ to
-paste. Password managers and concealed items are skipped.
-
-![Clipboard history](docs/images/clipboard.png)
-
-### Fan Control
-
-Fan speeds and temperatures, with Auto, Quiet, Fixed, Curve and Max modes.
-Changing speed uses a small privileged helper that you install once.
-
-![Fan Control](docs/images/fan-detail.png)
-
-### Keep Awake
-
-Keeps the Mac awake with one switch, or by itself while Claude Code is
-working (and a few minutes after, so a pause between prompts doesn't put it
-to sleep). It uses the same power assertions as `caffeinate`.
-
-![Keep Awake](docs/images/awake.png)
-
-### Claude
-
-Your Claude plan limits (session, week, Opus) and how many tokens were used on
-this Mac, read from the Claude CLI without spending tokens. The session
-percentage can sit in the menu bar.
-
-![Claude limits](docs/images/claude.png)
-
-### Settings
-
-Turn any tool off and it disappears with its widgets and pages. CleanMeBro
-opens at login by default; you can turn that off here.
-
-![Settings](docs/images/settings-tools.png)
-
-Every rule and threshold, with its source, is in [docs/MECHANICS.md](docs/MECHANICS.md).
 
 ## Requirements
 
