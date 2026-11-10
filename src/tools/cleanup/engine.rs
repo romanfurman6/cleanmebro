@@ -189,6 +189,13 @@ impl Ctx {
     }
     #[allow(clippy::too_many_arguments)]
     fn add(&mut self, group: Group, title: &str, path: PathBuf, kind: &'static str, verdict: Verdict, reason: &str) {
+        // CleanMeBro's own cache and logs: a few MB, and in use while it runs
+        if path.file_name().is_some_and(|n| {
+            let n = n.to_string_lossy().to_lowercase();
+            n == "cleanmebro" || n.starts_with("com.romanfurman6.cleanmebro")
+        }) {
+            return;
+        }
         if self.kept.iter().any(|k| path.starts_with(k)) {
             self.hidden_kept += 1;
             return;

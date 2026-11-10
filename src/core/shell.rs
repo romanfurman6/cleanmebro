@@ -76,6 +76,9 @@ impl App {
         let ctx = cc.egui_ctx.clone();
         let demo = opts.screenshot.is_some();
         let tools = crate::tools::all(&ToolEnv { ctx: ctx.clone(), demo });
+        if !demo {
+            crate::kit::login::default_on();
+        }
 
         // the menu bar icon
         let (tx, tray_rx): (Sender<tray_icon::TrayIconEvent>, _) = std::sync::mpsc::channel();
