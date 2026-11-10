@@ -5,6 +5,7 @@
 <h1 align="center">Cmd+Meow</h1>
 
 <p align="center">
+  <a href="https://cmdmeow.furman.cat">Website</a> ·
   <a href="https://github.com/romanfurman6/cmdmeow/releases/latest">Download</a> ·
   <a href="https://github.com/romanfurman6/cmdmeow/actions/workflows/macos.yml">Latest build</a>
 </p>

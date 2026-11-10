@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cmd+Meow · Mac menu bar toolkit</title>
+<meta name="description" content="A macOS menu bar app: cleaner, uninstaller, disk map, screenshots and screen recording, clipboard history, keep awake and system monitor. Free, open source, runs locally.">
+<meta property="og:title" content="Cmd+Meow">
+<meta property="og:description" content="Cleaner, capture, clipboard and keep awake in one Mac menu bar app.">
+<meta property="og:image" content="https://cmdmeow.furman.cat/icon.png">
+<meta name="theme-color" content="#111318">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="Cmd+Meow home">
+      <svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#mark"/></svg>
+      <span>Cmd+Meow</span>
+    </a>
+    <nav class="links" aria-label="Sections">
+      <a href="#tools">Tools</a>
+      <a href="#capture">Capture</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/romanfurman6/cmdmeow">GitHub</a>
+    </nav>
+    <a class="btn p sm" href="https://github.com/romanfurman6/cmdmeow/releases">Download</a>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero wrap">
+  <div class="hero-copy">
+    <img class="appicon" src="icon.png" width="96" height="96" alt="">
+    <h1>Your Mac's toolkit,<br>one click from the menu bar.</h1>
+    <p class="lead">Clean up junk, map the disk, remove apps with their leftovers, take screenshots and recordings, keep clipboard history and keep the Mac awake. One small app instead of six.</p>
+    <div class="row">
+      <a class="btn p l" href="https://github.com/romanfurman6/cmdmeow/releases">
+        <svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v9M4.5 7 8 10.5 11.5 7M2.5 14.5h11"/></svg>
+        Download for macOS
+      </a>
+      <a class="btn l" href="https://github.com/romanfurman6/cmdmeow">Source code</a>
+    </div>
+    <p class="cap">Free and open source · Apple silicon and Intel · Runs locally</p>
+  </div>
+
+  <!-- Live panel, drawn in HTML so it stays sharp and animates with real-looking data -->
+  <div class="stage" aria-label="The Cmd+Meow menu bar panel" role="img">
+    <div class="menubar" aria-hidden="true">
+      <span class="mb-glyph"><svg viewBox="0 0 100 100" width="16" height="16"><use href="#mark-mono"/></svg></span>
+      <span class="num" id="clock">Tue 17:11</span>
+    </div>
+    <div class="panel" aria-hidden="true">
+      <div class="p-head"><b>MacBook Pro</b><span class="cap">M3 Max · up 3 days</span></div>
+
+      <div class="card">
+        <div class="c-top"><div><div class="t">CPU</div><div class="cap">12 cores · Xcode uses most</div></div><b class="num" id="cpu">16%</b></div>
+        <div class="bars" id="bars"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <div class="t">Memory</div>
+          <div class="ring-row">
+            <svg width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" class="ring-bg"/><circle cx="22" cy="22" r="18" class="ring" style="--p:.62" transform="rotate(-90 22 22)"/></svg>
+            <div><div class="n22 num">22.4</div><div class="cap">of 36 GB</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="t">Storage</div>
+          <div class="n22 num" style="margin-top:8px">312 GB</div>
+          <div class="cap">free of 1 TB</div>
+          <div class="track"><div style="width:69%"></div></div>
+        </div>
+      </div>
+
+      <div class="card rows">
+        <div class="rw">
+          <svg class="ic b" width="16" height="16" viewBox="0 0 16 16"><path d="M10.5 1.5 6 9M3.5 9.5h6l-1 5h-4zM5.5 12v2.5M7.5 12v2.5"/></svg>
+          <div><div>Clean Up</div><div class="cap">Caches, logs, Xcode data</div></div>
+          <span class="r"><span class="num dim">4.2 GB</span><span class="btn p xs">Review</span></span>
+        </div>
+        <div class="rw">
+          <svg class="ic b" width="16" height="16" viewBox="0 0 16 16"><path d="M2.5 6.5h9v3.5a3.5 3.5 0 0 1-3.5 3.5H6a3.5 3.5 0 0 1-3.5-3.5zM11.5 7.5h1a1.5 1.5 0 0 1 0 3h-1M5.5 1.5v2.5M8.5 1.5v2.5"/></svg>
+          <div><div>Keep Awake</div><div class="cap">On while Claude Code works</div></div>
+          <span class="r"><span class="sw on"></span></span>
+        </div>
+        <div class="rw">
+          <svg class="ic b" width="16" height="16" viewBox="0 0 16 16"><path d="M5 3H2.5v11.5h11V3H11M5.5 1.5h5v3h-5zM5 8h6M5 11h4"/></svg>
+          <div><div>Clipboard</div><div class="cap">142 items · last 2 min ago</div></div>
+          <span class="r"><span class="kc">⌥⌘V</span></span>
+        </div>
+      </div>
+
+      <div class="dock">
+        <span class="dk"><svg class="ic" width="16" height="16" viewBox="0 0 16 16"><path d="M1.5 5V1.5H5M11 1.5h3.5V5M14.5 11v3.5H11M5 14.5H1.5V11"/></svg>Capture</span>
+        <span class="dk"><svg class="ic" width="16" height="16" viewBox="0 0 16 16"><path d="M1.5 1.5h13v13h-13zM7 1.5v13M7 9h7.5"/></svg>Disk Map</span>
+        <span class="dk"><svg class="ic" width="16" height="16" viewBox="0 0 16 16"><path d="M2 4.5h12M2 11.5h12M5.5 3v3M10.5 10v3"/></svg>Settings</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tools" class="wrap sec">
+  <div class="sec-head">
+    <h2>Ten tools, one menu bar icon</h2>
+    <p class="sub">Turn off any tool you don't need. It disappears from the panel and stops running.</p>
+  </div>
+  <div class="tools">
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 1.5 6 9M3.5 9.5h6l-1 5h-4zM5.5 12v2.5M7.5 12v2.5"/></svg><h3>Clean Up</h3><p>Finds caches, logs and build leftovers. You review every path; items go to the Trash.</p></article>
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h13v13h-13zM7 1.5v13M7 9h7.5"/></svg><h3>Disk Map</h3><p>Shows what takes space, folder by folder. Starts only when you click.</p></article>
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M6 4V2h4v2M3.5 4l1 10.5h7l1-10.5M6.5 7v4.5M9.5 7v4.5"/></svg><h3>Uninstaller</h3><p>Removes an app together with its caches, preferences and login items.</p></article>
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v6M4.5 3.5a5.5 5.5 0 1 0 7 0"/></svg><h3>Startup Items</h3><p>Everything that starts with your Mac, in one list you can switch off.</p></article>
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5V1.5H5M11 1.5h3.5V5M14.5 11v3.5H11M5 14.5H1.5V11"/></svg><h3>Capture</h3><p>Screenshots with an editor, screen recording with system audio and camera.</p></article>
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3H2.5v11.5h11V3H11M5.5 1.5h5v3h-5zM5 8h6M5 11h4"/></svg><h3>Clipboard</h3><p>History of text, links and images. Search it and paste with <span class="kc">⌥⌘V</span>.</p></article>
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6.5h9v3.5a3.5 3.5 0 0 1-3.5 3.5H6a3.5 3.5 0 0 1-3.5-3.5zM11.5 7.5h1a1.5 1.5 0 0 1 0 3h-1M5.5 1.5v2.5M8.5 1.5v2.5"/></svg><h3>Keep Awake</h3><p>One switch to stop sleep. Can also stay awake while Claude Code is working.</p></article>
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8.5h3l1.5-4 3 8 1.5-4H15"/></svg><h3>Mac Health</h3><p>CPU, memory, disk, network and battery, including Bluetooth devices.</p></article>
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0.01 0M8 6.6a1.4 1.4 0 1 0 0.01 0M8 6.6C8.6 4.6 9.6 3.6 10.6 3.2M9.3 7.4c2-.1 3.2.6 3.8 1.5M8.5 9.3c.9 1.8.9 3.1.4 4.1M6.8 8.7c-1.4 1.4-2.7 1.9-3.8 1.8M6.8 7.2c-1.9-.6-2.8-1.6-3.1-2.6"/></svg><h3>Fans</h3><p>Live fan speeds and temperatures, with manual control when you need it.</p></article>
+    <article class="tool"><svg class="ic" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12a6.5 6.5 0 0 1 13 0M8 12l3.5-4.5"/></svg><h3>Claude Usage</h3><p>Your Claude Code limits at a glance. Optional: Claude can review cleanup paths.</p></article>
+  </div>
+</section>
+
+<section id="capture" class="wrap sec split">
+  <div class="sec-head">
+    <h2>Record, then share a link</h2>
+    <p class="sub">Press <span class="kc">⇧⌘2</span>, pick an area, record. Cmd+Meow uploads the file to your own S3 storage and copies a link that opens in a clean player.</p>
+    <ul class="checks">
+      <li>Records with system audio and an optional camera bubble</li>
+      <li>Your bucket, your keys. The secret stays in the Keychain</li>
+      <li>Links open in the <a href="play/">Cmd+Meow player</a> on any device</li>
+    </ul>
+  </div>
+  <div class="mini-player" aria-hidden="true">
+    <div class="mp-video">
+      <div class="mp-rec"><i></i>REC 00:42</div>
+    </div>
+    <div class="mp-bar">
+      <span class="mp-play"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 1.5v9l7.5-4.5z" fill="#fff"/></svg></span>
+      <span class="num dim">0:18</span>
+      <span class="mp-track"><span></span></span>
+      <span class="num dim">0:42</span>
+    </div>
+  </div>
+</section>
+
+<section class="wrap sec">
+  <div class="facts">
+    <div><div class="n22">Local</div><p class="cap">Scans, history and recordings stay on your Mac unless you share them.</p></div>
+    <div><div class="n22">On click</div><p class="cap">Heavy scans start only when you ask. Nothing runs in the background behind your back.</p></div>
+    <div><div class="n22">Trash first</div><p class="cap">Cleaned files go to the Trash, so every step can be undone.</p></div>
+    <div><div class="n22">Rust</div><p class="cap">Native, small and fast. MIT licensed.</p></div>
+  </div>
+</section>
+
+<section id="install" class="wrap sec">
+  <div class="sec-head">
+    <h2>Install</h2>
+    <p class="sub">Open the dmg and drag <b>Cmd+Meow</b> to Applications. The app isn't notarized yet, so open it once with right-click › Open, or run:</p>
+  </div>
+  <div class="code">
+    <pre><code id="cmd">xattr -dr com.apple.quarantine /Applications/CmdMeow.app</code></pre>
+    <button class="btn sm" type="button" data-copy="cmd">Copy</button>
+  </div>
+  <p class="cap" style="margin-top:12px">Or build it yourself: <code>cargo run --release</code>. Requires macOS 12 or later.</p>
+</section>
+
+</main>
+
+<footer class="wrap foot">
+  <span class="brand small"><svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#mark"/></svg>Cmd+Meow</span>
+  <span class="cap">MIT · made by <a href="https://github.com/romanfurman6">Roman Furman</a></span>
+</footer>
+
+<!-- Brand marks: keycap with cat ears, amber ⌘ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="mark" viewBox="0 0 100 100">
+      <g fill="#F3EFE6"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
+      <path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="#E8A33D" stroke-width="6.5" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="mark-mono" viewBox="0 0 100 100">
+      <g fill="#fff"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
+      <path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="#3B4656" stroke-width="6.5" stroke-linecap="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<script>
+// CPU bars: a scrolling history, the newest bar on the right.
+(function () {
+  var bars = document.getElementById('bars'), cpu = document.getElementById('cpu');
+  var n = 40, v = [];
+  for (var i = 0; i < n; i++) v.push(12 + Math.random() * 30);
+  function draw() {
+    bars.innerHTML = '';
+    v.forEach(function (h, i) {
+      var b = document.createElement('i');
+      b.style.height = h + '%';
+      if (h > 70) b.className = 'hot';
+      bars.appendChild(b);
+    });
+    cpu.textContent = Math.round(v[v.length - 1]) + '%';
+  }
+  function tick() {
+    var last = v[v.length - 1], next = last + (Math.random() - 0.5) * 22;
+    if (Math.random() < 0.06) next = 72 + Math.random() * 20;
+    v.push(Math.max(6, Math.min(95, next))); v.shift(); draw();
+  }
+  draw();
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(tick, 900);
+
+  var d = new Date(), days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  document.getElementById('clock').textContent = days[d.getDay()] + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+
+  document.querySelectorAll('[data-copy]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var t = document.getElementById(b.dataset.copy).textContent;
+      navigator.clipboard.writeText(t).then(function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); });
+    });
+  });
+})();
+</script>
+</body>
+</html>
