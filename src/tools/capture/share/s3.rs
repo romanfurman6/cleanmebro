@@ -26,7 +26,14 @@ impl Bucket {
     /// unless given ("fsn1.your-objectstorage.com" → "fsn1"; AWS's
     /// "s3.eu-central-1.amazonaws.com" → "eu-central-1").
     pub fn new(endpoint: &str, region: &str, name: &str, access_key: &str, secret: &str) -> Bucket {
-        let host = endpoint.trim().trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_string();
+        let name = name.trim().trim_matches('/');
+        // "https://fsn1.your-objectstorage.com/", a pasted bucket URL
+        // ("https://clips.fsn1…/", "https://fsn1…/clips") or a bare host
+        let host: String = endpoint.trim().trim_start_matches("https://").trim_start_matches("http://").split('/').next().unwrap_or("").to_lowercase();
+        let host = match host.strip_prefix(&format!("{}.", name.to_lowercase())) {
+            Some(rest) if !name.is_empty() && rest.contains('.') => rest.to_string(),
+            _ => host,
+        };
         let region = if region.trim().is_empty() {
             let labels: Vec<&str> = host.split('.').collect();
             match labels.as_slice() {
@@ -37,7 +44,7 @@ impl Bucket {
         } else {
             region.trim().to_string()
         };
-        Bucket { host, region, name: name.trim().to_string(), access_key: access_key.trim().to_string(), secret: secret.trim().to_string() }
+        Bucket { host, region, name: name.to_string(), access_key: access_key.trim().to_string(), secret: secret.trim().to_string() }
     }
 
     /// The bucket's own host ("bucket.fsn1.your-objectstorage.com").
@@ -106,7 +113,15 @@ pub fn put_file(b: &Bucket, key: &str, file: &Path, content_type: &str, public: 
     req = req.header("authorization", &auth);
     let f = std::fs::File::open(file).map_err(|e| format!("Can't read the file: {e}"))?;
     let mut body = Counting { inner: f, p };
-    let resp = req.send(ureq::SendBody::from_reader(&mut body)).map_err(|e| if p.cancel.load(Ordering::Relaxed) { "Stopped".to_string() } else { format!("Upload failed: {e}") })?;
+    let resp = req.send(ureq::SendBody::from_reader(&mut body)).map_err(|e| {
+        if p.cancel.load(Ordering::Relaxed) {
+            "Stopped".to_string()
+        } else if e.to_string().contains("lookup address") {
+            format!("Upload failed: {} doesn't exist; check Endpoint and Bucket", b.bucket_host())
+        } else {
+            format!("Upload failed: {e}")
+        }
+    })?;
     let status = resp.status().as_u16();
     if (200..300).contains(&status) {
         return Ok(());
@@ -279,6 +294,9 @@ mod tests {
         assert_eq!(b.url("a b/c.mp4"), "https://clips.fsn1.your-objectstorage.com/a%20b/c.mp4");
         assert_eq!(Bucket::new("s3.eu-central-1.amazonaws.com", "", "x", "k", "s").region, "eu-central-1");
         assert_eq!(Bucket::new("nbg1.your-objectstorage.com", " nbg1 ", "x", "k", "s").region, "nbg1");
+        // a pasted bucket URL, either style
+        assert_eq!(Bucket::new("https://clips.fsn1.your-objectstorage.com/", "", "clips", "k", "s").host, "fsn1.your-objectstorage.com");
+        assert_eq!(Bucket::new("https://fsn1.your-objectstorage.com/clips", "", " clips ", "k", "s").bucket_host(), "clips.fsn1.your-objectstorage.com");
     }
 
     #[test]
