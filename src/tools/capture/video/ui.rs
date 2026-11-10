@@ -37,6 +37,7 @@ pub fn show(c: &mut Capture, ctx: &egui::Context) {
         .with_has_shadow(true)
         .with_active(true);
     let mut closed = false;
+    let upload = c.uploads.progress(&v.path);
     crate::kit::viewport::show(ctx, ViewportId::from_hash_of("capture-video"), builder, |ui, _| {
         let vctx = ui.ctx().clone();
         if first {
@@ -54,7 +55,7 @@ pub fn show(c: &mut Capture, ctx: &egui::Context) {
             }
         }
         let full = ui.max_rect();
-        if draw(&mut v, ui, full) {
+        if draw(&mut v, ui, full, upload) {
             closed = true;
         }
     });
@@ -64,11 +65,16 @@ pub fn show(c: &mut Capture, ctx: &egui::Context) {
             Out::Saved { path, secs, copy } => {
                 if !copy {
                     if let Some(id) = c.store.video_entry(&path).map(|s| s.id) {
-                        c.store.set_video(id, path, secs as f32);
+                        c.store.set_video(id, path.clone(), secs as f32);
+                    }
+                    // shared before: upload the edit under the same link
+                    if crate::tools::capture::share::link_for(&path).is_some() {
+                        c.share(path);
                     }
                 }
                 c.files_at = None;
             }
+            Out::Share(path) => c.copy_link(path),
         }
     }
     if closed {
@@ -82,11 +88,11 @@ pub fn show(c: &mut Capture, ctx: &egui::Context) {
 }
 
 /// The whole window; true to close.
-fn draw(v: &mut Viewer, ui: &mut Ui, full: Rect) -> bool {
+fn draw(v: &mut Viewer, ui: &mut Ui, full: Rect, upload: Option<f32>) -> bool {
     let p = ui.painter().clone();
     p.rect_filled(full, 12.0, BG);
     let head = Rect::from_min_size(full.min, Vec2::new(full.width(), HEAD_H));
-    let mut close = header(v, ui, head);
+    let mut close = header(v, ui, head, upload);
     let tl = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - TIMELINE_H), full.max);
     let tr = Rect::from_min_max(Pos2::new(full.left(), tl.top() - TRANSPORT_H), Pos2::new(full.right(), tl.top()));
     let side = Rect::from_min_max(Pos2::new(full.right() - PANEL_W, head.bottom()), Pos2::new(full.right(), tr.top()));
@@ -120,11 +126,11 @@ fn draw(v: &mut Viewer, ui: &mut Ui, full: Rect) -> bool {
     close
 }
 
-fn header(v: &mut Viewer, ui: &mut Ui, r: Rect) -> bool {
+fn header(v: &mut Viewer, ui: &mut Ui, r: Rect, upload: Option<f32>) -> bool {
     let p = ui.painter().clone();
     p.rect_filled(r, egui::CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, FOOTER);
     hairline(&p, r.left_bottom(), r.right_bottom());
-    let drag = ui.interact(Rect::from_min_max(r.min + Vec2::new(90.0, 0.0), r.max - Vec2::new(360.0, 0.0)), ui.scope_id().with("drag"), Sense::click_and_drag());
+    let drag = ui.interact(Rect::from_min_max(r.min + Vec2::new(90.0, 0.0), r.max - Vec2::new(470.0, 0.0)), ui.scope_id().with("drag"), Sense::click_and_drag());
     if drag.drag_started() {
         ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
     }
@@ -161,6 +167,16 @@ fn header(v: &mut Viewer, ui: &mut Ui, r: Rect) -> bool {
     }
     if button(ui, "Save copy", BTN_SECONDARY, v.player.is_some() && can) {
         v.save(true);
+    }
+    // Share uploads the saved file; unsaved edits go up after Save
+    let shared = crate::tools::capture::share::link_for(&v.path).is_some();
+    let label = match upload {
+        Some(f) => format!("Uploading {:.0}%", f * 100.0),
+        None if shared => "Copy link".into(),
+        None => "Share".into(),
+    };
+    if button(ui, &label, BTN_SECONDARY, upload.is_none() && !v.saving) {
+        v.out.push(Out::Share(v.path.clone()));
     }
     if v.dirty() {
         let what = match (v.edited(), v.voice_on && v.voice.is_some()) {

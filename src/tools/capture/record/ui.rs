@@ -828,6 +828,7 @@ fn saved(c: &mut Capture, ctx: &egui::Context) {
     #[derive(PartialEq)]
     enum Do {
         Open,
+        Link,
         Reveal,
         Copy,
         Delete,
@@ -835,6 +836,13 @@ fn saved(c: &mut Capture, ctx: &egui::Context) {
     }
     let mut todo = None;
     let mut hovered = false;
+    let uploading = c.uploads.progress(&sv.path);
+    let shared = uploading.is_none() && crate::tools::capture::share::link_for(&sv.path).is_some();
+    let link_label = match uploading {
+        Some(f) => format!("{:.0}%", f * 100.0),
+        None if shared => "Copy link".to_string(),
+        None => "Share".to_string(),
+    };
     crate::kit::viewport::show(ctx, vid, floating(title, pos, size).with_active(false), |ui, _| {
         sys::lift(title, None);
         let vctx = ui.ctx().clone();
@@ -870,8 +878,8 @@ fn saved(c: &mut Capture, ctx: &egui::Context) {
         icons::draw(&p, Ico::Check, Rect::from_center_size(Pos2::new(r.left() + 18.0, y), Vec2::splat(13.0)), Color32::from_rgb(0x30, 0xD1, 0x58));
         p.text(Pos2::new(r.left() + 30.0, y), Align2::LEFT_CENTER, format!("Saved · {}", megabytes(sv.bytes)), font(12.0), TEXT);
         p.text(Pos2::new(r.right() - 12.0, y), Align2::RIGHT_CENTER, format!("{}×{}", sv.size.0, sv.size.1), font(12.0), TEXT_FAINT);
-        let acts = [(Ico::Scissors, "Edit", Do::Open), (Ico::Folder, "Finder", Do::Reveal), (Ico::Copy, "Copy", Do::Copy), (Ico::Trash, "Delete", Do::Delete)];
-        let bw = (r.width() - 16.0 - 12.0) / 4.0;
+        let acts = [(Ico::Scissors, "Edit", Do::Open), (Ico::Link, link_label.as_str(), Do::Link), (Ico::Folder, "Finder", Do::Reveal), (Ico::Copy, "Copy", Do::Copy), (Ico::Trash, "Delete", Do::Delete)];
+        let bw = (r.width() - 16.0 - 16.0) / 5.0;
         for (k, (ico, label, act)) in acts.into_iter().enumerate() {
             let br = Rect::from_min_size(Pos2::new(r.left() + 8.0 + k as f32 * (bw + 4.0), y + 14.0), Vec2::new(bw, 44.0));
             let resp = ui.interact(br, id.with(("act", k)), Sense::click());
@@ -899,6 +907,7 @@ fn saved(c: &mut Capture, ctx: &egui::Context) {
             c.rec.saved = None;
             c.open_video(path);
         }
+        Some(Do::Link) => c.copy_link(path),
         Some(Do::Reveal) => sys::reveal(&path),
         Some(Do::Copy) => {
             if sys::copy_file(&path) {

@@ -19,6 +19,7 @@ mod render;
 mod settings;
 mod store;
 mod ui;
+pub mod share;
 pub mod video;
 mod windows;
 
@@ -152,6 +153,10 @@ pub struct Capture {
     rec: record::Recorder,
     /// The video viewer, when one is open.
     video: Option<video::Viewer>,
+    /// Recordings being uploaded for a link.
+    uploads: share::Uploads,
+    /// The secret key as it's being typed in settings (never shown back).
+    share_secret: String,
 }
 
 impl Capture {
@@ -199,6 +204,8 @@ impl Capture {
             next_pin: 1,
             rec: record::Recorder::new(env.ctx.clone()),
             video: None,
+            uploads: share::Uploads::default(),
+            share_secret: String::new(),
         };
         c.apply_keys();
         c
@@ -303,9 +310,56 @@ impl Capture {
             }
         };
         self.files_at = None;
+        if self.settings.share.auto && self.settings.share.ready() {
+            self.share(st.path.clone());
+        }
+        if self.settings.rec.open_editor {
+            self.open_video(st.path);
+            return;
+        }
         let bytes = std::fs::metadata(&st.path).map(|m| m.len()).unwrap_or(0);
         let display = self.rec.last_display;
         self.rec.saved = Some(record::Saved { path: st.path, secs: st.secs, size: st.size, bytes, thumb: Some(thumb), tex: None, history: id, display, born: Instant::now(), key: Instant::now() });
+    }
+
+    /// Upload `path` for a link (again, if it was shared before: the link
+    /// stays the same).
+    fn share(&mut self, path: PathBuf) {
+        if let Err(e) = self.uploads.start(&self.settings.share, path, &self.ctx) {
+            self.hud(e);
+        }
+    }
+
+    /// Copy the link of `path`: shared already, or upload it first.
+    fn copy_link(&mut self, path: PathBuf) {
+        if self.uploads.progress(&path).is_some() {
+            return;
+        }
+        match share::link_for(&path) {
+            Some(link) => {
+                self.copy_text(&link);
+                self.hud("Link copied");
+            }
+            None => self.share(path),
+        }
+    }
+
+    /// Finished uploads: copy the link, say so.
+    fn uploads_done(&mut self) {
+        for (path, r) in self.uploads.poll() {
+            match r {
+                Ok(link) => {
+                    if self.settings.share.copy_link {
+                        self.copy_text(&link);
+                        self.hud("Uploaded · link copied");
+                    } else {
+                        self.hud("Uploaded");
+                    }
+                }
+                Err(e) if e == "Stopped" => {}
+                Err(e) => self.hud(format!("{e} ({})", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
+            }
+        }
     }
 
     /// Hand what the recorder asked for to the rest of Capture.
@@ -842,11 +896,18 @@ impl Tool for Capture {
         }
         self.rec.tick(&mut self.settings.rec);
         self.recorder_out();
+        self.uploads_done();
+        if let Some(sv) = &mut self.rec.saved {
+            // the card waits for its upload
+            if self.uploads.progress(&sv.path).is_some() {
+                sv.born = Instant::now();
+            }
+        }
         if self.rec.live().is_some() {
             // the timer in the menu bar
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
-        let timed = self.countdown.is_some() || self.hud.is_some() || self.preview.is_some() || self.rec.busy();
+        let timed = self.countdown.is_some() || self.hud.is_some() || self.preview.is_some() || self.rec.busy() || self.uploads.busy();
         if timed {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }

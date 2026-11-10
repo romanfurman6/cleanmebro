@@ -44,6 +44,7 @@ pub enum Ico {
     Restart,
     Gear,
     Scissors,
+    Link,
 }
 
 fn symbol(i: Ico) -> &'static str {
@@ -86,6 +87,7 @@ fn symbol(i: Ico) -> &'static str {
         Ico::Restart => "arrow.counterclockwise",
         Ico::Gear => "gearshape",
         Ico::Scissors => "scissors",
+        Ico::Link => "link",
     }
 }
 
@@ -259,6 +261,11 @@ pub fn draw(p: &Painter, i: Ico, rect: Rect, color: Color32) {
             circle(17.0, 17.0, 3.0);
             line(&[(9.0, 15.0), (18.0, 4.0)]);
             line(&[(15.0, 15.0), (6.0, 4.0)]);
+        }
+        Ico::Link => {
+            line(&[(10.0, 14.0), (14.0, 10.0)]);
+            line(&[(11.0, 7.0), (13.5, 4.5), (16.5, 4.5), (19.5, 7.5), (19.5, 10.5), (17.0, 13.0)]);
+            line(&[(13.0, 17.0), (10.5, 19.5), (7.5, 19.5), (4.5, 16.5), (4.5, 13.5), (7.0, 11.0)]);
         }
         Ico::Gear => {
             circle(12.0, 12.0, 3.0);

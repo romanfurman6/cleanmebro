@@ -40,6 +40,8 @@ pub enum Out {
     /// A file was written: over the original (`copy` false) or beside it.
     Saved { path: PathBuf, secs: f64, copy: bool },
     CopyText(String),
+    /// Upload the file for a link (Share).
+    Share(PathBuf),
 }
 
 enum Event {

@@ -118,6 +118,8 @@ pub struct Settings {
     pub keep_breaks: bool,
     /// Screen recording.
     pub rec: RecSettings,
+    /// Uploading recordings for a link.
+    pub share: super::share::Settings,
 }
 
 /// Frame rates the recorder offers.
@@ -165,6 +167,11 @@ pub struct RecSettings {
     pub clicks: bool,
     /// Seconds of 3-2-1 before recording (0 = none).
     pub countdown: u32,
+    /// After a recording: open it in the video editor right away (instead
+    /// of the small saved card).
+    pub open_editor: bool,
+    /// Seconds the saved card stays up; None keeps it until closed.
+    pub card_secs: Option<u32>,
 }
 
 impl Default for RecSettings {
@@ -181,6 +188,8 @@ impl Default for RecSettings {
             cursor: true,
             clicks: false,
             countdown: 3,
+            open_editor: false,
+            card_secs: Some(8),
         }
     }
 }
@@ -202,6 +211,7 @@ impl Default for Settings {
             cover: Cover::Box,
             keep_breaks: true,
             rec: RecSettings::default(),
+            share: Default::default(),
         }
     }
 }
