@@ -1,6 +1,6 @@
 //! macOS-only pieces of Clipboard: reading and writing the general
-//! pasteboard, the app in front, and pasting into it with a synthetic ⌘V
-//! (which needs the Accessibility permission). Elsewhere these are no-ops,
+//! pasteboard and the app in front (the source of each copy). Elsewhere
+//! these are no-ops,
 //! so the tool still builds and its tests run on Linux.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
@@ -49,28 +49,10 @@ mod imp {
     use objc2::runtime::ProtocolObject;
     use objc2::AnyThread;
     use objc2_app_kit::{
-        NSApplicationActivationOptions, NSBitmapImageFileType, NSBitmapImageRep, NSImage, NSPasteboard, NSPasteboardTypeFileURL, NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF,
-        NSPasteboardTypeString, NSPasteboardTypeTIFF, NSPasteboardWriting, NSRunningApplication, NSWorkspace,
+        NSBitmapImageFileType, NSBitmapImageRep, NSImage, NSPasteboard, NSPasteboardTypeFileURL, NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF,
+        NSPasteboardTypeString, NSPasteboardTypeTIFF, NSPasteboardWriting, NSWorkspace,
     };
     use objc2_foundation::{NSArray, NSData, NSDictionary, NSString, NSURL};
-
-    #[link(name = "ApplicationServices", kind = "framework")]
-    unsafe extern "C" {
-        fn AXIsProcessTrusted() -> bool;
-    }
-
-    #[link(name = "CoreGraphics", kind = "framework")]
-    unsafe extern "C" {
-        fn CGEventSourceCreate(state: i32) -> *mut std::ffi::c_void;
-        fn CGEventCreateKeyboardEvent(source: *mut std::ffi::c_void, key: u16, down: bool) -> *mut std::ffi::c_void;
-        fn CGEventSetFlags(event: *mut std::ffi::c_void, flags: u64);
-        fn CGEventPost(tap: u32, event: *mut std::ffi::c_void);
-    }
-
-    #[link(name = "CoreFoundation", kind = "framework")]
-    unsafe extern "C" {
-        fn CFRelease(p: *const std::ffi::c_void);
-    }
 
     pub fn change_count() -> isize {
         NSPasteboard::generalPasteboard().changeCount()
@@ -82,10 +64,6 @@ mod imp {
         let name = app.localizedName().map(|n| n.to_string()).unwrap_or_default();
         let bundle = app.bundleIdentifier().map(|b| b.to_string()).unwrap_or_default();
         Some((name, bundle, app.processIdentifier()))
-    }
-
-    pub fn own_pid() -> i32 {
-        std::process::id() as i32
     }
 
     fn data(pb: &NSPasteboard, ty: &NSString) -> Option<Vec<u8>> {
@@ -191,41 +169,6 @@ mod imp {
         }
         ok.then(|| pb.changeCount())
     }
-
-    pub fn can_paste() -> bool {
-        unsafe { AXIsProcessTrusted() }
-    }
-
-    /// Bring back the app that was in front before quick paste.
-    pub fn activate_pid(pid: i32) {
-        if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
-            #[allow(deprecated)]
-            app.activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps);
-        }
-    }
-
-    /// Press ⌘V in the app in front.
-    pub fn press_paste() {
-        const KEY_V: u16 = 9;
-        const CMD: u64 = 1 << 20;
-        unsafe {
-            // kCGEventSourceStateCombinedSessionState
-            let src = CGEventSourceCreate(0);
-            for down in [true, false] {
-                let e = CGEventCreateKeyboardEvent(src, KEY_V, down);
-                if e.is_null() {
-                    continue;
-                }
-                CGEventSetFlags(e, CMD);
-                // kCGAnnotatedSessionEventTap
-                CGEventPost(2, e);
-                CFRelease(e);
-            }
-            if !src.is_null() {
-                CFRelease(src);
-            }
-        }
-    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -238,9 +181,6 @@ mod imp {
     pub fn front_app() -> Option<(String, String, i32)> {
         None
     }
-    pub fn own_pid() -> i32 {
-        std::process::id() as i32
-    }
     pub fn read(_max: usize, _img: bool) -> Clip {
         Clip::default()
     }
@@ -250,19 +190,9 @@ mod imp {
     pub fn write(_w: &Write) -> Option<isize> {
         None
     }
-    pub fn can_paste() -> bool {
-        false
-    }
-    pub fn activate_pid(_pid: i32) {}
-    pub fn press_paste() {}
 }
 
 pub use imp::*;
-
-/// Accessibility pane of System Settings, where paste permission is given.
-pub fn open_accessibility_settings() {
-    let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility").spawn();
-}
 
 #[cfg(test)]
 mod tests {
