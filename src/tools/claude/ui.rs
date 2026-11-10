@@ -2,6 +2,7 @@
 //! left half of the Claude page).
 
 use super::backend;
+use crate::kit::ai::UsageInfo;
 use super::ID;
 use crate::core::tool::{Cx, Size};
 use crate::kit::tile;
@@ -13,7 +14,7 @@ pub const CLEANUP: &str = "cleanup";
 const GAP: f32 = 12.0;
 
 /// The Claude widget at `size`.
-pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &backend::ClaudeInfo, sel: bool) -> egui::Response {
+pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &UsageInfo, sel: bool) -> egui::Response {
     let id = ui.scope_id().with("w-claude");
     let t = ui.ctx().input(|i| i.time);
     let session = cl.session().cloned();
@@ -21,11 +22,11 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &backend::ClaudeInfo, sel: b
     let col = super::page::usage_color(pct);
     let value = session.as_ref().map(|_| format!("{pct:.0}%")).unwrap_or_else(|| "–".into());
     match size {
-        Size::S11 => tile::small_ring(ui, r, id, Icon::Sparkle, pct / 100.0, col, &format!("Session {value}"), sel),
+        Size::S11 => tile::small_ring(ui, r, id, Icon::Gauge, pct / 100.0, col, &format!("Session {value}"), sel),
         Size::S12 => {
             let st = status(cl);
             let bar_or = if session.is_some() { Ok(((pct / 100.0).max(0.01), col)) } else { Err(st.as_str()) };
-            tile::wide(ui, r, id, Icon::Sparkle, tint::CLAUDE, "Claude · session", &value, bar_or, sel)
+            tile::wide(ui, r, id, Icon::Gauge, tint::CLAUDE, &format!("{} · session", cl.provider), &value, bar_or, sel)
         }
         Size::S14 => {
             let resp = tile::card(ui, r, id, sel);
@@ -35,7 +36,7 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &backend::ClaudeInfo, sel: b
         _ => {
             let resp = tile::card(ui, r, id, sel);
             let p = ui.painter();
-            let body = tile::head(p, r, Icon::Sparkle, tint::CLAUDE, &cl.plan_title(), &status(cl));
+            let body = tile::head(p, r, Icon::Gauge, tint::CLAUDE, &cl.plan_title(), &status(cl));
             for (k, (label, l)) in [("Session", cl.session()), ("Week", cl.weekly())].into_iter().enumerate() {
                 let lr = Rect::from_min_size(Pos2::new(body.left(), body.top() + k as f32 * 22.0), Vec2::new(body.width(), 22.0));
                 let v = l.map(|l| format!("{:.0}% · {}", l.pct, short_reset(&l.resets).trim_start_matches("resets "))).unwrap_or_default();
@@ -49,7 +50,7 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &backend::ClaudeInfo, sel: b
     }
 }
 
-fn status(cl: &backend::ClaudeInfo) -> String {
+fn status(cl: &UsageInfo) -> String {
     if cl.loading && cl.limits.is_empty() {
         "Checking…".to_string()
     } else if !cl.installed && !cl.loading {
@@ -64,14 +65,13 @@ fn status(cl: &backend::ClaudeInfo) -> String {
 }
 
 /// The panel card: plan, tokens today, then Session and Week bars.
-pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
+pub fn card(p: &egui::Painter, r: Rect, cl: &UsageInfo, t: f64) {
     let x0 = r.left() + 12.0;
     let x1 = r.right() - 12.0;
     let hy = r.top() + 17.0;
-    icon(p, Icon::Sparkle, Rect::from_center_size(Pos2::new(x0 + 8.0, hy), Vec2::splat(16.0)), CLAUDE);
     let status = status(cl);
-    let sw = text_fit(p, Pos2::new(x1, hy), Align2::RIGHT_CENTER, &status, font(12.0), TEXT_DIM, 170.0).width();
-    text_fit(p, Pos2::new(x0 + 24.0, hy), Align2::LEFT_CENTER, &cl.plan_title(), bold(13.0), TEXT, (x1 - sw - 12.0) - (x0 + 24.0));
+    let sw = text_fit(p, Pos2::new(x1, hy), Align2::RIGHT_CENTER, &status, ty::label(), white(166), 170.0).width();
+    text_fit(p, Pos2::new(x0, hy), Align2::LEFT_CENTER, &cl.plan_title(), ty::title(), TEXT, (x1 - sw - 12.0) - x0);
     if cl.limits.is_empty() && cl.loading {
         spinner(p, Pos2::new(x1 - 8.0, r.top() + 56.0), 7.0, t, TEXT_DIM);
     }
@@ -111,7 +111,7 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         (Some(f), _) => format!("Limits updated {}", f.format("%H:%M")),
         _ => String::new(),
     };
-    if sheet_header(ui, rect, Icon::Sparkle, tint::CLAUDE, &cl.plan_title(), &sub) {
+    if sheet_header(ui, rect, Icon::Gauge, tint::CLAUDE, &cl.plan_title(), &sub) {
         cx.close_detail();
     }
     let rb = Rect::from_center_size(Pos2::new(rect.right() - 27.0 - 34.0, rect.top() + 29.0), Vec2::splat(26.0));
@@ -120,7 +120,7 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         crate::kit::glass::animate(&ctx);
     } else if round_button(ui, rb, Icon::Refresh, "Refresh limits").clicked() {
         backend::request_refresh();
-        cx.toast("Asking Claude for your limits…");
+        cx.toast(format!("Asking {} for your limits…", cl.provider));
     }
     let x0 = rect.left() + 16.0;
     let w = rect.width() - 32.0;
@@ -132,7 +132,7 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, lim_h));
     glass_card(&p, lr, R_CARD, 0.0, false);
     if n == 0 {
-        let msg = cl.error.clone().unwrap_or_else(|| "Asking Claude Code for your limits…".into());
+        let msg = cl.error.clone().unwrap_or_else(|| format!("Asking {} for your limits…", cl.provider));
         paragraph(&p, lr.min + Vec2::new(12.0, 12.0), &msg, font(13.0), TEXT_DIM, w - 24.0);
     }
     for (i, l) in cl.limits.iter().enumerate() {
@@ -172,7 +172,8 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
                 lines.push((l.clone(), TEXT_SOFT, 13.0));
             }
         }
-        None => lines.push(("Claude Code reports this once you've used it on this Mac.".into(), TEXT_DIM, 13.0)),
+        None if !cl.note.is_empty() && cl.provider != crate::kit::ai::claude::NAME => lines.push((cl.note.clone(), TEXT_DIM, 13.0)),
+        None => lines.push((format!("{} reports this once you've used it on this Mac.", cl.provider), TEXT_DIM, 13.0)),
     }
     let heights: Vec<f32> = lines.iter().map(|(l, c, s)| p.layout(l.clone(), font(*s), *c, w - 24.0).size().y).collect();
     let mut h = 12.0 + 18.0 + 6.0;
@@ -186,19 +187,23 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     }
     let ur = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h + 6.0));
     glass_card(&p, ur, R_CARD, 0.0, false);
-    p.text(ur.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "What uses your limits", bold(13.0), TEXT);
+    p.text(ur.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, if cl.contrib.is_empty() && cl.provider != crate::kit::ai::claude::NAME { "About these limits" } else { "What uses your limits" }, bold(13.0), TEXT);
     let mut ly = ur.top() + 36.0;
     for ((l, c, s), hh) in lines.iter().zip(&heights).take(shown) {
         paragraph(&p, Pos2::new(ur.left() + 12.0, ly), l, font(*s), *c, w - 24.0);
         ly += hh + 6.0;
     }
 
-    // buttons, bottom right
+    // buttons, bottom right (Cleanup knows Claude's caches only)
     let primary = "Clean Claude caches";
     let pw = button_width(&p, primary, BTN_PRIMARY);
-    let pr = Rect::from_min_size(Pos2::new(rect.right() - 16.0 - pw, by), Vec2::new(pw, 30.0));
-    if pill_button(ui, pr, primary, BTN_PRIMARY, true).clicked() {
-        cx.open_page(CLEANUP, "claude");
+    let mut pr = Rect::from_min_size(Pos2::new(rect.right() - 16.0 - pw, by), Vec2::new(pw, 30.0));
+    if cl.provider == crate::kit::ai::claude::NAME {
+        if pill_button(ui, pr, primary, BTN_PRIMARY, true).clicked() {
+            cx.open_page(CLEANUP, "claude");
+        }
+    } else {
+        pr = Rect::from_min_size(Pos2::new(rect.right() - 8.0, by), Vec2::new(0.0, 30.0));
     }
     let sw = button_width(&p, "Open page", BTN_SECONDARY);
     let sr = Rect::from_min_size(Pos2::new(pr.left() - 8.0 - sw, by), Vec2::new(sw, 30.0));

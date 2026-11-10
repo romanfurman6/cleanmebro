@@ -79,6 +79,29 @@ pub struct Device {
 }
 
 impl Device {
+    /// SF Symbols for this exact model, best first: macOS knows AirPods,
+    /// AirPods Max, Beats and Magic accessories by name. Several spellings
+    /// are listed because symbol names changed between macOS releases; the
+    /// first one this Mac has wins, and the kind's own icon is the fallback.
+    pub fn symbols(&self) -> &'static [&'static str] {
+        let n = self.name.to_lowercase();
+        match self.kind {
+            _ if n.contains("airpods max") => &["airpods.max", "airpodsmax"],
+            _ if n.contains("airpods pro") => &["airpods.pro", "airpodspro"],
+            _ if n.contains("airpods 4") || n.contains("airpods (3") || n.contains("airpods 3") => &["airpods.gen3"],
+            _ if n.contains("airpods") => &["airpods"],
+            _ if n.contains("beats") && self.kind == Kind::Headphones => &["beats.headphones"],
+            _ if n.contains("beats") || n.contains("powerbeats") => &["beats.earphones", "earbuds"],
+            Kind::Earbuds => &["earbuds"],
+            Kind::Headphones => &["headphones"],
+            Kind::Mouse if n.contains("magic mouse") => &["magicmouse"],
+            Kind::Mouse => &["computermouse"],
+            Kind::Keyboard => &["keyboard"],
+            Kind::Trackpad => &["rectangle.and.hand.point.up.left"],
+            Kind::Other => &[],
+        }
+    }
+
     /// The charge that matters: the single battery, or the emptier earbud.
     /// The case doesn't count (it's not in your ears).
     pub fn battery(&self) -> Option<u8> {
@@ -364,6 +387,17 @@ pub fn demo() -> Vec<Device> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_symbols() {
+        let d = |n: &str| Device { name: n.into(), kind: Kind::guess("", n), ..Default::default() };
+        assert_eq!(d("Roman's AirPods Max").symbols()[0], "airpods.max");
+        assert_eq!(d("AirPods Pro").symbols()[0], "airpods.pro");
+        assert_eq!(d("AirPods").symbols(), &["airpods"]);
+        assert_eq!(d("Magic Mouse").symbols(), &["magicmouse"]);
+        assert_eq!(d("MX Master 3S").symbols(), &["computermouse"]);
+        assert_eq!(d("Magic Keyboard").symbols(), &["keyboard"]);
+    }
 
     const PROFILER: &str = r#"{"SPBluetoothDataType":[{"controller_properties":{},"device_connected":[
         {"Alex's AirPods Pro":{"device_address":"AA:BB:CC:DD:EE:01","device_batteryLevelCase":"71%","device_batteryLevelLeft":"42%","device_batteryLevelRight":"38%","device_minorType":"Headphones"}},

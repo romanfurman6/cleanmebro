@@ -180,6 +180,10 @@ impl Tool for Cleanup {
                 *self.clean.lock().unwrap() = page::demo_results();
                 Some(View::Page)
             }
+            "cleanup-done" => {
+                *self.clean.lock().unwrap() = page::demo_done();
+                Some(View::Page)
+            }
             _ => None,
         }
     }

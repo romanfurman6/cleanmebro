@@ -3,6 +3,7 @@
 //! Nothing here knows about any tool.
 
 pub mod activity;
+pub mod ai;
 pub mod brand;
 pub mod claude_code;
 pub mod fs;

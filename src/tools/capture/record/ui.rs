@@ -774,7 +774,7 @@ fn camera_controls(c: &mut Capture, ctx: &egui::Context) {
         p.rect_filled(r, r.height() / 2.0, Color32::from_rgba_unmultiplied(22, 22, 24, 230));
         let id = ui.scope_id().with("cam-ctl");
         let b = |i: f32| Rect::from_center_size(Pos2::new(r.left() + 20.0 + i * 36.0, r.center().y), Vec2::splat(28.0));
-        let mut glyph = |ui: &mut Ui, rect: Rect, key: &str, tip: &str, on: bool, draw: &dyn Fn(&egui::Painter, Pos2, Color32)| {
+        let glyph = |ui: &mut Ui, rect: Rect, key: &str, tip: &str, on: bool, draw: &dyn Fn(&egui::Painter, Pos2, Color32)| {
             let resp = ui.interact(rect, id.with(key), Sense::click());
             if resp.hovered() && on {
                 p.circle_filled(rect.center(), 13.0, white(30));

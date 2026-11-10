@@ -11,7 +11,7 @@ use crate::core::tool::Size;
 use crate::kit::glass::*;
 use crate::kit::tile;
 use egui::epaint::{PathShape, PathStroke};
-use egui::{Align2, Color32, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
+use egui::{Align2, Color32, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use std::f32::consts::{PI, TAU};
 
 const HERO_H: f32 = 120.0;
@@ -32,12 +32,18 @@ struct Look {
     bg: Color32,
 }
 
+/// Claude's own orange, for its spark and its time on the Today strip.
+const CLAUDE_ORANGE: Color32 = Color32::from_rgb(0xC9, 0x64, 0x3E);
+/// Time kept awake by hand on the Today strip.
+const HAND: Color32 = GREEN;
+
 fn look(st: State) -> Look {
+    let cup = white(235);
+    let soft = white(190);
     match st {
-        State::Off => Look { ring: Color32::from_rgb(0x6E, 0x82, 0xB4), body: Color32::from_rgb(0xA9, 0xB4, 0xCF), soft: Color32::from_rgb(0xC7, 0xCE, 0xDD), bg: Color32::from_rgb(0x1B, 0x1D, 0x24) },
-        State::Manual => Look { ring: tint::KEEP_AWAKE, body: Color32::from_rgb(0xF2, 0xC6, 0xD9), soft: Color32::from_rgb(0xF5, 0xD0, 0xE0), bg: Color32::from_rgb(0x24, 0x1A, 0x21) },
-        State::Claude => Look { ring: tint::CLAUDE, body: Color32::from_rgb(0xF2, 0xD3, 0xC4), soft: Color32::from_rgb(0xF3, 0xD3, 0xC4), bg: Color32::from_rgb(0x25, 0x1C, 0x18) },
-        State::WindDown { .. } => Look { ring: AMBER, body: Color32::from_rgb(0xE8, 0xD6, 0xB0), soft: Color32::from_rgb(0xF0, 0xDD, 0xB5), bg: Color32::from_rgb(0x22, 0x1F, 0x18) },
+        State::Off => Look { ring: tint::NEUTRAL, body: tint::NEUTRAL, soft, bg: CARD },
+        State::Manual | State::Claude => Look { ring: GREEN, body: cup, soft, bg: CARD },
+        State::WindDown { .. } => Look { ring: AMBER, body: cup, soft, bg: CARD },
     }
 }
 
@@ -101,33 +107,6 @@ fn ring_frac(e: &Engine, st: State, now: i64) -> f32 {
 }
 
 // ---------------------------------------------------------------- the scene
-
-/// A soft round glow behind the scene (a radial fade), clipped to `clip`.
-fn glow(p: &Painter, clip: Rect, center: Pos2, radius: f32, color: Color32) {
-    let p = p.with_clip_rect(clip.intersect(p.clip_rect()));
-    let mut mesh = Mesh::default();
-    let n = 64u32;
-    // centre, a mid ring and the rim: a softer falloff than one linear step
-    mesh.colored_vertex(center, with_alpha(color, 0.42));
-    for (k, (rf, a)) in [(0.45f32, 0.20f32), (1.0, 0.0)].into_iter().enumerate() {
-        for i in 0..n {
-            let ang = TAU * i as f32 / n as f32;
-            mesh.colored_vertex(center + Vec2::new(ang.cos(), ang.sin()) * radius * rf, with_alpha(color, a));
-        }
-        let ring = 1 + k as u32 * n;
-        for i in 0..n {
-            let j = (i + 1) % n;
-            if k == 0 {
-                mesh.add_triangle(0, ring + i, ring + j);
-            } else {
-                let inner = ring - n;
-                mesh.add_triangle(inner + i, ring + i, ring + j);
-                mesh.add_triangle(inner + i, ring + j, inner + j);
-            }
-        }
-    }
-    p.add(Shape::mesh(mesh));
-}
 
 /// A crescent: the part of circle (c1, r1) outside circle (c2, r2).
 fn crescent(p: &Painter, c1: Pos2, r1: f32, c2: Pos2, r2: f32, color: Color32) {
@@ -235,7 +214,7 @@ fn scene(p: &Painter, rect: Rect, st: State, frac: f32, t: f64) {
     if st == State::Claude {
         // Claude's spark rides the end of the ring
         let pos = c + Vec2::new(a1.cos(), a1.sin()) * rr;
-        p.circle_filled(pos, 9.0 * s, tint::CLAUDE);
+        p.circle_filled(pos, 9.0 * s, CLAUDE_ORANGE);
         let (lo, hi) = (1.6 * s, 6.0 * s);
         for (dx, dy) in [(lo, hi), (hi, lo)] {
             let pts = vec![pos + Vec2::new(0.0, -dy), pos + Vec2::new(dx, 0.0), pos + Vec2::new(0.0, dy), pos + Vec2::new(-dx, 0.0)];
@@ -279,8 +258,6 @@ fn hero(p: &Painter, r: Rect, e: &Engine, st: State, now: i64, t: f64, big: bool
     let size = if big { 150.0 } else { 96.0 };
     let pad = if big { 28.0 } else { 14.0 };
     let sr = Rect::from_min_size(Pos2::new(r.left() + pad, r.center().y - size / 2.0), Vec2::splat(size));
-    glow(p, r.shrink(1.0), sr.center(), size * 1.3, lk.ring);
-    p.rect_stroke(r, radius, Stroke::new(1.0, with_alpha(lk.ring, 0.38)), StrokeKind::Inside);
     scene(p, sr, st, ring_frac(e, st, now), t);
 
     let (title, reason, detail) = hero_text(e, st, now);
@@ -508,7 +485,7 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     }
     y += 20.0;
     let mut lx = x0;
-    for (label, c) in [("By hand", tint::KEEP_AWAKE), ("Claude working", tint::CLAUDE)] {
+    for (label, c) in [("By hand", HAND), ("Claude working", CLAUDE_ORANGE)] {
         p.rect_filled(Rect::from_min_size(Pos2::new(lx, y + 1.0), Vec2::splat(10.0)), 3.0, c);
         let tr = p.text(Pos2::new(lx + 16.0, y + 6.0), Align2::LEFT_CENTER, label, font(12.0), TEXT_DIM);
         lx = tr.right() + 16.0;
@@ -526,12 +503,11 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
 
 fn today_strip(p: &Painter, r: Rect, spans: &[Span], now: i64) {
     p.rect_filled(r, 8.0, CARD);
-    p.rect_stroke(r, 8.0, Stroke::new(1.0, white(HAIRLINE)), StrokeKind::Inside);
     let day = super::engine::today_start(now);
     let x_of = |t: i64| r.left() + r.width() * ((t - day) as f32 / 86_400.0).clamp(0.0, 1.0);
     for s in spans {
         let (a, b) = (x_of(s.start), x_of(s.end).max(x_of(s.start) + 3.0));
-        let c = if s.claude { tint::CLAUDE } else { tint::KEEP_AWAKE };
+        let c = if s.claude { CLAUDE_ORANGE } else { HAND };
         p.rect_filled(Rect::from_min_max(Pos2::new(a, r.top() + 4.0), Pos2::new(b, r.bottom() - 4.0)), 4.0, c);
     }
     let nx = x_of(now);
@@ -539,8 +515,7 @@ fn today_strip(p: &Painter, r: Rect, spans: &[Span], now: i64) {
 }
 
 fn section_card(p: &Painter, r: Rect) {
-    p.rect_filled(r, R_CARD, CARD);
-    p.rect_stroke(r, R_CARD, Stroke::new(1.0, white(HAIRLINE)), StrokeKind::Inside);
+    glass_card(p, r, R_CARD, 0.0, false);
 }
 
 /// A switch row with a hint under the label. Returns true when clicked.
@@ -614,4 +589,37 @@ fn screen_section(ui: &mut Ui, p: &Painter, r: Rect, e: &mut Engine, now: i64, i
         TEXT_FAINT,
         card.width() - 4.0,
     );
+    states_card(p, Rect::from_min_max(Pos2::new(r.left(), card.bottom() + 48.0), r.max), ui.ctx().input(|i| i.time));
+}
+
+/// What each look of the cup means, when there is room for it.
+fn states_card(p: &Painter, r: Rect, t: f64) {
+    let pad = sp::L;
+    let cup = 64.0;
+    let h = pad + 16.0 + sp::XS + 14.0 + sp::L + cup + sp::S + 16.0 + sp::XS + 14.0 + pad;
+    if r.height() < h {
+        return;
+    }
+    let cr = Rect::from_min_size(r.min, Vec2::new(r.width(), h));
+    section_card(p, cr);
+    let x = cr.left() + pad;
+    let mut y = cr.top() + pad;
+    p.text(Pos2::new(x, y), Align2::LEFT_TOP, "States", ty::title(), TEXT);
+    y += 16.0 + sp::XS;
+    p.text(Pos2::new(x, y), Align2::LEFT_TOP, "The cup tells you why the Mac is up", ty::caption(), ty::caption_color());
+    y += 14.0 + sp::L;
+    let col = (cr.width() - pad * 2.0) / 4.0;
+    let states = [
+        (State::Off, 0.0, "Off", "sleeps as usual"),
+        (State::Manual, 1.0, "By hand", "switch is on"),
+        (State::Claude, 0.7, "Claude", "a session writes"),
+        (State::WindDown { left: 180 }, 0.6, "Wind-down", "3 min left"),
+    ];
+    for (i, (st, frac, name, note)) in states.into_iter().enumerate() {
+        let cx = x + col * (i as f32 + 0.5);
+        scene(p, Rect::from_center_size(Pos2::new(cx, y + cup / 2.0), Vec2::splat(cup)), st, frac, t);
+        let ny = y + cup + sp::S;
+        text_fit(p, Pos2::new(cx, ny), Align2::CENTER_TOP, name, bold(12.0), TEXT, col - 4.0);
+        text_fit(p, Pos2::new(cx, ny + 16.0 + sp::XS), Align2::CENTER_TOP, note, ty::caption(), ty::caption_color(), col - 4.0);
+    }
 }

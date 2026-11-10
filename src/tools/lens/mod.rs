@@ -23,6 +23,8 @@ pub struct Lens {
     /// zooming out, start time).
     pub(crate) lens_morph: Option<(Option<egui::Rect>, PathBuf, f64)>,
     pub(crate) lens_selected: Vec<(PathBuf, u64)>,
+    /// The folder whose details show beside the rings.
+    pub(crate) lens_focus: Option<PathBuf>,
     /// Inside "Other": how many of the folder's biggest items are hidden
     /// (0 = the folder itself).
     pub(crate) lens_skip: usize,
@@ -40,9 +42,6 @@ pub struct Lens {
     /// Top-level folders in the order they got their colour, so a folder
     /// keeps its colour while the map grows.
     pub(crate) lens_hues: Vec<PathBuf>,
-    /// Where each block was drawn last frame, so blocks glide to new sizes.
-    pub(crate) lens_anim: std::collections::HashMap<PathBuf, egui::Rect>,
-    pub(crate) lens_anim_area: egui::Rect,
 }
 
 impl Lens {
@@ -55,6 +54,7 @@ impl Lens {
             lens_path: root,
             lens_morph: None,
             lens_selected: vec![],
+            lens_focus: None,
             lens_skip: 0,
             lens_review: false,
             lens_msg: None,
@@ -63,8 +63,6 @@ impl Lens {
             lens_order_at: 0.0,
             lens_rows: Default::default(),
             lens_hues: vec![],
-            lens_anim: Default::default(),
-            lens_anim_area: egui::Rect::NOTHING,
         }
     }
 }
@@ -128,7 +126,7 @@ impl Tool for Lens {
                     let vals: Vec<f64> = top.iter().map(|t| t.1 as f64).collect();
                     for (k, (r, (name, b))) in scan::squarify(&vals, body).into_iter().zip(&top).enumerate() {
                         let r = r.shrink(1.5);
-                        p.rect_filled(r, 6.0, page::HUES[k.min(page::HUES.len() - 1)]);
+                        p.rect_filled(r, 6.0, page::HUES[k % page::HUES.len()]);
                         if r.width() > 44.0 && r.height() > 30.0 {
                             text_fit(p, r.left_top() + Vec2::new(7.0, 6.0), Align2::LEFT_TOP, name, bold(11.0), TEXT, r.width() - 12.0);
                             text_fit(p, r.left_top() + Vec2::new(7.0, 21.0), Align2::LEFT_TOP, &human_bytes(*b), font(10.0), TEXT_SOFT, r.width() - 12.0);

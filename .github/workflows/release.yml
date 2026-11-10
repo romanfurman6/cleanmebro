@@ -1,0 +1,157 @@
+name: Release
+
+# Push a tag like v0.2.0 (scripts/release.sh does it) to build Cmd+Meow and
+# publish a GitHub Release with CmdMeow.zip and CmdMeow.dmg.
+# The website downloads releases/latest/download/CmdMeow.zip, so the asset
+# names must stay the same from release to release.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Roman's own M1 (self-hosted, see macos.yml). Only Roman pushes tags.
+    runs-on: [self-hosted, m1-personal]
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0" # see macos.yml
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history: build number = commit count
+
+      # The runner's service PATH lacks Homebrew (cmake for whisper.cpp).
+      - name: Homebrew tools on PATH
+        run: |
+          for d in /opt/homebrew/bin /usr/local/bin; do [ -d "$d" ] && echo "$d" >> "$GITHUB_PATH"; done
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          command -v cmake || { echo "::error::cmake not found (brew install cmake)"; exit 1; }
+
+      - name: Check tag matches Cargo.toml
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [[ "$TAG" != "$VER" ]]; then
+            echo "::error::Tag v$TAG does not match Cargo.toml version $VER"
+            exit 1
+          fi
+          echo "VERSION=$VER" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false # restore main's cache, don't save one per tag
+
+      # Release profile + arm64 target, so the bundle step reuses these deps.
+      - name: Test
+        run: cargo test --release --target aarch64-apple-darwin
+
+      # Developer ID signing + notarization when the secrets are set
+      # (see README "Signing"); otherwise the app stays ad-hoc signed.
+      - name: Import Developer ID certificate
+        id: sign
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [[ -z "$MACOS_CERT_P12" ]]; then
+            echo "::warning::No MACOS_CERT_P12 secret: release is ad-hoc signed, not notarized"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Temporary keychain: this runs on a real Mac, so leave the user's
+          # keychains alone and delete it in the cleanup step.
+          KC="$RUNNER_TEMP/cmdmeow-sign-$GITHUB_RUN_ID.keychain-db"
+          KC_PW="$(uuidgen)"
+          security list-keychains -d user | tr -d '" ' > "$RUNNER_TEMP/keychains.orig"
+          echo "SIGN_KEYCHAIN=$KC" >> "$GITHUB_ENV"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KC_PW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KC_PW" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(cat "$RUNNER_TEMP/keychains.orig")
+          rm "$RUNNER_TEMP/cert.p12"
+          LINE="$(security find-identity -v -p codesigning "$KC" | grep 'Developer ID Application:' | head -1)"
+          [[ -n "$LINE" ]] || { echo "::error::No 'Developer ID Application' identity in MACOS_CERT_P12"; exit 1; }
+          echo "Signing as: ${LINE#*) }"
+          # SHA-1 hash, not the name: the same cert may also be in the login keychain.
+          ID="$(echo "$LINE" | awk '{print $2}')"
+          echo "SIGN_ID=$ID" >> "$GITHUB_ENV"
+          echo "HARDENED=1" >> "$GITHUB_ENV"
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Bundle CmdMeow.app (universal)
+        run: UNIVERSAL=1 scripts/bundle-mac.sh
+
+      - name: Make dmg
+        run: |
+          cd target/bundle
+          rm -rf dmg CmdMeow.dmg
+          mkdir dmg
+          cp -R CmdMeow.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Cmd+Meow" -srcfolder dmg -fs HFS+ -format UDZO -ov CmdMeow.dmg
+          if [[ -n "${SIGN_ID:-}" ]]; then codesign --sign "$SIGN_ID" --keychain "$SIGN_KEYCHAIN" --timestamp CmdMeow.dmg; fi
+
+      - name: Notarize and staple
+        if: steps.sign.outputs.enabled == 'true'
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          cd target/bundle
+          echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+          # Notarizing the dmg also covers the app inside it.
+          xcrun notarytool submit CmdMeow.dmg --wait --timeout 30m \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+          rm "$RUNNER_TEMP/notary.p8"
+          xcrun stapler staple CmdMeow.dmg
+          xcrun stapler staple CmdMeow.app
+          spctl -a -vv -t exec CmdMeow.app
+
+      - name: Make zip and checksums
+        run: |
+          cd target/bundle
+          rm -f CmdMeow.zip
+          ditto -c -k --keepParent CmdMeow.app CmdMeow.zip
+          shasum -a 256 CmdMeow.zip CmdMeow.dmg | tee SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Cmd+Meow ${{ env.VERSION }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            Download **CmdMeow.dmg** (or CmdMeow.zip), move Cmd+Meow to Applications.
+            ${{ steps.sign.outputs.enabled != 'true' && 'This build is not notarized: open it the first time with right-click › Open, or run `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`.' || '' }}
+          files: |
+            target/bundle/CmdMeow.zip
+            target/bundle/CmdMeow.dmg
+            target/bundle/SHA256SUMS.txt
+
+      - name: Clean up signing keychain
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8"
+          if [[ -f "$RUNNER_TEMP/keychains.orig" ]]; then
+            security list-keychains -d user -s $(cat "$RUNNER_TEMP/keychains.orig")
+            rm -f "$RUNNER_TEMP/keychains.orig"
+          fi
+          if [[ -n "${SIGN_KEYCHAIN:-}" && -f "$SIGN_KEYCHAIN" ]]; then
+            security delete-keychain "$SIGN_KEYCHAIN"
+          fi

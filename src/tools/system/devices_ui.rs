@@ -37,11 +37,18 @@ pub fn note(devs: &[Device]) -> String {
     }
 }
 
+/// The device's own SF Symbol (AirPods Max, Magic Mouse…), or its kind's icon.
+fn device_glyph(p: &egui::Painter, d: &Device, r: Rect, color: egui::Color32) {
+    if !d.symbols().iter().any(|n| symbol(p, n, r, color)) {
+        icon(p, d.kind.icon(), r, color);
+    }
+}
+
 /// A ring with the device's glyph inside and its charge under it.
 fn ring_cell(p: &egui::Painter, c: Pos2, r: f32, d: &Device, glyph_sz: f32) {
     let b = d.battery();
     tile::ring(p, c, r, (r * 0.24).max(3.5), frac(b), col(b));
-    icon(p, d.kind.icon(), Rect::from_center_size(c, Vec2::splat(glyph_sz)), TEXT_SOFT);
+    device_glyph(p, d, Rect::from_center_size(c, Vec2::splat(glyph_sz)), TEXT_SOFT);
 }
 
 pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel: bool) -> Response {
@@ -67,9 +74,8 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel
         Size::S12 => {
             let x0 = r.left() + tile::PAD;
             let x1 = r.right() - tile::PAD;
-            tool_chip(p, Rect::from_min_size(Pos2::new(x0, r.top() + 9.0), Vec2::splat(18.0)), Icon::Bluetooth, tint::HEALTH);
-            p.text(Pos2::new(x1, r.top() + 18.0), Align2::RIGHT_CENTER, devs.len().to_string(), font(11.0), TEXT_FAINT);
-            text_fit(p, Pos2::new(x0 + 24.0, r.top() + 18.0), Align2::LEFT_CENTER, "Devices", font(11.0), TEXT_DIM, x1 - x0 - 40.0);
+            p.text(Pos2::new(x1, r.top() + 20.0), Align2::RIGHT_CENTER, devs.len().to_string(), ty::label(), white(166));
+            text_fit(p, Pos2::new(x0, r.top() + 20.0), Align2::LEFT_CENTER, "Devices", ty::title(), TEXT, x1 - x0 - 30.0);
             if devs.is_empty() {
                 text_fit(p, Pos2::new(x0, r.bottom() - 12.0), Align2::LEFT_BOTTOM, "None connected", font(12.0), TEXT_FAINT, x1 - x0);
                 return resp;
@@ -78,7 +84,7 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel
             let cw = (x1 - x0) / n as f32;
             for (k, d) in devs.iter().take(n).enumerate() {
                 let cx = x0 + cw * (k as f32 + 0.5);
-                icon(p, d.kind.icon(), Rect::from_center_size(Pos2::new(cx, r.bottom() - 34.0), Vec2::splat(16.0)), TEXT_SOFT);
+                device_glyph(p, d, Rect::from_center_size(Pos2::new(cx, r.bottom() - 34.0), Vec2::splat(16.0)), TEXT_SOFT);
                 text_fit(p, Pos2::new(cx, r.bottom() - 10.0), Align2::CENTER_BOTTOM, &pct_text(d.battery()), bold(12.0), txt_col(d.battery()), cw - 4.0);
             }
         }
@@ -124,7 +130,7 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel
 fn device_line(p: &egui::Painter, lr: Rect, d: &Device) {
     let b = d.battery();
     let cy = lr.center().y;
-    icon(p, d.kind.icon(), Rect::from_center_size(Pos2::new(lr.left() + 9.0, cy), Vec2::splat(17.0)), TEXT_SOFT);
+    device_glyph(p, d, Rect::from_center_size(Pos2::new(lr.left() + 9.0, cy), Vec2::splat(17.0)), TEXT_SOFT);
     let vr = p.text(Pos2::new(lr.right(), cy), Align2::RIGHT_CENTER, pct_text(b), bold(12.5), txt_col(b));
     let bw = 64.0;
     let bx1 = vr.left() - 10.0;
@@ -150,7 +156,7 @@ fn large(s: &Snapshot, devs: &[Device], p: &egui::Painter, r: Rect) {
     for d in pods.iter().take(1) {
         let cr = Rect::from_min_size(Pos2::new(body.left(), y), Vec2::new(body.width(), 112.0));
         p.rect_filled(cr, 10.0, white(10));
-        icon(p, d.kind.icon(), Rect::from_center_size(Pos2::new(cr.left() + 19.0, cr.top() + 17.0), Vec2::splat(17.0)), TEXT_SOFT);
+        device_glyph(p, d, Rect::from_center_size(Pos2::new(cr.left() + 19.0, cr.top() + 17.0), Vec2::splat(17.0)), TEXT_SOFT);
         text_fit(p, Pos2::new(cr.left() + 36.0, cr.top() + 17.0), Align2::LEFT_CENTER, &d.name, bold(13.0), TEXT, cr.width() - 48.0);
         let cw = cr.width() / 3.0;
         for (k, (label, v)) in d.parts().iter().enumerate() {

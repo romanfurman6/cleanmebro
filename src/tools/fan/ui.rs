@@ -14,10 +14,10 @@ use std::f32::consts::{PI, TAU};
 
 /// Height of the card's fans-and-heat part (all of Medium).
 pub const CARD_H: f32 = 168.0;
-/// Light cyan of the blades and lines.
-pub const BLADE: Color32 = Color32::from_rgb(0x7F, 0xD3, 0xE8);
-pub const LINE: Color32 = Color32::from_rgb(0x3F, 0xB8, 0xD8);
-pub const HOT_LINE: Color32 = Color32::from_rgb(0xF0, 0x8A, 0x2C);
+/// Blades, speed rings and lines: system blue (D6 has no per-tool colours).
+pub const BLADE: Color32 = crate::kit::glass::ACCENT;
+pub const LINE: Color32 = crate::kit::glass::BLUE;
+pub const HOT_LINE: Color32 = crate::kit::glass::AMBER;
 
 /// Blade angle of the fan drawn as `key` at time `t`: one turn takes
 /// 2400 / rpm seconds, slow enough to read while still following the real
@@ -220,14 +220,15 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     // spinning blades over the chip
     if let Some(r) = rpm {
         let p = ui.painter();
-        let chip = match size {
-            Size::S12 => Some(Rect::from_min_size(Pos2::new(rect.left() + tile::PAD, rect.top() + 9.0), Vec2::splat(18.0))),
-            Size::S14 => Some(tile::row_chip(rect)),
+        // over the static glyph: the ring's centre (Wide) or the round chip (Row)
+        let spot = match size {
+            Size::S12 => Some((Pos2::new(rect.left() + tile::PAD + 17.0, rect.center().y), 9.0, 7.0, CARD)),
+            Size::S14 => Some((tile::row_chip(rect).center(), 12.0, 10.0, lerp_color(CARD, Color32::WHITE, 14.0 / 255.0))),
             _ => None,
         };
-        if let Some(chip) = chip {
-            p.rect_filled(chip, chip.width() * 0.28, tint::FAN);
-            blades(p, chip.center(), chip.width() * 0.36, spin("fan-avg", t, r), Color32::WHITE, tint::FAN);
+        if let Some((c, cover, br, hub)) = spot {
+            p.circle_filled(c, cover, hub);
+            blades(p, c, br, spin("fan-avg", t, r), BLADE, hub);
         }
     }
     keep_spinning(ui, s);
@@ -248,8 +249,7 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let x0 = rect.left() + 12.0;
     let x1 = rect.right() - 12.0;
     let hy = rect.top() + 20.0;
-    tool_chip(&p, Rect::from_center_size(Pos2::new(x0 + 10.0, hy), Vec2::splat(20.0)), Icon::Fan, tint::FAN);
-    p.text(Pos2::new(x0 + 28.0, hy), Align2::LEFT_CENTER, "Fans", bold(13.0), TEXT);
+    p.text(Pos2::new(x0, hy), Align2::LEFT_CENTER, "Fans", ty::title(), TEXT);
     let mode = if s.fanless() { "No fans" } else { "Auto" };
     p.text(Pos2::new(x1, hy), Align2::RIGHT_CENTER, mode, font(12.0), TEXT_DIM);
 
@@ -306,7 +306,7 @@ fn card_resp(ui: &mut Ui, rect: Rect, selected: bool) -> egui::Response {
 
 /// One fan in the panel card: ring with blades, name and speed.
 fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str, t: f64) {
-    p.rect_filled(r, 10.0, white(10));
+    p.rect_filled(r, 8.0, white(8));
     let c = Pos2::new(r.left() + 8.0 + 18.0, r.center().y);
     ring(p, c, 17.0, 3.0, f.frac(), LINE);
     blades(p, c, 12.0, spin(name, t, f.rpm), BLADE, CARD);

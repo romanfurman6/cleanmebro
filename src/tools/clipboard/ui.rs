@@ -2,13 +2,12 @@
 //! card in the panel, the History and Settings page in the full window, and
 //! the small toast shown outside the shell.
 
-use super::settings::{Ignored, Layout, AGES, KEEP_MAX, KEEP_MIN};
+use super::settings::{Ignored, AGES, KEEP_MAX, KEEP_MIN};
 use super::store::{parse_color, Entry, Kind};
-use super::{mac, Clipboard, Filter, Tab, ID, TINT};
+use super::{Clipboard, Filter, Tab, ID, TINT};
 use crate::core::tool::{Cx, Size};
 use crate::kit::tile;
 use crate::kit::glass::*;
-use crate::kit::hotkeys::Shortcut;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -38,15 +37,14 @@ pub fn ago(e: &Entry) -> String {
 /// A small mark for an app (we draw no app icons): a rounded square in a
 /// color picked from its name.
 pub fn app_color(app: &str) -> Color32 {
-    const PALETTE: [Color32; 8] = [
-        Color32::from_rgb(0x1F, 0x7A, 0xE0),
-        Color32::from_rgb(0x8E, 0x44, 0xAD),
-        Color32::from_rgb(0x24, 0x8A, 0x3D),
-        Color32::from_rgb(0xC7, 0x80, 0x1F),
-        Color32::from_rgb(0xC0, 0x39, 0x2B),
-        Color32::from_rgb(0x2E, 0x9E, 0x8F),
-        Color32::from_rgb(0x5B, 0x2C, 0x6F),
-        Color32::from_rgb(0x48, 0x48, 0x4E),
+    // calm blue shades and greys, like the rest of the app (no rainbow)
+    const PALETTE: [Color32; 6] = [
+        Color32::from_rgb(0x0E, 0x63, 0xBA),
+        Color32::from_rgb(0x0B, 0x4A, 0x8C),
+        Color32::from_rgb(0x3A, 0x3A, 0x3E),
+        Color32::from_rgb(0x0C, 0x56, 0xA3),
+        Color32::from_rgb(0x4A, 0x4A, 0x50),
+        Color32::from_rgb(0x0A, 0x3D, 0x73),
     ];
     let h = super::store::hash(&[app.as_bytes()]);
     PALETTE[(h % PALETTE.len() as u64) as usize]
@@ -151,16 +149,15 @@ fn row_hover(ui: &Ui, r: Rect, id: egui::Id) -> egui::Response {
 
 // ---------------------------------------------------------------- panel
 
-/// The Clipboard widget at `size`: the small ones open quick paste with the
-/// latest clip on show; Medium and Large are the card with recent clips.
+/// The Clipboard widget at `size`: the small ones show the latest clip and
+/// open the history; Medium and Large are the card with recent clips.
 pub fn widget(c: &mut Clipboard, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     if matches!(size, Size::S24 | Size::S44) {
         return card(c, ui, rect, cx);
     }
     let id = ui.scope_id().with("w-clipboard");
     let latest = c.visible(Filter::All, "").first().and_then(|i| c.store.get(*i).cloned());
-    let shortcut = c.settings.shortcut.as_ref().map(|s| s.display()).unwrap_or_default();
-    let status = c.pause_label().map(|_| "Paused".to_string()).unwrap_or_else(|| if shortcut.is_empty() { "History".into() } else { shortcut.clone() });
+    let status = c.pause_label().map(|_| "Paused".to_string()).unwrap_or_else(|| "History".into());
     let (title, sub) = match &latest {
         Some(e) => (e.title(), format!("{} · {}", if e.app.is_empty() { "Unknown app" } else { &e.app }, ago(e))),
         None => ("Nothing copied yet".to_string(), status.clone()),
@@ -189,13 +186,13 @@ pub fn widget(c: &mut Clipboard, size: Size, ui: &mut Ui, rect: Rect, cx: &mut C
             resp
         }
     };
-    if resp.on_hover_text("Open quick paste").clicked() {
-        cx.push(crate::core::tool::Action::HidePanel);
-        c.want_quick = true;
+    if resp.on_hover_text("Open the history").clicked() {
+        c.tab = Tab::History;
+        cx.open_page(ID, "history");
     }
 }
 
-/// The panel card: pause, a search row that opens quick paste, and the
+/// The panel card: pause, a search row that opens the history, and the
 /// latest entries (click to copy).
 pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
@@ -234,7 +231,7 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     }
     y += 30.0;
 
-    // search row: opens quick paste
+    // search row: opens the history
     let sr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 28.0));
     let sresp = row_hover(ui, sr, id.with("search"));
     p.rect_filled(sr, 7.0, white(if sresp.hovered() { 24 } else { 15 }));
@@ -245,12 +242,9 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         None => format!("Search {n} item{}", if n == 1 { "" } else { "s" }),
     };
     p.text(Pos2::new(sr.left() + 30.0, sr.center().y), Align2::LEFT_CENTER, hint, font(12.0), if paused { AMBER } else { TEXT_FAINT });
-    if let Some(s) = &c.settings.shortcut {
-        p.text(Pos2::new(sr.right() - 10.0, sr.center().y), Align2::RIGHT_CENTER, s.display(), font(11.0), TEXT_FAINT);
-    }
-    if sresp.on_hover_text("Open quick paste").clicked() {
-        cx.push(crate::core::tool::Action::HidePanel);
-        c.want_quick = true;
+    if sresp.on_hover_text("Search the history").clicked() {
+        c.tab = Tab::History;
+        cx.open_page(ID, "history");
     }
     y += 28.0 + 6.0;
 
@@ -263,7 +257,7 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         text_fit(&p, r.center(), Align2::CENTER_CENTER, msg, font(12.0), TEXT_FAINT, r.width() - 16.0);
         return;
     }
-    for (k, eid) in ids.iter().enumerate() {
+    for eid in &ids {
         let Some(e) = c.store.get(*eid).cloned() else { continue };
         let r = Rect::from_min_size(Pos2::new(x0 - 6.0, y), Vec2::new(x1 - x0 + 12.0, 34.0));
         let resp = row_hover(ui, r, id.with(("row", e.id)));
@@ -272,9 +266,7 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         }
         let th = Rect::from_min_size(Pos2::new(x0, r.center().y - 13.0), Vec2::splat(26.0));
         entry_thumb(c, &p, th, &e, 6.0);
-        let key = format!("⌘{}", k + 1);
-        let kr = p.text(Pos2::new(x1, r.center().y), Align2::RIGHT_CENTER, &key, font(11.0), TEXT_FAINT);
-        let mut right = kr.left() - 8.0;
+        let mut right = x1;
         if e.pinned {
             pin_glyph(&p, Pos2::new(right - 6.0, r.center().y), TINT);
             right -= 18.0;
@@ -300,7 +292,7 @@ pub fn pin_glyph(p: &egui::Painter, c: Pos2, col: Color32) {
 
 // ---------------------------------------------------------------- page
 
-pub fn page(c: &mut Clipboard, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+pub fn page(c: &mut Clipboard, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     let p = ui.painter().clone();
     let n = c.store.entries.len();
     let pinned = c.store.entries.iter().filter(|e| e.pinned).count();
@@ -322,13 +314,11 @@ pub fn page(c: &mut Clipboard, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let cur = (c.tab == Tab::Settings) as usize;
     if let Some(i) = segmented(ui, tr, ui.scope_id().with("clip-tab"), &["History", "Settings"], cur) {
         c.tab = if i == 1 { Tab::Settings } else { Tab::History };
-        c.recording = false;
-        c.apply_keys();
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     match c.tab {
         Tab::History => history(c, ui, body),
-        Tab::Settings => settings_page(c, ui, body, cx),
+        Tab::Settings => settings_page(c, ui, body),
     }
 }
 
@@ -700,8 +690,7 @@ fn row_y(card: Rect, k: usize) -> f32 {
     card.top() + 4.0 + k as f32 * ROW_H + ROW_H / 2.0
 }
 
-fn settings_page(c: &mut Clipboard, ui: &mut Ui, body: Rect, cx: &mut Cx) {
-    record_key(c, ui, cx);
+fn settings_page(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     let mut child = ui.new_child(UiBuilder::new().max_rect(body));
     ScrollArea::vertical().id_salt("clip-settings").auto_shrink([false, false]).show(&mut child, |ui| {
         let rows = c.settings.ignore.len().max(1);
@@ -719,44 +708,6 @@ fn settings_page(c: &mut Clipboard, ui: &mut Ui, body: Rect, cx: &mut Cx) {
     });
 }
 
-/// While recording: the next key press with a modifier becomes the shortcut.
-fn record_key(c: &mut Clipboard, ui: &mut Ui, cx: &mut Cx) {
-    if !c.recording {
-        return;
-    }
-    let mut result: Option<Option<Shortcut>> = None;
-    let mut cancel = false;
-    ui.input(|i| {
-        for e in &i.events {
-            if let egui::Event::Key { key, pressed: true, modifiers, .. } = e {
-                let plain = !modifiers.command && !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd;
-                if *key == egui::Key::Escape && plain {
-                    cancel = true;
-                } else if (*key == egui::Key::Backspace || *key == egui::Key::Delete) && plain {
-                    result = Some(None);
-                } else if let Some(s) = Shortcut::from_press(*key, *modifiers) {
-                    result = Some(Some(s));
-                }
-            }
-        }
-    });
-    if cancel {
-        c.recording = false;
-        c.apply_keys();
-        return;
-    }
-    if let Some(s) = result {
-        if let Some(w) = s.as_ref().and_then(|s| s.conflict()) {
-            cx.toast(format!("{}: {w}", s.as_ref().map(|s| s.display()).unwrap_or_default()));
-        }
-        c.settings.shortcut = s;
-        c.recording = false;
-        c.save_settings();
-        c.apply_keys();
-    }
-    ui.ctx().request_repaint();
-}
-
 fn label(p: &egui::Painter, card: Rect, k: usize, text: &str) {
     p.text(Pos2::new(card.left() + 12.0, row_y(card, k)), Align2::LEFT_CENTER, text, font(13.0), TEXT);
 }
@@ -766,61 +717,7 @@ fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     let w = col.width();
     let id = ui.scope_id().with("clip-left");
     let mut changed = false;
-    let mut y = col.top();
-
-    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Quick paste", bold(15.0), TEXT);
-    let card = card_rows(p, x0, y + 28.0, w, 3);
-    // shortcut
-    label(p, card, 0, "Shortcut");
-    let ry = row_y(card, 0);
-    let rec = c.recording;
-    let cur = c.settings.shortcut.clone();
-    let text = if rec { "Type a shortcut…".to_string() } else { cur.as_ref().map(|s| s.display()).unwrap_or_else(|| "Record".into()) };
-    let g = p.layout_no_wrap(text.clone(), font(12.0), TEXT);
-    let bw = (g.size().x + 20.0).max(76.0);
-    let br = Rect::from_min_max(Pos2::new(card.right() - 12.0 - bw, ry - 12.0), Pos2::new(card.right() - 12.0, ry + 12.0));
-    let resp = ui.interact(br, id.with("key"), Sense::click());
-    if rec {
-        p.rect_filled(br, 6.0, with_alpha(BLUE, 0.22));
-        p.rect_stroke(br, 6.0, Stroke::new(1.0, ACCENT), StrokeKind::Inside);
-    } else if cur.is_some() {
-        p.rect_filled(br, 6.0, white(if resp.hovered() { 30 } else { 20 }));
-        p.rect_stroke(br, 6.0, Stroke::new(1.0, white(26)), StrokeKind::Inside);
-    } else {
-        dashed_rect(p, br, 6.0, white(60));
-    }
-    p.text(br.center(), Align2::CENTER_CENTER, text, font(12.0), if cur.is_some() || rec { TEXT } else { TEXT_FAINT });
-    if resp.on_hover_text("Click, then press the keys. Esc cancels, ⌫ removes it.").clicked() {
-        c.recording = !rec;
-        if c.recording {
-            if let Some(k) = &mut c.keys {
-                k.clear();
-            }
-        } else {
-            c.apply_keys();
-        }
-    }
-    if let Some(err) = &c.key_error {
-        text_fit(p, Pos2::new(card.left() + 80.0, ry), Align2::LEFT_CENTER, err, font(11.0), AMBER, br.left() - card.left() - 90.0);
-    }
-    // layout
-    label(p, card, 1, "Layout");
-    let ry = row_y(card, 1);
-    let sr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 130.0, ry - 13.0), Pos2::new(card.right() - 12.0, ry + 13.0));
-    if let Some(i) = segmented(ui, sr, id.with("layout"), &["Cards", "List"], (c.settings.layout == Layout::List) as usize) {
-        c.settings.layout = if i == 1 { Layout::List } else { Layout::Cards };
-        changed = true;
-    }
-    // paste right away
-    label(p, card, 2, "Paste right away");
-    let ry = row_y(card, 2);
-    let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, ry), Vec2::new(30.0, 18.0));
-    p.text(Pos2::new(sw.left() - 10.0, ry), Align2::RIGHT_CENTER, "off: only copies", font(12.0), TEXT_FAINT);
-    if switch(ui, sw, id.with("paste"), c.settings.paste_now, true).clicked() {
-        c.settings.paste_now = !c.settings.paste_now;
-        changed = true;
-    }
-    y = card.bottom() + 16.0;
+    let y = col.top();
 
     p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "History", bold(15.0), TEXT);
     let card = card_rows(p, x0, y + 28.0, w, 5);
@@ -965,23 +862,6 @@ fn right_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     if let Some(k) = remove {
         c.settings.ignore.remove(k);
         changed = true;
-    }
-    y = card.bottom() + 16.0;
-
-    // permission
-    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Permission", bold(15.0), TEXT);
-    let card = Rect::from_min_size(Pos2::new(x0, y + 28.0), Vec2::new(w, 56.0));
-    glass_card(p, card, R_CARD, 0.0, false);
-    let ok = mac::can_paste();
-    p.circle_filled(Pos2::new(card.left() + 18.0, card.top() + 19.0), 4.0, if ok { GREEN } else { AMBER });
-    p.text(Pos2::new(card.left() + 30.0, card.top() + 19.0), Align2::LEFT_CENTER, "Accessibility", font(13.0), TEXT);
-    let status = if ok { "Allowed. Quick paste types ⌘V for you." } else { "Needed to paste into other apps. Without it, items are only copied." };
-    let label = if ok { "Open System Settings" } else { "Allow…" };
-    let bw = button_width(p, label, BTN_SECONDARY) - 6.0;
-    let br = Rect::from_min_max(Pos2::new(card.right() - 12.0 - bw, card.center().y - 13.0), Pos2::new(card.right() - 12.0, card.center().y + 13.0));
-    text_fit(p, Pos2::new(card.left() + 30.0, card.top() + 38.0), Align2::LEFT_CENTER, status, font(12.0), TEXT_DIM, br.left() - card.left() - 40.0);
-    if pill_button(ui, br, label, if ok { BTN_SECONDARY } else { BTN_PRIMARY }, true).clicked() {
-        mac::open_accessibility_settings();
     }
     changed
 }

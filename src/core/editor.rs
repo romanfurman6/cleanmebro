@@ -7,7 +7,7 @@
 use super::panel::{self, Placed};
 use super::settings::{hide_entry, place_entry, set_size, widget_key};
 use super::shell::{App, CORE, RECOMMENDATION};
-use super::tool::{Cx, GRID_COLUMNS};
+use super::tool::{Cx, Size};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
 use egui::{Align2, Color32, CornerRadius, Id, LayerId, Order, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
@@ -22,15 +22,15 @@ pub struct Drag {
     pub size: Vec2,
     /// Where the pointer holds the dragged block, from its top-left corner.
     pub grab: Vec2,
+    /// From the gallery: the size it is added at.
+    pub as_size: Option<Size>,
 }
 
 const TOP_H: f32 = 52.0;
-const GALLERY_W: f32 = 330.0;
-const CARD_H: f32 = 48.0;
-const CARD_GAP: f32 = 8.0;
+/// The list of widgets on the left of Settings › Widgets.
+const LIST_W: f32 = 184.0;
+const LIST_ROW_H: f32 = 30.0;
 const END_SLOT_H: f32 = 40.0;
-/// The gallery's title, hint and search field above the list.
-const GALLERY_HEAD: f32 = 104.0;
 /// Under the panel preview: the selected widget's sizes.
 const SIZE_BAR_H: f32 = 64.0;
 
@@ -69,7 +69,8 @@ struct Item {
     title: String,
     /// The tool's name and the widget's one-liner, for search.
     words: String,
-    span: u8,
+    /// How many sizes it comes in.
+    sizes: usize,
     glyph: Icon,
     color: Color32,
     added: bool,
@@ -93,8 +94,7 @@ fn gallery(app: &App, query: &str) -> Vec<(String, Vec<Item>)> {
             .into_iter()
             .map(|w| {
                 let key = widget_key(t.id(), w.id);
-                let span = if w.size.cols() <= 2 { 2 } else { GRID_COLUMNS };
-                Item { added: added(&key), key: Some(key), title: w.title.into(), words: format!("{} {}", t.name(), w.about), span, glyph: b.icon, color: b.color }
+                Item { added: added(&key), key: Some(key), title: w.title.into(), words: format!("{} {}", t.name(), w.about), sizes: w.sizes.len(), glyph: b.icon, color: b.color }
             })
             .filter(|it| matches(query, &it.title, &it.words))
             .collect();
@@ -106,7 +106,7 @@ fn gallery(app: &App, query: &str) -> Vec<(String, Vec<Item>)> {
         .into_iter()
         .map(|(id, title, glyph)| {
             let key = widget_key(CORE, id);
-            Item { added: added(&key), key: Some(key), title: title.into(), words: "suggestion tip today".into(), span: GRID_COLUMNS, glyph, color: tint::NEUTRAL }
+            Item { added: added(&key), key: Some(key), title: title.into(), words: "suggestion tip today".into(), sizes: 1, glyph, color: tint::NEUTRAL }
         })
         .filter(|it| matches(query, &it.title, &it.words))
         .collect::<Vec<_>>();
@@ -120,77 +120,87 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let pointer = ctx.pointer_latest_pos();
-    let gr = Rect::from_min_size(body.min, Vec2::new(GALLERY_W, body.height()));
+    let lr = Rect::from_min_size(body.min, Vec2::new(LIST_W, body.height()));
+    let vr = Rect::from_min_size(Pos2::new(lr.right() + 1.0, body.top()), Vec2::new(panel::inner_width() + 2.0 * sp::L, body.height()));
+    let gr = Rect::from_min_max(lr.min, vr.max);
     let pr = Rect::from_min_max(Pos2::new(gr.right() + 1.0, body.top()), body.max);
     let dragging_out = app.drag.as_ref().is_some_and(|d| !d.from_gallery);
     let over_gallery = dragging_out && pointer.is_some_and(|q| gr.contains(q));
 
-    // gallery: red tint while a panel widget hovers it (drop = hide)
+    // list and sizes: red tint while a panel widget hovers them (drop = hide)
     let gallery_bg = if over_gallery {
-        lerp_color(Color32::from_rgb(0x1A, 0x1A, 0x1D), RED, 0.12)
+        lerp_color(SIDEBAR, RED, 0.12)
     } else if dragging_out {
-        Color32::from_rgb(0x22, 0x22, 0x25)
+        RAISED
     } else {
-        Color32::from_rgb(0x1A, 0x1A, 0x1D)
+        SIDEBAR
     };
     p.rect_filled(gr, CornerRadius::ZERO, gallery_bg);
+    hairline(&p, lr.right_top(), lr.right_bottom());
     hairline(&p, gr.right_top(), gr.right_bottom());
-    let mut add: Option<String> = None;
-    let head = Rect::from_min_size(gr.min + Vec2::new(16.0, 16.0), Vec2::new(gr.width() - 32.0, GALLERY_HEAD - 16.0));
-    p.text(head.min, Align2::LEFT_TOP, "Widgets", bold(15.0), TEXT);
-    let hint = if over_gallery || dragging_out { "Drop here to hide it" } else { "Drag into the panel, or press +" };
-    p.text(head.min + Vec2::new(0.0, 20.0), Align2::LEFT_TOP, hint, font(12.0), if over_gallery { RED } else { TEXT_DIM });
-    let sr = Rect::from_min_size(head.min + Vec2::new(0.0, 48.0), Vec2::new(head.width(), 30.0));
+
+    // list: search, then each tool's widgets
+    let sr = Rect::from_min_size(lr.min + Vec2::new(sp::M, sp::L), Vec2::new(LIST_W - 2.0 * sp::M, 28.0));
     let mut q = std::mem::take(&mut app.widget_search);
-    let sresp = search_field(ui, sr, &mut q, "Search widgets", false, 13.0);
+    let sresp = search_field(ui, sr, &mut q, "Search", false, 13.0);
     if sresp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         q.clear();
     }
     app.widget_search = q;
     let query = app.widget_search.clone();
-    let list_r = Rect::from_min_max(Pos2::new(gr.left(), gr.top() + GALLERY_HEAD), gr.max);
-    let mut child = ui.new_child(UiBuilder::new().max_rect(list_r.shrink2(Vec2::new(16.0, 4.0))).layout(egui::Layout::top_down(egui::Align::Min)));
+    let groups = gallery(app, &query);
+    let keys: Vec<String> = groups.iter().flat_map(|(_, its)| its.iter().filter_map(|i| i.key.clone())).collect();
+    if app.gallery_pick.as_ref().is_none_or(|k| !keys.contains(k)) {
+        app.gallery_pick = keys.first().cloned();
+    }
+    let list_r = Rect::from_min_max(Pos2::new(lr.left(), sr.bottom() + sp::S), lr.max);
+    let mut child = ui.new_child(UiBuilder::new().max_rect(list_r.shrink2(Vec2::new(sp::S, 0.0))).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(list_r);
-    ScrollArea::vertical().id_salt("gallery").auto_shrink([false, false]).show(&mut child, |ui| {
+    ScrollArea::vertical().id_salt("gallery-list").auto_shrink([false, false]).show(&mut child, |ui| {
         let w = ui.available_width();
-        let groups = gallery(app, &query);
-        let col = (w - CARD_GAP * (GRID_COLUMNS as f32 - 1.0)) / GRID_COLUMNS as f32;
-        let mut h = 12.0;
-        for (_, items) in &groups {
-            h += 26.0 + rows_height(items) + 16.0;
-        }
-        let (origin, _) = ui.allocate_exact_size(Vec2::new(w, h.max(80.0)), Sense::hover());
+        let h: f32 = groups.iter().map(|(_, its)| 26.0 + its.len() as f32 * LIST_ROW_H).sum::<f32>() + sp::S;
+        let (origin, _) = ui.allocate_exact_size(Vec2::new(w, h.max(60.0)), Sense::hover());
         let p = ui.painter().clone();
         if groups.is_empty() {
-            p.text(origin.center_top() + Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, format!("No widgets match \"{}\"", query.trim()), font(13.0), TEXT_DIM);
+            text_fit(&p, Pos2::new(origin.left() + 4.0, origin.top() + 16.0), Align2::LEFT_CENTER, &format!("No widgets match \"{}\"", query.trim()), font(12.0), TEXT_DIM, w - 8.0);
         }
-        let mut y = origin.top() + 8.0;
+        let mut y = origin.top();
         for (name, items) in &groups {
-            section_header(&p, Pos2::new(origin.left(), y), Align2::LEFT_TOP, name);
-            y += 22.0;
-            let (mut x_col, mut row_y) = (0u8, y);
+            section_header(&p, Pos2::new(origin.left() + 4.0, y + 12.0), Align2::LEFT_TOP, name);
+            y += 26.0;
             for it in items {
-                if x_col + it.span > GRID_COLUMNS {
-                    x_col = 0;
-                    row_y += CARD_H + CARD_GAP;
+                let rr = Rect::from_min_size(Pos2::new(origin.left(), y), Vec2::new(w, LIST_ROW_H - 2.0));
+                y += LIST_ROW_H;
+                let resp = ui.interact(rr, ui.scope_id().with(("gl", &it.title, &it.key)), Sense::click());
+                let sel = it.key.is_some() && it.key == app.gallery_pick;
+                if sel {
+                    p.rect_filled(rr, 7.0, BLUE);
+                } else if resp.hovered() {
+                    p.rect_filled(rr, 7.0, white(12));
                 }
-                let cr = Rect::from_min_size(Pos2::new(origin.left() + x_col as f32 * (col + CARD_GAP), row_y), Vec2::new(col * it.span as f32 + CARD_GAP * (it.span as f32 - 1.0), CARD_H));
-                x_col += it.span;
-                if let Some(k) = gallery_card(ui, cr, it, app.drag.is_some()) {
-                    match k {
-                        CardEvent::Add => add = it.key.clone(),
-                        CardEvent::DragStart(grab) => {
-                            app.drag = Some(Drag { key: it.key.clone().unwrap_or_default(), from_gallery: true, label: it.title.clone(), size: cr.size(), grab });
-                        }
-                    }
+                icon(&p, it.glyph, Rect::from_center_size(Pos2::new(rr.left() + 16.0, rr.center().y), Vec2::splat(14.0)), if sel { Color32::WHITE } else { lift(it.color) });
+                let meta = if it.sizes == 1 { "1 size".to_string() } else { format!("{} sizes", it.sizes) };
+                let mr = p.text(Pos2::new(rr.right() - 8.0, rr.center().y), Align2::RIGHT_CENTER, meta, ty::caption(), if sel { white(205) } else { ty::caption_color() });
+                let mut right = mr.left() - 6.0;
+                if it.added {
+                    p.circle_filled(Pos2::new(right - 3.0, rr.center().y), 3.0, GREEN);
+                    right -= 12.0;
+                }
+                text_fit(&p, Pos2::new(rr.left() + 32.0, rr.center().y), Align2::LEFT_CENTER, &it.title, ty::body(), if sel { Color32::WHITE } else { TEXT }, right - rr.left() - 36.0);
+                if resp.clicked() {
+                    app.gallery_pick = it.key.clone();
                 }
             }
-            y = row_y + CARD_H + 16.0 + 4.0;
         }
     });
-    if let Some(k) = add {
-        place_entry(&mut app.widgets, &k, None);
-        app.edit_sel = Some(k);
+
+    // sizes: the picked widget, drawn for real at every size it comes in
+    if let Some(key) = app.gallery_pick.clone() {
+        if let Some(z) = variants(app, ui, vr, &key) {
+            place_entry(&mut app.widgets, &key, None);
+            set_size(&mut app.widgets, &key, z);
+            app.edit_sel = Some(key);
+        }
     }
 
     // preview: a hint of the menu bar, the title row, then the panel
@@ -281,6 +291,9 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
                     if before.as_deref() != Some(d.key.as_str()) {
                         place_entry(&mut app.widgets, &d.key, before.as_deref());
                     }
+                    if let Some(z) = d.as_size {
+                        set_size(&mut app.widgets, &d.key, z);
+                    }
                 }
                 Target::Hide => hide_entry(&mut app.widgets, &d.key),
                 _ => {}
@@ -293,73 +306,73 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     crate::kit::glass::animate(&ctx);
 }
 
-fn rows_height(items: &[Item]) -> f32 {
-    let (mut col, mut rows) = (0u8, 1u32);
-    for it in items {
-        if col + it.span > GRID_COLUMNS {
-            col = 0;
-            rows += 1;
-        }
-        col += it.span;
-    }
-    rows as f32 * (CARD_H + CARD_GAP) - CARD_GAP + 4.0
-}
-
-enum CardEvent {
-    Add,
-    DragStart(Vec2),
-}
-
-/// One gallery card: tool chip and name; "+" adds it, a check means it's in
-/// the panel already; planned ones are dashed.
-fn gallery_card(ui: &mut Ui, r: Rect, it: &Item, dragging: bool) -> Option<CardEvent> {
+/// The picked widget at each size it comes in, drawn live at real size, the
+/// two small ones side by side. Drag one into the panel, or click it to add
+/// it at that size (returned).
+fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
+    let (owner, spec) = app.widget_spec(key)?;
     let p = ui.painter().clone();
-    let id = ui.scope_id().with(("gal", &it.title));
-    let chip = Rect::from_min_size(Pos2::new(r.left() + 10.0, r.center().y - 10.0), Vec2::splat(20.0));
-    let Some(_) = &it.key else {
-        dashed_rect(&p, r, 10.0, white(56));
-        planned_chip(&p, chip, it.glyph);
-        let later = p.text(Pos2::new(r.right() - 10.0, r.center().y), Align2::RIGHT_CENTER, "later", font(11.0), TEXT_FAINT);
-        text_fit(&p, Pos2::new(chip.right() + 8.0, r.center().y), Align2::LEFT_CENTER, &it.title, bold(12.0), TEXT_DIM, later.left() - chip.right() - 14.0);
-        let _ = ui.interact(r, id, Sense::hover()).on_hover_text("Comes with the tool, once it's built");
-        return None;
-    };
-    let resp = ui.interact(r, id, if it.added { Sense::hover() } else { Sense::click_and_drag() });
-    let hov = resp.hovered() && !it.added && !dragging;
-    p.rect_filled(r, 10.0, if hov { RAISED } else { CARD });
-    p.rect_stroke(r, 10.0, Stroke::new(1.0, white(20)), StrokeKind::Inside);
-    tool_chip(&p, chip, it.glyph, it.color);
-    text_fit(&p, Pos2::new(chip.right() + 8.0, r.center().y), Align2::LEFT_CENTER, &it.title, bold(12.0), TEXT, r.right() - chip.right() - 22.0);
-    if it.added {
-        p.rect_filled(r, 10.0, with_alpha(Color32::from_rgb(0x1A, 0x1A, 0x1D), 0.55));
+    let x = r.left() + sp::L;
+    let w = panel::inner_width();
+    let mut y = r.top() + sp::L;
+    text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, spec.title, ty::title(), TEXT, w);
+    y += 16.0 + sp::XS;
+    let n = spec.sizes.len();
+    let hint = if n == 1 { "Drag it into the panel, or click to add it.".to_string() } else { format!("{n} sizes. Drag the one you want into the panel, or click it.") };
+    text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, &hint, ty::caption(), ty::caption_color(), w);
+    y += 14.0 + sp::M;
+    let cur = app.widgets.iter().find(|e| e.key == key && e.on).map(|e| spec.fit(e.size));
+    // rows: Small and Wide share one; the rest get their own
+    let mut rows: Vec<Vec<Size>> = vec![];
+    let small: Vec<Size> = spec.sizes.iter().copied().filter(|z| z.cols() <= 2).collect();
+    if !small.is_empty() {
+        rows.push(small);
     }
-    if hov {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-    }
-    let badge = Rect::from_center_size(Pos2::new(r.right() - 4.0, r.top() + 4.0), Vec2::splat(20.0));
+    rows.extend(spec.sizes.iter().copied().filter(|z| z.cols() > 2).map(|z| vec![z]));
+    let label_h = 14.0 + sp::XS;
+    let total: f32 = rows.iter().map(|row| label_h + row.iter().map(|z| panel::size_px(*z, w).y).fold(0.0, f32::max) + sp::L).sum();
+    let area = Rect::from_min_max(Pos2::new(r.left(), y), r.max);
+    let mut child = ui.new_child(UiBuilder::new().id_salt("gallery-sizes").max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
+    child.set_clip_rect(area);
+    let mut quiet = Cx::new(None);
     let mut out = None;
-    if it.added {
-        p.circle_filled(badge.center(), 10.0, Color32::from_rgb(0x48, 0x48, 0x4C));
-        icon(&p, Icon::Check, badge.shrink(5.0), TEXT_SOFT);
-    } else {
-        let b = ui.interact(badge, id.with("add"), Sense::click());
-        p.circle_filled(badge.center() + Vec2::new(0.0, 1.5), 10.5, Color32::from_black_alpha(80));
-        p.circle_filled(badge.center(), 10.0, if b.hovered() { lerp_color(tint::HEALTH, Color32::WHITE, 0.15) } else { tint::HEALTH });
-        plus(&p, badge.center(), 4.5, Color32::WHITE);
-        if b.on_hover_text("Add to the panel").clicked() {
-            out = Some(CardEvent::Add);
+    let dragging = app.drag.is_some();
+    ScrollArea::vertical().id_salt(("gallery-sizes", key)).auto_shrink([false, false]).show(&mut child, |ui| {
+        let (origin, _) = ui.allocate_exact_size(Vec2::new(area.width(), total + sp::S), Sense::hover());
+        let p = ui.painter().clone();
+        let mut y = origin.top();
+        for row in &rows {
+            let mut cx = x;
+            let mut row_h: f32 = 0.0;
+            for z in row {
+                let sz = panel::size_px(*z, w);
+                let here = cur == Some(*z);
+                let label = if here { format!("{} · {} · in the panel", z.name(), z.label()) } else { format!("{} · {}", z.name(), z.label()) };
+                text_fit(&p, Pos2::new(cx, y), Align2::LEFT_TOP, &label, ty::caption(), if here { ACCENT } else { ty::caption_color() }, sz.x.max(150.0));
+                let wr = Rect::from_min_size(Pos2::new(cx, y + label_h), sz);
+                panel::draw_at(app, ui, owner, spec.id, *z, wr, &mut quiet);
+                let resp = ui.interact(wr, ui.scope_id().with(("var", key, z.label())), Sense::click_and_drag());
+                if here {
+                    p.rect_stroke(wr.expand(2.0), R_CARD + 2.0, Stroke::new(2.0, ACCENT), StrokeKind::Outside);
+                } else if resp.hovered() && !dragging {
+                    p.rect_stroke(wr, R_CARD, Stroke::new(1.0, white(46)), StrokeKind::Inside);
+                }
+                if resp.hovered() && !dragging {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                }
+                if resp.drag_started() && !dragging {
+                    let grab = resp.interact_pointer_pos().map(|q| q - wr.min).unwrap_or(Vec2::splat(12.0));
+                    app.drag = Some(Drag { key: key.to_string(), from_gallery: true, label: spec.title.to_string(), size: sz, grab, as_size: Some(*z) });
+                } else if resp.on_hover_text(if here { "In the panel at this size" } else { "Click to add at this size, or drag into the panel" }).clicked() {
+                    out = Some(*z);
+                }
+                cx += sz.x + panel::GAP;
+                row_h = row_h.max(sz.y);
+            }
+            y += label_h + row_h + sp::L;
         }
-    }
-    if resp.drag_started() && !it.added {
-        let grab = resp.interact_pointer_pos().map(|q| q - r.min).unwrap_or(Vec2::splat(12.0));
-        out = Some(CardEvent::DragStart(grab));
-    }
+    });
     out
-}
-
-fn plus(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
-    p.line_segment([c - Vec2::new(s, 0.0), c + Vec2::new(s, 0.0)], Stroke::new(1.8, col));
-    p.line_segment([c - Vec2::new(0.0, s), c + Vec2::new(0.0, s)], Stroke::new(1.8, col));
 }
 
 /// A click on a widget in the preview.
@@ -451,7 +464,7 @@ fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Place
         if resp.drag_started() && app.drag.is_none() {
             let title = app.widget_spec(&key).map(|(_, s)| s.title.to_string()).unwrap_or_default();
             let grab = resp.interact_pointer_pos().map(|q| q - base.min).unwrap_or(Vec2::splat(12.0));
-            app.drag = Some(Drag { key: key.clone(), from_gallery: false, label: title, size: base.size(), grab });
+            app.drag = Some(Drag { key: key.clone(), from_gallery: false, label: title, size: base.size(), grab, as_size: None });
         }
         // "−" hides it
         let mb = Rect::from_center_size(base.left_top() + Vec2::new(3.0, 3.0), Vec2::splat(20.0));
@@ -528,6 +541,15 @@ fn dist(r: Rect, q: Pos2) -> f32 {
 
 // ---------------------------------------------------------------- tools
 
+/// "Cmd+Meow 0.2.0 (57)": the Cargo.toml version plus the build number that
+/// scripts/bundle-mac.sh passes in as CMDMEOW_BUILD (commit count).
+pub fn version_label() -> String {
+    match option_env!("CMDMEOW_BUILD") {
+        Some(b) if !b.is_empty() => format!("Cmd+Meow {} ({b})", env!("CARGO_PKG_VERSION")),
+        _ => format!("Cmd+Meow {}", env!("CARGO_PKG_VERSION")),
+    }
+}
+
 fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let p = ui.painter().clone();
     let w = 560.0f32.min(body.width() - 48.0);
@@ -547,7 +569,8 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
             eprintln!("[login] {e}");
         }
     }
-    y = card.bottom() + 28.0;
+    p.text(Pos2::new(x + 2.0, card.bottom() + 8.0), Align2::LEFT_TOP, version_label(), font(11.0), TEXT_FAINT);
+    y = card.bottom() + 44.0;
     p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Tools", bold(15.0), TEXT);
     p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, "Each tool is separate. Turning one off hides its widgets and its page.", font(12.0), TEXT_DIM);
     y += 50.0;

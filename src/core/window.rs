@@ -37,16 +37,23 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
             app.page = first;
         }
     }
-    let x = side.left() + 10.0;
-    let w = side.width() - 20.0;
-    let mut y = full.top() + 40.0;
+    let x = side.left() + 8.0;
+    let w = side.width() - 16.0;
+    // app mark under the traffic lights
+    let logo_y = full.top() + 44.0;
+    if let Some(tex) = crate::kit::brand::app_icon(&ctx) {
+        let r = Rect::from_min_size(Pos2::new(side.left() + 16.0, logo_y), Vec2::splat(22.0));
+        p.image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+    }
+    p.text(Pos2::new(side.left() + 46.0, logo_y + 11.0), Align2::LEFT_CENTER, "Cmd+Meow", bold(13.0), TEXT);
+    let mut y = logo_y + 22.0 + 4.0;
     let mut section = "";
     for &i in &pages {
         if app.tools[i].section() != section {
             section = app.tools[i].section();
             y += 12.0;
             section_header(&p, Pos2::new(x + 8.0, y), Align2::LEFT_TOP, section);
-            y += 20.0;
+            y += 18.0;
         }
         let t = &app.tools[i];
         let (label, badge, meta, id) = (t.name(), t.badge(), t.sidebar_meta(), t.id());
@@ -62,7 +69,7 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
     if !planned.is_empty() {
         y += 12.0;
         section_header(&p, Pos2::new(x + 8.0, y), Align2::LEFT_TOP, "Planned tools");
-        y += 20.0;
+        y += 18.0;
         for (ic, label) in planned {
             let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, SIDEBAR_ROW_H));
             sidebar_item(ui, r, ui.scope_id().with(("planned", *label)), *ic, Color32::TRANSPARENT, label, "", false, true);
