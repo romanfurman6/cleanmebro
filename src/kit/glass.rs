@@ -288,12 +288,17 @@ pub fn arc_points(center: Pos2, radius: f32, a0: f32, a1: f32, n: usize) -> Vec<
         .collect()
 }
 
+/// Frame interval for things that move by themselves. 15 ms lands on an
+/// even beat with vsync on common displays: every frame at 60 Hz, every
+/// 2nd at 100 Hz (50 fps) and 120 Hz (60 fps), every 3rd at 144 Hz. The
+/// old 33 ms didn't divide 100/120 Hz evenly and stuttered; every frame
+/// at 100 Hz cost ~20% CPU with the panel open (fan blades redraw it all).
+pub const ANIM_FRAME: std::time::Duration = std::time::Duration::from_millis(15);
+
 /// Ask for the next frame of something that moves by itself (spinners, fan
-/// blades, steam): every display frame, paced by vsync. A fixed interval
-/// (33 ms, 50 ms) doesn't divide a 100 or 120 Hz display's frames evenly,
-/// so the motion stutters. Only call it while the thing is on screen.
+/// blades, steam). Only call it while the thing is on screen.
 pub fn animate(ctx: &egui::Context) {
-    ctx.request_repaint();
+    ctx.request_repaint_after(ANIM_FRAME);
 }
 
 /// A spinning arc used while something is working; call [`animate`] to keep
