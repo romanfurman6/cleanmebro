@@ -7,7 +7,7 @@ use super::apps::Source;
 use super::leftovers::{Item, Kind};
 use super::remove::Target;
 use super::{mac, Drop, Filter, Origin, Phase, Review, Sort, Tab, Uninstaller, ID, TINT, UNDO_FOR, UNUSED_DAYS};
-use crate::core::tool::{Cx, Size};
+use crate::core::tool::Cx;
 use crate::kit::glass::*;
 use crate::kit::tile;
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId};
@@ -902,91 +902,6 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
 }
 
 // ---------------------------------------------------------------- panel widget
-
-pub fn widget(u: &mut Uninstaller, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-    let ctx = ui.ctx().clone();
-    let id = ui.scope_id().with("w-uninstall");
-    let hovering = files_in(&ctx, false).iter().any(|f| f.extension().is_some_and(|e| e == "app"));
-    if let Some(f) = files_in(&ctx, true).into_iter().next() {
-        u.origin = Origin::Widget;
-        u.dropped(f);
-    }
-    let d = u.st.lock().unwrap().drop.clone();
-    let mine = u.origin == Origin::Widget;
-    // small sizes confirm in the window
-    if mine && size != Size::S14 {
-        if let Drop::Confirm(t) = &d {
-            u.st.lock().unwrap().drop = Drop::Idle;
-            u.selected = t.app.clone();
-            u.tab = Tab::Apps;
-            u.review = Some(Review { targets: vec![t.clone()], open: [0].into() });
-            cx.open_page(ID, "");
-            return;
-        }
-        if let Drop::Refused(name, why) = &d {
-            cx.toast(format!("{name}: {why}"));
-            u.st.lock().unwrap().drop = Drop::Idle;
-        }
-    }
-    let p = ui.painter().clone();
-    let green = Color32::from_rgb(0x4C, 0xAF, 0x50);
-    let orphan_bytes: u64 = u.st.lock().unwrap().orphans.iter().map(|o| o.bytes()).sum();
-    if size == Size::S14 && mine && !matches!(d, Drop::Idle) {
-        inline_confirm(u, ui, rect, &d);
-        return;
-    }
-    if size == Size::S14 && mine {
-        if let Some((msg, can_undo, _)) = result_text(u).filter(|_| u.st.lock().unwrap().last.as_ref().is_some_and(|(_, t)| t.elapsed() < Duration::from_secs(30))) {
-            tile::card(ui, rect, id.with("done"), false);
-            let c = Pos2::new(rect.left() + 30.0, rect.center().y);
-            p.circle_filled(c, 20.0, with_alpha(TINT, 0.25));
-            icon(&p, Icon::Check, Rect::from_center_size(c, Vec2::splat(18.0)), Color32::from_rgb(0x6F, 0xCF, 0x7A));
-            let ur = Rect::from_min_size(Pos2::new(rect.right() - 12.0 - 64.0, rect.center().y - 13.0), Vec2::new(64.0, 26.0));
-            text_fit(&p, Pos2::new(c.x + 30.0, rect.center().y - 8.0), Align2::LEFT_CENTER, &msg, bold(12.0), TEXT, ur.left() - c.x - 40.0);
-            p.text(Pos2::new(c.x + 30.0, rect.center().y + 9.0), Align2::LEFT_CENTER, "Drop another app", font(11.0), TEXT_DIM);
-            if can_undo && pill_button(ui, ur, "Undo", BTN_SECONDARY, true).clicked() {
-                u.undo();
-            }
-            return;
-        }
-    }
-    let resp = if hovering {
-        let resp = tile::glow_card(ui, rect, id, green, false);
-        let c = rect.center();
-        tool_chip(&p, Rect::from_center_size(c - Vec2::new(0.0, if size == Size::S11 { 8.0 } else { 0.0 }), Vec2::splat(30.0)), Icon::AppRemove, TINT);
-        if size == Size::S11 {
-            p.text(c + Vec2::new(0.0, 24.0), Align2::CENTER_CENTER, "Release", bold(11.0), Color32::from_rgb(0x8E, 0xE0, 0x9A));
-        } else {
-            p.text(Pos2::new(c.x + 24.0, c.y), Align2::LEFT_CENTER, "Release to review", bold(12.0), Color32::from_rgb(0x8E, 0xE0, 0x9A));
-        }
-        resp
-    } else {
-        let resp = tile::card(ui, rect, id, false);
-        dashed_rect(&p, rect.shrink(1.0), tile::R_TILE, white(56));
-        match size {
-            Size::S11 => {
-                tool_chip(&p, Rect::from_min_size(rect.min + Vec2::splat(9.0), Vec2::splat(24.0)), Icon::AppRemove, TINT);
-                tile::small_text(&p, rect, "Uninstall", "drop app", TEXT_DIM);
-            }
-            _ => {
-                let ic = Rect::from_min_size(Pos2::new(rect.left() + 10.0, rect.center().y - 20.0), Vec2::splat(40.0));
-                p.rect_filled(ic, 10.0, with_alpha(TINT, 0.22));
-                icon(&p, Icon::Down, Rect::from_center_size(ic.center(), Vec2::splat(18.0)), Color32::from_rgb(0x6F, 0xCF, 0x7A));
-                let x = ic.right() + 10.0;
-                let w = rect.right() - x - 8.0;
-                text_fit(&p, Pos2::new(x, rect.center().y - 16.0), Align2::LEFT_CENTER, "Drop an app", bold(12.0), TEXT, w);
-                text_fit(&p, Pos2::new(x, rect.center().y), Align2::LEFT_CENTER, "to uninstall it", font(11.0), TEXT_DIM, w);
-                if orphan_bytes > 0 {
-                    text_fit(&p, Pos2::new(x, rect.center().y + 16.0), Align2::LEFT_CENTER, &format!("{} leftovers", human_bytes(orphan_bytes)), font(11.0), Color32::from_rgb(0xF2, 0xC4, 0x6B), w);
-                }
-            }
-        }
-        resp
-    };
-    if resp.on_hover_text("Drop an app here, or open the Uninstaller").clicked() {
-        cx.open_page(ID, "");
-    }
-}
 
 /// The confirm row inside the 1:4 widget and the drop zone.
 fn inline_confirm(u: &mut Uninstaller, ui: &mut Ui, rect: Rect, d: &Drop) {

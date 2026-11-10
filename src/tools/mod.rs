@@ -44,13 +44,10 @@ pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "system/cpu",
     "system/battery",
     "system/network",
-    "system/devices",
     "startup/summary",
+    "system/devices",
     "claude/limits",
     "fan/fans",
-    "core/recommendation",
-    "system/health",
-    "lens/map",
 ];
 
 #[cfg(test)]
@@ -63,7 +60,6 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), tools.len());
-        assert!(!ids.contains(&crate::core::shell::CORE));
         for t in &tools {
             let mut w: Vec<&str> = t.widgets().iter().map(|w| w.id).collect();
             w.sort();

@@ -6,7 +6,7 @@
 
 use super::panel::{self, Placed};
 use super::settings::{hide_entry, place_entry, set_size, widget_key};
-use super::shell::{App, CORE, RECOMMENDATION};
+use super::shell::App;
 use super::tool::{Cx, Size};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
@@ -101,17 +101,6 @@ fn gallery(app: &App, query: &str) -> Vec<(String, Vec<Item>)> {
         if !items.is_empty() {
             groups.push((t.name().to_uppercase(), items));
         }
-    }
-    let core = [(RECOMMENDATION, "Recommendation", Icon::Sparkle)]
-        .into_iter()
-        .map(|(id, title, glyph)| {
-            let key = widget_key(CORE, id);
-            Item { added: added(&key), key: Some(key), title: title.into(), words: "suggestion tip today".into(), sizes: 1, glyph, color: tint::NEUTRAL }
-        })
-        .filter(|it| matches(query, &it.title, &it.words))
-        .collect::<Vec<_>>();
-    if !core.is_empty() {
-        groups.push(("CORE".into(), core));
     }
     groups
 }
