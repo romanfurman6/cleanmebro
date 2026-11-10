@@ -6,7 +6,7 @@
 <title>Cmd+Meow</title>
 <meta name="description" content="Menu bar app for macOS: cleaner, disk map, uninstaller, screenshots and screen recording, clipboard history, keep awake, fan and system monitor. Free, MIT, written in Rust.">
 <meta property="og:title" content="Cmd+Meow">
-<meta property="og:description" content="Menu bar app for macOS. Clean, map, capture, paste, stay awake.">
+<meta property="og:description" content="A Mac cleaner, screenshot tool, clipboard history and keep-awake switch in one menu bar app.">
 <meta property="og:image" content="https://cmdmeow.furman.cat/icon.png">
 <meta name="theme-color" content="#111318">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -31,7 +31,7 @@
   <div class="hero-text">
     <img class="appicon" src="icon.png" width="160" height="160" alt="Cmd+Meow icon: a command key with cat ears">
     <h1>Cmd+Meow</h1>
-    <p class="say">Clean, map, capture, paste, stay awake.<br>From the menu bar.</p>
+    <p class="say">A cleaner, screenshot tool, clipboard history<br>and keep-awake switch in one menu bar app.</p>
     <div class="row">
       <a class="btn p l" href="https://github.com/romanfurman6/cmdmeow/releases">Download for Mac</a>
       <span class="meta">Free · macOS 12+</span>
@@ -86,8 +86,8 @@
 <section class="show wrap">
   <div class="show-text">
     <span class="tag"><svg class="ph" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><path d="M235.5,216.81c-22.56-11-35.5-34.58-35.5-64.8V134.73a15.94,15.94,0,0,0-10.09-14.87L165,110a8,8,0,0,1-4.48-10.34l21.32-53a28,28,0,0,0-16.1-37,28.14,28.14,0,0,0-35.82,16,.61.61,0,0,0,0,.12L108.9,79a8,8,0,0,1-10.37,4.49L73.11,73.14A15.89,15.89,0,0,0,55.74,76.8C34.68,98.45,24,123.75,24,152a111.45,111.45,0,0,0,31.18,77.53A8,8,0,0,0,61,232H232a8,8,0,0,0,3.5-15.19ZM67.14,88l25.41,10.3a24,24,0,0,0,31.23-13.45l21-53c2.56-6.11,9.47-9.27,15.43-7a12,12,0,0,1,6.88,15.92L145.69,93.76a24,24,0,0,0,13.43,31.14L184,134.73V152c0,.33,0,.66,0,1L55.77,101.71A108.84,108.84,0,0,1,67.14,88Zm48,128a87.53,87.53,0,0,1-24.34-42,8,8,0,0,0-15.49,4,105.16,105.16,0,0,0,18.36,38H64.44A95.54,95.54,0,0,1,40,152a85.9,85.9,0,0,1,7.73-36.29l137.8,55.12c3,18,10.56,33.48,21.89,45.16Z"/></svg>Clean Up</span>
-    <h2>Gigabytes you didn't know about.</h2>
-    <p>Caches, logs, Xcode leftovers. You tick what goes. It goes to the Trash.</p>
+    <h2>Find the caches you can delete.</h2>
+    <p>It scans caches, logs and Xcode DerivedData. You tick what goes, and it goes to the Trash, so you can still undo it.</p>
   </div>
   <div class="stage" aria-hidden="true" data-demo="clean">
     <div class="win">
@@ -105,8 +105,8 @@
 <section class="show wrap flip">
   <div class="show-text">
     <span class="tag"><svg class="ph" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><path d="M100,116.43a8,8,0,0,0,4-6.93v-72A8,8,0,0,0,93.34,30,104.06,104.06,0,0,0,25.73,147a8,8,0,0,0,4.52,5.81,7.86,7.86,0,0,0,3.35.74,8,8,0,0,0,4-1.07ZM88,49.62v55.26L40.12,132.51C40,131,40,129.48,40,128A88.12,88.12,0,0,1,88,49.62ZM128,24a8,8,0,0,0-8,8v91.82L41.19,169.73a8,8,0,0,0-2.87,11A104,104,0,1,0,128,24Zm0,192a88.47,88.47,0,0,1-71.49-36.68l75.52-44a8,8,0,0,0,4-6.92V40.36A88,88,0,0,1,128,216Z"/></svg>Disk Map</span>
-    <h2>See where the space went.</h2>
-    <p>Every folder, sized. Hover a ring.</p>
+    <h2>See which folders fill your disk.</h2>
+    <p>Each ring is a folder, sized by what's inside. Hover one to see its name.</p>
   </div>
   <div class="stage" data-demo="map">
     <div class="win">
@@ -128,8 +128,8 @@
 <section class="show wrap">
   <div class="show-text">
     <span class="tag"><svg class="ph" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><path d="M240,192a8,8,0,0,1-8,8H200v32a8,8,0,0,1-16,0V200H64a8,8,0,0,1-8-8V72H24a8,8,0,0,1,0-16H56V24a8,8,0,0,1,16,0V184H232A8,8,0,0,1,240,192ZM96,72h88v88a8,8,0,0,0,16,0V64a8,8,0,0,0-8-8H96a8,8,0,0,0,0,16Z"/></svg>Capture <kbd>⇧⌘2</kbd></span>
-    <h2>Grab it. Record it. Send a link.</h2>
-    <p>Screenshots with an editor. Recording with sound and camera. Links open in <a href="play/">this player</a>.</p>
+    <h2>Screenshots and screen recordings.</h2>
+    <p>Mark up a screenshot, or record the screen with system audio, mic and camera. Upload a recording to your own S3 and the link opens in <a href="play/">this player</a>.</p>
   </div>
   <div class="stage" aria-hidden="true" data-demo="capture">
     <div class="screen" id="cap-screen">
@@ -147,8 +147,8 @@
 <section class="show wrap flip">
   <div class="show-text">
     <span class="tag"><svg class="ph" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><path d="M168,152a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,152Zm-8-40H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm56-64V216a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V48A16,16,0,0,1,56,32H92.26a47.92,47.92,0,0,1,71.48,0H200A16,16,0,0,1,216,48ZM96,64h64a32,32,0,0,0-64,0ZM200,48H173.25A47.93,47.93,0,0,1,176,64v8a8,8,0,0,1-8,8H88a8,8,0,0,1-8-8V64a47.93,47.93,0,0,1,2.75-16H56V216H200Z"/></svg>Clipboard <kbd>⌥⌘V</kbd></span>
-    <h2>Copy now, paste whenever.</h2>
-    <p>Text, links, images, code. Passwords stay out.</p>
+    <h2>Press ⌥⌘V for everything you copied.</h2>
+    <p>Text, links, images and code. Anything that looks like a password stays hidden.</p>
   </div>
   <div class="stage" aria-hidden="true" data-demo="clip">
     <div class="clip">
@@ -162,8 +162,8 @@
 <section class="show wrap">
   <div class="show-text">
     <span class="tag"><svg class="ph" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><path d="M80,56V24a8,8,0,0,1,16,0V56a8,8,0,0,1-16,0Zm40,8a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,120,64Zm32,0a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,152,64Zm96,56v8a40,40,0,0,1-37.51,39.91,96.59,96.59,0,0,1-27,40.09H208a8,8,0,0,1,0,16H32a8,8,0,0,1,0-16H56.54A96.3,96.3,0,0,1,24,136V88a8,8,0,0,1,8-8H208A40,40,0,0,1,248,120ZM200,96H40v40a80.27,80.27,0,0,0,45.12,72h69.76A80.27,80.27,0,0,0,200,136Zm32,24a24,24,0,0,0-16-22.62V136a95.78,95.78,0,0,1-1.2,15A24,24,0,0,0,232,128Z"/></svg>Keep Awake</span>
-    <h2>No naps during a long build.</h2>
-    <p>One switch. Or let it stay up while Claude Code is working.</p>
+    <h2>Keep the Mac awake through a long build.</h2>
+    <p>Flip the switch, or let it turn on by itself while Claude Code is working.</p>
   </div>
   <div class="stage" data-demo="awake">
     <button class="awake" id="awake" type="button" aria-pressed="true" aria-label="Keep Awake">
@@ -193,7 +193,7 @@
     <span><svg class="ph" width="18" height="18" viewBox="0 0 256 256" aria-hidden="true"><path d="M233,135a60,60,0,0,0-89.62-35.45l16.39-65.44a8,8,0,0,0-3.45-8.68A60,60,0,1,0,95.69,128.91L30.82,147.44a8,8,0,0,0-5.8,7.32,60,60,0,0,0,44.42,60.66,60.52,60.52,0,0,0,15.62,2.07,60.07,60.07,0,0,0,59.88-62l48.48,46.92a8,8,0,0,0,9.25,1.35A60,60,0,0,0,233,135Zm-121-7a16,16,0,1,1,16,16A16,16,0,0,1,112,128ZM80,76a44,44,0,0,1,62.75-39.82L127.77,96A32,32,0,0,0,99.85,112.8,43.85,43.85,0,0,1,80,76Zm27,119.57a44,44,0,0,1-65.86-34.43l59.31-16.94A32,32,0,0,0,128,160l.91,0A43.82,43.82,0,0,1,107,195.57Zm106.17-23a43.92,43.92,0,0,1-13,14.14l-44.32-42.89a31.91,31.91,0,0,0-.59-32.57,44,44,0,0,1,57.91,61.32Z"/></svg>Fans</span>
     <span><svg class="ph" width="18" height="18" viewBox="0 0 256 256" aria-hidden="true"><path d="M207.06,72.67A111.24,111.24,0,0,0,128,40h-.4C66.07,40.21,16,91,16,153.13V176a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V152A111.25,111.25,0,0,0,207.06,72.67ZM224,176H119.71l54.76-75.3a8,8,0,0,0-12.94-9.42L99.92,176H32V153.13c0-3.08.15-6.12.43-9.13H56a8,8,0,0,0,0-16H35.27c10.32-38.86,44-68.24,84.73-71.66V80a8,8,0,0,0,16,0V56.33A96.14,96.14,0,0,1,221,128H200a8,8,0,0,0,0,16h23.67c.21,2.65.33,5.31.33,8Z"/></svg>Claude Usage</span>
   </div>
-  <p class="cap center">Turn off what you don't use. It stops running.</p>
+  <p class="cap center">Any tool you turn off stops running.</p>
 </section>
 
 <!-- Install -->
@@ -201,7 +201,7 @@
   <img src="icon.png" width="72" height="72" alt="">
   <div>
     <h2>Get it</h2>
-    <p class="dim">Download, drag to Applications. Not notarized yet, so open it once with right-click › Open, or:</p>
+    <p class="dim">Download it and drag it to Applications. The app isn't notarized yet, so open it the first time with right-click › Open, or run this:</p>
     <div class="code"><pre><code id="cmd">xattr -dr com.apple.quarantine /Applications/CmdMeow.app</code></pre><button class="btn sm" type="button" data-copy="cmd">Copy</button></div>
     <div class="row" style="margin-top:16px"><a class="btn p" href="https://github.com/romanfurman6/cmdmeow/releases">Download</a><a class="btn" href="https://github.com/romanfurman6/cmdmeow">Source</a></div>
   </div>

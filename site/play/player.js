@@ -68,7 +68,7 @@
   });
 
   v.addEventListener('error', function () {
-    showEmpty("Couldn't load the video", 'The file may have expired, been removed, or use a format this browser can\'t play. You can still try opening the file directly.');
+    showEmpty("Couldn't load the video", 'The link may have expired, or this browser can\'t play the format. Try opening the file directly.');
     $('url').value = src.href;
   });
 
