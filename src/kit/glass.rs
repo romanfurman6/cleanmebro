@@ -1,6 +1,6 @@
-//! Drawing kit for the "Control Center" look: near-opaque dark surfaces,
-//! flat cards with hairlines, one blue accent, standard 28–34 pt buttons and
-//! small monochrome icons (no bitmap assets).
+//! Drawing kit for the D6 look: a native dark Mac window, cards sunk a
+//! little darker than the window, system blue for actions, monochrome tool
+//! icons, one spacing scale ([`sp`]) and one type ramp ([`ty`]).
 
 use egui::{
     epaint::{PathShape, PathStroke},
@@ -12,15 +12,15 @@ use std::f32::consts::{PI, TAU};
 // ---------------------------------------------------------------- palette
 
 /// Window / panel background.
-pub const BG: Color32 = Color32::from_rgb(0x1C, 0x1C, 0x1F);
-/// Card surface on top of `BG`.
-pub const CARD: Color32 = Color32::from_rgb(0x24, 0x24, 0x28);
-/// Raised tile (quick actions) and selected rows.
-pub const RAISED: Color32 = Color32::from_rgb(0x2A, 0x2A, 0x2E);
+pub const BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x20);
+/// Card surface: a little darker than `BG`, no border.
+pub const CARD: Color32 = Color32::from_rgb(0x15, 0x15, 0x17);
+/// Hovered card, quick-action tiles and selected rows.
+pub const RAISED: Color32 = Color32::from_rgb(0x2C, 0x2C, 0x2E);
 /// Window sidebar.
-pub const SIDEBAR: Color32 = Color32::from_rgb(0x16, 0x16, 0x18);
+pub const SIDEBAR: Color32 = Color32::from_rgb(0x18, 0x18, 0x1A);
 /// Window footer strip.
-pub const FOOTER: Color32 = Color32::from_rgb(0x19, 0x19, 0x1C);
+pub const FOOTER: Color32 = Color32::from_rgb(0x1A, 0x1A, 0x1C);
 
 pub const TEXT: Color32 = Color32::from_rgb(0xF5, 0xF5, 0xF7);
 /// Secondary text on dark surfaces.
@@ -30,33 +30,79 @@ pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x8E, 0x8E, 0x93);
 /// Chevrons, drag handles.
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x73);
 
-/// The one accent: primary buttons, selection, checkboxes (white on it passes 4.5:1).
-pub const BLUE: Color32 = Color32::from_rgb(0x0B, 0x6B, 0xD8);
-/// Links, storage bars, sparklines.
-pub const ACCENT: Color32 = Color32::from_rgb(0x4D, 0xA3, 0xFF);
+/// System blue: primary buttons, selection, checkboxes, sidebar icons.
+pub const BLUE: Color32 = Color32::from_rgb(0x0A, 0x84, 0xFF);
+/// Links and blue text on dark cards.
+pub const ACCENT: Color32 = Color32::from_rgb(0x64, 0xB5, 0xFF);
 pub const GREEN: Color32 = Color32::from_rgb(0x30, 0xD1, 0x58);
-pub const AMBER: Color32 = Color32::from_rgb(0xFF, 0xB3, 0x40);
+/// Orange: attention (busy spikes, "suggested", warnings).
+pub const AMBER: Color32 = Color32::from_rgb(0xFF, 0x9F, 0x0A);
 pub const RED: Color32 = Color32::from_rgb(0xFF, 0x45, 0x3A);
-/// Claude's tint (bars, sparkle).
-pub const CLAUDE: Color32 = Color32::from_rgb(0xE8, 0x87, 0x5F);
+/// Claude's tint (limit bars and rings).
+pub const CLAUDE: Color32 = Color32::from_rgb(0xBF, 0x5A, 0xF2);
+/// Second blue for charts (wired memory, second series).
+pub const INDIGO: Color32 = Color32::from_rgb(0x5E, 0x5C, 0xE6);
 pub const TEAL: Color32 = Color32::from_rgb(0x64, 0xD2, 0xFF);
 pub const PURPLE: Color32 = Color32::from_rgb(0xBF, 0x8C, 0xFF);
 pub const MINT: Color32 = Color32::from_rgb(99, 230, 226);
 pub const GRAY: Color32 = Color32::from_rgb(152, 152, 157);
 pub const PINK: Color32 = AMBER;
 
-/// One small tint chip per tool (white glyph on it).
+/// Tool tints. D6 drops the rainbow: every tool uses system blue, and only
+/// Claude keeps its own colour because its data is Claude's.
 pub mod tint {
     use egui::Color32;
     pub const CLEANUP: Color32 = super::BLUE;
-    pub const DISK_MAP: Color32 = Color32::from_rgb(0x2E, 0x9E, 0x8F);
-    pub const HEALTH: Color32 = Color32::from_rgb(0x30, 0xA1, 0x4E);
-    pub const CLAUDE: Color32 = Color32::from_rgb(0xC9, 0x64, 0x3E);
-    pub const CAPTURE: Color32 = Color32::from_rgb(0x6E, 0x56, 0xCF);
-    pub const KEEP_AWAKE: Color32 = Color32::from_rgb(0xC2, 0x41, 0x7A);
-    pub const FAN: Color32 = Color32::from_rgb(0x0E, 0x8F, 0xB0);
-    pub const STARTUP: Color32 = Color32::from_rgb(0xD6, 0x45, 0x3D);
-    pub const NEUTRAL: Color32 = Color32::from_rgb(0x63, 0x63, 0x66);
+    pub const DISK_MAP: Color32 = super::BLUE;
+    pub const HEALTH: Color32 = super::BLUE;
+    pub const CLAUDE: Color32 = super::CLAUDE;
+    pub const CAPTURE: Color32 = super::BLUE;
+    pub const KEEP_AWAKE: Color32 = super::BLUE;
+    pub const FAN: Color32 = super::BLUE;
+    pub const STARTUP: Color32 = super::BLUE;
+    pub const NEUTRAL: Color32 = Color32::from_rgb(0x8E, 0x8E, 0x93);
+}
+
+/// The spacing scale. Only these six values; nothing in between.
+pub mod sp {
+    /// Label ↔ its caption.
+    pub const XS: f32 = 4.0;
+    /// Items in a group.
+    pub const S: f32 = 8.0;
+    /// Title block ↔ content.
+    pub const M: f32 = 12.0;
+    /// Between blocks, card padding, gap between cards.
+    pub const L: f32 = 16.0;
+    /// Between sections.
+    pub const XL: f32 = 24.0;
+    /// Page margin.
+    pub const XXL: f32 = 32.0;
+    /// A row in a list.
+    pub const ROW_H: f32 = 44.0;
+    /// A legend row.
+    pub const LEGEND_H: f32 = 22.0;
+}
+
+/// The type ramp: seven styles, used everywhere instead of ad-hoc sizes.
+pub mod ty {
+    use super::{bold, font, white};
+    use egui::{Color32, FontId};
+    /// 28/600: one per card at most ("4.2 GB").
+    pub fn hero() -> FontId { bold(28.0) }
+    /// 22/600: secondary numbers ("3.2 MB/s").
+    pub fn number() -> FontId { bold(22.0) }
+    /// 15/600: page titles and lead lines ("Clean Up finished").
+    pub fn lead() -> FontId { bold(15.0) }
+    /// 13/600: card titles.
+    pub fn title() -> FontId { bold(13.0) }
+    /// 13/400: body text and list rows.
+    pub fn body() -> FontId { font(13.0) }
+    /// 12/400: labels and legends.
+    pub fn label() -> FontId { font(12.0) }
+    /// 11/400: captions, in [`caption_color`].
+    pub fn caption() -> FontId { font(11.0) }
+    /// White at 50%: the caption colour.
+    pub fn caption_color() -> Color32 { white(128) }
 }
 
 /// Status chip colours: (background, text).
@@ -137,10 +183,9 @@ pub fn backdrop(painter: &Painter, rect: Rect, radius: f32, opaque: bool, _t: f6
 /// A flat card: `CARD` fill with a hairline. `hover` 0..1 lifts it a little,
 /// `selected` adds the blue ring.
 pub fn glass_card(painter: &Painter, rect: Rect, r: f32, hover: f32, selected: bool) {
-    painter.rect_filled(rect, r, lerp_color(CARD, RAISED, hover));
-    painter.rect_stroke(rect, r, Stroke::new(1.0, white(HAIRLINE)), StrokeKind::Inside);
+    painter.rect_filled(rect, r, lerp_color(CARD, RAISED, hover * 0.5));
     if selected {
-        painter.rect_stroke(rect, r, Stroke::new(1.5, ACCENT), StrokeKind::Inside);
+        painter.rect_stroke(rect, r, Stroke::new(1.5, BLUE), StrokeKind::Inside);
     }
 }
 
@@ -389,11 +434,17 @@ pub fn dashed_rect(p: &Painter, rect: Rect, r: f32, color: Color32) {
     p.extend(Shape::dashed_line(&path, Stroke::new(1.0, color), 3.0, 2.5));
 }
 
-/// One tool's tint chip: a rounded square in `color` with a white glyph.
+/// One tool's chip: a quiet rounded square with the glyph in `color`
+/// (system blue for every tool; no rainbow of filled squircles).
 pub fn tool_chip(p: &Painter, rect: Rect, glyph: Icon, color: Color32) {
     let r = (rect.width() * 0.27).round();
-    p.rect_filled(rect, r, color);
-    icon(p, glyph, Rect::from_center_size(rect.center(), rect.size() * 0.6), Color32::WHITE);
+    p.rect_filled(rect, r, white(18));
+    icon(p, glyph, Rect::from_center_size(rect.center(), rect.size() * 0.6), lift(color));
+}
+
+/// A tint made readable as a glyph or text on a dark card (blue → lighter blue).
+pub fn lift(c: Color32) -> Color32 {
+    if c == BLUE { ACCENT } else { c }
 }
 
 /// The dashed chip of a planned tool.
@@ -410,7 +461,7 @@ pub fn hairline(p: &Painter, a: Pos2, b: Pos2) {
 
 /// Small section header ("Clean", "Monitor", table column titles).
 pub fn section_header(p: &Painter, pos: Pos2, align: Align2, label: &str) -> Rect {
-    p.text(pos, align, label, bold(11.0), TEXT_FAINT)
+    p.text(pos, align, label, bold(11.0), white(102))
 }
 
 /// The header of a detail sheet: tint chip, title, subtitle, close button.
@@ -465,21 +516,26 @@ pub fn sidebar_item(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: C
     let h = ui.ctx().animate_bool(id.with("h"), resp.hovered() && !planned);
     let p = ui.painter();
     if selected {
-        p.rect_filled(rect, R_SMALL, with_alpha(BLUE, 0.85));
+        p.rect_filled(rect, 6.0, with_alpha(BLUE, 0.9));
     } else if h > 0.0 {
-        p.rect_filled(rect, R_SMALL, white((12.0 * h) as u8));
+        p.rect_filled(rect, 6.0, white((12.0 * h) as u8));
     }
-    let chip_r = Rect::from_min_size(Pos2::new(rect.left() + 8.0, rect.center().y - 11.0), Vec2::splat(22.0));
-    if planned {
-        planned_chip(p, chip_r, glyph);
+    let chip_r = Rect::from_min_size(Pos2::new(rect.left() + 8.0, rect.center().y - 8.0), Vec2::splat(16.0));
+    let glyph_col = if planned {
+        TEXT_MUTED
+    } else if selected {
+        Color32::WHITE
+    } else if color == tint::NEUTRAL || color == Color32::TRANSPARENT {
+        TEXT_DIM
     } else {
-        tool_chip(p, chip_r, glyph, color);
-    }
+        color
+    };
+    icon(p, glyph, chip_r, glyph_col);
     let mut right = rect.right() - 8.0;
     if !meta.is_empty() {
-        right = p.text(Pos2::new(right, rect.center().y), Align2::RIGHT_CENTER, meta, font(11.0), if selected { white(210) } else { TEXT_FAINT }).left() - 6.0;
+        right = p.text(Pos2::new(right, rect.center().y), Align2::RIGHT_CENTER, meta, font(11.0), if selected { white(205) } else { white(102) }).left() - 6.0;
     }
-    text_fit(p, Pos2::new(chip_r.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, label, font(13.0), if planned { TEXT_FAINT } else { TEXT }, right - chip_r.right() - 8.0);
+    text_fit(p, Pos2::new(chip_r.right() + 9.0, rect.center().y), Align2::LEFT_CENTER, label, font(13.0), if planned { TEXT_FAINT } else if selected { Color32::WHITE } else { white(217) }, right - chip_r.right() - 9.0);
     if planned {
         return resp.on_hover_text("Planned: not built yet");
     }
@@ -487,22 +543,25 @@ pub fn sidebar_item(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: C
 }
 
 /// Height of a [`sidebar_item`] row.
-pub const SIDEBAR_ROW_H: f32 = 32.0;
+pub const SIDEBAR_ROW_H: f32 = 28.0;
 /// Width of the window sidebar.
-pub const SIDEBAR_W: f32 = 220.0;
+pub const SIDEBAR_W: f32 = 210.0;
 
 /// Height of a window page header ([`page_header`]).
-pub const PAGE_HEADER_H: f32 = 68.0;
+pub const PAGE_HEADER_H: f32 = 50.0;
 /// Height of a window page footer ([`page_footer`]).
 pub const PAGE_FOOTER_H: f32 = 60.0;
 
 /// A window page's header: 20 pt title, one line of status under it and a
 /// hairline. Returns the rect for buttons on the right (vertically centred).
 pub fn page_header(p: &Painter, r: Rect, title: &str, sub: &str, sub_col: Color32) -> Rect {
-    p.text(r.min + Vec2::new(24.0, 16.0), Align2::LEFT_TOP, title, bold(20.0), TEXT);
-    text_fit(p, r.min + Vec2::new(24.0, 43.0), Align2::LEFT_TOP, sub, font(13.0), sub_col, r.width() - 220.0);
-    hairline(p, Pos2::new(r.left(), r.top() + PAGE_HEADER_H), Pos2::new(r.right(), r.top() + PAGE_HEADER_H));
-    Rect::from_min_max(Pos2::new(r.right() - 24.0, r.top() + 20.0), Pos2::new(r.right() - 24.0, r.top() + 48.0))
+    let cy = r.top() + PAGE_HEADER_H / 2.0;
+    let t = p.text(Pos2::new(r.left() + 20.0, cy), Align2::LEFT_CENTER, title, ty::lead(), TEXT);
+    // status sits on the same line as the title, like a macOS toolbar
+    let sub_col = if sub_col == TEXT_DIM { ty::caption_color() } else { sub_col };
+    text_fit(p, Pos2::new(t.right() + 10.0, cy + 1.0), Align2::LEFT_CENTER, sub, ty::label(), sub_col, (r.right() - 260.0 - t.right()).max(40.0));
+    p.line_segment([Pos2::new(r.left(), r.top() + PAGE_HEADER_H), Pos2::new(r.right(), r.top() + PAGE_HEADER_H)], Stroke::new(1.0, Color32::from_black_alpha(115)));
+    Rect::from_min_max(Pos2::new(r.right() - 20.0, cy - 13.0), Pos2::new(r.right() - 20.0, cy + 13.0))
 }
 
 /// A window page's footer strip (darker, with a top hairline). Returns its rect.

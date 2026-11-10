@@ -36,3 +36,6 @@ research/
 
 # README images are published on purpose
 !docs/images/*.png
+
+# App icon sources are part of the build
+!assets/icon/*.png

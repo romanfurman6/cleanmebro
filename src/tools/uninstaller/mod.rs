@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 pub const ID: ToolId = "uninstaller";
 const DROP: &str = "drop";
-pub const TINT: Color32 = Color32::from_rgb(0x3A, 0x8A, 0x3F);
+pub const TINT: Color32 = crate::kit::glass::BLUE;
 
 /// Apps unused this long count as unused.
 pub const UNUSED_DAYS: i64 = 90;
