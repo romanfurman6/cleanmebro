@@ -4,14 +4,13 @@ name: macOS build
 on:
   push:
     branches: [main]
-    tags: ["v*"]
     paths-ignore: ["**.md", "docs/**", "site/**", "LICENSE"]
   pull_request:
     paths-ignore: ["**.md", "docs/**", "site/**", "LICENSE"]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 # A new push to the same branch or PR cancels its older run.
 concurrency:
@@ -53,7 +52,7 @@ jobs:
       - name: Test
         run: cargo test --release --target aarch64-apple-darwin
 
-      # Pull requests: Apple silicon only. main and tags: universal.
+      # Pull requests: Apple silicon only. main: universal.
       - name: Bundle CmdMeow.app
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
@@ -69,8 +68,3 @@ jobs:
           path: target/bundle/*.zip
           if-no-files-found: error
 
-      - name: Publish release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: target/bundle/*.zip
