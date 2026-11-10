@@ -2,6 +2,7 @@
 //! left half of the Claude page).
 
 use super::backend;
+use crate::kit::ai::UsageInfo;
 use super::ID;
 use crate::core::tool::{Cx, Size};
 use crate::kit::tile;
@@ -13,7 +14,7 @@ pub const CLEANUP: &str = "cleanup";
 const GAP: f32 = 12.0;
 
 /// The Claude widget at `size`.
-pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &backend::ClaudeInfo, sel: bool) -> egui::Response {
+pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &UsageInfo, sel: bool) -> egui::Response {
     let id = ui.scope_id().with("w-claude");
     let t = ui.ctx().input(|i| i.time);
     let session = cl.session().cloned();
@@ -49,7 +50,7 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &backend::ClaudeInfo, sel: b
     }
 }
 
-fn status(cl: &backend::ClaudeInfo) -> String {
+fn status(cl: &UsageInfo) -> String {
     if cl.loading && cl.limits.is_empty() {
         "Checking…".to_string()
     } else if !cl.installed && !cl.loading {
@@ -64,7 +65,7 @@ fn status(cl: &backend::ClaudeInfo) -> String {
 }
 
 /// The panel card: plan, tokens today, then Session and Week bars.
-pub fn card(p: &egui::Painter, r: Rect, cl: &backend::ClaudeInfo, t: f64) {
+pub fn card(p: &egui::Painter, r: Rect, cl: &UsageInfo, t: f64) {
     let x0 = r.left() + 12.0;
     let x1 = r.right() - 12.0;
     let hy = r.top() + 17.0;

@@ -8,6 +8,8 @@ mod ui;
 
 use crate::core::tool::{Action, Badge, Cx, MenuItem, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::glass::{tint, Icon};
+use crate::kit::ai::claude::{self, ClaudeCode};
+use crate::kit::ai::UsageInfo;
 use egui::{Rect, Ui};
 
 pub const ID: ToolId = "claude";
@@ -20,7 +22,7 @@ pub struct Claude {
 
 impl Claude {
     pub fn new(env: &ToolEnv) -> Self {
-        Claude { info: backend::start(env.ctx.clone(), env.demo), demo: env.demo }
+        Claude { info: backend::start(env.ctx.clone(), env.demo, Box::new(ClaudeCode::default())), demo: env.demo }
     }
 }
 
@@ -104,7 +106,7 @@ impl Tool for Claude {
             "claude" => Some(View::Page),
             "claude-missing" => {
                 let error = Some(format!("Claude Code isn't installed on this Mac. {}", crate::kit::claude_code::Availability::NotInstalled.how()));
-                *self.info.lock().unwrap() = backend::ClaudeInfo { loading: false, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
+                *self.info.lock().unwrap() = UsageInfo { provider: claude::NAME, loading: false, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
                 Some(View::Page)
             }
             _ => None,
