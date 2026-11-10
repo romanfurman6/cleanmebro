@@ -782,6 +782,38 @@ thread_local! {
     static SYMBOLS: std::cell::RefCell<std::collections::HashMap<(String, u32), Option<(egui::TextureHandle, Vec2)>>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
+/// Icons SF Symbols has no good match for: our own SVG (see `kit::svgicon`).
+fn own_icon(icon: Icon) -> Option<&'static str> {
+    match icon {
+        Icon::Broom => Some("broom"),
+        _ => None,
+    }
+}
+
+/// Draw one of our own SVG icons tinted `color`, square, inside `rect`.
+fn own(p: &Painter, name: &str, rect: Rect, color: Color32) -> bool {
+    let ppp = p.ctx().pixels_per_point();
+    let px = (rect.height().min(rect.width()) * ppp).round().max(8.0) as u32;
+    let key = (format!("svg:{name}"), px);
+    let entry = SYMBOLS.with(|m| m.borrow().get(&key).cloned());
+    let entry = match entry {
+        Some(e) => e,
+        None => {
+            let made = crate::kit::svgicon::render(name, px).map(|(w, h, rgba)| {
+                let img = egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba);
+                let tex = p.ctx().load_texture(format!("svg:{name}:{px}"), img, egui::TextureOptions::LINEAR);
+                (tex, Vec2::new(w as f32 / ppp, h as f32 / ppp))
+            });
+            SYMBOLS.with(|m| m.borrow_mut().insert(key, made.clone()));
+            made
+        }
+    };
+    let Some((tex, size)) = entry else { return false };
+    let r = Rect::from_center_size(rect.center(), size);
+    p.image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), color);
+    true
+}
+
 /// Draw an SF Symbol tinted `color`, fitted (aspect kept) inside `rect`.
 /// Returns false when the symbol isn't available (then a drawn icon is used).
 pub fn symbol(p: &Painter, name: &str, rect: Rect, color: Color32) -> bool {
@@ -810,6 +842,11 @@ pub fn symbol(p: &Painter, name: &str, rect: Rect, color: Color32) -> bool {
 
 /// Draw a small icon: Apple's SF Symbol when available, otherwise a drawn one.
 pub fn icon(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
+    if let Some(name) = own_icon(icon) {
+        if own(p, name, rect, color) {
+            return;
+        }
+    }
     if let Some(name) = symbol_name(icon) {
         if symbol(p, name, rect, color) {
             return;

@@ -14,5 +14,6 @@ pub mod mechanics;
 pub mod native;
 pub mod notify;
 pub mod plist;
+pub mod svgicon;
 pub mod tile;
 pub mod viewport;
