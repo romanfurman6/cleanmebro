@@ -70,6 +70,23 @@ build, then a GitHub Release with generated notes and `CmdMeow.dmg`,
 `https://github.com/romanfurman6/cmdmeow/releases/latest/download/CmdMeow.zip`
 always points to the newest version (the website's Download button uses it).
 
+### Signing and notarization
+
+Release builds are signed with **Developer ID Application** and notarized when
+these repository secrets are set (Settings › Secrets and variables › Actions);
+without them the release is ad-hoc signed and users must right-click › Open.
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CERT_P12` | `base64 -i DeveloperID.p12` (certificate + private key) |
+| `MACOS_CERT_PASSWORD` | password of that .p12 |
+| `NOTARY_KEY_P8` | contents of the App Store Connect API key `AuthKey_XXXX.p8` |
+| `NOTARY_KEY_ID` | that key's Key ID |
+| `NOTARY_ISSUER_ID` | Issuer ID from App Store Connect › Users and Access › Integrations |
+
+The signed app runs with the hardened runtime and `assets/CmdMeow.entitlements`
+(microphone, camera, Apple Events).
+
 The app is ad-hoc signed, not notarized. On first launch, right-click it and
 choose **Open**, or run `xattr -dr com.apple.quarantine CmdMeow.app`.
 

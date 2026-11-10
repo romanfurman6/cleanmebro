@@ -3,7 +3,7 @@
 #
 #   scripts/bundle-mac.sh              # native arch
 #   UNIVERSAL=1 scripts/bundle-mac.sh  # Apple silicon + Intel in one binary
-#   SIGN_ID=... APP_NAME=... DISPLAY_NAME=... BUNDLE_ID=... PROFILE=debug override the defaults
+#   SIGN_ID=... HARDENED=1 APP_NAME=... DISPLAY_NAME=... BUNDLE_ID=... PROFILE=debug override the defaults
 #
 # Output: target/bundle/CmdMeow.app and target/bundle/CmdMeow-<version>-macos.zip
 set -euo pipefail
@@ -69,8 +69,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 # Ad-hoc signature by default so Apple silicon runs it; SIGN_ID signs with a
-# real identity instead. Not notarized.
-codesign --force --deep --sign "${SIGN_ID:--}" "$APP"
+# real identity instead. HARDENED=1 adds the hardened runtime + entitlements
+# and a secure timestamp, which notarization requires (release.yml).
+SIGN_ARGS=(--force --deep --sign "${SIGN_ID:--}")
+if [[ "${HARDENED:-0}" == "1" ]]; then
+  SIGN_ARGS+=(--options runtime --timestamp --entitlements assets/CmdMeow.entitlements)
+fi
+codesign "${SIGN_ARGS[@]}" "$APP"
 
 ZIP="$OUT/$APP_NAME-$VERSION-macos.zip"
 rm -f "$ZIP"

@@ -47,17 +47,70 @@ jobs:
       - name: Test
         run: cargo test --release --target aarch64-apple-darwin
 
+      # Developer ID signing + notarization when the secrets are set
+      # (see README "Signing"); otherwise the app stays ad-hoc signed.
+      - name: Import Developer ID certificate
+        id: sign
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [[ -z "$MACOS_CERT_P12" ]]; then
+            echo "::warning::No MACOS_CERT_P12 secret: release is ad-hoc signed, not notarized"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          KC="$RUNNER_TEMP/sign.keychain-db"
+          KC_PW="$(uuidgen)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KC_PW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KC_PW" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          ID="$(security find-identity -v -p codesigning "$KC" | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)"
+          [[ -n "$ID" ]] || { echo "::error::No 'Developer ID Application' identity in MACOS_CERT_P12"; exit 1; }
+          echo "Signing as: $ID"
+          echo "SIGN_ID=$ID" >> "$GITHUB_ENV"
+          echo "HARDENED=1" >> "$GITHUB_ENV"
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
       - name: Bundle CmdMeow.app (universal)
         run: UNIVERSAL=1 scripts/bundle-mac.sh
 
-      - name: Make zip and dmg
+      - name: Make dmg
         run: |
           cd target/bundle
-          cp "CmdMeow-$VERSION-macos.zip" CmdMeow.zip
           mkdir dmg
           cp -R CmdMeow.app dmg/
           ln -s /Applications dmg/Applications
           hdiutil create -volname "Cmd+Meow" -srcfolder dmg -fs HFS+ -format UDZO -ov CmdMeow.dmg
+          if [[ -n "${SIGN_ID:-}" ]]; then codesign --sign "$SIGN_ID" --timestamp CmdMeow.dmg; fi
+
+      - name: Notarize and staple
+        if: steps.sign.outputs.enabled == 'true'
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          cd target/bundle
+          echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+          # Notarizing the dmg also covers the app inside it.
+          xcrun notarytool submit CmdMeow.dmg --wait --timeout 30m \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+          rm "$RUNNER_TEMP/notary.p8"
+          xcrun stapler staple CmdMeow.dmg
+          xcrun stapler staple CmdMeow.app
+          spctl -a -vv -t exec CmdMeow.app
+
+      - name: Make zip and checksums
+        run: |
+          cd target/bundle
+          rm -f CmdMeow.zip
+          ditto -c -k --keepParent CmdMeow.app CmdMeow.zip
           shasum -a 256 CmdMeow.zip CmdMeow.dmg | tee SHA256SUMS.txt
 
       - name: Publish GitHub Release
@@ -68,9 +121,7 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
             Download **CmdMeow.dmg** (or CmdMeow.zip), move Cmd+Meow to Applications.
-
-            The app is not notarized yet: open it the first time with right-click › Open, or run
-            `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`.
+            ${{ steps.sign.outputs.enabled != 'true' && 'This build is not notarized: open it the first time with right-click › Open, or run `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`.' || '' }}
           files: |
             target/bundle/CmdMeow.zip
             target/bundle/CmdMeow.dmg
