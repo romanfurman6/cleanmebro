@@ -1,19 +1,22 @@
 name: macOS build
 
+# Docs, site and license changes don't need a macOS build.
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore: ["**.md", "docs/**", "site/**", "LICENSE"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**", "site/**", "LICENSE"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
-# A new push to a pull request cancels its older run.
+# A new push to the same branch or PR cancels its older run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   build:
