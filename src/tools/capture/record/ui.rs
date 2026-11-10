@@ -524,6 +524,7 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
     let title = &plain("capture-rec-countdown");
     let mut skip = false;
     let mut cancel = false;
+    let mut native_ring = false;
     // no system shadow: macOS would redo it on every frame of the ring
     crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), floating(title, pos, size).with_active(true).with_has_shadow(false), |ui, _| {
         sys::lift(title, None);
@@ -536,8 +537,14 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
         p.circle_filled(c0, 70.0, Color32::from_rgba_unmultiplied(22, 22, 24, 235));
         p.circle_stroke(c0, 66.0, Stroke::new(2.0, Color32::from_black_alpha(90)));
         let frac = (left / total.max(0.1)).clamp(0.0, 1.0);
-        let a0 = -std::f32::consts::FRAC_PI_2;
-        p.add(egui::epaint::PathShape::line(arc_points(c0, 66.0, a0, a0 + frac * std::f32::consts::TAU, 64), egui::epaint::PathStroke::new(5.0, tint::CAPTURE)));
+        // macOS animates the ring itself, smooth whatever our frame rate;
+        // elsewhere (and before its window is up) egui draws it
+        let [r0, g0, b0, _] = tint::CAPTURE.to_array();
+        native_ring = sys::countdown_ring(title, 66.0, 5.0, [r0, g0, b0], frac as f64, left as f64);
+        if !native_ring {
+            let a0 = -std::f32::consts::FRAC_PI_2;
+            p.add(egui::epaint::PathShape::line(arc_points(c0, 66.0, a0, a0 + frac * std::f32::consts::TAU, 64), egui::epaint::PathStroke::new(5.0, tint::CAPTURE)));
+        }
         p.text(c0, Align2::CENTER_CENTER, format!("{}", left.ceil().max(1.0) as u32), bold(52.0), TEXT);
         if ui.interact(r, ui.scope_id().with("skip"), Sense::click()).on_hover_text("Click to start now · Esc to cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Space)) {
             skip = true;
@@ -546,9 +553,14 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
             cancel = true;
         }
     });
-    // a smooth ring: every display frame (vsync paces it; a fixed 16 ms
-    // halves the rate on a 100 or 120 Hz screen)
-    ctx.request_repaint();
+    if native_ring {
+        // only the number changes: wake up for the next whole second
+        let next = (left - left.floor()).max(0.005);
+        ctx.request_repaint_after(std::time::Duration::from_secs_f32(next.min(0.1)));
+    } else {
+        // egui's ring: every display frame (vsync paces it)
+        ctx.request_repaint();
+    }
     if cancel {
         c.rec.cancel();
     } else if skip {
