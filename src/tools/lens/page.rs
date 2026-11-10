@@ -1,5 +1,5 @@
 //! Disk Map screens: choose what to map (with live progress while it runs)
-//! → drill-down treemap with a "To remove" list → review and move to Trash.
+//! → rings you can open folder by folder, with a "To remove" list → review and move to Trash.
 
 use super::scan::{self, Node};
 use super::Lens as App;
@@ -9,31 +9,23 @@ use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind,
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-/// Block colours, one per top-level folder (biggest first); the rest share
-/// the last, neutral one.
-pub(crate) const HUES: [Color32; 9] = [
-    Color32::from_rgb(0x2E, 0x9E, 0x8F),
-    Color32::from_rgb(0x2F, 0x6F, 0xD0),
-    Color32::from_rgb(0xC7, 0x78, 0x2A),
-    Color32::from_rgb(0x81, 0x59, 0xC9),
-    Color32::from_rgb(0xB8, 0x4C, 0x80),
-    Color32::from_rgb(0x4C, 0x8A, 0x3F),
-    Color32::from_rgb(0xA8, 0x82, 0x3A),
-    Color32::from_rgb(0x5A, 0x5A, 0x60),
-    Color32::from_rgb(0x48, 0x48, 0x4C),
+/// Ring shades (from the design); the folder in focus is BLUE / ACCENT.
+pub(crate) const HUES: [Color32; 4] = [
+    Color32::from_rgb(0x0E, 0x63, 0xBA),
+    Color32::from_rgb(0x0C, 0x56, 0xA3),
+    Color32::from_rgb(0x0B, 0x4A, 0x8C),
+    Color32::from_rgb(0x0A, 0x3D, 0x73),
 ];
-const OTHER_HUE: Color32 = Color32::from_rgb(0x48, 0x48, 0x4C);
-/// Zoom animation length, seconds.
-const MORPH_SECS: f64 = 0.35;
+const OTHER_HUE: Color32 = Color32::from_rgb(0x3A, 0x3A, 0x3E);
+/// How long the rings take to sweep in, seconds.
+const SWEEP_SECS: f64 = 0.45;
 const HEADER_H: f32 = 57.0;
 const FOOTER_H: f32 = 42.0;
 const ASIDE_W: f32 = 260.0;
-/// Smallest block worth drawing on its own (about 64 × 46 points); smaller
-/// items fold into one block.
-const MIN_BLOCK_PX: f64 = 64.0 * 46.0;
-const MAX_BLOCKS: usize = 60;
-/// A block narrower or shorter than this can't show its name.
-const MIN_LABEL: Vec2 = Vec2::new(68.0, 50.0);
+const DETAILS_MIN_W: f32 = 240.0;
+/// Inner-ring folders drawn on their own; the rest fold into "Other".
+const MAX_SEGMENTS: usize = 14;
+const MIN_SPAN_DEG: f64 = 2.5;
 
 pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let shared = app.lens.clone();
@@ -60,7 +52,6 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         // mapping just finished: the treemap starts fresh, no glide from the list
         app.lens_order.clear();
         app.lens_rows.clear();
-        app.lens_anim.clear();
     }
     app.lens_live = None;
     let guard = shared.result.lock().unwrap();
@@ -86,7 +77,6 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         *shared.result.lock().unwrap() = None;
         app.lens_selected.clear();
         app.lens_morph = None;
-        app.lens_anim.clear();
         begin(app, ui.ctx());
     } else if app.lens_review {
         review(app, ui, r, cx);
@@ -212,22 +202,7 @@ fn hue_of(app: &mut App, root: &Path, path: &Path) -> Color32 {
             app.lens_hues.len() - 1
         }
     };
-    HUES[i.min(HUES.len() - 1)]
-}
-
-/// Where a block is drawn this frame: it glides from where it was towards
-/// `target`; a new block grows from its centre.
-fn glide(app: &mut App, key: &Path, target: Rect, snap: bool, dt: f32, moving: &mut bool) -> Rect {
-    let prev = if snap { None } else { app.lens_anim.get(key).copied() };
-    let from = prev.unwrap_or_else(|| if snap { target } else { Rect::from_center_size(target.center(), Vec2::ZERO) });
-    let k = 1.0 - (-dt * 10.0).exp();
-    let shown = lerp_rect(from, target, k);
-    if (shown.min - target.min).length() + (shown.max - target.max).length() > 0.5 {
-        *moving = true;
-    } else {
-        return target;
-    }
-    shown
+    HUES[i % HUES.len()]
 }
 
 fn pct(part: u64, whole: u64) -> u64 {
@@ -236,16 +211,6 @@ fn pct(part: u64, whole: u64) -> u64 {
     } else {
         ((part as f64 / whole as f64) * 100.0).round() as u64
     }
-}
-
-/// Map a rect laid out in `area` so that `from` lands on `to`.
-fn affine(b: Rect, from: Rect, to: Rect) -> Rect {
-    let sx = to.width() / from.width().max(1.0);
-    let sy = to.height() / from.height().max(1.0);
-    Rect::from_min_max(
-        Pos2::new(to.left() + (b.left() - from.left()) * sx, to.top() + (b.top() - from.top()) * sy),
-        Pos2::new(to.left() + (b.right() - from.left()) * sx, to.top() + (b.bottom() - from.top()) * sy),
-    )
 }
 
 fn lerp_rect(a: Rect, b: Rect, t: f32) -> Rect {
@@ -460,8 +425,8 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         format!("Mapping · {} · {} files", human_bytes(app.lens.bytes.load(Ordering::Relaxed)), group_digits(app.lens.files.load(Ordering::Relaxed)))
     } else {
         match *app.lens.when.lock().unwrap() {
-            Some(w) => format!("Mapped {} · click to zoom in, tick to select", ago(w)),
-            None => "Click a folder to zoom in · tick a corner to select".to_string(),
+            Some(w) => format!("Mapped {} · click for details, double-click to open", ago(w)),
+            None => "Click for details · double-click to open".to_string(),
         }
     };
     let hint = p.text(Pos2::new(new_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, hint_text, font(12.0), if live { TEXT_DIM } else { TEXT_FAINT });
@@ -512,184 +477,235 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         p.with_clip_rect(track).rect_filled(seg, 1.0, tint::DISK_MAP);
     }
 
-    // treemap
+    // rings: the folder in the centre, its folders on the inner ring and
+    // what is inside each of them on the outer ring
     let fr = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - FOOTER_H), r.max);
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, fr.top() - 12.0));
     let area = Rect::from_min_max(body.min, Pos2::new(body.right() - ASIDE_W - 16.0, body.bottom()));
-    // only blocks big enough to read get their own place; the rest fold
-    // into one "smaller items" block (children are sorted biggest first)
-    let px = (area.width() * area.height()) as f64;
-    let whole = total.max(1) as f64;
-    let readable = |b: u64| b as f64 / whole * px >= MIN_BLOCK_PX;
-    let mut keep = all.iter().take(MAX_BLOCKS).take_while(|c| readable(c.bytes)).count();
-    // a block can be big enough yet too thin for its name: fold it (and
-    // everything smaller) too, and lay out again
-    let (folded, other_bytes, vals, rects) = loop {
-        let folded = all.len() - keep;
-        let other_bytes = node.other + all[keep..].iter().map(|c| c.bytes).sum::<u64>();
-        let mut vals: Vec<f64> = all[..keep].iter().map(|c| c.bytes as f64).collect();
-        if other_bytes > 0 && (readable(other_bytes) || keep == 0) {
-            vals.push(other_bytes as f64);
-        }
-        let rects = scan::squarify(&vals, area);
-        match rects[..keep].iter().position(|b| b.width() < MIN_LABEL.x || b.height() < MIN_LABEL.y) {
-            Some(k) => keep = k,
-            None => break (folded, other_bytes, vals, rects),
-        }
-    };
     let now = ctx.input(|i| i.time);
-    let morph = app.lens_morph.clone().and_then(|(into, focus, start)| {
-        let t = ((now - start) / MORPH_SECS).clamp(0.0, 1.0) as f32;
-        if t >= 1.0 {
-            return None;
-        }
-        let ease = 1.0 - (1.0 - t).powi(3);
-        let (from, to) = match into {
-            Some(clicked) => (area, clicked),
-            None => {
-                let k = all[..keep].iter().position(|c| focus.starts_with(&c.path))?;
-                (rects[k], area)
-            }
-        };
-        Some((from, to, ease))
-    });
-    if morph.is_some() {
-        ctx.request_repaint();
-    } else {
-        app.lens_morph = None;
+    // the rings sweep in each time a folder opens
+    if app.lens_morph.as_ref().is_none_or(|m| m.1 != node.path || m.0.is_some()) {
+        app.lens_morph = Some((None, node.path.clone(), now));
     }
-    // blocks glide to new sizes (the map growing while mapping); jump
-    // straight there when zooming, on the first draw and when resized
-    let snap = morph.is_some() || app.lens_anim.is_empty() || app.lens_anim_area != area;
-    let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.1);
-    let mut moving = false;
-    let mut drawn: std::collections::HashMap<PathBuf, Rect> = Default::default();
-    let mp = p.with_clip_rect(area.expand(1.0));
+    let start = app.lens_morph.as_ref().map(|m| m.2).unwrap_or(now);
+    let t = ((now - start) / SWEEP_SECS).clamp(0.0, 1.0) as f32;
+    let sweep = 1.0 - (1.0 - t).powi(3);
+    if t < 1.0 {
+        ctx.request_repaint();
+    }
+    // a details card beside the rings when there is room for both
+    let diam = area.height().min(560.0).min(area.width() - 16.0 - DETAILS_MIN_W);
+    let (diam, card_w) = if diam >= 300.0 { (diam, (area.width() - diam - 16.0).min(340.0)) } else { (area.height().min(area.width()).min(560.0), 0.0) };
+    let chart_w = area.width() - if card_w > 0.0 { card_w + 16.0 } else { 0.0 };
+    let c = Pos2::new(area.left() + chart_w / 2.0, area.center().y);
+    let big = diam / 2.0 - 4.0;
+    let (r_hole, r1a, r1b, r2a, r2b) = (big * 0.39, big * 0.415, big * 0.757, big * 0.775, big);
+    let whole = total.max(1) as f64;
+    // inner ring: biggest folders first; slivers and loose files fold into "Other"
+    let keep = all.iter().take(MAX_SEGMENTS).take_while(|ch| ch.bytes as f64 / whole * 360.0 >= MIN_SPAN_DEG).count();
+    let folded = all.len() - keep;
+    let other_bytes = node.other + all[keep..].iter().map(|ch| ch.bytes).sum::<u64>();
     let depth = node.path.strip_prefix(&root.path).map(|x| x.components().count()).unwrap_or(0);
-    let n = vals.len();
+    let mut segs: Vec<Seg> = vec![];
+    let mut a = 0.0f32;
+    for (i, ch) in all[..keep].iter().enumerate() {
+        let span = (ch.bytes as f64 / whole * 360.0) as f32;
+        segs.push(Seg { ring: 1, a0: a, a1: a + span, path: Some(ch.path.clone()), name: ch.name.clone(), bytes: ch.bytes, kids: ch.children.len(), parent: i });
+        // outer ring: what's inside this folder
+        let cw = ch.bytes.max(1) as f64;
+        let mut b = a;
+        for g in ch.children.iter().take(8) {
+            let s2 = (g.bytes as f64 / cw) as f32 * span;
+            if s2 < 1.2 {
+                break;
+            }
+            segs.push(Seg { ring: 2, a0: b, a1: b + s2, path: Some(g.path.clone()), name: g.name.clone(), bytes: g.bytes, kids: g.children.len(), parent: i });
+            b += s2;
+        }
+        a += span;
+    }
+    if other_bytes > 0 {
+        let span = (other_bytes as f64 / whole * 360.0) as f32;
+        segs.push(Seg { ring: 1, a0: a, a1: (a + span).min(360.0), path: None, name: "Other".into(), bytes: other_bytes, kids: folded, parent: usize::MAX });
+    }
+    // what's under the pointer
+    let ptr = ctx.input(|i| i.pointer.hover_pos()).filter(|q| area.contains(*q));
+    let polar = ptr.map(|q| {
+        let d = q - c;
+        let ang = (d.x.atan2(-d.y).to_degrees() + 360.0) % 360.0;
+        (d.length(), ang)
+    });
+    let interact = ui.interact(Rect::from_center_size(c, Vec2::splat(big * 2.0)), ui.scope_id().with("rings"), Sense::click());
+    let hit = polar.filter(|_| t >= 1.0).and_then(|(d, ang)| {
+        let ring = if d >= r1a && d <= r1b { 1 } else if d >= r2a && d <= r2b { 2 } else { return None };
+        segs.iter().position(|s| s.ring == ring && ang >= s.a0 && ang < s.a1)
+    });
+    let in_hole = polar.is_some_and(|(d, _)| d < r_hole);
+    let focus = app.lens_focus.clone().filter(|f| f.starts_with(&node.path) && f != &node.path);
     let mut hovered: Option<(String, Color32, u64, Option<usize>)> = None;
     let mut toggle: Option<(PathBuf, u64)> = None;
-    for k in 0..n {
-        let base = rects[k];
-        let child = all[..keep].get(k);
-        let key = child.map(|c| c.path.clone()).unwrap_or_else(|| node.path.join("\u{0}other"));
-        let target = match morph {
-            Some((from, to, e)) => lerp_rect(affine(base, from, to), base, e),
-            None => base,
+    let mp = p.with_clip_rect(area.expand(1.0));
+    for (k, s) in segs.iter().enumerate() {
+        let measuring = s.path.as_ref().is_some_and(|pa| pending.is_some_and(|q| q.contains(pa)));
+        let focused = s.path.is_some() && s.path == focus;
+        let in_focus = focus.as_ref().is_some_and(|f| s.path.as_ref().is_some_and(|pa| pa.starts_with(f) || f.starts_with(pa)));
+        let mut fill = if s.path.is_none() {
+            OTHER_HUE
+        } else if s.ring == 1 {
+            if focused || in_focus { BLUE } else { HUES[s.parent % 4] }
+        } else {
+            let j = segs[..k].iter().rev().take_while(|o| o.ring == 2 && o.parent == s.parent).count();
+            let base = if in_focus { ACCENT } else { HUES[(s.parent + j + 1) % 4] };
+            with_alpha(base, (0.9 - j as f32 * 0.12).max(0.45))
         };
-        let shown = glide(app, &key, target, snap, dt, &mut moving);
-        drawn.insert(key, shown);
-        let br = shown.shrink(2.0);
-        if br.width() < 1.0 || br.height() < 1.0 {
+        if measuring {
+            let pulse = 0.45 + 0.2 * ((now * 3.0 + k as f64).sin() as f32);
+            fill = with_alpha(fill, pulse);
+            ctx.request_repaint();
+        }
+        if hit == Some(k) {
+            fill = lerp_color(fill, Color32::WHITE, 0.16);
+        }
+        let (ra, rb) = if s.ring == 1 { (r1a, r1b) } else { (r2a, r2b) };
+        let gap = 0.5f32.min((s.a1 - s.a0) * 0.2);
+        let (a0, a1) = (s.a0 * sweep + gap, s.a1 * sweep - gap);
+        if a1 <= a0 {
             continue;
         }
-        let (name, bytes, path) = match child {
-            Some(c) => (c.name.clone(), c.bytes, Some(c.path.clone())),
-            None => ("Other".to_string(), other_bytes, None),
-        };
-        let measuring = path.as_ref().is_some_and(|pa| pending.is_some_and(|q| q.contains(pa)));
-        let hue = match &path {
-            Some(pa) => hue_of(app, &root.path, pa),
-            None => OTHER_HUE,
-        };
-        let shade = if depth == 0 { 0.75 } else { 0.45 + 0.4 * (1.0 - k as f32 / (n.max(2) - 1) as f32) };
-        let id = ui.scope_id().with(("blk", &name, k));
-        // "Other" opens to show the items folded into it
-        let kids = child.map(|c| c.children.len()).unwrap_or(folded);
-        let clickable = (path.is_some() || folded > 0) && morph.is_none() && !measuring;
-        let resp = ui.interact(br, id, if clickable { Sense::click() } else { Sense::hover() });
-        let hov = resp.hovered();
-        let mut fill = lerp_color(BG, hue, if measuring { shade * 0.55 } else { shade });
-        if hov && clickable {
-            fill = lerp_color(fill, Color32::WHITE, 0.14);
-        }
-        mp.rect_filled(br, 8.0, fill);
-        if measuring {
-            // a soft sheen sweeping across blocks still being measured
-            let w = br.width().max(br.height());
-            let f = ((now * 0.7 + k as f64 * 0.13).fract() as f32) * (br.width() + w) - w * 0.5;
-            let sheen = Rect::from_min_size(Pos2::new(br.left() + f - w * 0.25, br.top()), Vec2::new(w * 0.5, br.height()));
-            mp.with_clip_rect(br.intersect(area.expand(1.0))).rect_filled(sheen, 0.0, white(14));
-            mp.rect_stroke(br, 8.0, Stroke::new(1.0, with_alpha(hue, 0.6)), StrokeKind::Inside);
-        }
-        let selectable = !live && path.as_ref().is_some_and(|pa| !scan::is_essential(pa));
-        let on = path.as_ref().is_some_and(|pa| app.lens_selected.iter().any(|(q, _)| q == pa));
+        annulus(&mp, c, ra, rb, a0, a1, fill);
+        let on = s.path.as_ref().is_some_and(|pa| app.lens_selected.iter().any(|(q, _)| q == pa));
         if on {
-            mp.rect_stroke(br, 8.0, Stroke::new(3.0, Color32::WHITE), StrokeKind::Inside);
+            annulus_outline(&mp, c, ra + 1.0, rb - 1.0, a0 + 0.3, a1 - 0.3, Stroke::new(2.0, Color32::WHITE));
         }
-        if br.width() > 64.0 && br.height() > 46.0 {
-            let fs = if br.width() > 220.0 && br.height() > 120.0 { 16.0 } else { 12.0 };
-            let tw = br.width() - 20.0 - if selectable { 22.0 } else { 0.0 };
-            let mut ty = br.top() + 10.0;
-            ty += text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &name, bold(fs), Color32::WHITE, tw).height() + 3.0;
-            let size = if measuring { format!("{} so far", human_bytes(bytes)) } else { format!("{} · {}%", human_bytes(bytes), pct(bytes, total)) };
-            ty += text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &size, font(12.0), white(217), br.width() - 20.0).height() + 3.0;
-            let more = if measuring {
-                Some("measuring…".to_string())
-            } else if kids > 0 {
-                Some(format!("{kids} items · click to open"))
-            } else {
-                None
+        // labels on wide inner segments
+        if s.ring == 1 && t >= 1.0 && s.a1 - s.a0 > 18.0 {
+            let mid = ((s.a0 + s.a1) / 2.0).to_radians();
+            let lr = (r1a + r1b) / 2.0;
+            let lp = c + Vec2::new(mid.sin(), -mid.cos()) * lr;
+            let max_w = ((s.a1 - s.a0).to_radians() * lr).min(r1b - r1a + 30.0);
+            text_fit(&mp, lp - Vec2::new(0.0, 1.0), Align2::CENTER_BOTTOM, &s.name, bold(11.0), Color32::WHITE, max_w);
+            let size = if measuring { "measuring…".to_string() } else { human_bytes(s.bytes) };
+            text_fit(&mp, lp + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, &size, font(11.0), white(190), max_w);
+        }
+        if hit == Some(k) {
+            let label = match &s.path {
+                Some(pa) => tilde(pa),
+                None if folded > 0 => format!("{} · {folded} smaller items and small files", tilde(&node.path)),
+                None => format!("{} · small files", tilde(&node.path)),
             };
-            if let Some(more) = more.filter(|_| ty + 14.0 < br.bottom()) {
-                text_fit(&mp, Pos2::new(br.left() + 10.0, ty), Align2::LEFT_TOP, &more, font(11.0), white(166), br.width() - 20.0);
+            hovered = Some((label, fill, s.bytes, (s.kids > 0 && !measuring).then_some(s.kids)));
+            let opens = s.kids > 0 && !measuring;
+            ctx.set_cursor_icon(if opens { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Default });
+            if measuring {
+                interact.clone().on_hover_text("Still measuring this folder.");
             }
-        }
-        // selection box in the corner
-        let mut box_clicked = false;
-        if selectable && morph.is_none() && br.width() > 64.0 && br.height() > 46.0 {
-            let bx = Rect::from_min_size(Pos2::new(br.right() - 24.0, br.top() + 6.0), Vec2::splat(18.0));
-            let bresp = ui.interact(bx, id.with("box"), Sense::click());
-            if on {
-                mp.rect_filled(bx, 5.0, BLUE);
-                mp.rect_stroke(bx, 5.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Inside);
-                icon(&mp, Icon::Check, bx.shrink(4.0), Color32::WHITE);
-            } else {
-                mp.rect_filled(bx, 5.0, Color32::from_black_alpha(64));
-                mp.rect_stroke(bx, 5.0, Stroke::new(1.5, white(if hov || bresp.hovered() { 230 } else { 115 })), StrokeKind::Inside);
-            }
-            box_clicked = bresp.on_hover_text(if on { "Remove from the list" } else { "Add to the list" }).clicked();
-        }
-        if hov || (morph.is_none() && ui.rect_contains_pointer(br)) {
-            hovered = Some((path.as_ref().map(|pa| tilde(pa)).unwrap_or_else(|| if folded > 0 { format!("{} · {folded} smaller items and small files", tilde(&node.path)) } else { format!("{} · small files", tilde(&node.path)) }), hue, bytes, (kids > 0 && !measuring).then_some(kids)));
-        }
-        if path.is_none() && clickable {
-            if resp.clicked() {
-                app.lens_morph = Some((Some(base), PathBuf::new(), now));
-                app.lens_skip = skip + keep;
-                ctx.request_repaint();
-            }
-            if hov {
-                ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
-            }
-        }
-        if let Some(pa) = &path {
-            if box_clicked {
-                toggle = Some((pa.clone(), bytes));
-            } else if resp.clicked() {
-                if kids > 0 {
-                    app.lens_morph = Some((Some(base), PathBuf::new(), now));
-                    go_to = Some(pa.clone());
-                } else if selectable {
-                    toggle = Some((pa.clone(), bytes));
+            if interact.double_clicked() && opens {
+                match &s.path {
+                    Some(pa) => go_to = Some(pa.clone()),
+                    None => {
+                        app.lens_skip = skip + keep;
+                        app.lens_morph = None;
+                    }
                 }
-            }
-            if hov && clickable && kids > 0 {
-                ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
-            } else if hov && selectable {
-                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-            if hov && measuring {
-                resp.on_hover_text("Still measuring this folder.");
-            } else if hov && !live && !selectable {
-                resp.on_hover_text("Your Mac needs this folder, so it can't be removed.");
+            } else if interact.clicked() {
+                match &s.path {
+                    Some(pa) if s.ring == 1 && s.kids > 0 && focused => go_to = Some(pa.clone()),
+                    Some(pa) => app.lens_focus = Some(pa.clone()),
+                    None if folded > 0 => {
+                        app.lens_skip = skip + keep;
+                        app.lens_morph = None;
+                    }
+                    None => {}
+                }
             }
         }
     }
-    app.lens_anim = drawn;
-    app.lens_anim_area = area;
-    if moving {
-        ctx.request_repaint();
+    // the centre: this folder; clicking it goes up
+    let hole_hot = in_hole && can_up;
+    mp.circle_filled(c, r_hole, if hole_hot { RAISED } else { CARD });
+    let name = if skip > 0 { format!("Other in {}", if depth == 0 { &root_label } else { &node.name }) } else if depth == 0 { root_label.clone() } else { node.name.clone() };
+    text_fit(&mp, c - Vec2::new(0.0, 15.0), Align2::CENTER_BOTTOM, &name, ty::caption(), ty::caption_color(), r_hole * 1.6);
+    mp.text(c, Align2::CENTER_CENTER, human_bytes(total), ty::number(), TEXT);
+    if can_up {
+        mp.text(c + Vec2::new(0.0, 15.0), Align2::CENTER_TOP, "click to go up", ty::caption(), ty::caption_color());
+    }
+    if hole_hot {
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        if interact.clicked() {
+            if skip > 0 {
+                unskip = true;
+            } else {
+                go_to = node.path.parent().map(Path::to_path_buf);
+            }
+        }
+    }
+    if in_hole || hit.is_none() && polar.is_some_and(|(d, _)| d > big) {
+        if interact.clicked() && !in_hole {
+            app.lens_focus = None;
+        }
+    }
+
+    // details of the focused folder (or of this folder)
+    if card_w > 0.0 {
+        let subject = focus.as_ref().and_then(|f| scan::find(root, f)).unwrap_or(node);
+        let is_node = subject.path == node.path;
+        let kids: Vec<&Node> = subject.children.iter().take(4).collect();
+        let selectable = !live && !is_node && !scan::is_essential(&subject.path);
+        let on = app.lens_selected.iter().any(|(q, _)| q == &subject.path);
+        let pad = sp::L;
+        let rows_h = kids.len() as f32 * sp::LEGEND_H;
+        let h = pad + 16.0 + sp::XS + 14.0 + sp::L + 34.0 + sp::XS + 14.0 + if kids.is_empty() { 0.0 } else { sp::L + rows_h } + sp::L + 30.0 + if !is_node { sp::S + 30.0 } else { 0.0 } + pad;
+        let cr = Rect::from_min_size(Pos2::new(area.right() - card_w, (c.y - diam / 2.0).max(area.top())), Vec2::new(card_w, h.min(area.height())));
+        glass_card(&p, cr, R_CARD, 0.0, false);
+        let x = cr.left() + pad;
+        let w = cr.width() - pad * 2.0;
+        let mut y = cr.top() + pad;
+        text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, if is_node { &name } else { &subject.name }, ty::title(), TEXT, w);
+        y += 16.0 + sp::XS;
+        let sub = format!("{} · {} items", tilde(&subject.path), group_digits(subject.items));
+        text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, &sub, ty::caption(), ty::caption_color(), w);
+        y += 14.0 + sp::L;
+        p.text(Pos2::new(x, y), Align2::LEFT_TOP, human_bytes(subject.bytes), ty::hero(), TEXT);
+        y += 34.0 + sp::XS;
+        let share = if is_node {
+            format!("{} folders · click one for details", subject.children.len())
+        } else {
+            format!("{}% of {}", pct(subject.bytes, total), name)
+        };
+        p.text(Pos2::new(x, y), Align2::LEFT_TOP, share, ty::caption(), ty::caption_color());
+        y += 14.0;
+        if !kids.is_empty() {
+            y += sp::L;
+            for g in &kids {
+                legend_row(&p, Rect::from_min_size(Pos2::new(cr.left(), y), Vec2::new(cr.width() - 4.0, sp::LEGEND_H)), ACCENT, &g.name, &human_bytes(g.bytes), TEXT_SOFT);
+                y += sp::LEGEND_H;
+            }
+        }
+        y += sp::L;
+        let half = (w - sp::S) / 2.0;
+        let opens = !is_node && !subject.children.is_empty();
+        let (r_a, r_b) = (Rect::from_min_size(Pos2::new(x, y), Vec2::new(half, 30.0)), Rect::from_min_size(Pos2::new(x + half + sp::S, y), Vec2::new(half, 30.0)));
+        if opens {
+            if pill_button(ui, r_a, "Open", BTN_SECONDARY, true).clicked() {
+                go_to = Some(subject.path.clone());
+            }
+        }
+        let finder = if opens { r_b } else { Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 30.0)) };
+        if pill_button(ui, finder, "Show in Finder", BTN_SECONDARY, true).clicked() {
+            crate::kit::macos::reveal(&subject.path);
+        }
+        if !is_node {
+            y += 30.0 + sp::S;
+            let br = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 30.0));
+            if selectable {
+                if pill_button(ui, br, if on { "Remove from the list" } else { "Add to the list" }, if on { BTN_SECONDARY } else { BTN_PRIMARY }, true).clicked() {
+                    toggle = Some((subject.path.clone(), subject.bytes));
+                }
+            } else {
+                let why = if live { "You can pick what to remove when mapping finishes." } else { "Your Mac needs this folder, so it can't be removed." };
+                text_fit(&p, Pos2::new(x, br.center().y), Align2::LEFT_CENTER, why, ty::caption(), ty::caption_color(), w);
+            }
+        }
     }
     if let Some((path, b)) = toggle {
         if let Some(i) = app.lens_selected.iter().position(|(q, _)| q == &path) {
@@ -703,15 +719,13 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         }
     }
     if let Some(target) = go_to {
-        if app.lens_morph.as_ref().is_none_or(|m| m.0.is_none()) {
-            // going up: zoom out from the folder we were in
-            app.lens_morph = Some((None, app.lens_path.clone(), now));
-        }
+        app.lens_focus = None;
         app.lens_path = target;
         app.lens_skip = 0;
         ctx.request_repaint();
     } else if unskip {
         app.lens_skip = 0;
+        app.lens_morph = None;
         ctx.request_repaint();
     }
 
@@ -724,7 +738,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
     if live {
         paragraph(&p, Pos2::new(ar.left(), list_top), "You can pick what to remove when mapping finishes. Finished folders open already.", font(12.0), TEXT_FAINT, ar.width());
     } else if app.lens_selected.is_empty() {
-        paragraph(&p, Pos2::new(ar.left(), list_top), "Nothing yet. Tick the corner of a block to add it here.", font(12.0), TEXT_FAINT, ar.width());
+        paragraph(&p, Pos2::new(ar.left(), list_top), "Nothing yet. Click a folder, then Add to the list.", font(12.0), TEXT_FAINT, ar.width());
     }
     let mut drop: Option<usize> = None;
     let rel = |pa: &Path| -> String {
@@ -783,7 +797,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             text_fit(&p, Pos2::new(fr.left() + 92.0, fr.center().y), Align2::LEFT_CENTER, &tilde(Path::new(&cur)), mono(12.0), TEXT_SOFT, fr.width() - 112.0);
         }
         None => {
-            p.text(Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, "Hover a block to see details", mono(12.0), TEXT_FAINT);
+            p.text(Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, "Point at a ring to see details", mono(12.0), TEXT_FAINT);
         }
     }
     act
@@ -887,6 +901,7 @@ pub fn demo_tree(app: &mut App) {
     root.other = (4.4 * GB) as u64;
     app.lens_root = root.path.clone();
     app.lens_path = root.path.clone();
+    app.lens_focus = Some(root.path.join("Movies"));
     app.lens_selected = vec![(root.path.join("Downloads/Xcode_16.xip"), (12.0 * GB) as u64), (root.path.join("Movies"), (31.0 * GB) as u64)];
     *app.lens.result.lock().unwrap() = Some(root);
 }
@@ -914,4 +929,46 @@ pub fn demo_live(app: &mut App) {
     *app.lens.live.lock().unwrap() = Some((root.path.clone(), live));
     app.lens.running.store(true, Ordering::SeqCst);
     app.lens_selected.clear();
+}
+
+/// One segment of the rings: angles in degrees, clockwise from the top.
+struct Seg {
+    ring: u8,
+    a0: f32,
+    a1: f32,
+    path: Option<PathBuf>,
+    name: String,
+    bytes: u64,
+    kids: usize,
+    /// Index of the inner-ring folder this belongs to.
+    parent: usize,
+}
+
+fn ring_points(c: Pos2, r: f32, a0: f32, a1: f32) -> impl Iterator<Item = Pos2> {
+    let n = ((a1 - a0) / 2.0).ceil().max(2.0) as usize;
+    (0..=n).map(move |i| {
+        let a = (a0 + (a1 - a0) * i as f32 / n as f32).to_radians();
+        c + Vec2::new(a.sin(), -a.cos()) * r
+    })
+}
+
+/// A filled ring segment between radii `ra`..`rb` and angles `a0`..`a1`.
+fn annulus(p: &egui::Painter, c: Pos2, ra: f32, rb: f32, a0: f32, a1: f32, fill: Color32) {
+    let mut mesh = egui::Mesh::default();
+    for (pi, po) in ring_points(c, ra, a0, a1).zip(ring_points(c, rb, a0, a1)) {
+        let i = mesh.vertices.len() as u32;
+        mesh.colored_vertex(pi, fill);
+        mesh.colored_vertex(po, fill);
+        if i >= 2 {
+            mesh.add_triangle(i - 2, i - 1, i);
+            mesh.add_triangle(i - 1, i, i + 1);
+        }
+    }
+    p.add(egui::Shape::mesh(mesh));
+}
+
+fn annulus_outline(p: &egui::Painter, c: Pos2, ra: f32, rb: f32, a0: f32, a1: f32, stroke: Stroke) {
+    let mut pts: Vec<Pos2> = ring_points(c, rb, a0, a1).collect();
+    pts.extend(ring_points(c, ra, a0, a1).collect::<Vec<_>>().into_iter().rev());
+    p.add(egui::Shape::closed_line(pts, stroke));
 }
