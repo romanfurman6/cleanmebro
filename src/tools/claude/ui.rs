@@ -26,7 +26,7 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &UsageInfo, sel: bool) -> eg
         Size::S12 => {
             let st = status(cl);
             let bar_or = if session.is_some() { Ok(((pct / 100.0).max(0.01), col)) } else { Err(st.as_str()) };
-            tile::wide(ui, r, id, Icon::Gauge, tint::CLAUDE, "Claude · session", &value, bar_or, sel)
+            tile::wide(ui, r, id, Icon::Gauge, tint::CLAUDE, &format!("{} · session", cl.provider), &value, bar_or, sel)
         }
         Size::S14 => {
             let resp = tile::card(ui, r, id, sel);
@@ -120,7 +120,7 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         crate::kit::glass::animate(&ctx);
     } else if round_button(ui, rb, Icon::Refresh, "Refresh limits").clicked() {
         backend::request_refresh();
-        cx.toast("Asking Claude for your limits…");
+        cx.toast(format!("Asking {} for your limits…", cl.provider));
     }
     let x0 = rect.left() + 16.0;
     let w = rect.width() - 32.0;
@@ -132,7 +132,7 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, lim_h));
     glass_card(&p, lr, R_CARD, 0.0, false);
     if n == 0 {
-        let msg = cl.error.clone().unwrap_or_else(|| "Asking Claude Code for your limits…".into());
+        let msg = cl.error.clone().unwrap_or_else(|| format!("Asking {} for your limits…", cl.provider));
         paragraph(&p, lr.min + Vec2::new(12.0, 12.0), &msg, font(13.0), TEXT_DIM, w - 24.0);
     }
     for (i, l) in cl.limits.iter().enumerate() {
@@ -172,7 +172,8 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
                 lines.push((l.clone(), TEXT_SOFT, 13.0));
             }
         }
-        None => lines.push(("Claude Code reports this once you've used it on this Mac.".into(), TEXT_DIM, 13.0)),
+        None if !cl.note.is_empty() && cl.provider != crate::kit::ai::claude::NAME => lines.push((cl.note.clone(), TEXT_DIM, 13.0)),
+        None => lines.push((format!("{} reports this once you've used it on this Mac.", cl.provider), TEXT_DIM, 13.0)),
     }
     let heights: Vec<f32> = lines.iter().map(|(l, c, s)| p.layout(l.clone(), font(*s), *c, w - 24.0).size().y).collect();
     let mut h = 12.0 + 18.0 + 6.0;
@@ -186,19 +187,23 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     }
     let ur = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h + 6.0));
     glass_card(&p, ur, R_CARD, 0.0, false);
-    p.text(ur.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "What uses your limits", bold(13.0), TEXT);
+    p.text(ur.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, if cl.contrib.is_empty() && cl.provider != crate::kit::ai::claude::NAME { "About these limits" } else { "What uses your limits" }, bold(13.0), TEXT);
     let mut ly = ur.top() + 36.0;
     for ((l, c, s), hh) in lines.iter().zip(&heights).take(shown) {
         paragraph(&p, Pos2::new(ur.left() + 12.0, ly), l, font(*s), *c, w - 24.0);
         ly += hh + 6.0;
     }
 
-    // buttons, bottom right
+    // buttons, bottom right (Cleanup knows Claude's caches only)
     let primary = "Clean Claude caches";
     let pw = button_width(&p, primary, BTN_PRIMARY);
-    let pr = Rect::from_min_size(Pos2::new(rect.right() - 16.0 - pw, by), Vec2::new(pw, 30.0));
-    if pill_button(ui, pr, primary, BTN_PRIMARY, true).clicked() {
-        cx.open_page(CLEANUP, "claude");
+    let mut pr = Rect::from_min_size(Pos2::new(rect.right() - 16.0 - pw, by), Vec2::new(pw, 30.0));
+    if cl.provider == crate::kit::ai::claude::NAME {
+        if pill_button(ui, pr, primary, BTN_PRIMARY, true).clicked() {
+            cx.open_page(CLEANUP, "claude");
+        }
+    } else {
+        pr = Rect::from_min_size(Pos2::new(rect.right() - 8.0, by), Vec2::new(0.0, 30.0));
     }
     let sw = button_width(&p, "Open page", BTN_SECONDARY);
     let sr = Rect::from_min_size(Pos2::new(pr.left() - 8.0 - sw, by), Vec2::new(sw, 30.0));

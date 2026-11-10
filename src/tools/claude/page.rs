@@ -1,10 +1,11 @@
-//! The Claude page in the full window: plan limits, local token use and the
-//! Claude Code projects on this Mac (which ones count as "in use" and are
-//! protected by Cleanup).
+//! The AI usage page in the full window: a Claude / Codex switch, plan
+//! limits, local token use and, for Claude, the Claude Code projects on
+//! this Mac (which ones count as "in use" and are protected by Cleanup).
 
 use super::backend as claude;
 use super::ui::CLEANUP;
 use crate::core::tool::Cx;
+use crate::kit::ai::{self, UsageInfo};
 use crate::kit::claude_code::{self as cc, Availability};
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
@@ -34,28 +35,44 @@ pub fn day_bars(p: &egui::Painter, r: Rect, daily: &[u64], gap: f32) {
     }
 }
 
-/// The page when Claude Code is missing or signed out: what's wrong, how to
-/// turn it on, and that the rest of the app works without it.
-fn not_set_up(a: Availability, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+/// The Claude / Codex switch, right-aligned in `area`. Returns its left edge.
+fn picker(info: &claude::Shared, demo: bool, ui: &mut Ui, area: Rect) -> f32 {
+    let labels: Vec<&str> = ai::PROVIDERS.iter().map(|m| m.name).collect();
+    let w = 64.0 * labels.len() as f32;
+    let rect = Rect::from_min_max(Pos2::new(area.right() - w, area.top()), area.max);
+    if let Some(i) = segmented(ui, rect, ui.scope_id().with("ai-provider"), &labels, ai::selected()) {
+        claude::select(info, demo, i);
+    }
+    rect.left()
+}
+
+/// The page when the assistant is missing or signed out: what's wrong, how
+/// to turn it on, and that the rest of the app works without it.
+fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
-    page_header(&p, r, "Claude", a.short(), TEXT_DIM);
+    let m = ai::meta(cl.provider);
+    let short = if a == Availability::SignedOut { format!("{} signed out", m.name) } else { format!("{} not installed", m.name) };
+    let btns = page_header(&p, r, m.name, &short, TEXT_DIM);
+    picker(info, demo, ui, btns);
     let colw = 480.0f32.min(r.width() - 48.0);
     let x = r.center().x - colw / 2.0;
     let mut y = r.top() + PAGE_HEADER_H + 56.0;
     tool_chip(&p, Rect::from_center_size(Pos2::new(r.center().x, y + 28.0), Vec2::splat(56.0)), Icon::Gauge, tint::CLAUDE);
     y += 56.0 + 20.0;
-    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, a.title(), bold(20.0), TEXT);
+    let title = if a == Availability::SignedOut { format!("{} isn't signed in", m.name) } else { format!("{} isn't installed", m.name) };
+    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, title, bold(20.0), TEXT);
     y += 32.0;
-    let intro = "Set it up to see your plan limits, token use and Claude Code projects here, and to let Cleanup ask Claude about each path.";
-    let g = p.layout(intro.into(), font(13.0), TEXT_DIM, colw);
+    let intro = if m.id == "claude" {
+        "Set it up to see your plan limits, token use and Claude Code projects here, and to let Cleanup ask Claude about each path.".to_string()
+    } else {
+        format!("Set it up to see your {} plan limits and token use here. Or switch back to the assistant you use above.", m.name)
+    };
+    let g = p.layout(intro, font(13.0), TEXT_DIM, colw);
     let gh = g.size().y;
     p.galley(Pos2::new(r.center().x - g.size().x / 2.0, y), g, TEXT_DIM);
     y += gh + 20.0;
 
-    let steps: &[&str] = match a {
-        Availability::SignedOut => &["Open Terminal and run claude", "Sign in with your Claude account", "Come back and press Check again"],
-        _ => &["Install Claude Code from claude.com/claude-code", "Open Terminal and run claude once to sign in", "Come back and press Check again"],
-    };
+    let steps: &[&str] = if a == Availability::SignedOut { m.sign_in_steps } else { m.install_steps };
     let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(colw, 12.0 + steps.len() as f32 * 34.0));
     glass_card(&p, card, R_CARD, 0.0, false);
     for (i, s) in steps.iter().enumerate() {
@@ -69,7 +86,8 @@ fn not_set_up(a: Availability, ui: &mut Ui, r: Rect, cx: &mut Cx) {
 
     // buttons, centred
     let primary = "Check again";
-    let second = if a == Availability::SignedOut { "Open Terminal" } else { "Get Claude Code" };
+    let get = format!("Get {}", if m.id == "claude" { "Claude Code" } else { m.name });
+    let second = if a == Availability::SignedOut { "Open Terminal" } else { get.as_str() };
     let pw = button_width(&p, primary, BTN_PRIMARY);
     let sw = button_width(&p, second, BTN_SECONDARY);
     let left = r.center().x - (pw + 8.0 + sw) / 2.0;
@@ -79,12 +97,12 @@ fn not_set_up(a: Availability, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         if a == Availability::SignedOut {
             cc::open_terminal();
         } else {
-            cc::open_download_page();
+            let _ = std::process::Command::new("open").arg(m.install_url).spawn();
         }
     }
     if pill_button(ui, pr, primary, BTN_PRIMARY, true).clicked() {
         claude::request_refresh();
-        cx.toast("Looking for Claude Code…");
+        cx.toast(format!("Looking for {}…", m.name));
     }
     y += 32.0 + 18.0;
     p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, "Cleanup and the rest of the app work without it.", font(12.0), TEXT_FAINT);
@@ -93,9 +111,10 @@ fn not_set_up(a: Availability, ui: &mut Ui, r: Rect, cx: &mut Cx) {
 pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let cl = info.lock().unwrap().clone();
     if let Some(a) = cl.unavailable() {
-        not_set_up(a, ui, r, cx);
+        not_set_up(a, &cl, info, demo, ui, r, cx);
         return;
     }
+    let is_claude = ai::meta(cl.provider).id == "claude";
     let p = ui.painter().clone();
     let mut sub = cl.plan_title();
     match (&cl.fetched, cl.loading) {
@@ -104,15 +123,16 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         _ => {}
     }
     if cl.data_bytes > 0 {
-        sub.push_str(&format!(" · all Claude data on this Mac {}", human_bytes(cl.data_bytes)));
+        sub.push_str(&format!(" · all {} data on this Mac {}", cl.provider, human_bytes(cl.data_bytes)));
     }
-    let btns = page_header(&p, r, "Claude", &sub, TEXT_DIM);
+    let btns = page_header(&p, r, cl.provider, &sub, TEXT_DIM);
     let w = button_width(&p, "Refresh limits", BTN_SECONDARY);
     let rb = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
     if pill_button(ui, rb, "Refresh limits", BTN_SECONDARY, !cl.loading).clicked() {
         claude::request_refresh();
-        cx.toast("Asking Claude for your limits…");
+        cx.toast(format!("Asking {} for your limits…", cl.provider));
     }
+    picker(info, demo, ui, Rect::from_min_max(btns.min, Pos2::new(rb.left() - sp::M, btns.bottom())));
 
     let x0 = r.left() + 20.0;
     let x1 = r.right() - 20.0;
@@ -126,7 +146,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     if cl.limits.is_empty() {
         let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(cw * 3.0 + gap * 2.0, ch));
         glass_card(&p, lr, R_CARD, 0.0, false);
-        let msg = cl.error.clone().unwrap_or_else(|| if cl.loading { "Asking Claude Code for your limits…".into() } else { "No limits yet.".into() });
+        let msg = cl.error.clone().unwrap_or_else(|| if cl.loading { format!("Asking {} for your limits…", cl.provider) } else { "No limits yet.".into() });
         p.text(lr.min + Vec2::splat(sp::L), Align2::LEFT_TOP, "Plan limits", ty::title(), TEXT);
         paragraph(&p, lr.min + Vec2::new(sp::L, sp::L + 16.0 + sp::M), &msg, ty::body(), TEXT_SOFT, lr.width() - 2.0 * sp::L);
         if cl.loading {
@@ -151,7 +171,8 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         }
         col += 1;
     }
-    let tr = Rect::from_min_size(Pos2::new(x0 + 3.0 * (cw + gap), y), Vec2::new(cw, ch));
+    // today takes the slots no limit uses (Codex has two, Claude three)
+    let tr = Rect::from_min_max(Pos2::new(x0 + col as f32 * (cw + gap), y), Pos2::new(x1, y + ch));
     glass_card(&p, tr, R_CARD, 0.0, false);
     let ti = tr.shrink(sp::L);
     p.text(ti.left_top(), Align2::LEFT_TOP, "Today", ty::title(), TEXT);
@@ -182,6 +203,25 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
 
     glass_card(&p, pr, R_CARD, 0.0, false);
     let pi = pr.shrink(sp::L);
+    if !is_claude {
+        // no project list for other assistants (yet): say where the numbers come from
+        p.text(pi.left_top(), Align2::LEFT_TOP, "About these numbers", ty::title(), TEXT);
+        let lines = [
+            cl.note.clone(),
+            format!("Tokens are counted from the {} session logs on this Mac: fresh input plus output, without cached input.", cl.provider),
+            "Projects and Cleanup work with Claude Code only.".to_string(),
+        ];
+        let mut ly = pi.top() + 16.0 + sp::M;
+        for l in lines.iter().filter(|l| !l.is_empty()) {
+            let g = p.layout(l.clone(), ty::body(), TEXT_SOFT, pi.width());
+            let h = g.size().y;
+            if ly + h > pi.bottom() {
+                break;
+            }
+            p.galley(Pos2::new(pi.left(), ly), g, TEXT_SOFT);
+            ly += h + sp::S;
+        }
+    } else {
     p.text(pi.left_top(), Align2::LEFT_TOP, "Claude Code projects", ty::title(), TEXT);
     let used = cl.projects.iter().filter(|p| p.in_use()).count();
     p.text(pi.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} on this Mac · {} in use, kept by Cleanup", cl.projects.len(), used), ty::caption(), ty::caption_color());
@@ -222,6 +262,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
             text_fit(pp, Pos2::new(x, row.center().y + 1.0), Align2::LEFT_TOP, &format!("{label} · {when}"), ty::caption(), ty::caption_color(), nw);
         }
     });
+    }
     if split {
         let ur = Rect::from_min_max(Pos2::new(pr.left(), pr.bottom() + gap), Pos2::new(x1, bottom));
         glass_card(&p, ur, R_CARD, 0.0, false);
@@ -243,6 +284,10 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
 
     // footer
     let f = page_footer(&p, r, 12.0);
+    if !is_claude {
+        text_fit(&p, Pos2::new(f.left() + 24.0, f.center().y), Align2::LEFT_CENTER, &format!("{} limits update with each request you make in it.", cl.provider), font(13.0), TEXT_DIM, f.width() - 48.0);
+        return;
+    }
     let bl = "Review in Cleanup";
     let bw = button_width(&p, bl, BTN_PRIMARY);
     let br = Rect::from_min_size(Pos2::new(f.right() - 24.0 - bw, f.center().y - 16.0), Vec2::new(bw, 32.0));
