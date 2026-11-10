@@ -24,8 +24,19 @@ jobs:
     # GitHub's runner (public repo: no foreign code on the personal machine).
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login == 'romanfurman6') && fromJSON('["self-hosted","m1-personal"]') || 'macos-latest' }}
     timeout-minutes: 60
+    env:
+      # Same floor as LSMinimumSystemVersion in bundle-mac.sh; without it C
+      # deps (whisper.cpp) target the build machine's macOS.
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
       - uses: actions/checkout@v5
+
+      # The self-hosted runner's service PATH lacks Homebrew (cmake for whisper.cpp).
+      - name: Homebrew tools on PATH
+        run: |
+          for d in /opt/homebrew/bin /usr/local/bin; do [ -d "$d" ] && echo "$d" >> "$GITHUB_PATH"; done
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          command -v cmake || { echo "::error::cmake not found (brew install cmake)"; exit 1; }
 
       - uses: dtolnay/rust-toolchain@stable
         with:
