@@ -534,7 +534,7 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
             p.circle_filled(c0 + Vec2::new(0.0, 3.0), k, Color32::from_black_alpha(a));
         }
         p.circle_filled(c0, 70.0, Color32::from_rgba_unmultiplied(22, 22, 24, 235));
-        p.circle_stroke(c0, 66.0, Stroke::new(5.0, white(30)));
+        p.circle_stroke(c0, 66.0, Stroke::new(2.0, Color32::from_black_alpha(90)));
         let frac = (left / total.max(0.1)).clamp(0.0, 1.0);
         let a0 = -std::f32::consts::FRAC_PI_2;
         p.add(egui::epaint::PathShape::line(arc_points(c0, 66.0, a0, a0 + frac * std::f32::consts::TAU, 64), egui::epaint::PathStroke::new(5.0, tint::CAPTURE)));
@@ -546,8 +546,9 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
             cancel = true;
         }
     });
-    // a smooth ring: every display frame, not every 50 ms
-    ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    // a smooth ring: every display frame (vsync paces it; a fixed 16 ms
+    // halves the rate on a 100 or 120 Hz screen)
+    ctx.request_repaint();
     if cancel {
         c.rec.cancel();
     } else if skip {
