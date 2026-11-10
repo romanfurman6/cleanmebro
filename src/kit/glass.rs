@@ -288,13 +288,12 @@ pub fn arc_points(center: Pos2, radius: f32, a0: f32, a1: f32, n: usize) -> Vec<
         .collect()
 }
 
-/// Frame interval for small looping animations (spinners, fan blades):
-/// smooth to the eye at a fraction of a 120 Hz display's frames.
-pub const ANIM_FRAME: std::time::Duration = std::time::Duration::from_millis(33);
-
-/// Ask for the next frame of a looping animation.
+/// Ask for the next frame of something that moves by itself (spinners, fan
+/// blades, steam): every display frame, paced by vsync. A fixed interval
+/// (33 ms, 50 ms) doesn't divide a 100 or 120 Hz display's frames evenly,
+/// so the motion stutters. Only call it while the thing is on screen.
 pub fn animate(ctx: &egui::Context) {
-    ctx.request_repaint_after(ANIM_FRAME);
+    ctx.request_repaint();
 }
 
 /// A spinning arc used while something is working; call [`animate`] to keep

@@ -290,7 +290,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
         ctx.request_repaint();
     }
     // the panel's widgets jiggle while editing
-    ctx.request_repaint_after(std::time::Duration::from_millis(33));
+    crate::kit::glass::animate(&ctx);
 }
 
 fn rows_height(items: &[Item]) -> f32 {
