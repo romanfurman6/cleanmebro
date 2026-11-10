@@ -1,23 +1,26 @@
-//! The Mac Health page in the full window (design A): a status card with the
-//! most important recommendation, then the six readings (storage, memory,
-//! CPU, battery, network, devices) laid out in two columns. Each section is
-//! the same content as its panel sheet, so the two never drift apart.
+//! The Mac Health page in the full window (D6): a bento of five cards that
+//! fits the window without scrolling. CPU (wide, with its history), the
+//! startup disk as a ring, memory, battery and network. Devices open from
+//! the toolbar and take the whole body, with a way back.
+//!
+//! Each card shows real readings only: no chart is drawn for data the
+//! monitor does not keep a history of.
 
 use super::monitor::{self, Level, Snapshot};
 use super::sheets::{Action as SheetAction, Section, Sheet};
 use crate::core::tool::{Cx, Recommendation};
 use crate::kit::glass::*;
+use crate::kit::tile;
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
 
-const STATUS_H: f32 = 64.0;
-const GAP_X: f32 = 24.0;
-const GAP_Y: f32 = 28.0;
-/// Below this content width the sections stack in one column.
-const TWO_COLUMNS_MIN: f32 = 640.0;
+/// Below this body width the cards stack in one scrolling column.
+const BENTO_MIN_W: f32 = 760.0;
+/// Below this body height the bento scrolls.
+const BENTO_MIN_H: f32 = 520.0;
 
 fn level_color(l: Level) -> Color32 {
     match l {
-        Level::Good => GREEN,
+        Level::Good => BLUE,
         Level::Fair => AMBER,
         Level::Critical => RED,
     }
@@ -26,8 +29,10 @@ fn level_color(l: Level) -> Color32 {
 pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let s = mon.lock().unwrap().clone();
     let p = ui.painter().clone();
+    let devices_id = ui.scope_id().with("health-devices");
+    let show_devices = ui.ctx().data(|d| d.get_temp::<bool>(devices_id)).unwrap_or(false);
 
-    // header: model, chip and uptime
+    // header: model, chip, uptime; the top recommendation and Devices on the right
     let mut sub: Vec<String> = Vec::new();
     if !s.model.is_empty() {
         sub.push(s.model.clone());
@@ -38,40 +43,81 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     if s.uptime_secs > 0 {
         sub.push(format!("up {}", human_duration(s.uptime_secs)));
     }
-    page_header(&p, r, "Mac Health", &sub.join(" · "), TEXT_DIM);
+    let (sub, sub_col) = match recs.first() {
+        Some(rec) => (rec.title.clone(), AMBER),
+        None => (sub.join(" · "), TEXT_DIM),
+    };
+    let btns = page_header(&p, r, "Mac Health", &sub, sub_col);
+    let mut right = btns.right();
+    let label = if show_devices { "Back" } else { "Devices…" };
+    let bw = button_width(&p, label, BTN_SECONDARY);
+    let br = Rect::from_min_max(Pos2::new(right - bw, btns.top()), Pos2::new(right, btns.bottom()));
+    if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
+        ui.ctx().data_mut(|d| d.insert_temp(devices_id, !show_devices));
+    }
+    right = br.left() - sp::S;
+    if let Some(rec) = recs.first() {
+        let bw = button_width(&p, &rec.action, BTN_PRIMARY);
+        let br = Rect::from_min_max(Pos2::new(right - bw, btns.top()), Pos2::new(right, btns.bottom()));
+        if pill_button(ui, br, &rec.action, BTN_PRIMARY, true).clicked() {
+            cx.push(rec.go.clone());
+        }
+    }
 
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
-    let x0 = body.left() + 24.0;
-    let w = body.width() - 48.0;
-    let two = w >= TWO_COLUMNS_MIN;
-    let cw = if two { (w - GAP_X) / 2.0 } else { w };
-
-    let order = [Sheet::Storage, Sheet::Memory, Sheet::Cpu, Sheet::Battery, Sheet::Network, Sheet::Devices];
-    let sections: Vec<Section> = order.iter().map(|k| Section::new(*k, &s)).collect();
-    let heights: Vec<f32> = sections.iter().map(|sec| sec.height(&p, ui.ctx(), &s, cw)).collect();
-    let rows: Vec<f32> = if two { heights.chunks(2).map(|c| c.iter().copied().fold(0.0, f32::max)).collect() } else { heights.clone() };
-    let total = 20.0 + STATUS_H + GAP_Y + rows.iter().sum::<f32>() + GAP_Y * (rows.len().saturating_sub(1)) as f32 + 24.0;
-
-    let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-page"));
+    let inner = body.shrink2(Vec2::new(20.0, 0.0));
     let mut action = SheetAction::None;
-    ScrollArea::vertical().id_salt("health-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), total), Sense::hover());
-        let mut y = area.top() + 20.0;
 
-        status_card(ui, Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, STATUS_H)), &s, recs.first(), cx);
-        y += STATUS_H + GAP_Y;
-
-        for (i, sec) in sections.iter().enumerate() {
-            let (col, row) = if two { (i % 2, i / 2) } else { (0, i) };
-            let top = y + rows[..row].iter().sum::<f32>() + GAP_Y * row as f32;
-            let sr = Rect::from_min_size(Pos2::new(x0 + col as f32 * (cw + GAP_X), top), Vec2::new(cw, heights[i]));
-            let mut sui = ui.new_child(UiBuilder::new().max_rect(sr).id_salt(("health-sec", i)));
-            let a = sec.show(&mut sui, sr, &s);
-            if a != SheetAction::None {
+    if show_devices {
+        let sec = Section::new(Sheet::Devices, &s);
+        let w = inner.width().min(640.0);
+        let h = sec.height(&p, ui.ctx(), &s, w);
+        let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-devices-page"));
+        ScrollArea::vertical().id_salt("health-dev-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
+            let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h + 2.0 * sp::L), Sense::hover());
+            let sr = Rect::from_min_size(Pos2::new(area.left() + 20.0, area.top() + sp::L), Vec2::new(w, h));
+            let mut sui = ui.new_child(UiBuilder::new().max_rect(sr).id_salt("health-dev-sec"));
+            action = sec.show(&mut sui, sr, &s);
+        });
+    } else {
+        // 3 columns (1.4 : 1 : 1) × 2 rows; CPU spans the first two columns
+        let fits = inner.width() >= BENTO_MIN_W;
+        let total_h = if fits { (body.height() - 2.0 * sp::L).max(BENTO_MIN_H) } else { 5.0 * 250.0 + 4.0 * sp::L };
+        let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-page"));
+        ScrollArea::vertical().id_salt("health-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
+            let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), total_h + 2.0 * sp::L), Sense::hover());
+            let g = Rect::from_min_size(Pos2::new(inner.left(), area.top() + sp::L), Vec2::new(inner.width(), total_h));
+            let rects: [Rect; 5] = if fits {
+                let unit = (g.width() - 2.0 * sp::L) / 3.4;
+                let (c0, c1) = (unit * 1.4, unit);
+                let rh = (g.height() - sp::L) / 2.0;
+                let x = [g.left(), g.left() + c0 + sp::L, g.left() + c0 + c1 + 2.0 * sp::L];
+                let y = [g.top(), g.top() + rh + sp::L];
+                [
+                    Rect::from_min_size(Pos2::new(x[0], y[0]), Vec2::new(c0 + sp::L + c1, rh)),
+                    Rect::from_min_size(Pos2::new(x[2], y[0]), Vec2::new(c1, rh)),
+                    Rect::from_min_size(Pos2::new(x[0], y[1]), Vec2::new(c0, rh)),
+                    Rect::from_min_size(Pos2::new(x[1], y[1]), Vec2::new(c1, rh)),
+                    Rect::from_min_size(Pos2::new(x[2], y[1]), Vec2::new(c1, rh)),
+                ]
+            } else {
+                std::array::from_fn(|i| Rect::from_min_size(Pos2::new(g.left(), g.top() + i as f32 * (250.0 + sp::L)), Vec2::new(g.width(), 250.0)))
+            };
+            let p = ui.painter().clone();
+            for rr in rects {
+                glass_card(&p, rr, R_CARD, 0.0, false);
+            }
+            cpu_card(&p, rects[0].shrink(sp::L), &s);
+            if let Some(a) = disk_card(ui, &p, rects[1].shrink(sp::L), &s) {
                 action = a;
             }
-        }
-    });
+            memory_card(&p, rects[2].shrink(sp::L), &s);
+            battery_card(&p, rects[3].shrink(sp::L), &s);
+            if let Some(a) = network_card(ui, &p, rects[4].shrink(sp::L), &s) {
+                action = a;
+            }
+        });
+    }
     match action {
         SheetAction::Open(tool) => cx.open_page(tool, ""),
         SheetAction::SpeedTest => monitor::start_speed_test(mon.clone(), ui.ctx().clone()),
@@ -83,40 +129,211 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     }
 }
 
-/// The overall state: a coloured dot, one line on what matters most, and the
-/// top recommendation's button when there is one.
-fn status_card(ui: &mut Ui, r: Rect, s: &Snapshot, rec: Option<&Recommendation>, cx: &mut Cx) {
-    let p = ui.painter().clone();
-    glass_card(&p, r, R_CARD, 0.0, false);
-    let (title, col) = if !s.ready {
-        ("Checking your Mac…", TEXT_FAINT)
-    } else {
-        match s.health() {
-            Level::Good if rec.is_none() => ("All good", GREEN),
-            Level::Good => ("Looks good", GREEN),
-            l @ Level::Fair => ("Needs a look", level_color(l)),
-            l @ Level::Critical => ("Needs attention", level_color(l)),
-        }
-    };
-    let chip = Rect::from_min_size(Pos2::new(r.left() + 14.0, r.center().y - 16.0), Vec2::splat(32.0));
-    p.rect_filled(chip, 8.0, with_alpha(col, 0.16));
-    p.circle_filled(chip.center(), 5.0, col);
-
-    let mut right = r.right() - 14.0;
-    if let Some(rec) = rec {
-        let bw = button_width(&p, &rec.action, BTN_PRIMARY);
-        let br = Rect::from_min_size(Pos2::new(right - bw, r.center().y - 15.0), Vec2::new(bw, 30.0));
-        if pill_button(ui, br, &rec.action, BTN_PRIMARY, true).clicked() {
-            cx.push(rec.go.clone());
-        }
-        right = br.left() - 16.0;
+/// Card title (13/600) with its caption, and an optional big value on the
+/// right. Returns the y where the content starts.
+fn card_title(p: &egui::Painter, r: Rect, title: &str, caption: &str, big: Option<(&str, &str)>) -> f32 {
+    let mut right = r.right();
+    if let Some((num, unit)) = big {
+        let u = p.text(Pos2::new(r.right(), r.top() + 26.0), Align2::RIGHT_BOTTOM, unit, ty::body(), ty::caption_color());
+        let n = p.text(Pos2::new(u.left() - 3.0, r.top() + 28.0), Align2::RIGHT_BOTTOM, num, ty::hero(), TEXT);
+        right = n.left() - sp::M;
     }
-    let tx = chip.right() + 12.0;
-    let tw = right - tx;
-    let (line1, line2) = match rec {
-        Some(rec) => (format!("{title} · {}", rec.title), rec.body.clone()),
-        None => (title.to_string(), "Storage, memory, CPU, battery and network look healthy.".to_string()),
+    text_fit(p, r.left_top(), Align2::LEFT_TOP, title, ty::title(), TEXT, right - r.left());
+    text_fit(p, Pos2::new(r.left(), r.top() + 17.0 + sp::XS - 2.0), Align2::LEFT_TOP, caption, ty::caption(), ty::caption_color(), right - r.left());
+    r.top() + 34.0 + sp::M
+}
+
+/// Legend lines (22 pt each) at the bottom of `r`.
+fn legend(p: &egui::Painter, r: Rect, rows: &[(Option<Color32>, String, String)]) -> f32 {
+    let top = r.bottom() - rows.len() as f32 * sp::LEGEND_H;
+    for (k, (c, label, value)) in rows.iter().enumerate() {
+        let cy = top + (k as f32 + 0.5) * sp::LEGEND_H;
+        let mut x = r.left();
+        if let Some(c) = c {
+            p.rect_filled(Rect::from_center_size(Pos2::new(x + 4.0, cy), Vec2::splat(8.0)), 2.0, *c);
+            x += 14.0;
+        }
+        let vr = p.text(Pos2::new(r.right(), cy), Align2::RIGHT_CENTER, value, ty::label(), TEXT);
+        text_fit(p, Pos2::new(x, cy), Align2::LEFT_CENTER, label, ty::label(), white(166), vr.left() - x - 8.0);
+    }
+    top
+}
+
+fn cpu_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
+    let load = format!("{:.0}", s.cpu_load);
+    let y = card_title(p, r, "CPU", &format!("{} · orange = busy spike", s.thermal_word()), Some((&load, "%")));
+    let foot = r.bottom() - 18.0;
+    let gr = Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), foot - sp::M));
+    let peak = s.cpu_history.iter().copied().fold(0.0f32, f32::max);
+    tile::spark_to(p, gr, &s.cpu_history, level_color(s.thermal_level()), (peak * 1.15).max(25.0));
+    let mut x = r.left();
+    for t in [format!("User {:.0}%", s.cpu_user), format!("System {:.0}%", s.cpu_system), format!("Idle {:.0}%", (100.0 - s.cpu_user - s.cpu_system).max(0.0))] {
+        x = p.text(Pos2::new(x, foot + 9.0), Align2::LEFT_CENTER, t, ty::label(), white(166)).right() + sp::L;
+    }
+}
+
+fn disk_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option<SheetAction> {
+    let name = if s.volume_name.is_empty() { "Macintosh HD".to_string() } else { s.volume_name.clone() };
+    let mut cap = vec![human_bytes(s.disk_total)];
+    if !s.smart_status.is_empty() {
+        cap.push(format!("drive {}", s.smart_status.to_lowercase()));
+    }
+    let y = card_title(p, r, &name, &cap.join(" · "), None);
+    let used = if s.disk_total > 0 { 1.0 - s.disk_free as f32 / s.disk_total as f32 } else { 0.0 };
+    let foot_h = 26.0 + sp::M;
+    let avail = (r.bottom() - foot_h - sp::M - y).max(60.0);
+    let rr = (avail / 2.0).min(46.0);
+    let c = Pos2::new(r.left() + rr + 2.0, y + avail / 2.0);
+    tile::ring(p, c, rr - 5.0, 10.0, used.max(0.01), if s.disk_level() == Level::Good { INDIGO } else { level_color(s.disk_level()) });
+    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, &human_bytes(s.disk_free), bold(14.0), TEXT, rr * 1.5);
+    p.text(c + Vec2::new(0.0, 10.0), Align2::CENTER_CENTER, "free", ty::caption(), ty::caption_color());
+    // biggest folders beside the ring
+    let lr = Rect::from_min_max(Pos2::new(c.x + rr + sp::L, y), Pos2::new(r.right(), y + avail));
+    let colors = [BLUE, INDIGO, TEAL];
+    let rows: Vec<(Option<Color32>, String, String)> = s.categories.iter().take(3).enumerate().map(|(i, (n, b))| (Some(colors[i]), n.clone(), human_bytes(*b))).collect();
+    if rows.is_empty() {
+        text_fit(p, Pos2::new(lr.left(), lr.center().y), Align2::LEFT_CENTER, if s.sizing { "Measuring folders…" } else { "Folders not measured" }, ty::label(), ty::caption_color(), lr.width());
+    } else {
+        let lh = rows.len() as f32 * sp::LEGEND_H;
+        legend(p, Rect::from_min_max(Pos2::new(lr.left(), lr.center().y - lh / 2.0), Pos2::new(lr.right(), lr.center().y + lh / 2.0)), &rows);
+    }
+    // footer: Trash and the way to free space
+    let fy = r.bottom() - 26.0;
+    p.line_segment([Pos2::new(r.left(), fy - sp::M), Pos2::new(r.right(), fy - sp::M)], egui::Stroke::new(1.0, white(15)));
+    let mut out = None;
+    let bw = button_width(p, "Free up space", BTN_SECONDARY);
+    let br = Rect::from_min_size(Pos2::new(r.right() - bw, fy), Vec2::new(bw, 26.0));
+    if pill_button(ui, br, "Free up space", BTN_SECONDARY, true).clicked() {
+        out = Some(SheetAction::Open("cleanup"));
+    }
+    let trash = s.trash_bytes.map(|b| format!("Trash {}", human_bytes(b))).unwrap_or_else(|| "Trash".into());
+    text_fit(p, Pos2::new(r.left(), fy + 13.0), Align2::LEFT_CENTER, &trash, ty::label(), white(166), br.left() - r.left() - sp::S);
+    out
+}
+
+fn memory_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
+    let word = match s.mem_level() {
+        Level::Good => "pressure normal",
+        Level::Fair => "pressure elevated",
+        Level::Critical => "pressure high",
     };
-    text_fit(&p, Pos2::new(tx, r.top() + 13.0), Align2::LEFT_TOP, &line1, bold(15.0), TEXT, tw);
-    text_fit(&p, Pos2::new(tx, r.top() + 34.0), Align2::LEFT_TOP, &line2, font(12.0), TEXT_DIM, tw);
+    let pct = format!("{:.0}", s.mem_pressure);
+    let y = card_title(p, r, "Memory", &format!("{} · {word}", human_bytes(s.mem_total)), Some((&pct, "%")));
+    // one stacked bar of what holds the memory
+    let tot = s.mem_total.max(1) as f32;
+    let parts = [(s.mem_active, BLUE), (s.mem_wired, INDIGO), (s.mem_compressed, CLAUDE)];
+    let segs: Vec<(f32, Color32)> = parts.iter().map(|(b, c)| (*b as f32 / tot, *c)).collect();
+    let rows = vec![
+        (Some(BLUE), "App memory".to_string(), human_bytes(s.mem_active)),
+        (Some(INDIGO), "Wired".to_string(), human_bytes(s.mem_wired)),
+        (Some(CLAUDE), "Compressed".to_string(), human_bytes(s.mem_compressed)),
+        (None, "Swap used".to_string(), human_bytes(s.swap_used)),
+    ];
+    let lt = legend(p, r, &rows);
+    // pressure over the last minutes, then what holds the memory
+    let bar_y = lt - sp::M - 10.0;
+    stacked_bar(p, Rect::from_min_size(Pos2::new(r.left(), bar_y), Vec2::new(r.width(), 10.0)), &segs);
+    let cap_y = bar_y - sp::M - 14.0;
+    p.text(Pos2::new(r.left(), cap_y), Align2::LEFT_TOP, "Pressure, last minutes", ty::caption(), ty::caption_color());
+    if cap_y - sp::XS - y > 24.0 {
+        tile::spark_to(p, Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), cap_y - sp::XS)), &s.mem_history, level_color(s.mem_level()), (s.mem_history.iter().copied().fold(0.0f32, f32::max) * 1.5).max(30.0));
+    }
+}
+
+/// A horizontal battery: outline, fill to `frac`, a nub on the right and
+/// the label inside.
+fn battery_glyph(p: &egui::Painter, r: Rect, frac: f32, color: Color32, label: &str) {
+    let body = Rect::from_min_max(r.min, Pos2::new(r.right() - 6.0, r.bottom()));
+    p.rect_stroke(body, 8.0, egui::Stroke::new(2.0, white(70)), egui::StrokeKind::Inside);
+    let inner = body.shrink(4.0);
+    let w = (inner.width() * frac.clamp(0.0, 1.0)).max(4.0);
+    p.rect_filled(Rect::from_min_size(inner.min, Vec2::new(w, inner.height())), 5.0, color);
+    p.rect_filled(Rect::from_min_max(Pos2::new(body.right() + 2.0, r.center().y - 7.0), Pos2::new(r.right(), r.center().y + 7.0)), 2.0, white(70));
+    p.text(body.center(), Align2::CENTER_CENTER, label, bold((r.height() * 0.32).clamp(14.0, 20.0)), Color32::WHITE);
+}
+
+fn battery_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
+    let b = &s.battery;
+    if !b.present {
+        let y = card_title(p, r, "Power", "Power adapter", None);
+        text_fit(p, Pos2::new(r.left(), y + 10.0), Align2::LEFT_CENTER, "This Mac has no battery.", ty::label(), ty::caption_color(), r.width());
+        return;
+    }
+    let status = if b.full || (b.plugged && b.percent >= 100) {
+        "Fully charged".to_string()
+    } else if b.charging {
+        "Charging".to_string()
+    } else if b.plugged {
+        "On adapter, not charging".to_string()
+    } else if let Some(min) = b.minutes_left {
+        format!("{} remaining", human_duration(min as u64 * 60))
+    } else {
+        "On battery".to_string()
+    };
+    let y = card_title(p, r, "Battery", &status, None);
+    let col = if b.percent <= 20 { RED } else { GREEN };
+    let mut rows = Vec::new();
+    if let Some(h) = b.health_pct {
+        rows.push((None, "Health".to_string(), format!("{h:.0}%")));
+    } else if !b.health_text.is_empty() {
+        rows.push((None, "Health".to_string(), b.health_text.clone()));
+    }
+    if b.cycles > 0 {
+        let of = if b.design_cycles > 0 { format!(" of {}", b.design_cycles) } else { String::new() };
+        rows.push((None, "Cycles".to_string(), format!("{}{of}", b.cycles)));
+    }
+    if let Some(t) = b.temp_c {
+        rows.push((None, "Temperature".to_string(), format!("{t:.0} °C")));
+    }
+    let lt = legend(p, r, &rows);
+    let gh = ((lt - y - sp::L) * 0.5).clamp(40.0, 64.0);
+    let gw = (gh * 2.6).min(r.width());
+    let gr = Rect::from_center_size(Pos2::new(r.left() + gw / 2.0, (y + lt) / 2.0), Vec2::new(gw, gh));
+    battery_glyph(p, gr, b.percent as f32 / 100.0, col, &format!("{}%", b.percent));
+}
+
+fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option<SheetAction> {
+    let title = if s.wifi.wired { "Ethernet".to_string() } else if s.wifi.name.is_empty() { "Network".to_string() } else { "Wi-Fi".to_string() };
+    let mut cap = Vec::new();
+    if !s.wifi.name.is_empty() {
+        cap.push(s.wifi.name.clone());
+    }
+    if !s.online {
+        cap.push("offline".into());
+    }
+    let y = card_title(p, r, &title, &cap.join(" · "), None);
+    // two numbers side by side
+    let colw = r.width() / 2.0;
+    for (k, (v, label, col)) in [(human_rate(s.net_down), "download", TEXT), (human_rate(s.net_up), "upload", TEAL)].into_iter().enumerate() {
+        let x = r.left() + k as f32 * colw;
+        text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &v, ty::lead(), col, colw - sp::S);
+        p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, label, ty::caption(), ty::caption_color());
+    }
+    let mut rows = vec![(None, "Today".to_string(), format!("{} in · {} out", human_bytes(s.net_recv_total), human_bytes(s.net_sent_total)))];
+    if !s.wifi.signal.is_empty() {
+        rows.push((None, "Signal".to_string(), s.wifi.signal.clone()));
+    }
+    let sp_ = &s.speed;
+    let speed = if sp_.running {
+        format!("Testing… {:.0}%", sp_.progress * 100.0)
+    } else if let (Some(d), Some(u)) = (sp_.down_mbps, sp_.up_mbps) {
+        format!("{d:.0} down · {u:.0} up Mbps")
+    } else {
+        "Not tested".to_string()
+    };
+    rows.push((None, "Speed".to_string(), speed));
+    let bottom = Rect::from_min_max(r.min, Pos2::new(r.right(), r.bottom() - 26.0 - sp::M));
+    let lt = legend(p, bottom, &rows);
+    let gr = Rect::from_min_max(Pos2::new(r.left(), y + 34.0 + sp::M), Pos2::new(r.right(), lt - sp::M));
+    if gr.height() > 20.0 {
+        tile::spark(p, gr, &s.net_history, TEAL, None);
+    }
+    let mut out = None;
+    let label = "Test speed";
+    let bw = button_width(p, label, BTN_SECONDARY);
+    let br = Rect::from_min_size(Pos2::new(r.left(), r.bottom() - 26.0), Vec2::new(bw, 26.0));
+    if pill_button(ui, br, label, BTN_SECONDARY, !sp_.running).clicked() {
+        out = Some(SheetAction::SpeedTest);
+    }
+    out
 }

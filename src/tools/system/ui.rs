@@ -12,7 +12,7 @@ use egui::{Align2, Color32, Pos2, Rect, Ui};
 
 fn level_color(l: Level) -> Color32 {
     match l {
-        Level::Good => GREEN,
+        Level::Good => BLUE,
         Level::Fair => AMBER,
         Level::Critical => RED,
     }
@@ -30,7 +30,7 @@ pub fn header(s: &Snapshot) -> PanelHeader {
         Level::Fair => "Needs a look",
         Level::Critical => "Needs attention",
     };
-    PanelHeader { title, status: status.into(), dot: level_color(health) }
+    PanelHeader { title, status: status.into(), dot: if health == Level::Good { GREEN } else { level_color(health) } }
 }
 
 /// "1.44 TB" -> ("1.44", "TB")
@@ -62,7 +62,7 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
     let (glyph, label, (big, unit), caption, bar_) = match id {
         "storage" => {
             let used = if s.disk_total > 0 { 1.0 - s.disk_free as f32 / s.disk_total as f32 } else { 0.0 };
-            let c = if s.disk_level() == Level::Good { ACCENT } else { level_color(s.disk_level()) };
+            let c = if s.disk_level() == Level::Good { TEAL } else { level_color(s.disk_level()) };
             (Icon::Disk, s.volume_name_or(), split_num(&human_bytes(s.disk_free)), "free".to_string(), Some((used.clamp(0.01, 1.0), c)))
         }
         "memory" => {
@@ -75,7 +75,7 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
         }
         "cpu" => {
             let c = match s.thermal {
-                0 => GREEN,
+                0 => BLUE,
                 1 => AMBER,
                 _ => RED,
             };
@@ -174,7 +174,7 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
             [("App", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / tot).clamp(0.01, 1.0), PURPLE)), human_bytes(b))).collect()
         }
         "cpu" => {
-            tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(GREEN), Some(with_alpha(GREEN, 0.12)));
+            tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(BLUE), None);
             return;
         }
         "battery" => {
@@ -213,7 +213,7 @@ fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rec
             [("App memory", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / tot).clamp(0.01, 1.0), PURPLE)), human_bytes(b))).collect()
         }
         "cpu" => {
-            tile::spark(p, list.shrink2(egui::Vec2::new(0.0, 2.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(GREEN), Some(with_alpha(GREEN, 0.12)));
+            tile::spark(p, list.shrink2(egui::Vec2::new(0.0, 2.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(BLUE), None);
             Vec::new()
         }
         "network" => vec![("Download".into(), None, human_rate(s.net_down)), ("Upload".into(), None, human_rate(s.net_up)), ("Received today".into(), None, human_bytes(s.net_recv_total))],
@@ -244,7 +244,7 @@ fn overview(s: &Snapshot, size: Size, p: &egui::Painter, r: Rect) {
         }
         let sr = Rect::from_min_max(Pos2::new(body.left(), body.top() + ms.len() as f32 * lh + 14.0), body.max);
         p.text(sr.left_top(), Align2::LEFT_TOP, "CPU · last minute", font(11.0), TEXT_FAINT);
-        tile::spark(p, Rect::from_min_max(sr.left_top() + egui::Vec2::new(0.0, 18.0), sr.max), &s.cpu_history, GREEN, Some(with_alpha(GREEN, 0.12)));
+        tile::spark(p, Rect::from_min_max(sr.left_top() + egui::Vec2::new(0.0, 18.0), sr.max), &s.cpu_history, BLUE, None);
         return;
     }
     // Medium: three across, two down

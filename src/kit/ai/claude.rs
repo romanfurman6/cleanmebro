@@ -177,9 +177,19 @@ pub fn demo_info() -> UsageInfo {
         error: None,
         fetched: Some(Local::now()),
         local: LocalTokens { tokens_5h: 1_250_000, tokens_today: 3_400_000, tokens_7d: 21_000_000, output_7d: 900_000, requests_today: 637, daily: vec![2_100_000, 3_900_000, 1_200_000, 4_400_000, 2_800_000, 3_200_000, 3_400_000] },
-        projects: vec![],
+        projects: demo_projects(),
         data_bytes: 5_400_000_000,
     }
+}
+
+/// Sample Claude Code projects for screenshots.
+fn demo_projects() -> Vec<Project> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let ago = |h: u64| Some(std::time::SystemTime::now() - std::time::Duration::from_secs(h * 3600));
+    [("Projects/cmdmeow", true, 0, 1_200_000_000), ("Projects/site", true, 3, 640_000_000), ("notes", true, 50, 88_000_000), ("Projects/old-experiment", false, 900, 412_000_000)]
+        .into_iter()
+        .map(|(rel, exists, hours, bytes)| Project { folder: home.join(".claude/projects").join(rel.replace('/', "-")), cwd: Some(home.join(rel)), cwd_exists: exists, last_used: ago(hours), bytes })
+        .collect()
 }
 
 #[cfg(test)]
