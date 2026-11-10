@@ -87,6 +87,23 @@ pub fn glyph_rgba(px: u32) -> Vec<u8> {
     pm.take()
 }
 
+/// The app icon at 64 px, for the window sidebar.
+const APP_ICON_64: &[u8] = include_bytes!("../../assets/icon/AppIcon-64.png");
+
+/// The app icon as a texture (loaded once per context).
+pub fn app_icon(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let id = egui::Id::NULL.with("cmdmeow-app-icon");
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return Some(t);
+    }
+    let img = image::load_from_memory(APP_ICON_64).ok()?.to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    let ci = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+    let t = ctx.load_texture("cmdmeow-app-icon", ci, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    Some(t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +127,11 @@ mod tests {
         assert_eq!(alpha(&px, n, 512.0, 600.0), 255, "the ⌘'s middle square stays filled");
         assert_eq!(alpha(&px, n, 348.0, 434.0), 255, "inside a loop stays filled");
         assert_eq!(alpha(&px, n, 10.0, 10.0), 0, "corner is clear");
+    }
+
+    #[test]
+    fn app_icon_png_decodes() {
+        let img = image::load_from_memory(APP_ICON_64).unwrap();
+        assert_eq!((img.width(), img.height()), (64, 64));
     }
 }
