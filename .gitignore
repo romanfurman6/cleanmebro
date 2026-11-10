@@ -33,3 +33,6 @@ research/
 
 # Vendored crates keep their own assets
 !vendor/**/*.png
+
+# README images are published on purpose
+!docs/images/*.png
