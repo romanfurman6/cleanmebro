@@ -357,7 +357,10 @@ impl Capture {
                     }
                 }
                 Err(e) if e == "Stopped" => {}
-                Err(e) => self.hud(format!("{e} ({})", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
+                Err(e) => {
+                    eprintln!("[share] {}: {e}", path.display());
+                    self.hud(format!("{e} ({})", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+                }
             }
         }
     }
