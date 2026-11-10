@@ -18,7 +18,8 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-latest
+    # Roman's own M1 (self-hosted, see macos.yml). Only Roman pushes tags.
+    runs-on: [self-hosted, m1-personal]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -60,19 +61,25 @@ jobs:
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          KC="$RUNNER_TEMP/sign.keychain-db"
+          # Temporary keychain: this runs on a real Mac, so leave the user's
+          # keychains alone and delete it in the cleanup step.
+          KC="$RUNNER_TEMP/cmdmeow-sign-$GITHUB_RUN_ID.keychain-db"
           KC_PW="$(uuidgen)"
+          security list-keychains -d user | tr -d '" ' > "$RUNNER_TEMP/keychains.orig"
+          echo "SIGN_KEYCHAIN=$KC" >> "$GITHUB_ENV"
           echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security create-keychain -p "$KC_PW" "$KC"
           security set-keychain-settings -lut 21600 "$KC"
           security unlock-keychain -p "$KC_PW" "$KC"
           security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PW" "$KC" >/dev/null
-          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          security list-keychains -d user -s "$KC" $(cat "$RUNNER_TEMP/keychains.orig")
           rm "$RUNNER_TEMP/cert.p12"
-          ID="$(security find-identity -v -p codesigning "$KC" | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)"
-          [[ -n "$ID" ]] || { echo "::error::No 'Developer ID Application' identity in MACOS_CERT_P12"; exit 1; }
-          echo "Signing as: $ID"
+          LINE="$(security find-identity -v -p codesigning "$KC" | grep 'Developer ID Application:' | head -1)"
+          [[ -n "$LINE" ]] || { echo "::error::No 'Developer ID Application' identity in MACOS_CERT_P12"; exit 1; }
+          echo "Signing as: ${LINE#*) }"
+          # SHA-1 hash, not the name: the same cert may also be in the login keychain.
+          ID="$(echo "$LINE" | awk '{print $2}')"
           echo "SIGN_ID=$ID" >> "$GITHUB_ENV"
           echo "HARDENED=1" >> "$GITHUB_ENV"
           echo "enabled=true" >> "$GITHUB_OUTPUT"
@@ -83,11 +90,12 @@ jobs:
       - name: Make dmg
         run: |
           cd target/bundle
+          rm -rf dmg CmdMeow.dmg
           mkdir dmg
           cp -R CmdMeow.app dmg/
           ln -s /Applications dmg/Applications
           hdiutil create -volname "Cmd+Meow" -srcfolder dmg -fs HFS+ -format UDZO -ov CmdMeow.dmg
-          if [[ -n "${SIGN_ID:-}" ]]; then codesign --sign "$SIGN_ID" --timestamp CmdMeow.dmg; fi
+          if [[ -n "${SIGN_ID:-}" ]]; then codesign --sign "$SIGN_ID" --keychain "$SIGN_KEYCHAIN" --timestamp CmdMeow.dmg; fi
 
       - name: Notarize and staple
         if: steps.sign.outputs.enabled == 'true'
@@ -126,3 +134,15 @@ jobs:
             target/bundle/CmdMeow.zip
             target/bundle/CmdMeow.dmg
             target/bundle/SHA256SUMS.txt
+
+      - name: Clean up signing keychain
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8"
+          if [[ -f "$RUNNER_TEMP/keychains.orig" ]]; then
+            security list-keychains -d user -s $(cat "$RUNNER_TEMP/keychains.orig")
+            rm -f "$RUNNER_TEMP/keychains.orig"
+          fi
+          if [[ -n "${SIGN_KEYCHAIN:-}" && -f "$SIGN_KEYCHAIN" ]]; then
+            security delete-keychain "$SIGN_KEYCHAIN"
+          fi

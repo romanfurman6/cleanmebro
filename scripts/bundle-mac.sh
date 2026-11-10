@@ -75,6 +75,7 @@ SIGN_ARGS=(--force --deep --sign "${SIGN_ID:--}")
 if [[ "${HARDENED:-0}" == "1" ]]; then
   SIGN_ARGS+=(--options runtime --timestamp --entitlements assets/CmdMeow.entitlements)
 fi
+[[ -n "${SIGN_KEYCHAIN:-}" ]] && SIGN_ARGS+=(--keychain "$SIGN_KEYCHAIN")
 codesign "${SIGN_ARGS[@]}" "$APP"
 
 ZIP="$OUT/$APP_NAME-$VERSION-macos.zip"
