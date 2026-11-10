@@ -21,10 +21,19 @@ jobs:
     # Roman's own M1 (self-hosted, see macos.yml). Only Roman pushes tags.
     runs-on: [self-hosted, m1-personal]
     timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0" # see macos.yml
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # full history: build number = commit count
+
+      # The runner's service PATH lacks Homebrew (cmake for whisper.cpp).
+      - name: Homebrew tools on PATH
+        run: |
+          for d in /opt/homebrew/bin /usr/local/bin; do [ -d "$d" ] && echo "$d" >> "$GITHUB_PATH"; done
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          command -v cmake || { echo "::error::cmake not found (brew install cmake)"; exit 1; }
 
       - name: Check tag matches Cargo.toml
         run: |

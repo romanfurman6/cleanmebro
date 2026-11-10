@@ -22,8 +22,6 @@ pub const PRIORITY_DRIVE_HEALTH: u32 = 100;
 pub const PRIORITY_BATTERY_HEALTH: u32 = 80;
 pub const PRIORITY_OUT_OF_DISK: u32 = 20;
 pub const PRIORITY_TRASH_OVERFILL: u32 = 5;
-/// AssistantDomain sub_1a98c: a shown recommendation comes back after 604800 s.
-pub const RECOMMENDATION_COOLDOWN_SECS: u64 = 604_800;
 
 pub fn disk_alert_threshold(capacity: u64) -> u64 {
     if capacity == 0 {
@@ -80,8 +78,6 @@ pub fn battery_health_state(text: &str, permanent_failure: bool) -> BatteryHealt
         BatteryHealthState::Unknown
     }
 }
-/// "designed to retain up to 80% of its original charge capacity" (Menu strings)
-pub const BATTERY_HEALTH_WARN_PCT: f32 = 80.0;
 /// AssistantDomain sub_1ba28: UptimeHealthFactor.noRecentRestartInterval = 604800 s;
 /// uptime days = trunc(seconds / 86400) (sub_1bbc0).
 pub const UPTIME_RESTART_INTERVAL_SECS: u64 = 604_800;

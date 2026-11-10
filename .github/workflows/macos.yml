@@ -1,35 +1,68 @@
 name: macOS build
 
+# Docs, site and license changes don't need a macOS build.
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**", "site/**", "LICENSE"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**", "site/**", "LICENSE"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to the same branch or PR cancels its older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    runs-on: macos-latest
+    # Roman's own Mac for his pushes and PRs; PRs from anyone else stay on
+    # GitHub's runner (public repo: no foreign code on the personal machine).
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login == 'romanfurman6') && fromJSON('["self-hosted","m1-personal"]') || 'macos-latest' }}
     timeout-minutes: 60
+    env:
+      # Same floor as LSMinimumSystemVersion in bundle-mac.sh; without it C
+      # deps (whisper.cpp) target the build machine's macOS.
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      # The self-hosted runner's service PATH lacks Homebrew (cmake for whisper.cpp).
+      - name: Homebrew tools on PATH
+        run: |
+          for d in /opt/homebrew/bin /usr/local/bin; do [ -d "$d" ] && echo "$d" >> "$GITHUB_PATH"; done
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          command -v cmake || { echo "::error::cmake not found (brew install cmake)"; exit 1; }
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      # Only main saves the cache (~1.5 GB); pull requests restore it, so
+      # branch caches don't push main's out of the 10 GB limit.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # Release + explicit target: the bundle step below reuses these deps
+      # instead of compiling everything a second time in the dev profile.
       - name: Test
-        run: cargo test
+        run: cargo test --release --target aarch64-apple-darwin
 
-      - name: Bundle CmdMeow.app (universal)
-        run: UNIVERSAL=1 scripts/bundle-mac.sh
+      # Pull requests: Apple silicon only. main: universal.
+      - name: Bundle CmdMeow.app
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            TARGET=aarch64-apple-darwin scripts/bundle-mac.sh
+          else
+            UNIVERSAL=1 scripts/bundle-mac.sh
+          fi
 
       - name: Upload app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: CmdMeow-macos
           path: target/bundle/*.zip

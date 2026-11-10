@@ -247,7 +247,14 @@ impl<'a> Walker<'a> {
 
     /// Take a free thread if there is one.
     fn try_thread(&self) -> bool {
-        self.free.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1)).is_ok()
+        let mut n = self.free.load(Ordering::Acquire);
+        while n > 0 {
+            match self.free.compare_exchange_weak(n, n - 1, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return true,
+                Err(now) => n = now,
+            }
+        }
+        false
     }
 
     /// The root: its folders are published live and each one counts into

@@ -3,6 +3,7 @@
 #
 #   scripts/bundle-mac.sh              # native arch
 #   UNIVERSAL=1 scripts/bundle-mac.sh  # Apple silicon + Intel in one binary
+#   TARGET=aarch64-apple-darwin scripts/bundle-mac.sh  # one explicit target
 #   SIGN_ID=... HARDENED=1 APP_NAME=... DISPLAY_NAME=... BUNDLE_ID=... PROFILE=debug override the defaults
 #
 # Output: target/bundle/CmdMeow.app and target/bundle/CmdMeow-<version>-macos.zip
@@ -29,6 +30,11 @@ if [[ "${UNIVERSAL:-0}" == "1" ]]; then
   lipo -create -output "target/release/$BIN" \
     "target/aarch64-apple-darwin/release/$BIN" \
     "target/x86_64-apple-darwin/release/$BIN"
+elif [[ -n "${TARGET:-}" ]]; then
+  # one explicit target (CI pull requests: reuses the test build's deps)
+  cargo build --release --target "$TARGET"
+  mkdir -p target/release
+  cp "target/$TARGET/release/$BIN" "target/release/$BIN"
 elif [[ "${PROFILE:-release}" == "debug" ]]; then
   cargo build
 else

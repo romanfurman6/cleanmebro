@@ -44,9 +44,7 @@ pub const CLAUDE: Color32 = Color32::from_rgb(0xBF, 0x5A, 0xF2);
 pub const INDIGO: Color32 = Color32::from_rgb(0x5E, 0x5C, 0xE6);
 pub const TEAL: Color32 = Color32::from_rgb(0x64, 0xD2, 0xFF);
 pub const PURPLE: Color32 = Color32::from_rgb(0xBF, 0x8C, 0xFF);
-pub const MINT: Color32 = Color32::from_rgb(99, 230, 226);
 pub const GRAY: Color32 = Color32::from_rgb(152, 152, 157);
-pub const PINK: Color32 = AMBER;
 
 /// Tool tints. D6 drops the rainbow: every tool uses system blue, and only
 /// Claude keeps its own colour because its data is Claude's.
@@ -197,7 +195,7 @@ pub const BTN_DANGER: u8 = 2;
 /// Standard push button (28–34 pt tall, radius 8). `kind`: 0 = secondary
 /// (quiet fill + hairline), 1 = primary (blue), 2 = destructive (red).
 pub fn pill_button(ui: &mut Ui, rect: Rect, label: &str, kind: u8, enabled: bool) -> Response {
-    let id = ui.id().with(("pill", label, rect.min.x as i32, rect.min.y as i32));
+    let id = ui.scope_id().with(("pill", label, rect.min.x as i32, rect.min.y as i32));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let resp = ui.interact(rect, id, sense);
     let hover = ui.ctx().animate_bool(id.with("h"), resp.hovered() && enabled);
@@ -247,7 +245,7 @@ pub fn liquid_capsule(p: &Painter, rect: Rect, tint: Option<Color32>, hover: f32
 
 /// A 30 pt square icon button (panel header, sheet actions).
 pub fn icon_button(ui: &mut Ui, rect: Rect, ic: Icon, tip: &str) -> Response {
-    let id = ui.id().with(("icon-btn", tip, rect.min.x as i32, rect.min.y as i32));
+    let id = ui.scope_id().with(("icon-btn", tip, rect.min.x as i32, rect.min.y as i32));
     let resp = ui.interact(rect, id, Sense::click());
     let h = ui.ctx().animate_bool(id, resp.hovered());
     let p = ui.painter();
@@ -261,7 +259,7 @@ pub fn icon_button(ui: &mut Ui, rect: Rect, ic: Icon, tip: &str) -> Response {
 
 /// The round 26 pt close / refresh button used in sheet headers.
 pub fn round_button(ui: &mut Ui, rect: Rect, ic: Icon, tip: &str) -> Response {
-    let id = ui.id().with(("round-btn", tip, rect.min.x as i32, rect.min.y as i32));
+    let id = ui.scope_id().with(("round-btn", tip, rect.min.x as i32, rect.min.y as i32));
     let resp = ui.interact(rect, id, Sense::click());
     let h = ui.ctx().animate_bool(id, resp.hovered());
     let p = ui.painter();
@@ -274,7 +272,7 @@ pub fn round_button(ui: &mut Ui, rect: Rect, ic: Icon, tip: &str) -> Response {
 pub fn link(ui: &mut Ui, pos: Pos2, align: Align2, label: &str, size: f32) -> Response {
     let galley = ui.painter().layout_no_wrap(label.to_owned(), bold(size), ACCENT);
     let rect = align.anchor_size(pos, galley.size());
-    let id = ui.id().with(("link", label, pos.x as i32, pos.y as i32));
+    let id = ui.scope_id().with(("link", label, pos.x as i32, pos.y as i32));
     let resp = ui.interact(rect.expand(4.0), id, Sense::click());
     let col = if resp.hovered() { Color32::from_rgb(0x7D, 0xBB, 0xFF) } else { ACCENT };
     ui.painter().galley(rect.min, galley, col);
@@ -663,6 +661,7 @@ pub fn paragraph(painter: &Painter, pos: Pos2, text: &str, font: FontId, color: 
 pub const PARAGRAPH_MAX: usize = 4000;
 
 // ---------------------------------------------------------------- icons
+#[allow(dead_code)] // the full symbol set: some glyphs wait for views not drawn yet
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Icon {
