@@ -212,8 +212,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 spinner(&p, Pos2::new(cr.left() + 24.0, cr.center().y), 7.0, ctx.input(|i| i.time), ACCENT);
                 p.text(Pos2::new(cr.left() + 42.0, cr.center().y), Align2::LEFT_CENTER, line, font(13.0), TEXT_SOFT);
             } else if let Some(n) = undo {
-                p.rect_filled(cr, R_CARD, with_alpha(GREEN, 0.08));
-                p.rect_stroke(cr, R_CARD, Stroke::new(1.0, with_alpha(GREEN, 0.35)), StrokeKind::Inside);
+                glass_card(&p, cr, R_CARD, 0.0, false);
                 let c = Pos2::new(cr.left() + 30.0, cr.center().y);
                 p.circle_filled(c, 17.0, with_alpha(GREEN, 0.16));
                 icon(&p, Icon::Check, Rect::from_center_size(c, Vec2::splat(18.0)), GREEN);
@@ -224,8 +223,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 p.text(Pos2::new(cr.left() + 58.0, cr.center().y - 9.0), Align2::LEFT_CENTER, format!("{} turned off", plural(n, "item")), bold(13.0), TEXT);
                 text_fit(&p, Pos2::new(cr.left() + 58.0, cr.center().y + 9.0), Align2::LEFT_CENTER, "Nothing was removed. The apps still work when you open them.", font(12.0), TEXT_DIM, br.left() - cr.left() - 70.0);
             } else {
-                p.rect_filled(cr, R_CARD, red_wash(0.10));
-                p.rect_stroke(cr, R_CARD, Stroke::new(1.0, red_wash(0.35)), StrokeKind::Inside);
+                glass_card(&p, cr, R_CARD, 0.0, false);
                 tool_chip(&p, Rect::from_center_size(Pos2::new(cr.left() + 30.0, cr.center().y), Vec2::splat(34.0)), Icon::Power, tint::STARTUP);
                 let label = format!("Turn off {}", suggested.len());
                 let bw = button_width(&p, &label, BTN_PRIMARY);
