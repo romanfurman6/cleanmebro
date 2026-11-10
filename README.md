@@ -1,6 +1,13 @@
-# Cmd+Meow
+<p align="center">
+  <img src="docs/images/icon.png" width="128" alt="Cmd+Meow icon">
+</p>
 
-*Formerly CleanMeBro.* Bundle id `com.romanfurman6.cmdmeow`.
+<h1 align="center">Cmd+Meow</h1>
+
+<p align="center">
+  <a href="https://github.com/romanfurman6/cmdmeow/releases/latest">Download</a> ·
+  <a href="https://github.com/romanfurman6/cmdmeow/actions/workflows/macos.yml">Latest build</a>
+</p>
 
 A macOS menu bar app that keeps a Mac in shape: cleaner, uninstaller, startup
 items, disk map, fan control, screenshots and screen recording, clipboard
@@ -29,6 +36,8 @@ history and keep-awake in one place. Written in Rust; everything runs locally.
 ## Build and run
 
 ```bash
+git clone https://github.com/romanfurman6/cmdmeow
+cd cmdmeow
 cargo run --release            # menu bar app
 cargo test                     # unit tests
 ```
@@ -47,7 +56,8 @@ CI (`.github/workflows/macos.yml`) runs the tests and builds a universal
 The app is ad-hoc signed, not notarized. On first launch, right-click it and
 choose **Open**, or run `xattr -dr com.apple.quarantine CmdMeow.app`.
 
-Coming from CleanMeBro: the new bundle id makes it a new app to macOS. Grant
+Coming from CleanMeBro (the old name; bundle id is now
+`com.romanfurman6.cmdmeow`): the new bundle id makes it a new app to macOS. Grant
 Screen Recording, Accessibility and Full Disk Access again, turn **Open at
 login** back on, and delete the old app. Settings, clipboard history and the
 sharing key move over on first launch. The fan helper keeps its old id, so an
@@ -102,7 +112,7 @@ entry. Nothing in `src/core/` changes.
 ## Project layout
 
 ```
-.
+cmdmeow/
 ├── Cargo.toml / Cargo.lock
 ├── src/
 │   ├── main.rs              entry point, CLI flags
