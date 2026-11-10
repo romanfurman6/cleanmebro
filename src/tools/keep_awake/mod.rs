@@ -10,7 +10,7 @@ mod power;
 mod sessions;
 mod ui;
 
-use crate::core::tool::{Badge, Cx, MenuItem, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
+use crate::core::tool::{Badge, Cx, MenuItem, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::glass::{tint, Icon};
 use egui::{Rect, Ui};
 use engine::{now, Engine, State};
@@ -151,7 +151,7 @@ impl Tool for KeepAwake {
         ui::short_state(self.state()).into()
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: CARD, title: "Keep Awake", about: "The switch, and what keeps your Mac up.", sizes: ALL_SIZES, size: Size::S11, default_on: true }]
+        vec![WidgetSpec { id: CARD, title: "Keep Awake", about: "The switch, and what keeps your Mac up.", sizes: UP_TO_MEDIUM, size: Size::S11, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(self, size, ui, rect, cx);

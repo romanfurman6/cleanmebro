@@ -12,10 +12,6 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// The shell's own tool id, for widgets it draws itself.
-pub const CORE: &str = "core";
-/// "Today's Recommendation", fed by every tool.
-pub const RECOMMENDATION: &str = "recommendation";
 /// How often the app wakes while nothing is on screen.
 const HIDDEN_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -179,7 +175,6 @@ impl App {
                 v.push((widget_key(t.id(), w.id), w.default_on, w.size));
             }
         }
-        v.push((widget_key(CORE, RECOMMENDATION), true, Size::S14));
         // the registry's preferred order first, the rest as the tools list them
         let rank = |k: &str| crate::tools::DEFAULT_WIDGET_ORDER.iter().position(|o| *o == k).unwrap_or(usize::MAX);
         v.sort_by_key(|(k, _, _)| rank(k));
@@ -189,9 +184,6 @@ impl App {
     /// Spec and owner of a widget key; `None` owner means the shell.
     pub fn widget_spec(&self, key: &str) -> Option<(Option<usize>, WidgetSpec)> {
         let (tool, id) = key.split_once('/')?;
-        if tool == CORE && id == RECOMMENDATION {
-            return Some((None, WidgetSpec { id: RECOMMENDATION, title: "Today's Recommendation", about: "The most useful thing to do now, from every tool.", sizes: &[Size::S14], size: Size::S14, default_on: true }));
-        }
         let i = self.tools.iter().position(|t| t.id() == tool)?;
         let spec = self.tools[i].widgets().into_iter().find(|w| w.id == id)?;
         Some((Some(i), spec))

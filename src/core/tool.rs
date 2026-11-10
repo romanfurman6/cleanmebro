@@ -89,8 +89,6 @@ impl WidgetSpec {
     }
 }
 
-/// Every size.
-pub const ALL_SIZES: &[Size] = &Size::ALL;
 /// Every size but Large.
 pub const UP_TO_MEDIUM: &[Size] = &[Size::S11, Size::S12, Size::S14, Size::S24];
 

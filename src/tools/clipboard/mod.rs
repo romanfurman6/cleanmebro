@@ -10,7 +10,7 @@ mod store;
 mod ui;
 mod watch;
 
-use crate::core::tool::{Action, Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, ALL_SIZES};
+use crate::core::tool::{Action, Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::glass::Icon;
 use egui::{Color32, Rect, Ui};
 use settings::Settings;
@@ -391,7 +391,7 @@ impl Tool for Clipboard {
         if self.paused() { "Paused".into() } else { String::new() }
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: CARD, title: "Clipboard", about: "Your latest clips; click one to copy it again.", sizes: ALL_SIZES, size: Size::S11, default_on: true }]
+        vec![WidgetSpec { id: CARD, title: "Clipboard", about: "Your latest clips; click one to copy it again.", sizes: UP_TO_MEDIUM, size: Size::S11, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(self, size, ui, rect, cx);

@@ -14,7 +14,7 @@ mod mac;
 mod remove;
 mod ui;
 
-use crate::core::tool::{Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::core::tool::{Badge, Cx, Tool, ToolEnv, ToolId, View};
 use crate::kit::fs::dir_size;
 use crate::kit::glass::Icon;
 use apps::Source;
@@ -28,7 +28,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub const ID: ToolId = "uninstaller";
-const DROP: &str = "drop";
 pub const TINT: Color32 = crate::kit::glass::BLUE;
 
 /// Apps unused this long count as unused.
@@ -264,7 +263,6 @@ pub struct Uninstaller {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Origin {
     Zone,
-    Widget,
     #[default]
     Page,
 }
@@ -719,7 +717,7 @@ impl Tool for Uninstaller {
         "Uninstaller"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::Trash, color: TINT }
+        Badge { icon: Icon::AppRemove, color: TINT }
     }
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};
@@ -739,12 +737,6 @@ impl Tool for Uninstaller {
         } else {
             g.apps.len().to_string()
         }
-    }
-    fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: DROP, title: "Uninstall", about: "Drop an app on it to remove it with its files.", sizes: &[Size::S11, Size::S12, Size::S14], size: Size::S11, default_on: false }]
-    }
-    fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        ui::widget(self, size, ui, rect, cx);
     }
     fn has_page(&self) -> bool {
         true

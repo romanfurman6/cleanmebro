@@ -30,14 +30,13 @@ impl System {
 
 const SMALL_TO_MEDIUM: &[Size] = UP_TO_MEDIUM;
 
-const WIDGETS: [WidgetSpec; 7] = [
+const WIDGETS: [WidgetSpec; 6] = [
     WidgetSpec { id: "storage", title: "Storage", about: "Free space on your startup disk.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
     WidgetSpec { id: "memory", title: "Memory", about: "Memory pressure and what uses it.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
     WidgetSpec { id: "cpu", title: "CPU", about: "Load and temperature, with the last minute.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
     WidgetSpec { id: "battery", title: "Battery", about: "Charge and time left.", sizes: &[Size::S11, Size::S12, Size::S14], size: Size::S12, default_on: true },
     WidgetSpec { id: "network", title: "Network", about: "Wi-Fi and live speed.", sizes: SMALL_TO_MEDIUM, size: Size::S12, default_on: true },
-    WidgetSpec { id: "devices", title: "Connected Devices", about: "Bluetooth devices and their batteries.", sizes: &[Size::S11, Size::S12, Size::S14, Size::S24, Size::S44], size: Size::S12, default_on: true },
-    WidgetSpec { id: "health", title: "Mac Health", about: "Every reading at a glance.", sizes: &[Size::S24, Size::S44], size: Size::S24, default_on: false },
+    WidgetSpec { id: "devices", title: "Connected Devices", about: "Bluetooth devices and their batteries.", sizes: &[Size::S11, Size::S12, Size::S14, Size::S24, Size::S44], size: Size::S14, default_on: true },
 ];
 
 impl Tool for System {
