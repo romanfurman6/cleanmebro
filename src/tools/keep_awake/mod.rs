@@ -179,7 +179,7 @@ impl Tool for KeepAwake {
         // steam and countdowns move while awake and on screen; the watcher
         // thread does the rest (hidden, these frames would only burn CPU)
         if crate::kit::activity::visible() && self.state().awake() {
-            ctx.request_repaint_after(Duration::from_millis(80));
+            crate::kit::glass::animate(ctx);
         }
         false
     }

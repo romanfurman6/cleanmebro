@@ -7,6 +7,7 @@ pub mod claude_code;
 pub mod fs;
 pub mod glass;
 pub mod hotkeys;
+pub mod login;
 pub mod macos;
 pub mod mechanics;
 pub mod native;

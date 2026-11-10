@@ -1,19 +1,22 @@
 # CleanMeBro
 
-A glassy macOS menu bar companion written in Rust (eframe/egui). It combines a
-Mac health panel, Claude plan limits, an AI-judged Cleanup and Disk Map.
+A macOS menu bar app that keeps a Mac in shape: cleaner, uninstaller, startup
+items, disk map, fan control, screenshots and screen recording, clipboard
+history and keep-awake in one place. Written in Rust; everything runs locally.
 
-## Features
+<p align="center">
+  <img src="docs/images/panel.png" width="380" alt="The menu bar panel">
+</p>
 
-| Area | What it does |
-|---|---|
-| **Menu bar panel** | Tray icon (title = Claude session %) opens a 440 pt glass panel of widgets: Mac Health verdict, Claude card, tiles for disk, memory, battery, CPU, network, connected devices, plus "Today's Recommendation". Clicking a tile opens a detail sheet beside the panel. Gear → **Customize widgets…** turns widgets on/off and reorders them; the choice is saved. |
-| **Claude** | Plan and limits from the Claude CLI (`claude auth status`, `claude -p /usage`, which spends no tokens). Local token activity is counted from `~/.claude/projects` logs (counts only). |
-| **Cleanup** | Finds junk by rule (System Junk, Xcode, app and developer caches, AI clutter). Claude judges each **path** (never file contents) as safe / ask / keep. Anything unclear waits for your OK. Items go to the Trash by default. |
-| **Disk Map** | Measures a folder tree, then shows it as a drill-down treemap. Selected items go to the Trash after review. |
-| **Clipboard** | History of what you copy (text, links, code, colors, images, files), kept on this Mac. ⌥⌘V opens quick paste over any app: big preview cards or a list, type to search, ↵ pastes (needs Accessibility), ⇧↵ pastes plain text, ⌘1–9 pick directly. Pin entries, pause recording, exclude apps. Password managers and items apps mark as concealed are skipped unless turned on. |
+## What it does
 
-Every rule and threshold, with its source, is in [docs/MECHANICS.md](docs/MECHANICS.md).
+- **Cleanup** finds caches, logs and other junk; Claude can review each path (never file contents). Items go to the Trash.
+- **Disk Map** shows what takes space as a treemap.
+- **Uninstaller** removes apps with their leftovers; **Startup** turns off what starts with your Mac.
+- **Capture** takes screenshots with an editor and records the screen with audio and camera.
+- **Clipboard**, **Fan Control**, **Keep Awake** and **Claude** limits round it out. Any tool can be turned off.
+
+![Disk Map](docs/images/lens.png)
 
 ## Requirements
 
@@ -111,11 +114,19 @@ entry. Nothing in `src/core/` changes.
 │   │   └── mechanics.rs     numbers/thresholds from docs/MECHANICS.md
 │   └── tools/
 │       ├── mod.rs           the tool list (the only place that names tools)
-│       ├── system/          Mac health: readings, widgets, detail sheets
-│       ├── claude/          Claude limits: card, sheet, page, tray title
-│       ├── cleanup/         junk rules, AI judge, removal, Cleanup page, --scan-report
-│       └── lens/            Disk Map: folder measuring and page
+│       ├── system/          Mac Health: readings, widgets, detail sheets
+│       ├── cleanup/         junk rules, AI judge, removal, --scan-report
+│       ├── lens/            Disk Map: folder measuring and treemap
+│       ├── uninstaller/     apps, leftovers, drop-to-uninstall widget
+│       ├── startup/         login items, launch agents and daemons
+│       ├── capture/         screenshots, editor, screen recording, sharing
+│       ├── clipboard/       clipboard history and quick paste
+│       ├── fan/             fan speeds, temperatures, helper
+│       ├── keep_awake/      keep the Mac awake, also while Claude works
+│       └── claude/          Claude limits: card, sheet, page, tray title
+├── vendor/eframe/        eframe 0.37 with one patch (see Cargo.toml)
 ├── docs/
+│   ├── images/          README screenshots
 │   ├── MECHANICS.md     rules, thresholds and where each came from
 │   └── mechanics.json   same data, machine-readable
 ├── assets/
@@ -127,7 +138,7 @@ entry. Nothing in `src/core/` changes.
 └── .github/workflows/macos.yml   CI: test, build, upload the app
 ```
 
-Screenshots are not kept in git. Render any view locally with
+The images in `docs/images/` are rendered from sample data with
 `--screenshot <file.png> --view <name>`.
 
 ## Safety
@@ -141,3 +152,7 @@ Screenshots are not kept in git. Render any view locally with
 
 - Some health thresholds are estimated (marked in `docs/MECHANICS.md`).
 - Live glass and tray behavior hasn't been visually verified end to end.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

@@ -159,7 +159,7 @@ fn start(app: &mut App, ui: &mut Ui, r: Rect) {
         app.lens.stop.store(true, Ordering::SeqCst);
     }
     paragraph(&p, Pos2::new(pr.left(), pr.bottom() + 14.0), "Mapping the whole disk takes a few minutes. Give CleanMeBro Full Disk Access in System Settings for complete results.", font(12.0), TEXT_FAINT, pr.width());
-    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    crate::kit::glass::animate(&ctx);
 }
 
 /// Map the whole startup disk from scratch.
@@ -352,8 +352,7 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     if moving {
         ctx.request_repaint();
     } else {
-        // the spinner and progress strip only need a calm frame rate
-        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        crate::kit::glass::animate(&ctx);
     }
 
     // aside

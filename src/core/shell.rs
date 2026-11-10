@@ -76,6 +76,9 @@ impl App {
         let ctx = cc.egui_ctx.clone();
         let demo = opts.screenshot.is_some();
         let tools = crate::tools::all(&ToolEnv { ctx: ctx.clone(), demo });
+        if !demo {
+            crate::kit::login::default_on();
+        }
 
         // the menu bar icon
         let (tx, tray_rx): (Sender<tray_icon::TrayIconEvent>, _) = std::sync::mpsc::channel();
@@ -596,6 +599,7 @@ impl eframe::App for App {
         // keep animations and live numbers moving
         ctx.request_repaint_after(std::time::Duration::from_millis(if self.visible { 500 } else { 2000 }));
         self.screenshot_step(&ctx);
+        crate::kit::viewport::end_pass();
     }
 }
 

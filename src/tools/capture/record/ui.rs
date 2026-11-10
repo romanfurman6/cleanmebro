@@ -25,6 +25,7 @@ pub fn show(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
     countdown(c, ctx);
     frame(c, ctx);
     bar(c, ctx);
+    camera_controls(c, ctx);
     bar_settings(c, ctx);
     saved(c, ctx);
 }
@@ -523,6 +524,7 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
     let title = &plain("capture-rec-countdown");
     let mut skip = false;
     let mut cancel = false;
+    let mut native_ring = false;
     // no system shadow: macOS would redo it on every frame of the ring
     crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), floating(title, pos, size).with_active(true).with_has_shadow(false), |ui, _| {
         sys::lift(title, None);
@@ -533,10 +535,16 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
             p.circle_filled(c0 + Vec2::new(0.0, 3.0), k, Color32::from_black_alpha(a));
         }
         p.circle_filled(c0, 70.0, Color32::from_rgba_unmultiplied(22, 22, 24, 235));
-        p.circle_stroke(c0, 66.0, Stroke::new(5.0, white(30)));
+        p.circle_stroke(c0, 66.0, Stroke::new(2.0, Color32::from_black_alpha(90)));
         let frac = (left / total.max(0.1)).clamp(0.0, 1.0);
-        let a0 = -std::f32::consts::FRAC_PI_2;
-        p.add(egui::epaint::PathShape::line(arc_points(c0, 66.0, a0, a0 + frac * std::f32::consts::TAU, 64), egui::epaint::PathStroke::new(5.0, tint::CAPTURE)));
+        // macOS animates the ring itself, smooth whatever our frame rate;
+        // elsewhere (and before its window is up) egui draws it
+        let [r0, g0, b0, _] = tint::CAPTURE.to_array();
+        native_ring = sys::countdown_ring(title, 66.0, 5.0, [r0, g0, b0], frac as f64, left as f64);
+        if !native_ring {
+            let a0 = -std::f32::consts::FRAC_PI_2;
+            p.add(egui::epaint::PathShape::line(arc_points(c0, 66.0, a0, a0 + frac * std::f32::consts::TAU, 64), egui::epaint::PathStroke::new(5.0, tint::CAPTURE)));
+        }
         p.text(c0, Align2::CENTER_CENTER, format!("{}", left.ceil().max(1.0) as u32), bold(52.0), TEXT);
         if ui.interact(r, ui.scope_id().with("skip"), Sense::click()).on_hover_text("Click to start now · Esc to cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Space)) {
             skip = true;
@@ -545,8 +553,14 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
             cancel = true;
         }
     });
-    // a smooth ring: every display frame, not every 50 ms
-    ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    if native_ring {
+        // only the number changes: wake up for the next whole second
+        let next = (left - left.floor()).max(0.005);
+        ctx.request_repaint_after(std::time::Duration::from_secs_f32(next.min(0.1)));
+    } else {
+        // egui's ring: every display frame (vsync paces it)
+        ctx.request_repaint();
+    }
     if cancel {
         c.rec.cancel();
     } else if skip {
@@ -727,14 +741,96 @@ fn bar(c: &mut Capture, ctx: &egui::Context) {
     }
 }
 
+/// While recording: smaller, bigger and close, over the camera bubble when
+/// the mouse is on it. Our own window, so it isn't in the video.
+fn camera_controls(c: &mut Capture, ctx: &egui::Context) {
+    use crate::tools::capture::settings::CameraSize;
+    if !matches!(c.rec.phase, Phase::Live(_)) {
+        return;
+    }
+    let Some(cam) = &c.rec.camera else { return };
+    if !cam.visible() {
+        return;
+    }
+    // look for the mouse often enough to feel immediate
+    ctx.request_repaint_after(std::time::Duration::from_millis(120));
+    let bubble = cam.frame();
+    let size = Vec2::new(112.0, 34.0);
+    let pos = Pos2::new(bubble.center().x - size.x / 2.0, bubble.bottom() - size.y - 14.0);
+    let pill = Rect::from_min_size(pos, size);
+    let over = sys::mouse().is_some_and(|m| bubble.expand(4.0).contains(m) || pill.contains(m));
+    if !over {
+        return;
+    }
+    let cur = c.settings.rec.camera_size;
+    let sizes = [CameraSize::S, CameraSize::M, CameraSize::L];
+    let k = sizes.iter().position(|&x| x == cur).unwrap_or(1);
+    let mut todo: Option<i32> = None;
+    let title = &plain("capture-rec-cam-ctl");
+    crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), floating(title, pos, size).with_active(false).with_has_shadow(false), |ui, _| {
+        sys::lift(title, None);
+        let r = ui.max_rect().shrink(1.0);
+        let p = ui.painter().clone();
+        p.rect_filled(r, r.height() / 2.0, Color32::from_rgba_unmultiplied(22, 22, 24, 230));
+        let id = ui.scope_id().with("cam-ctl");
+        let b = |i: f32| Rect::from_center_size(Pos2::new(r.left() + 20.0 + i * 36.0, r.center().y), Vec2::splat(28.0));
+        let mut glyph = |ui: &mut Ui, rect: Rect, key: &str, tip: &str, on: bool, draw: &dyn Fn(&egui::Painter, Pos2, Color32)| {
+            let resp = ui.interact(rect, id.with(key), Sense::click());
+            if resp.hovered() && on {
+                p.circle_filled(rect.center(), 13.0, white(30));
+            }
+            draw(&p, rect.center(), if on { TEXT } else { TEXT_MUTED });
+            on && resp.on_hover_text(tip).clicked()
+        };
+        let line = |p: &egui::Painter, a: Pos2, b: Pos2, col: Color32| {
+            p.line_segment([a, b], Stroke::new(2.0, col));
+        };
+        if glyph(ui, b(0.0), "smaller", "Smaller", k > 0, &|p, c0, col| line(p, c0 - Vec2::new(6.0, 0.0), c0 + Vec2::new(6.0, 0.0), col)) {
+            todo = Some(-1);
+        }
+        if glyph(ui, b(1.0), "bigger", "Bigger", k + 1 < sizes.len(), &|p, c0, col| {
+            line(p, c0 - Vec2::new(6.0, 0.0), c0 + Vec2::new(6.0, 0.0), col);
+            line(p, c0 - Vec2::new(0.0, 6.0), c0 + Vec2::new(0.0, 6.0), col);
+        }) {
+            todo = Some(1);
+        }
+        if glyph(ui, b(2.0), "close", "Hide the camera (bring it back in the bar's settings)", true, &|p, c0, col| {
+            line(p, c0 - Vec2::splat(5.0), c0 + Vec2::splat(5.0), col);
+            line(p, c0 + Vec2::new(-5.0, 5.0), c0 + Vec2::new(5.0, -5.0), col);
+        }) {
+            todo = Some(0);
+        }
+    });
+    match todo {
+        Some(0) => {
+            if let Some(cam) = &c.rec.camera {
+                cam.set_visible(false);
+            }
+        }
+        Some(step) => {
+            let next = sizes[(k as i32 + step).clamp(0, sizes.len() as i32 - 1) as usize];
+            if let Some(cam) = &c.rec.camera {
+                cam.set_diameter(next.points());
+            }
+            c.settings.rec.camera_size = next;
+            c.save_settings();
+        }
+        None => {}
+    }
+}
+
 /// The bar's settings, just above it.
 fn bar_settings(c: &mut Capture, ctx: &egui::Context) {
     let Phase::Live(live) = &c.rec.phase else { return };
     if !live.settings_open {
         return;
     }
-    let size = Vec2::new(300.0, 292.0);
+    let size = Vec2::new(300.0, 326.0);
     let bar = live.bar_at.unwrap_or_else(|| bar_spot(&live.chosen, BAR_W));
+    // the bubble can be hidden and shown again only if the recording
+    // started with it (the video keeps that one window)
+    let cam_shown = c.rec.camera.as_ref().map(|k| k.visible());
+    let mut cam_toggle = false;
     let pos = Pos2::new(bar.x + BAR_W - size.x, bar.y - size.y - 8.0);
     let title = &plain("capture-rec-settings");
     let mut s = c.settings.rec.clone();
@@ -764,6 +860,18 @@ fn bar_settings(c: &mut Capture, ctx: &egui::Context) {
         row(&p, y, "Quality");
         if let Some(i) = seg(ui, y, 130.0, "q", &["Smaller", "High"], if s.quality == RecQuality::Smaller { 0 } else { 1 }) {
             s.quality = if i == 0 { RecQuality::Smaller } else { RecQuality::High };
+        }
+        y += 34.0;
+        row(&p, y, "Camera");
+        match cam_shown {
+            Some(on) => {
+                if small_switch(ui, Rect::from_min_size(Pos2::new(x1 - 36.0, y + 5.0), Vec2::new(36.0, 20.0)), id.with("camera"), on) {
+                    cam_toggle = true;
+                }
+            }
+            None => {
+                p.text(Pos2::new(x1, y + 15.0), Align2::RIGHT_CENTER, "Turn on before recording", font(12.0), TEXT_FAINT);
+            }
         }
         y += 34.0;
         row(&p, y, "Camera size");
@@ -801,6 +909,11 @@ fn bar_settings(c: &mut Capture, ctx: &egui::Context) {
             close = true;
         }
     });
+    if cam_toggle {
+        if let Some(cam) = &c.rec.camera {
+            cam.set_visible(!cam.visible());
+        }
+    }
     if s != c.settings.rec {
         if s.camera_size != c.settings.rec.camera_size {
             if let Some(cam) = &c.rec.camera {

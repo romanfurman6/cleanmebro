@@ -18,6 +18,13 @@ impl Camera {
     }
     pub fn set_diameter(&self, _d: f32) {}
     pub fn move_to(&self, _center: egui::Pos2) {}
+    pub fn frame(&self) -> egui::Rect {
+        egui::Rect::NOTHING
+    }
+    pub fn visible(&self) -> bool {
+        false
+    }
+    pub fn set_visible(&self, _on: bool) {}
 }
 
 #[cfg(target_os = "macos")]
@@ -125,6 +132,43 @@ mod imp {
             let f = self.window.frame();
             let origin = NSPoint::new(center.x as f64 - f.size.width / 2.0, top - center.y as f64 - f.size.height / 2.0);
             self.window.setFrameOrigin(origin);
+        }
+
+        /// Where the bubble is now (global points, top-left origin): the
+        /// person may have dragged it.
+        pub fn frame(&self) -> egui::Rect {
+            let Some(mtm) = MainThreadMarker::new() else { return egui::Rect::NOTHING };
+            let top = NSScreen::screens(mtm).firstObject().map(|s| s.frame().size.height).unwrap_or(0.0);
+            let f = self.window.frame();
+            egui::Rect::from_min_size(Pos2::new(f.origin.x as f32, (top - f.origin.y - f.size.height) as f32), egui::vec2(f.size.width as f32, f.size.height as f32))
+        }
+
+        pub fn visible(&self) -> bool {
+            self.window.isVisible()
+        }
+
+        /// Hide the bubble (and turn the camera off) or bring it back. The
+        /// window stays, so a running recording keeps it in the video.
+        pub fn set_visible(&self, on: bool) {
+            if on == self.visible() {
+                return;
+            }
+            if on {
+                self.window.orderFrontRegardless();
+            } else {
+                self.window.orderOut(None);
+            }
+            let s = SendBox(self.session.clone());
+            std::thread::spawn(move || {
+                let s = s;
+                unsafe {
+                    if on {
+                        s.0.startRunning();
+                    } else {
+                        s.0.stopRunning();
+                    }
+                }
+            });
         }
 
         pub fn set_diameter(&self, d: f32) {

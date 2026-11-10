@@ -408,8 +408,8 @@ fn demo_store() -> Store {
     let items: Vec<(i64, Clip, bool)> = vec![
         (60 * 24 + 5, clip("Thanks! I will check the build tonight and send notes.", "Mail", "com.apple.mail"), false),
         (60 * 22, clip("https://developer.apple.com/documentation/appkit/nspasteboard", "Safari", "com.apple.Safari"), false),
-        (60 * 26, clip("Roman Furman · Kyiv, Ukraine", "Notes", "com.apple.Notes"), true),
-        (60, Clip { files: vec!["/Users/roman/Documents/Q4 report.pdf".into()], app: "Finder".into(), bundle: "com.apple.finder".into(), ..Default::default() }, false),
+        (60 * 26, clip("Alex Morgan · Lisbon, Portugal", "Notes", "com.apple.Notes"), true),
+        (60, Clip { files: vec!["/Users/me/Documents/Q4 report.pdf".into()], app: "Finder".into(), bundle: "com.apple.finder".into(), ..Default::default() }, false),
         (20, clip("#0B6BD8", "Figma", "com.figma.Desktop"), false),
         (12, Clip { png: Some(png), app: "Photos".into(), bundle: "com.apple.Photos".into(), ..Default::default() }, false),
         (6, clip("fn main() {\n    let app = App::new();\n    app.tool(\"clipboard\")\n       .run()?;\n}", "Zed", "dev.zed.Zed"), true),

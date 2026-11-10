@@ -8,7 +8,6 @@ use crate::kit::glass::*;
 use crate::kit::{macos, tile};
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 const ROW_H: f32 = 44.0;
 const ROW_GAP: f32 = 2.0;
@@ -127,7 +126,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     if !loaded {
         spinner(&p, Pos2::new(body.left() + 8.0, body.top() + 30.0), 7.0, ctx.input(|i| i.time), ACCENT);
         p.text(Pos2::new(body.left() + 24.0, body.top() + 30.0), Align2::LEFT_CENTER, "Reading what starts with your Mac…", font(13.0), TEXT_DIM);
-        ctx.request_repaint_after(Duration::from_millis(60));
+        crate::kit::glass::animate(&ctx);
         return;
     }
 
