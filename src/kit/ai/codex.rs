@@ -56,6 +56,8 @@ impl Provider for Codex {
         g.signed_out = installed && !logged_in;
         if !installed {
             g.limits.clear();
+            // checked: keeps the setup screen up while the next check runs
+            g.fetched = Some(Local::now());
             g.error = Some("Codex isn't installed on this Mac. Install it with npm i -g @openai/codex or brew install codex, then run codex once to sign in.".into());
             return;
         }
@@ -71,6 +73,7 @@ impl Provider for Codex {
             }
             None => {
                 g.limits.clear();
+                g.fetched = Some(Local::now());
                 g.error = Some(if logged_in { "Codex shows your limits here after your next request.".into() } else { "Sign in to Codex to see your limits: run codex in Terminal.".into() });
             }
         }
