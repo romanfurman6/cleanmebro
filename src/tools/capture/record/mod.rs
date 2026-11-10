@@ -456,6 +456,9 @@ impl Recorder {
     /// Background results and timers; call once per pass.
     pub fn tick(&mut self, s: &mut RecSettings) {
         crate::kit::activity::set_recording(!matches!(self.phase, Phase::Idle | Phase::Pick(_)));
+        // The picker, countdown, frame and bar are drawn in the hidden main
+        // window's pass; eframe would sleep 10 ms after each one.
+        eframe::skip_hidden_sleep(!matches!(self.phase, Phase::Idle));
         self.keep_meter(s);
         while let Ok(e) = self.rx.try_recv() {
             match e {
