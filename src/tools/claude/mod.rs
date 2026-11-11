@@ -35,7 +35,7 @@ impl Tool for Claude {
         ID
     }
     fn name(&self) -> &'static str {
-        ai::selected_meta().name
+        "AI Tool"
     }
     fn about(&self) -> &'static str {
         "Plan limits and token use of Claude Code or Codex"

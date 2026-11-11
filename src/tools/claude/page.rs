@@ -52,8 +52,13 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
     let p = ui.painter().clone();
     let m = ai::meta(cl.provider);
     let short = if a == Availability::SignedOut { format!("{} signed out", m.name) } else { format!("{} not installed", m.name) };
-    let btns = page_header(&p, r, m.name, &short, TEXT_DIM());
-    picker(info, demo, ui, btns);
+    let btns = page_header(&p, r, "AI Tool", &short, TEXT_DIM());
+    let w = button_width(&p, "Refresh", BTN_SECONDARY);
+    let rb = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
+    if pill_button(ui, rb, "Refresh", BTN_SECONDARY, !cl.loading).clicked() {
+        claude::request_refresh();
+    }
+    picker(info, demo, ui, Rect::from_min_max(btns.min, Pos2::new(rb.left() - sp::M, btns.bottom())));
     let colw = 480.0f32.min(r.width() - 48.0);
     let x = r.center().x - colw / 2.0;
     let mut y = r.top() + PAGE_HEADER_H + 56.0;
@@ -126,7 +131,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     if cl.data_bytes > 0 {
         sub.push_str(&format!(" · all {} data on this Mac {}", cl.provider, human_bytes(cl.data_bytes)));
     }
-    let btns = page_header(&p, r, cl.provider, &sub, TEXT_DIM());
+    let btns = page_header(&p, r, "AI Tool", &sub, TEXT_DIM());
     let w = button_width(&p, "Refresh limits", BTN_SECONDARY);
     let rb = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
     if pill_button(ui, rb, "Refresh limits", BTN_SECONDARY, !cl.loading).clicked() {
