@@ -1,0 +1,114 @@
+/* Cmd+Meow app mock-ups shared by the landing variants. Dark macOS UI, scoped under .mk */
+.mk { --w: #1E1E20; --c: #2A2A2D; --tx: rgba(255,255,255,.92); --dm: rgba(255,255,255,.6); --ln: rgba(255,255,255,.08);
+  --blue: #0A84FF; --orange: #FF9F0A; --green: #30D158; --red: #FF453A; --yellow: #FFD60A;
+  color: var(--tx); font: 400 13px/18px -apple-system, BlinkMacSystemFont, "Geist", "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; text-align: left; }
+.mk * { box-sizing: border-box; }
+.mk .num { font-variant-numeric: tabular-nums; }
+.mk .dm { color: var(--dm); }
+.mk .ph { fill: currentColor; flex: none; }
+
+/* Window */
+.mk.win { background: var(--w); border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 .5px rgba(0,0,0,.6), inset 0 0 0 .5px rgba(255,255,255,.14), 0 24px 60px -12px rgba(0,0,0,.45); }
+.mk .bar { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--ln); }
+.mk .bar i { width: 11px; height: 11px; border-radius: 50%; background: #FF5F57; }
+.mk .bar i:nth-child(2) { background: #FEBC2E; }
+.mk .bar i:nth-child(3) { background: #28C840; }
+.mk .bar span { flex: 1; text-align: center; margin-right: 50px; font-weight: 600; color: var(--dm); font-size: 12px; }
+.mk .body { padding: 16px; }
+
+/* Menu bar panel */
+.mk.panel { width: 300px; padding: 10px; border-radius: 14px; background: rgba(36,36,38,.92); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+  box-shadow: 0 0 0 .5px rgba(0,0,0,.6), inset 0 0 0 .5px rgba(255,255,255,.16), 0 24px 60px -12px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 8px; }
+.mk .ph-head { display: flex; justify-content: space-between; padding: 2px 4px; font-weight: 600; }
+.mk .card { background: rgba(255,255,255,.06); border-radius: 10px; padding: 10px 12px; }
+.mk .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mk .kv { display: flex; justify-content: space-between; align-items: baseline; }
+.mk .big { font-size: 22px; line-height: 26px; font-weight: 600; letter-spacing: -.01em; }
+.mk .bars { height: 40px; display: flex; align-items: flex-end; gap: 2px; margin-top: 8px; }
+.mk .bars i { flex: 1; background: var(--blue); border-radius: 2px 2px 0 0; opacity: .85; transition: height .6s ease; }
+.mk .bars i.hot { background: var(--orange); }
+.mk .meter { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); margin-top: 8px; overflow: hidden; }
+.mk .meter b { display: block; height: 100%; border-radius: 3px; background: var(--blue); }
+.mk .li { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 2px; border-top: 1px solid var(--ln); }
+.mk .li:first-child { border-top: 0; }
+.mk .li > .ph { color: var(--blue); width: 16px; height: 16px; }
+.mk .li .r { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.mk .pill { height: 22px; padding: 0 10px; border-radius: 6px; background: var(--blue); color: #fff; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; }
+.mk .sw { display: inline-block; flex: none; width: 30px; height: 18px; border-radius: 9px; background: var(--green); position: relative; }
+.mk .sw::after { content: ""; position: absolute; top: 2px; left: 14px; width: 14px; height: 14px; border-radius: 7px; background: #fff; }
+
+/* Clean Up */
+.mk .cl-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+.mk .cl-top .big { font-size: 34px; line-height: 38px; }
+.mk .cl { display: grid; grid-template-columns: 16px 1fr 72px 64px; align-items: center; gap: 10px; min-height: 36px; border-top: 1px solid var(--ln); }
+.mk .ck { width: 14px; height: 14px; border-radius: 4px; background: var(--blue); position: relative; }
+.mk .ck::after { content: ""; position: absolute; left: 4.5px; top: 2px; width: 4px; height: 7px; border: solid #fff; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.mk .ck.off { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.3); }
+.mk .ck.off::after { display: none; }
+.mk .trk { height: 4px; border-radius: 2px; background: rgba(255,255,255,.08); }
+.mk .trk b { display: block; height: 100%; border-radius: 2px; background: var(--blue); }
+.mk .cl .num { text-align: right; }
+.mk .ft { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* Disk Map treemap */
+.mk .tm { display: grid; grid-template-columns: 5fr 3fr 2fr; grid-template-rows: 3fr 2fr 1fr; gap: 3px; height: 240px; }
+.mk .tm div { border-radius: 4px; padding: 8px; font-size: 11px; line-height: 14px; color: rgba(255,255,255,.92); display: flex; flex-direction: column; justify-content: flex-end; }
+.mk .tm b { font-weight: 600; font-size: 12px; }
+.mk .tm .a { grid-row: 1 / 4; background: #0A6FD6; }
+.mk .tm .b { grid-row: 1 / 3; background: #2C7BE5; }
+.mk .tm .c { background: #4A90E2; }
+.mk .tm .d { background: #5E9BE6; }
+.mk .tm .e { background: #3A3A3E; }
+.mk .tm .f { background: #47474C; }
+
+/* Capture */
+.mk .dsk { position: relative; height: 240px; border-radius: 8px; overflow: hidden; background: linear-gradient(#2C3442, #1B1F27); }
+.mk .dsk .fw { position: absolute; border-radius: 6px; background: rgba(255,255,255,.08); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.12); }
+.mk .dsk .fw.w1 { left: 6%; top: 10%; width: 48%; height: 70%; }
+.mk .dsk .fw.w2 { left: 46%; top: 24%; width: 46%; height: 64%; background: rgba(255,255,255,.12); }
+.mk .dsk .fw i { display: block; height: 6px; margin: 12px 12px 0; border-radius: 3px; background: rgba(255,255,255,.14); }
+.mk .dsk .shade { position: absolute; inset: 0; background: rgba(0,0,0,.35); }
+.mk .dsk .cut { position: absolute; left: 30%; top: 22%; width: 44%; height: 56%; box-shadow: 0 0 0 9999px rgba(0,0,0,.4), inset 0 0 0 1px #fff; border-radius: 1px; }
+.mk .dsk .cut span { position: absolute; left: 0; top: calc(100% + 6px); padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,.7); font-size: 11px; }
+.mk .dsk .tools { position: absolute; right: 10px; top: 10px; display: flex; gap: 2px; padding: 4px; border-radius: 8px; background: rgba(30,30,32,.92); }
+.mk .dsk .tools i { width: 24px; height: 22px; border-radius: 5px; display: grid; place-items: center; font-style: normal; font-size: 11px; color: var(--dm); }
+.mk .dsk .tools i.on { background: rgba(255,255,255,.12); color: var(--tx); }
+.mk .dsk .tools i.rec { color: var(--red); }
+
+/* Clipboard */
+.mk .srch { height: 30px; border-radius: 8px; background: rgba(255,255,255,.07); display: flex; align-items: center; padding: 0 10px; color: var(--dm); margin-bottom: 8px; }
+.mk .cp { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: 8px; white-space: nowrap; overflow: hidden; }
+.mk .cp.cur { background: var(--blue); }
+.mk .cp .t { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.mk .cp kbd { font: 500 11px/1 -apple-system, sans-serif; color: var(--dm); background: none; box-shadow: none; padding: 0; min-width: 0; height: auto; }
+.mk .cp.cur kbd { color: rgba(255,255,255,.8); }
+.mk .sq { width: 16px; height: 16px; border-radius: 4px; flex: none; }
+.mk .mono { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12px; }
+
+/* Keep Awake */
+.mk .aw { display: grid; place-items: center; gap: 12px; padding: 16px 0 8px; }
+.mk .aw svg { width: 150px; height: 150px; }
+.mk .aw-bg { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 8; }
+.mk .aw-ring { fill: none; stroke: var(--orange); stroke-width: 8; stroke-linecap: round; stroke-dasharray: 540; stroke-dashoffset: 150; }
+.mk .aw-cup { stroke: var(--tx); }
+.mk .aw-t { text-align: center; }
+.mk .aw-t b { display: block; font-size: 15px; }
+
+/* Uninstaller */
+.mk .ap { display: flex; align-items: center; gap: 10px; height: 40px; border-top: 1px solid var(--ln); }
+.mk .ap:first-child { border-top: 0; }
+.mk .ai { width: 24px; height: 24px; border-radius: 6px; flex: none; }
+.mk .ap .num { margin-left: auto; color: var(--dm); }
+
+/* Usage */
+.mk .us + .us { margin-top: 14px; }
+.mk .us .meter { height: 8px; }
+.mk .us .meter b.o { background: var(--orange); }
+
+/* Equal-height windows inside a grid figure */
+@media (min-width: 961px) {
+  figure:has(> .mk.win) { display: flex; flex-direction: column; }
+  figure > .mk.win { flex: 1; }
+}
+.mk .sw.off { background: rgba(255,255,255,.18); }
+.mk .sw.off::after { left: 2px; }

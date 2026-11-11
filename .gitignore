@@ -39,3 +39,4 @@ research/
 
 # App icon sources are part of the build
 !assets/icon/*.png
+!site/*.jpg

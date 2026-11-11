@@ -3,7 +3,7 @@
 Static site for https://cmdmeow.furman.cat, deployed by `.github/workflows/pages.yml`
 on every push to `main` that touches `site/`.
 
-- `index.html`, `style.css`: the landing page.
+- `index.html`, `style.css`: the landing page. `app.css` styles the app mock-ups, `desk.webp` is the desktop wallpaper behind them.
 - `play/`: video player for shared recordings. `play/?v=<video url>` (optional `&t=<title>`).
   Only http(s) URLs play. The host must allow range requests (S3 does) for seeking.
 - `icon.png` is copied from `docs/images/icon.png` at deploy time (PNGs are gitignored).
