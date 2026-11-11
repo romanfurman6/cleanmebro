@@ -72,8 +72,8 @@ pub fn wide_ring(rect: Rect) -> (Pos2, f32) {
 /// Where a Small tile's ring sits, and its radius: it fills the tile above
 /// a one-line caption.
 pub fn small_ring_at(rect: Rect) -> (Pos2, f32) {
-    let rr = ((rect.height() - 34.0) / 2.0).min(rect.width() / 2.0 - 12.0).clamp(20.0, 30.0);
-    (Pos2::new(rect.center().x, rect.top() + 10.0 + rr), rr)
+    let rr = ((rect.height() - 40.0) / 2.0).min(rect.width() / 2.0 - 12.0).clamp(18.0, 30.0);
+    (Pos2::new(rect.center().x, rect.top() + 8.0 + rr), rr)
 }
 
 /// Wide (1:2): a ring (or the glyph) on the left; label, value and caption

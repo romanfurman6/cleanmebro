@@ -7,7 +7,7 @@ mod mac {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{
         NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSApplicationActivationPolicy,
-        NSAutoresizingMaskOptions, NSColor, NSGlassEffectView, NSGlassEffectViewStyle, NSView, NSVisualEffectBlendingMode,
+        NSAutoresizingMaskOptions, NSColor, NSView, NSVisualEffectBlendingMode,
         NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode, NSWorkspace,
     };
     use objc2_foundation::NSProcessInfo;
@@ -44,13 +44,8 @@ mod mac {
         }
     }
 
-    fn has_liquid_glass() -> bool {
-        objc2::runtime::AnyClass::get(c"NSGlassEffectView").is_some()
-    }
-
-    /// Put the system's own glass behind every egui window: Liquid Glass
-    /// (NSGlassEffectView, macOS 26+) with its own rounded corners, or the
-    /// older frosted NSVisualEffectView. Our drawing stays on top, mostly clear.
+    /// Put the system's frosted blur (NSVisualEffectView) behind every egui
+    /// window, with rounded corners. Our backdrop sits on top, partly clear.
     pub fn apply_glass(corner_radius: f64) {
         let Some(mtm) = MainThreadMarker::new() else { return };
         let app = NSApplication::sharedApplication(mtm);
@@ -74,18 +69,19 @@ mod mac {
                 w.setAppearance(Some(&ap));
             }
             let frame = content.frame();
-            let view: Retained<NSView> = if has_liquid_glass() {
-                let g = NSGlassEffectView::initWithFrame(mtm.alloc::<NSGlassEffectView>(), frame);
-                g.setStyle(NSGlassEffectViewStyle::Regular);
-                g.setCornerRadius(corner_radius);
-                Retained::into_super(g)
-            } else {
-                let e = NSVisualEffectView::initWithFrame(mtm.alloc::<NSVisualEffectView>(), frame);
-                e.setMaterial(NSVisualEffectMaterial::HUDWindow);
-                e.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-                e.setState(NSVisualEffectState::Active);
-                Retained::into_super(e)
-            };
+            // a real frosted blur, clipped to the window's rounded corners
+            // (Liquid Glass refracts what's behind instead of blurring it,
+            // which reads as a stretched picture under the panel)
+            let e = NSVisualEffectView::initWithFrame(mtm.alloc::<NSVisualEffectView>(), frame);
+            e.setMaterial(NSVisualEffectMaterial::Popover);
+            e.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+            e.setState(NSVisualEffectState::Active);
+            e.setWantsLayer(true);
+            if let Some(layer) = e.layer() {
+                layer.setCornerRadius(corner_radius);
+                layer.setMasksToBounds(true);
+            }
+            let view: Retained<NSView> = Retained::into_super(e);
             view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
             superview.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Below, Some(&content));
             w.invalidateShadow();
@@ -100,7 +96,8 @@ mod mac {
         let mut out = String::new();
         for w in app.windows().iter() {
             let f = w.frame();
-            out.push_str(&format!("win #{} frame {:?} opaque {} visible {}\n", w.windowNumber(), (f.origin.x, f.origin.y, f.size.width, f.size.height), w.isOpaque(), w.isVisible()));
+            let screen = w.screen().map(|s| { let sf = s.frame(); (sf.size.width, sf.size.height, s.backingScaleFactor()) });
+            out.push_str(&format!("win #{} frame {:?} opaque {} visible {} scale {} screen {:?}\n", w.windowNumber(), (f.origin.x, f.origin.y, f.size.width, f.size.height), w.isOpaque(), w.isVisible(), w.backingScaleFactor(), screen));
             if let Some(c) = w.contentView() {
                 let cf = c.frame();
                 out.push_str(&format!("  content {} {:?}\n", c.class().name().to_string_lossy(), (cf.size.width, cf.size.height)));

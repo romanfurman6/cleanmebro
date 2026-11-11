@@ -261,7 +261,7 @@ pub fn rounded_points(rect: Rect, r: f32) -> Vec<Pos2> {
 
 /// The window surface: a radial glow from the top centre (moss in dark
 /// mode, sage in light mode) with a 1 pt hairline edge. Live, the system
-/// glass behind it only shows through a few percent; `opaque` (screenshots)
+/// blur behind it shows through a little; `opaque` (screenshots)
 /// paints it solid.
 pub fn backdrop(painter: &Painter, rect: Rect, radius: f32, opaque: bool, _t: f64) {
     let stops: &[(f32, Color32)] = if is_light() {
@@ -269,7 +269,7 @@ pub fn backdrop(painter: &Painter, rect: Rect, radius: f32, opaque: bool, _t: f6
     } else {
         &[(0.0, hex(0x22401D)), (0.35, hex(0x132610)), (0.7, hex(0x0A150A)), (1.0, hex(0x070D07))]
     };
-    let alpha = if opaque { 1.0 } else { 0.97 };
+    let alpha = if opaque { 1.0 } else { 0.86 };
     let glow = Pos2::new(rect.center().x, rect.top());
     // the glow is an ellipse: wide across, reaching the bottom edge
     let (rx, ry) = (rect.width() * 0.75, rect.height() * 1.05);
