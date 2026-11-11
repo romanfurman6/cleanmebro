@@ -17,6 +17,8 @@
 //! `--video-probe <file.mp4> [--download]` runs the video viewer's work on a
 //! file without UI: sound tracks, voice cleanup, a cut saved as a copy, and
 //! (with the speech model there, or downloaded with `--download`) a transcript.
+//! `--dictation-probe <file.wav | mic:SECS> [--download] [--whisper] [--paste]`
+//! turns a recording (or the microphone) into text the way dictation does.
 //! `--fan-helper <uid>` is the helper itself (run by launchd as root).
 
 mod core;
@@ -59,6 +61,13 @@ fn main() -> eframe::Result {
         if a.get(1).map(String::as_str) == Some("--rec-probe") {
             let secs = a.get(2).and_then(|v| v.parse().ok()).unwrap_or(5.0);
             tools::capture::record::probe(secs, !a.iter().any(|v| v == "--no-sys"), !a.iter().any(|v| v == "--no-mic"));
+            return Ok(());
+        }
+        if a.get(1).map(String::as_str) == Some("--dictation-probe") {
+            if let Err(e) = tools::dictation::probe::probe(&a[2..]) {
+                eprintln!("[dictation] {e}");
+                std::process::exit(1);
+            }
             return Ok(());
         }
         if a.get(1).map(String::as_str) == Some("--video-probe") {

@@ -8,6 +8,7 @@
 
 mod audio;
 mod mac;
+pub mod probe;
 mod settings;
 mod ui;
 
