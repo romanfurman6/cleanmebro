@@ -3,6 +3,7 @@
 //! sheet and a page in the full window. Reading needs no admin rights;
 //! changing fan speed goes through the root helper in [`helper`].
 
+use crate::kit::sync::LockExt;
 pub mod control;
 pub mod data;
 pub mod helper;
@@ -97,14 +98,14 @@ impl FanControl {
                     if save && !self.demo {
                         control::save(&s);
                     }
-                    self.live.lock().unwrap().settings = s;
+                    self.live.lock_ok().settings = s;
                     self.kick.kick();
                 }
                 Cmd::Install | Cmd::Uninstall if self.demo => {}
                 Cmd::Install | Cmd::Uninstall => {
                     let install = c == Cmd::Install;
                     {
-                        let mut l = self.live.lock().unwrap();
+                        let mut l = self.live.lock_ok();
                         if l.busy {
                             continue;
                         }
@@ -114,7 +115,7 @@ impl FanControl {
                     let (live, kick, ctx) = (self.live.clone(), self.kick.clone(), ctx.clone());
                     std::thread::spawn(move || {
                         let r = if install { helper::install() } else { helper::uninstall() };
-                        let mut l = live.lock().unwrap();
+                        let mut l = live.lock_ok();
                         l.busy = false;
                         l.error = r.err().unwrap_or_default();
                         if !install && l.error.is_empty() {
@@ -131,13 +132,13 @@ impl FanControl {
     }
 
     fn view(&self) -> (Snapshot, Live) {
-        (self.snap.lock().unwrap().clone(), self.live.lock().unwrap().clone())
+        (self.snap.lock_ok().clone(), self.live.lock_ok().clone())
     }
 }
 
 impl Drop for FanControl {
     fn drop(&mut self) {
-        if !self.demo && self.live.lock().unwrap().manual {
+        if !self.demo && self.live.lock_ok().manual {
             ask(&Request::Auto);
         }
     }
@@ -160,7 +161,7 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: 
                 if on_now && read_at.due(Duration::from_secs(data::SAMPLE_SECS)) {
                     let r = probe.read();
                     let thermal = crate::kit::native::thermal_state();
-                    let mut s = out.lock().unwrap();
+                    let mut s = out.lock_ok();
                     s.loaded = true;
                     s.has_smc = r.has_smc;
                     s.fans = r.fans;
@@ -170,9 +171,9 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: 
                     s.push_history();
                 }
                 // what the fans should do
-                let s = out.lock().unwrap().clone();
+                let s = out.lock_ok().clone();
                 let (settings, tripped) = {
-                    let mut l = live.lock().unwrap();
+                    let mut l = live.lock_ok();
                     let tripped = control::hottest(&s).is_some_and(|h| l.guard.update(h));
                     (l.settings.clone(), tripped)
                 };
@@ -200,7 +201,7 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: 
                     ask(&Request::Hello)
                 };
                 {
-                    let mut l = live.lock().unwrap();
+                    let mut l = live.lock_ok();
                     l.helper = match &reply {
                         None => HelperState::Missing,
                         Some(r) if r.version != helper::VERSION => HelperState::Outdated,
@@ -256,7 +257,7 @@ impl Tool for FanControl {
     }
 
     fn own_status(&self, id: &str) -> crate::kit::perms::Status {
-        let l = self.live.lock().unwrap();
+        let l = self.live.lock_ok();
         if id != "fan-helper" || l.busy {
             crate::kit::perms::Status::NotAsked
         } else if l.helper == HelperState::Ready {
@@ -277,7 +278,7 @@ impl Tool for FanControl {
         "Monitor"
     }
     fn sidebar_meta(&self) -> String {
-        let s = self.snap.lock().unwrap();
+        let s = self.snap.lock_ok();
         match (s.avg_rpm(), s.hottest()) {
             (Some(r), _) => data::rpm_text(r),
             (None, Some((_, c))) => format!("{c:.0}°"),
@@ -288,7 +289,7 @@ impl Tool for FanControl {
         vec![WidgetSpec { id: CARD, title: "Fans", about: "Fan speed and the hottest part, live.", sizes: UP_TO_MEDIUM, size: Size::S14, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        let s = self.snap.lock().unwrap().clone();
+        let s = self.snap.lock_ok().clone();
         ui::widget(&s, size, ui, rect, cx);
     }
     fn detail_ui(&mut self, _detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
@@ -313,7 +314,7 @@ impl Tool for FanControl {
             "fan" => Some(View::Page),
             "fan-detail" => Some(View::Detail(SHEET)),
             "fan-curve" | "fan-fixed" | "fan-install" => {
-                let mut l = self.live.lock().unwrap();
+                let mut l = self.live.lock_ok();
                 l.settings.mode = match view {
                     "fan-curve" => Mode::Curve,
                     "fan-fixed" => Mode::Fixed,
@@ -324,11 +325,11 @@ impl Tool for FanControl {
                 Some(View::Page)
             }
             "fan-air" => {
-                *self.snap.lock().unwrap() = data::demo_fanless();
+                *self.snap.lock_ok() = data::demo_fanless();
                 Some(View::Page)
             }
             "fan-air-detail" => {
-                *self.snap.lock().unwrap() = data::demo_fanless();
+                *self.snap.lock_ok() = data::demo_fanless();
                 Some(View::Detail(SHEET))
             }
             _ => None,

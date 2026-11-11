@@ -3,6 +3,7 @@
 //! page. A panel card, a limits sheet, a page in the full window and the
 //! session % next to the menu-bar icon. Claude also lists its projects.
 
+use crate::kit::sync::LockExt;
 pub mod backend;
 mod page;
 mod ui;
@@ -53,7 +54,7 @@ impl Tool for Claude {
         if widget != LIMITS {
             return;
         }
-        let cl = self.info.lock().unwrap().clone();
+        let cl = self.info.lock_ok().clone();
         if ui::widget(ui, rect, size, &cl, cx.is_detail_open(ID, LIMITS)).clicked() {
             cx.toggle_detail(ID, LIMITS);
         }
@@ -71,13 +72,13 @@ impl Tool for Claude {
         true
     }
     fn sidebar_meta(&self) -> String {
-        self.info.lock().unwrap().session().map(|l| format!("{:.0}%", l.pct)).unwrap_or_default()
+        self.info.lock_ok().session().map(|l| format!("{:.0}%", l.pct)).unwrap_or_default()
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         page::page(&self.info, self.demo, ui, rect, cx);
     }
     fn recommendations(&self) -> Vec<Recommendation> {
-        let info = self.info.lock().unwrap();
+        let info = self.info.lock_ok();
         let Some(l) = info.session().filter(|l| l.pct >= 80.0) else { return Vec::new() };
         vec![Recommendation {
             priority: 60,
@@ -88,7 +89,7 @@ impl Tool for Claude {
         }]
     }
     fn tray_title(&self) -> Option<String> {
-        self.info.lock().unwrap().session().map(|l| format!("{:.0}%", l.pct))
+        self.info.lock_ok().session().map(|l| format!("{:.0}%", l.pct))
     }
     fn menu_items(&self) -> Vec<MenuItem> {
         vec![MenuItem { id: "refresh", label: format!("Refresh {} limits", ai::selected_meta().name) }]
@@ -109,7 +110,7 @@ impl Tool for Claude {
             }
             "claude-missing" => {
                 let error = Some(format!("Claude Code isn't installed on this Mac. {}", crate::kit::claude_code::Availability::NotInstalled.how()));
-                *self.info.lock().unwrap() = UsageInfo { provider: ai::claude::NAME, loading: false, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
+                *self.info.lock_ok() = UsageInfo { provider: ai::claude::NAME, loading: false, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
                 Some(View::Page)
             }
             _ => None,

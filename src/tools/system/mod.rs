@@ -1,6 +1,7 @@
 //! Mac health tool: live readings of disk, memory, battery, CPU, network and
 //! Bluetooth devices, shown as panel widgets with a detail sheet each.
 
+use crate::kit::sync::LockExt;
 mod devices;
 mod devices_ui;
 pub mod monitor;
@@ -62,7 +63,7 @@ impl Tool for System {
         "Monitor"
     }
     fn panel_header(&self) -> Option<PanelHeader> {
-        Some(ui::header(&self.mon.lock().unwrap()))
+        Some(ui::header(&self.mon.lock_ok()))
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
         WIDGETS.to_vec()
@@ -87,7 +88,7 @@ impl Tool for System {
     /// drive health 100, battery health 80, out of disk space 20, Trash
     /// overfill 5); memory and restart are slotted in by us.
     fn recommendations(&self) -> Vec<Recommendation> {
-        let s = self.mon.lock().unwrap().clone();
+        let s = self.mon.lock_ok().clone();
         let detail = |d: &str| Action::ShowDetail { tool: ID.into(), detail: d.into(), toggle: true };
         let page = |t: &str| Action::OpenPage { tool: t.into(), route: String::new() };
         let mut v = Vec::new();
@@ -114,7 +115,7 @@ impl Tool for System {
 
     /// The emptiest Bluetooth device while it is low ("Mouse 14%").
     fn tray_title(&self) -> Option<String> {
-        let s = self.mon.lock().unwrap();
+        let s = self.mon.lock_ok();
         devices::tray_title(&s.devices, s.bt_prefs)
     }
 

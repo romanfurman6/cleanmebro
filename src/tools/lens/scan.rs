@@ -1,6 +1,7 @@
 //! Disk Map: measure a folder tree in the background, then browse it as a
 //! drill-down treemap; selected items go to the Trash after review.
 
+use crate::kit::sync::LockExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -63,7 +64,7 @@ pub fn display_name(p: &Path) -> String {
 /// each. Only sizes are copied, never the finished trees, so this stays cheap
 /// however big the disk is.
 pub fn partial(s: &Scan) -> Option<(PathBuf, Vec<LiveRow>)> {
-    let g = s.live.lock().unwrap();
+    let g = s.live.lock_ok();
     let (root, kids) = g.as_ref()?;
     let rows = kids
         .iter()
@@ -120,8 +121,8 @@ pub fn start(shared: Shared, root: PathBuf, ctx: egui::Context) {
     shared.stop.store(false, Ordering::SeqCst);
     shared.files.store(0, Ordering::SeqCst);
     shared.bytes.store(0, Ordering::SeqCst);
-    *shared.result.lock().unwrap() = None;
-    *shared.live.lock().unwrap() = None;
+    *shared.result.lock_ok() = None;
+    *shared.live.lock_ok() = None;
     std::thread::spawn(move || {
         below_ui();
         let w = Walker::new(&root, &shared, &ctx);
@@ -130,9 +131,9 @@ pub fn start(shared: Shared, root: PathBuf, ctx: egui::Context) {
         if root == Path::new("/") {
             save(&node, now);
         }
-        *shared.when.lock().unwrap() = Some(now);
-        *shared.result.lock().unwrap() = Some(node);
-        *shared.live.lock().unwrap() = None;
+        *shared.when.lock_ok() = Some(now);
+        *shared.result.lock_ok() = Some(node);
+        *shared.live.lock_ok() = None;
         shared.running.store(false, Ordering::SeqCst);
         ctx.request_repaint();
         if !shared.stop.load(Ordering::SeqCst) {
@@ -176,8 +177,8 @@ pub fn save(root: &Node, when: i64) {
 pub fn save_later(shared: &Shared) {
     let s = shared.clone();
     std::thread::spawn(move || {
-        let node = s.result.lock().unwrap().clone();
-        let when = *s.when.lock().unwrap();
+        let node = s.result.lock_ok().clone();
+        let when = *s.when.lock_ok();
         if let (Some(node), Some(when)) = (node, when) {
             if node.path == Path::new("/") {
                 save(&node, when);
@@ -202,10 +203,10 @@ pub fn load(shared: &Shared, ctx: &egui::Context) -> bool {
         below_ui();
         let saved: Option<Saved> = std::fs::File::open(&path).ok().and_then(|f| serde_json::from_reader(std::io::BufReader::new(f)).ok());
         if let Some(saved) = saved {
-            let mut r = s.result.lock().unwrap();
+            let mut r = s.result.lock_ok();
             if r.is_none() && !s.running.load(Ordering::SeqCst) {
                 *r = Some(saved.root);
-                *s.when.lock().unwrap() = Some(saved.when);
+                *s.when.lock_ok() = Some(saved.when);
             }
         }
         s.loading.store(false, Ordering::SeqCst);
@@ -271,7 +272,7 @@ impl<'a> Walker<'a> {
             .map(|d| LiveChild { name: d.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(), path: d.clone(), bytes: Arc::new(AtomicU64::new(0)), done: false })
             .collect();
         let counters: Vec<Arc<AtomicU64>> = live.iter().map(|l| l.bytes.clone()).collect();
-        *self.s.live.lock().unwrap() = Some((root.to_path_buf(), live));
+        *self.s.live.lock_ok() = Some((root.to_path_buf(), live));
         let next = AtomicU64::new(0);
         // every core pulls the next top-level folder; inside one, free threads help
         let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).saturating_sub(1).max(1).min(dirs.len().max(1));
@@ -286,11 +287,11 @@ impl<'a> Walker<'a> {
                     }
                     let child = self.walk(&dirs[k], 1, Some(&counters[k]));
                     counters[k].store(child.bytes, Ordering::Relaxed);
-                    if let Some((_, live)) = self.s.live.lock().unwrap().as_mut() {
+                    if let Some((_, live)) = self.s.live.lock_ok().as_mut() {
                         live[k].done = true;
                     }
                     self.ctx.request_repaint();
-                    results.lock().unwrap().push((k, child));
+                    results.lock_ok().push((k, child));
                 });
             }
         });
@@ -352,7 +353,7 @@ impl<'a> Walker<'a> {
         }
         if let Ok(mut last) = self.last.try_lock() {
             if last.elapsed().as_millis() > 120 {
-                *self.s.current.lock().unwrap() = p.display().to_string();
+                *self.s.current.lock_ok() = p.display().to_string();
                 self.ctx.request_repaint();
                 *last = std::time::Instant::now();
             }
@@ -509,7 +510,7 @@ mod tests {
         while shared.running.load(Ordering::SeqCst) && t0.elapsed().as_secs() < 20 {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let root = shared.result.lock().unwrap().take().unwrap();
+        let root = shared.result.lock_ok().take().unwrap();
         assert_eq!(shared.files.load(Ordering::SeqCst), 6 * 5 * 4 + 1);
         assert_eq!(root.children.len(), 6);
         assert_eq!(root.children[0].name, "t0"); // biggest first
@@ -517,7 +518,7 @@ mod tests {
         let sum: u64 = root.children.iter().map(|c| c.bytes).sum();
         assert_eq!(root.bytes, sum);
         assert_eq!(shared.bytes.load(Ordering::SeqCst), root.bytes);
-        assert!(shared.live.lock().unwrap().is_none());
+        assert!(shared.live.lock_ok().is_none());
         let _ = std::fs::remove_dir_all(&base);
     }
 

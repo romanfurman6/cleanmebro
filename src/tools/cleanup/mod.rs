@@ -3,6 +3,7 @@
 //!
 //! Page routes: "" (as left), "claude" (open on the Claude group).
 
+use crate::kit::sync::LockExt;
 pub mod engine;
 mod page;
 
@@ -71,7 +72,7 @@ impl Tool for Cleanup {
         vec![WidgetSpec { id: "clean", title: "Clean", about: "What the last clean removed, and a scan.", sizes: &[Size::S12, Size::S14], size: Size::S12, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        let g = self.clean.lock().unwrap().clone();
+        let g = self.clean.lock_ok().clone();
         let (value, sub, frac) = match g.phase {
             engine::Phase::Results => (human_bytes(g.total()), "found · ready to review".to_string(), None),
             engine::Phase::Scanning | engine::Phase::Judging => ("Scanning…".into(), g.current.clone(), Some(g.progress)),
@@ -152,7 +153,7 @@ impl Tool for Cleanup {
         }
     }
     fn sidebar_meta(&self) -> String {
-        let g = self.clean.lock().unwrap();
+        let g = self.clean.lock_ok();
         if g.phase == engine::Phase::Results { human_bytes(g.total()) } else { String::new() }
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
@@ -172,7 +173,7 @@ impl Tool for Cleanup {
             action: "Start Cleanup".into(),
             go: go.clone(),
         }];
-        let claude_junk = self.clean.lock().unwrap().claude_safe_bytes();
+        let claude_junk = self.clean.lock_ok().claude_safe_bytes();
         if claude_junk > 50_000_000 {
             v.push(Recommendation {
                 priority: 4,
@@ -192,11 +193,11 @@ impl Tool for Cleanup {
                 Some(View::Page)
             }
             "results" => {
-                *self.clean.lock().unwrap() = page::demo_results();
+                *self.clean.lock_ok() = page::demo_results();
                 Some(View::Page)
             }
             "cleanup-done" => {
-                *self.clean.lock().unwrap() = page::demo_done();
+                *self.clean.lock_ok() = page::demo_done();
                 Some(View::Page)
             }
             _ => None,
@@ -211,11 +212,11 @@ pub fn scan_report(ai: bool) {
     engine::start_scan(state.clone(), egui::Context::default(), ai);
     loop {
         std::thread::sleep(std::time::Duration::from_millis(300));
-        if state.lock().unwrap().phase == engine::Phase::Results {
+        if state.lock_ok().phase == engine::Phase::Results {
             break;
         }
     }
-    let g = state.lock().unwrap();
+    let g = state.lock_ok();
     let home = dirs::home_dir().unwrap_or_default().display().to_string();
     for it in &g.items {
         println!(

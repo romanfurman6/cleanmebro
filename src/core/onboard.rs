@@ -2,6 +2,7 @@
 //! status), open at login, then hand over to the menu bar panel. Also the
 //! permission list in Settings › General.
 
+use crate::kit::sync::LockExt;
 use super::shell::App;
 use crate::kit::glass::*;
 use crate::kit::perms::{self, Perm, Status};
@@ -115,7 +116,7 @@ impl PermWatch {
             return;
         }
         {
-            let mut b = self.bg.lock().unwrap();
+            let mut b = self.bg.lock_ok();
             if b.running {
                 return;
             }
@@ -126,7 +127,7 @@ impl PermWatch {
         std::thread::spawn(move || {
             let v: Vec<(Perm, Status)> = perms.into_iter().map(|p| (p, p.status())).collect();
             let login = crate::kit::login::enabled();
-            let mut b = bg.lock().unwrap();
+            let mut b = bg.lock_ok();
             b.result = Some((v, login));
             b.running = false;
         });
@@ -152,7 +153,7 @@ impl PermWatch {
             }
             return;
         }
-        let landed = self.bg.lock().unwrap().result.take();
+        let landed = self.bg.lock_ok().result.take();
         if let Some((v, login)) = landed {
             self.login = Some(login);
             for (p, st) in v {
@@ -179,7 +180,7 @@ impl PermWatch {
         if demo {
             return true;
         }
-        if let Some((_, login)) = self.bg.lock().unwrap().result.as_ref() {
+        if let Some((_, login)) = self.bg.lock_ok().result.as_ref() {
             self.login = Some(*login);
         }
         self.kick(Vec::new(), now);

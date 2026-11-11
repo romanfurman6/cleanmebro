@@ -1,6 +1,7 @@
 //! Cleanup screens: start → scanning → Claude reviewing paths → results (with
 //! "needs your OK" questions) → cleaning → done.
 
+use crate::kit::sync::LockExt;
 use super::engine::{self as cleanup, Group, Item, Phase, Verdict, Who};
 use super::Cleanup as App;
 use crate::core::tool::{Action, Cx};
@@ -13,7 +14,7 @@ use std::path::PathBuf;
 const WIN_R: f32 = 12.0;
 
 pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
-    let phase = app.clean.lock().unwrap().phase.clone();
+    let phase = app.clean.lock_ok().phase.clone();
     match phase {
         Phase::Intro => intro(app, ui, r, cx),
         Phase::Scanning | Phase::Judging | Phase::Cleaning => working(app, ui, r, phase),
@@ -218,7 +219,7 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
 
 fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
     let ctx = ui.ctx().clone();
-    let st = app.clean.lock().unwrap().clone();
+    let st = app.clean.lock_ok().clone();
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time);
     let sub = match phase {
@@ -232,7 +233,7 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
         let w = button_width(&p, "Stop", BTN_SECONDARY).max(64.0);
         let sr = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
         if pill_button(ui, sr, "Stop", BTN_SECONDARY, true).clicked() {
-            app.clean.lock().unwrap().stop = true;
+            app.clean.lock_ok().stop = true;
         }
     }
 
@@ -316,7 +317,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let (total, pending, ai_used, ai_error, selected) = {
-        let g = app.clean.lock().unwrap();
+        let g = app.clean.lock_ok();
         (g.total(), g.pending_questions(), g.ai_used, g.ai_error.clone(), g.selected_bytes())
     };
     let avail = claude_now(app);
@@ -332,7 +333,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         cleanup::start_scan(app.clean.clone(), ctx.clone(), app.use_ai && avail.ready());
         return;
     }
-    let hidden = app.clean.lock().unwrap().hidden_kept;
+    let hidden = app.clean.lock_ok().hidden_kept;
     if hidden > 0 {
         let label = format!("Show {hidden} kept");
         let kw = button_width(&p, &label, BTN_SECONDARY);
@@ -352,7 +353,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         p.text(c + Vec2::new(0.0, 84.0), Align2::CENTER_CENTER, "No caches, logs or leftovers worth removing were found.", font(13.0), TEXT_DIM());
         let dr = Rect::from_center_size(c + Vec2::new(0.0, 130.0), Vec2::new(96.0, 32.0));
         if pill_button(ui, dr, "Done", BTN_PRIMARY, true).clicked() {
-            app.clean.lock().unwrap().phase = Phase::Intro;
+            app.clean.lock_ok().phase = Phase::Intro;
         }
         return;
     }
@@ -362,7 +363,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     // the groups as tabs: All, then each group that found something
     let mut tabs: Vec<(Option<Group>, String, u64, usize, Color32)> = vec![];
     {
-        let g = app.clean.lock().unwrap();
+        let g = app.clean.lock_ok();
         let asks = |f: &dyn Fn(&Item) -> bool| g.items.iter().filter(|i| f(i) && i.verdict == Verdict::Ask && i.by != Who::You).count();
         tabs.push((None, "All".into(), total, asks(&|_| true), TEXT_DIM()));
         for (k, grp) in Group::ALL.iter().enumerate() {
@@ -417,7 +418,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
 
     // the chosen tab's items, split three ways
     let (asks, safe, kept): (Vec<usize>, Vec<usize>, Vec<usize>) = {
-        let g = app.clean.lock().unwrap();
+        let g = app.clean.lock_ok();
         let mut mine: Vec<usize> = g.items.iter().enumerate().filter(|(_, it)| app.clean_group.is_none_or(|gr| it.group == gr)).map(|(i, _)| i).collect();
         mine.sort_by_key(|&i| std::cmp::Reverse(g.items[i].bytes));
         let asks = mine.iter().copied().filter(|&i| g.items[i].verdict == Verdict::Ask && g.items[i].by != Who::You).collect();
@@ -427,7 +428,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     };
     let shared = app.clean.clone();
     let sum = |v: &[usize]| -> u64 {
-        let g = shared.lock().unwrap();
+        let g = shared.lock_ok();
         v.iter().map(|&i| g.items[i].bytes).sum()
     };
     let cols = Rect::from_min_max(Pos2::new(body.left(), body.top() + tab_h + sp::L), body.max);
@@ -476,11 +477,11 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         if !safe.is_empty() {
             let lab = section_label(&p, safe_r.left_top(), "Safe", ACCENT(), safe.len(), sum(&safe));
             let all_on = {
-                let g = app.clean.lock().unwrap();
+                let g = app.clean.lock_ok();
                 safe.iter().all(|&i| g.items[i].selected || g.items[i].hard_keep)
             };
             if link(ui, Pos2::new(safe_r.right(), lab.center().y), Align2::RIGHT_CENTER, if all_on { "None" } else { "Select all" }, 12.0).clicked() {
-                let mut g = app.clean.lock().unwrap();
+                let mut g = app.clean.lock_ok();
                 for &i in &safe {
                     let it = &mut g.items[i];
                     it.selected = !all_on && !it.hard_keep && !it.permanent;
@@ -552,7 +553,7 @@ fn scroll_rows(ui: &mut Ui, area: Rect, salt: String, n: usize, row_h: f32, gap:
 fn answer_items(app: &mut App, idx: &[usize], v: Verdict) {
     let mut kept = Vec::new();
     {
-        let mut g = app.clean.lock().unwrap();
+        let mut g = app.clean.lock_ok();
         for &i in idx {
             let it = &mut g.items[i];
             if v == Verdict::Keep {
@@ -583,7 +584,7 @@ fn row_extras(ui: &mut Ui, rr: Rect, it: &Item) {
 
 /// One question: name and size, the path, Allow and Keep.
 fn ask_card(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
-    let it = app.clean.lock().unwrap().items[i].clone();
+    let it = app.clean.lock_ok().items[i].clone();
     let p = ui.painter().clone();
     glass_card(&p, rr, R_CARD, 0.0, false);
     row_extras(ui, rr, &it);
@@ -609,14 +610,14 @@ fn ask_card(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
 
 /// One safe item: checkbox, name, size.
 fn safe_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
-    let it = app.clean.lock().unwrap().items[i].clone();
+    let it = app.clean.lock_ok().items[i].clone();
     let p = ui.painter().clone();
     let rr = rr.shrink2(Vec2::new(4.0, 0.0));
     row_extras(ui, rr, &it);
     let can = !it.hard_keep;
     let cb = Rect::from_center_size(Pos2::new(rr.left() + sp::M + 8.0, rr.center().y), Vec2::splat(16.0));
     if checkbox(ui, cb, ui.scope_id().with(("sel", &it.path)), it.selected, can).clicked() && can {
-        let mut g = app.clean.lock().unwrap();
+        let mut g = app.clean.lock_ok();
         g.items[i].selected = !g.items[i].selected;
     }
     let sz = p.text(Pos2::new(rr.right() - sp::M, rr.center().y), Align2::RIGHT_CENTER, human_bytes(it.bytes), ty::title(), TEXT());
@@ -630,7 +631,7 @@ fn safe_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
 
 /// One kept item: a lock, the name, the size, dimmed.
 fn kept_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
-    let it = app.clean.lock().unwrap().items[i].clone();
+    let it = app.clean.lock_ok().items[i].clone();
     let p = ui.painter().clone();
     let rr = rr.shrink2(Vec2::new(4.0, 0.0));
     row_extras(ui, rr, &it);
@@ -647,7 +648,7 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
     let _ = ui.interact(r, ui.scope_id().with("confirm-scrim"), Sense::click());
     p.rect_filled(r, CornerRadius { nw: 0, sw: 0, ne: WIN_R as u8, se: WIN_R as u8 }, Color32::from_black_alpha(115));
     let (n, bytes, perm, trashed) = {
-        let g = app.clean.lock().unwrap();
+        let g = app.clean.lock_ok();
         let sel: Vec<&Item> = g.items.iter().filter(|i| i.selected).collect();
         let trashed = sel.iter().filter(|i| !i.permanent && !i.rebuilds()).count();
         (sel.len(), sel.iter().map(|i| i.bytes).sum::<u64>(), sel.iter().any(|i| i.permanent), trashed)
@@ -693,7 +694,7 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
 
 fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
-    let st = app.clean.lock().unwrap().clone();
+    let st = app.clean.lock_ok().clone();
     page_header(&p, r, "Cleanup", "Finished", TEXT_DIM());
     let ok = st.failed.is_empty();
     // removed items leave the list; the engine keeps what each one was
@@ -753,7 +754,7 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     }
     let db = Rect::from_min_size(Pos2::new(li.left(), li.bottom() - 34.0), Vec2::new(li.width(), 34.0));
     if pill_button(ui, db, "Done", BTN_PRIMARY, true).clicked() {
-        app.clean.lock().unwrap().phase = Phase::Intro;
+        app.clean.lock_ok().phase = Phase::Intro;
         app.clean_log = false;
     }
 

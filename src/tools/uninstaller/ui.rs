@@ -3,6 +3,7 @@
 //! that appears while an app is dragged, and the note shown when an app was
 //! thrown away elsewhere.
 
+use crate::kit::sync::LockExt;
 use super::apps::Source;
 use super::leftovers::{Item, Kind};
 use super::remove::Target;
@@ -167,7 +168,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let idle = {
-        let mut g = u.st.lock().unwrap();
+        let mut g = u.st.lock_ok();
         g.page_seen = true;
         g.phase == Phase::Idle
     };
@@ -175,7 +176,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         u.rescan();
     }
     let (n_apps, total, phase, orphan_bytes) = {
-        let g = u.st.lock().unwrap();
+        let g = u.st.lock_ok();
         (g.apps.len(), g.apps.iter().map(|a| a.total()).sum::<u64>(), g.phase, g.orphans.iter().map(|o| o.bytes()).sum::<u64>())
     };
     let sub = match (u.tab, phase) {
@@ -216,16 +217,16 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         u.dropped(f);
     }
     if u.origin == Origin::Page {
-        let d = u.st.lock().unwrap().drop.clone();
+        let d = u.st.lock_ok().drop.clone();
         match d {
             Drop::Confirm(t) => {
-                u.st.lock().unwrap().drop = Drop::Idle;
+                u.st.lock_ok().drop = Drop::Idle;
                 u.selected = t.app.clone();
                 u.tab = Tab::Apps;
                 u.review = Some(Review { targets: vec![t], open: [0].into() });
             }
             Drop::Refused(name, why) => {
-                u.st.lock().unwrap().drop = Drop::Idle;
+                u.st.lock_ok().drop = Drop::Idle;
                 cx.toast(format!("{name}: {why}"));
             }
             _ => {}
@@ -322,16 +323,16 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let area = Rect::from_min_max(Pos2::new(x0, fy + 40.0), Pos2::new(x1, body.bottom() - 20.0));
     let mut list = Rect::from_min_max(area.min, Pos2::new(area.right() - ASIDE_W - 16.0, area.bottom()));
     let aside = Rect::from_min_max(Pos2::new(list.right() + 16.0, area.top()), area.max);
-    u.checked.retain(|c| u.st.lock().unwrap().apps.iter().any(|a| &a.path == c && a.locked.is_none()));
+    u.checked.retain(|c| u.st.lock_ok().apps.iter().any(|a| &a.path == c && a.locked.is_none()));
     if !u.checked.is_empty() {
         let bar = Rect::from_min_max(Pos2::new(list.left(), list.bottom() - 52.0), list.max);
         list.max.y = bar.top() - 10.0;
         batch_bar(u, ui, bar);
     }
     let ids = u.visible();
-    let keep = u.selected.as_ref().is_some_and(|s| u.st.lock().unwrap().apps.iter().any(|a| &a.path == s));
+    let keep = u.selected.as_ref().is_some_and(|s| u.st.lock_ok().apps.iter().any(|a| &a.path == s));
     if !keep {
-        u.selected = ids.first().map(|&i| u.st.lock().unwrap().apps[i].path.clone());
+        u.selected = ids.first().map(|&i| u.st.lock_ok().apps[i].path.clone());
     }
     glass_card(&p, list, R_CARD, 0.0, false);
     // column heads
@@ -345,7 +346,7 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     hairline(&p, Pos2::new(list.left(), list.top() + 30.0), Pos2::new(list.right(), list.top() + 30.0));
     let rows = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - 2.0));
     if ids.is_empty() {
-        let (msg, hint) = match u.st.lock().unwrap().phase {
+        let (msg, hint) = match u.st.lock_ok().phase {
             Phase::Listing | Phase::Idle => ("Looking for apps…", ""),
             _ if u.search.is_empty() && u.filter == Filter::All => ("No apps found", "Apps in /Applications and ~/Applications show here."),
             _ => ("Nothing matches", "Try another filter or search."),
@@ -368,7 +369,7 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
                 }
                 // the row without its file list, which can be long
                 let (a, total) = {
-                    let g = u.st.lock().unwrap();
+                    let g = u.st.lock_ok();
                     (g.apps[i].without_items(), g.apps[i].total())
                 };
                 let resp = ui.interact(r, ui.scope_id().with(("un-row", &a.path)), Sense::click());
@@ -418,7 +419,7 @@ fn batch_bar(u: &mut Uninstaller, ui: &mut Ui, bar: Rect) {
     p.rect_filled(bar, R_CARD, RAISED());
     p.rect_stroke(bar, R_CARD, Stroke::new(1.0, white(20)), StrokeKind::Inside);
     let (n, bytes) = {
-        let g = u.st.lock().unwrap();
+        let g = u.st.lock_ok();
         let sel: Vec<_> = g.apps.iter().filter(|a| u.checked.contains(&a.path)).collect();
         (sel.len(), sel.iter().map(|a| a.total()).sum::<u64>())
     };
@@ -428,7 +429,7 @@ fn batch_bar(u: &mut Uninstaller, ui: &mut Ui, bar: Rect) {
     let bw = button_width(&p, &label, BTN_PRIMARY);
     let br = Rect::from_min_size(Pos2::new(bar.right() - 12.0 - bw, bar.center().y - 15.0), Vec2::new(bw, 30.0));
     if pill_button(ui, br, &label, BTN_PRIMARY, true).clicked() {
-        let g = u.st.lock().unwrap();
+        let g = u.st.lock_ok();
         let targets: Vec<Target> = g.apps.iter().filter(|a| u.checked.contains(&a.path) && a.locked.is_none()).map(|a| a.target(false)).collect();
         drop(g);
         u.review = Some(Review { targets, open: Default::default() });
@@ -443,7 +444,7 @@ fn batch_bar(u: &mut Uninstaller, ui: &mut Ui, bar: Rect) {
 fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
-    let Some(a) = u.st.lock().unwrap().apps.iter().find(|a| a.path == sel).cloned() else { return };
+    let Some(a) = u.st.lock_ok().apps.iter().find(|a| a.path == sel).cloned() else { return };
     let x0 = r.left() + 14.0;
     let x1 = r.right() - 14.0;
     let mut y = r.top() + 14.0;
@@ -520,7 +521,7 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
             let lr = text_fit(&p, Pos2::new(cb.right() + 8.0, rr.center().y), Align2::LEFT_CENTER, &label, font(12.0), if it.selected { TEXT() } else { TEXT_FAINT() }, right - cb.right() - 12.0);
             ui.interact(lr, ui.scope_id().with(("un-tip", &it.path)), Sense::hover()).on_hover_text(format!("{} · {}", it.kind.label(), it.path.display()));
             if resp.clicked() {
-                let mut g = u.st.lock().unwrap();
+                let mut g = u.st.lock_ok();
                 if let Some(x) = g.apps.iter_mut().find(|x| x.path == a.path).and_then(|x| x.items.iter_mut().find(|i| i.path == it.path)) {
                     x.selected = !x.selected;
                 }
@@ -698,7 +699,7 @@ fn visible_items(t: &Target) -> Vec<&Item> {
 // ---------------------------------------------------------------- progress and result
 
 fn working(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
-    let Some(line) = u.st.lock().unwrap().working.clone() else { return };
+    let Some(line) = u.st.lock_ok().working.clone() else { return };
     let ctx = ui.ctx().clone();
     scrim(ui, r, "un-working-scrim");
     let p = ui.painter().clone();
@@ -720,7 +721,7 @@ pub struct Outcome {
 }
 
 pub fn result_text(u: &Uninstaller) -> Option<Outcome> {
-    let g = u.st.lock().unwrap();
+    let g = u.st.lock_ok();
     let (rep, _) = g.last.as_ref()?;
     let (title, detail) = rep.summary();
     Some(Outcome { title, detail, can_undo: !rep.moved.is_empty(), can_retry: !rep.retry.is_empty(), failed: rep.failed.len() })
@@ -728,13 +729,13 @@ pub fn result_text(u: &Uninstaller) -> Option<Outcome> {
 
 /// Try again with what stayed last time.
 fn retry(u: &mut Uninstaller) {
-    let again = u.st.lock().unwrap().last.take().map(|(r, _)| r.retry).unwrap_or_default();
+    let again = u.st.lock_ok().last.take().map(|(r, _)| r.retry).unwrap_or_default();
     u.run(again);
 }
 
 fn result_bar(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
-    let fresh = u.st.lock().unwrap().last.as_ref().is_some_and(|(_, t)| t.elapsed() < UNDO_FOR);
-    if !fresh || u.st.lock().unwrap().working.is_some() {
+    let fresh = u.st.lock_ok().last.as_ref().is_some_and(|(_, t)| t.elapsed() < UNDO_FOR);
+    if !fresh || u.st.lock_ok().working.is_some() {
         return;
     }
     let Some(o) = result_text(u) else { return };
@@ -752,7 +753,7 @@ fn result_bar(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
     icon(&p, if failed > 0 { Icon::Info } else { Icon::Check }, Rect::from_center_size(c, Vec2::splat(12.0)), ON_ACTION);
     let close = Rect::from_center_size(Pos2::new(bar.right() - 22.0, bar.center().y), Vec2::splat(22.0));
     if round_button(ui, close, Icon::Close, "Dismiss").clicked() {
-        u.st.lock().unwrap().last = None;
+        u.st.lock_ok().last = None;
         return;
     }
     let mut right = close.left() - 8.0;
@@ -779,7 +780,7 @@ fn result_bar(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
     if let Some(d) = &o.detail {
         let fr = text_fit(&p, Pos2::new(c.x + 20.0, bar.center().y + 9.0), Align2::LEFT_CENTER, d, font(11.0), if failed > 0 { AMBER() } else { TEXT_DIM() }, right - c.x - 28.0);
         if failed > 0 {
-            let why: String = u.st.lock().unwrap().last.as_ref().map(|(r, _)| r.failed.iter().take(6).map(|(a, b)| format!("{}: {b}", short_path(a))).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+            let why: String = u.st.lock_ok().last.as_ref().map(|(r, _)| r.failed.iter().take(6).map(|(a, b)| format!("{}: {b}", short_path(a))).collect::<Vec<_>>().join("\n")).unwrap_or_default();
             ui.interact(fr.union(tr), ui.scope_id().with("un-fail-tip"), Sense::hover()).on_hover_text(why);
         }
     }
@@ -798,7 +799,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let x1 = body.right() - 24.0;
     let mut y = body.top() + 16.0;
     let (orphans, phase) = {
-        let g = u.st.lock().unwrap();
+        let g = u.st.lock_ok();
         (g.orphans.clone(), g.phase)
     };
     let sel: Vec<&super::Orphan> = orphans.iter().filter(|o| o.selected).collect();
@@ -828,7 +829,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let sc = Rect::from_min_max(Pos2::new(x0, body.bottom() - 20.0 - 2.0 * 44.0), Pos2::new(x1, body.bottom() - 20.0));
     glass_card(&p, sc, R_CARD, 0.0, false);
     let (watch, zone) = {
-        let g = u.st.lock().unwrap();
+        let g = u.st.lock_ok();
         (g.settings.watch_removed, g.settings.drop_zone)
     };
     let rows = [
@@ -843,7 +844,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
         p.text(Pos2::new(rr.left() + 16.0, rr.center().y), Align2::LEFT_CENTER, *t, font(13.0), TEXT());
         let sw = Rect::from_center_size(Pos2::new(rr.right() - 34.0, rr.center().y), Vec2::new(36.0, 20.0));
         if switch(ui, sw, ui.scope_id().with(("un-set", k)), *on, true).clicked() {
-            let mut g = u.st.lock().unwrap();
+            let mut g = u.st.lock_ok();
             if k == 0 {
                 g.settings.watch_removed = !g.settings.watch_removed;
             } else {
@@ -892,7 +893,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
             }
             let cb = Rect::from_center_size(Pos2::new(r.left() + 14.0 + 8.0, r.center().y), Vec2::splat(15.0));
             if checkbox(ui, cb, ui.scope_id().with(("un-ocheck", &o.id)), o.selected, true).clicked() || resp.clicked() {
-                let mut g = u.st.lock().unwrap();
+                let mut g = u.st.lock_ok();
                 if let Some(x) = g.orphans.iter_mut().find(|x| x.id == o.id) {
                     x.selected = !x.selected;
                 }
@@ -940,7 +941,7 @@ fn inline_confirm(u: &mut Uninstaller, ui: &mut Ui, rect: Rect, d: &Drop) {
             text_fit(&p, Pos2::new(x0 + 24.0, rect.top() + 38.0), Align2::LEFT_CENTER, why, font(11.0), TEXT_DIM(), x1 - x0 - 24.0);
             let ok = Rect::from_min_size(Pos2::new(x1 - 52.0, rect.bottom() - 34.0), Vec2::new(52.0, 26.0));
             if pill_button(ui, ok, "OK", BTN_SECONDARY, true).clicked() {
-                u.st.lock().unwrap().drop = Drop::Idle;
+                u.st.lock_ok().drop = Drop::Idle;
             }
         }
         Drop::Confirm(t) => {
@@ -958,10 +959,10 @@ fn inline_confirm(u: &mut Uninstaller, ui: &mut Ui, rect: Rect, d: &Drop) {
             let dr = Rect::from_min_size(Pos2::new(mr.left() - 6.0 - dw, by), Vec2::new(dw, 26.0));
             let cr = Rect::from_min_size(Pos2::new(x0 - 4.0, by), Vec2::new(64.0, 26.0));
             if link(ui, Pos2::new(cr.left() + 6.0, cr.center().y), Align2::LEFT_CENTER, "Cancel", 12.0).clicked() {
-                u.st.lock().unwrap().drop = Drop::Idle;
+                u.st.lock_ok().drop = Drop::Idle;
             }
             if pill_button(ui, dr, "Details…", BTN_SECONDARY, true).clicked() {
-                u.st.lock().unwrap().drop = Drop::Idle;
+                u.st.lock_ok().drop = Drop::Idle;
                 u.selected = t.app.clone();
                 u.tab = Tab::Apps;
                 u.review = Some(Review { targets: vec![t.clone()], open: [0].into() });
@@ -969,7 +970,7 @@ fn inline_confirm(u: &mut Uninstaller, ui: &mut Ui, rect: Rect, d: &Drop) {
             }
             if pill_button(ui, mr, main, BTN_PRIMARY, true).clicked() {
                 let t = t.clone();
-                u.st.lock().unwrap().drop = Drop::Idle;
+                u.st.lock_ok().drop = Drop::Idle;
                 u.done_until = Some(Instant::now() + Duration::from_secs(10));
                 u.run(vec![t]);
             }
@@ -996,7 +997,7 @@ fn screen(ctx: &egui::Context) -> Vec2 {
 /// and result that follow a drop on it.
 fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
     let (dragging, d, working) = {
-        let g = u.st.lock().unwrap();
+        let g = u.st.lock_ok();
         (!g.drag.apps.is_empty(), g.drop.clone(), g.working.is_some())
     };
     let mine = u.origin == Origin::Zone;
@@ -1032,20 +1033,20 @@ fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
             u.origin = Origin::Zone;
             u.dropped(f);
             crate::kit::native::activate();
-            u.st.lock().unwrap().drag = Default::default();
+            u.st.lock_ok().drag = Default::default();
         }
         let over = !files_in(&ictx, false).is_empty();
-        let d = u.st.lock().unwrap().drop.clone();
+        let d = u.st.lock_ok().drop.clone();
         if u.origin == Origin::Zone && !matches!(d, Drop::Idle) {
             p.rect_filled(r, 16.0, POPOVER());
             p.rect_stroke(r, 16.0, Stroke::new(1.0, white(36)), StrokeKind::Inside);
             inline_confirm(u, ui, r.shrink(2.0), &d);
             return;
         }
-        if u.st.lock().unwrap().working.is_some() {
+        if u.st.lock_ok().working.is_some() {
             p.rect_filled(r, 16.0, POPOVER());
             spinner(&p, Pos2::new(r.left() + 30.0, r.center().y), 9.0, ictx.input(|i| i.time), ACCENT());
-            let line = u.st.lock().unwrap().working.clone().unwrap_or_default();
+            let line = u.st.lock_ok().working.clone().unwrap_or_default();
             text_fit(&p, Pos2::new(r.left() + 52.0, r.center().y), Align2::LEFT_CENTER, &line, font(13.0), TEXT(), r.width() - 70.0);
             crate::kit::glass::animate(&ictx);
             return;
@@ -1084,7 +1085,7 @@ fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
         } else {
             dashed_rect(&p, r.shrink(2.0), 14.0, white(90));
         }
-        let names: Vec<String> = u.st.lock().unwrap().drag.apps.iter().filter_map(|a| a.file_stem().map(|s| s.to_string_lossy().into_owned())).collect();
+        let names: Vec<String> = u.st.lock_ok().drag.apps.iter().filter_map(|a| a.file_stem().map(|s| s.to_string_lossy().into_owned())).collect();
         let first = names.first().cloned().unwrap_or_else(|| "the app".into());
         tool_chip(&p, Rect::from_min_size(Pos2::new(r.left() + 16.0, r.center().y - 20.0), Vec2::splat(40.0)), Icon::AppRemove, TINT());
         let x = r.left() + 70.0;
@@ -1096,9 +1097,9 @@ fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
 
 /// "Zoom was removed, its data is still here" note.
 fn notice(u: &mut Uninstaller, ctx: &egui::Context, cx: &mut Cx) {
-    let Some(n) = u.st.lock().unwrap().notice.clone() else { return };
+    let Some(n) = u.st.lock_ok().notice.clone() else { return };
     if n.at.elapsed() > Duration::from_secs(90) {
-        u.st.lock().unwrap().notice = None;
+        u.st.lock_ok().notice = None;
         return;
     }
     let size = Vec2::new(360.0, 118.0);
@@ -1140,12 +1141,12 @@ fn notice(u: &mut Uninstaller, ctx: &egui::Context, cx: &mut Cx) {
     });
     match act {
         Some(true) => {
-            u.st.lock().unwrap().notice = None;
+            u.st.lock_ok().notice = None;
             u.tab = Tab::Leftovers;
             u.review = Some(Review { targets: vec![n.target], open: [0].into() });
             cx.open_page(ID, "leftovers");
         }
-        Some(false) => u.st.lock().unwrap().notice = None,
+        Some(false) => u.st.lock_ok().notice = None,
         None => ctx.request_repaint_after(Duration::from_millis(500)),
     }
 }
@@ -1158,6 +1159,7 @@ pub mod demo {
     use super::super::{AppRow, Filter, Orphan, Phase, Review, Tab, Uninstaller};
     use crate::core::tool::View;
     use std::path::PathBuf;
+    use crate::kit::sync::LockExt;
     use std::time::Instant;
 
     const MB: u64 = 1_000_000;
@@ -1258,7 +1260,7 @@ pub mod demo {
         }
         u.demo_now = Some(NOW);
         {
-            let mut g = u.st.lock().unwrap();
+            let mut g = u.st.lock_ok();
             g.apps = apps();
             g.orphans = orphans();
             g.phase = Phase::Ready;
@@ -1273,7 +1275,7 @@ pub mod demo {
             "uninstaller" | "uninstaller-apps" => {}
             "uninstaller-review" => {
                 u.filter = Filter::Unused;
-                let g = u.st.lock().unwrap();
+                let g = u.st.lock_ok();
                 let pick = ["Android Studio", "Final Cut Pro", "Zoom"];
                 let targets: Vec<_> = g.apps.iter().filter(|a| pick.contains(&a.name.as_str())).map(|a| a.target(false)).collect();
                 u.checked = g.apps.iter().filter(|a| pick.contains(&a.name.as_str())).map(|a| a.path.clone()).collect();
@@ -1282,12 +1284,12 @@ pub mod demo {
                 u.review = Some(Review { targets, open: [0].into() });
             }
             "uninstaller-done" => {
-                let t = u.st.lock().unwrap().apps.iter().find(|a| a.name == "Android Studio").unwrap().target(false);
+                let t = u.st.lock_ok().apps.iter().find(|a| a.name == "Android Studio").unwrap().target(false);
                 u.run(vec![t]);
-                u.st.lock().unwrap().last.as_mut().unwrap().1 = Instant::now();
+                u.st.lock_ok().last.as_mut().unwrap().1 = Instant::now();
             }
             "uninstaller-reset" => {
-                let t = u.st.lock().unwrap().apps.iter().find(|a| a.name == "Docker").unwrap().target(true);
+                let t = u.st.lock_ok().apps.iter().find(|a| a.name == "Docker").unwrap().target(true);
                 u.review = Some(Review { targets: vec![t], open: [0].into() });
             }
             "uninstaller-leftovers" => u.tab = Tab::Leftovers,

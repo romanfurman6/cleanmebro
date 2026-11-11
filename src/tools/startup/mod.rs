@@ -6,6 +6,7 @@
 //!
 //! Page routes: "" (All), "suggested", "off".
 
+use crate::kit::sync::LockExt;
 mod items;
 mod ui;
 
@@ -141,10 +142,10 @@ impl Startup {
         let st: Shared = Arc::new(Mutex::new(State::default()));
         let me = Startup { st: st.clone(), ctx: env.ctx.clone(), demo: env.demo, user_library: user_library.clone(), filter: Filter::All, search: String::new(), apps_requested: false, icons: Default::default(), events: (crate::kit::perms::Status::NotAsked, None) };
         if env.demo {
-            demo(&mut st.lock().unwrap(), false);
+            demo(&mut st.lock_ok(), false);
             return me;
         }
-        st.lock().unwrap().settings = Settings::load();
+        st.lock_ok().settings = Settings::load();
         let ctx = env.ctx.clone();
         std::thread::Builder::new()
             .name("startup-watch".into())
@@ -157,7 +158,7 @@ impl Startup {
     }
 
     pub fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.st.lock().unwrap()
+        self.st.lock_ok()
     }
 
     /// Whether System Events lets us read the login apps (never asks).
@@ -184,7 +185,7 @@ impl Startup {
             .name("startup-login".into())
             .spawn(move || {
                 let apps = items::login_apps();
-                let mut g = st.lock().unwrap();
+                let mut g = st.lock_ok();
                 match apps {
                     Ok(mut a) => {
                         for (name, path, hidden) in &g.settings.login_off {
@@ -228,7 +229,7 @@ impl Startup {
             .spawn(move || {
                 let res = f(&st);
                 let jobs = items::read_jobs(&lib);
-                let mut g = st.lock().unwrap();
+                let mut g = st.lock_ok();
                 g.jobs = jobs;
                 g.busy = None;
                 if let Err(e) = res {
@@ -250,7 +251,7 @@ impl Startup {
                 if !demo {
                     items::set_jobs(&[(j.clone(), want)])?;
                 }
-                if let Some(x) = st.lock().unwrap().jobs.iter_mut().find(|x| x.key() == j.key()) {
+                if let Some(x) = st.lock_ok().jobs.iter_mut().find(|x| x.key() == j.key()) {
                     x.on = want;
                     if !want {
                         x.pid = None;
@@ -270,7 +271,7 @@ impl Startup {
                 if !demo {
                     items::set_login_app(&a, want)?;
                 }
-                let mut g = st.lock().unwrap();
+                let mut g = st.lock_ok();
                 if let Some(x) = g.apps.iter_mut().find(|x| x.path == a.path) {
                     x.on = want;
                 }
@@ -300,7 +301,7 @@ impl Startup {
                     let batch: Vec<(Job, bool)> = list.iter().map(|j| (j.clone(), false)).collect();
                     items::set_jobs(&batch)?;
                 }
-                let mut g = st.lock().unwrap();
+                let mut g = st.lock_ok();
                 for j in &list {
                     if let Some(x) = g.jobs.iter_mut().find(|x| x.key() == j.key()) {
                         x.on = false;
@@ -324,7 +325,7 @@ impl Startup {
                 if !demo {
                     items::set_jobs(&jobs)?;
                 }
-                let mut g = st.lock().unwrap();
+                let mut g = st.lock_ok();
                 for (j, on) in &jobs {
                     if let Some(x) = g.jobs.iter_mut().find(|x| x.key() == j.key()) {
                         x.on = *on;
@@ -347,7 +348,7 @@ impl Startup {
                 if !demo {
                     items::trash_job(&j)?;
                 }
-                st.lock().unwrap().jobs.retain(|x| x.key() != j.key());
+                st.lock_ok().jobs.retain(|x| x.key() != j.key());
                 Ok(())
             },
         );
@@ -373,7 +374,7 @@ fn watch(st: Shared, lib: PathBuf, ctx: egui::Context) {
         let paths: BTreeSet<PathBuf> = items::plist_paths(&lib, std::path::Path::new("/")).into_iter().collect();
         let mut announce = Vec::new();
         {
-            let mut g = st.lock().unwrap();
+            let mut g = st.lock_ok();
             let fresh: Vec<PathBuf> = paths.difference(&g.settings.known).cloned().collect();
             let changed = !fresh.is_empty() || g.settings.known.len() != paths.len();
             if g.settings.seeded {

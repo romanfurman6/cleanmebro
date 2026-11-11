@@ -3,6 +3,7 @@
 //! limits on a slow timer, local tokens and projects while the panel or
 //! window is open. Picking another provider swaps it in on the next wake.
 
+use crate::kit::sync::LockExt;
 use crate::kit::activity::{self, Every, Wake};
 use crate::kit::ai::{self, UsageInfo};
 use crate::kit::claude_code as cc;
@@ -34,17 +35,17 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
             loop {
                 // another provider was picked: show its last data, refresh only when due
                 if ai::selected() != cur {
-                    let old = s.lock().unwrap().clone();
+                    let old = s.lock_ok().clone();
                     cache.insert(cur, (old, limits_at, local_at, size_at));
                     cur = ai::selected();
                     p = ai::make(cur);
                     match cache.remove(&cur) {
                         Some((info, a, b, c)) => {
-                            *s.lock().unwrap() = info;
+                            *s.lock_ok() = info;
                             (limits_at, local_at, size_at) = (a, b, c);
                         }
                         None => {
-                            *s.lock().unwrap() = UsageInfo { loading: true, ..UsageInfo::new(p.name()) };
+                            *s.lock_ok() = UsageInfo { loading: true, ..UsageInfo::new(p.name()) };
                             limits_at = Every::default();
                             local_at = Every::default();
                             size_at = Every::default();
@@ -59,10 +60,10 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                     continue;
                 }
                 // the limits also feed the menu-bar title, so they refresh hidden too
-                let retry_empty = s.lock().unwrap().limits.is_empty() && limits_at.age().is_some_and(|a| a.as_secs() > 60);
+                let retry_empty = s.lock_ok().limits.is_empty() && limits_at.age().is_some_and(|a| a.as_secs() > 60);
                 if retry_empty || limits_at.due(Duration::from_secs(m::CLAUDE_LIMITS_REFRESH_SECS)) {
                     limits_at.mark();
-                    s.lock().unwrap().loading = true;
+                    s.lock_ok().loading = true;
                     activity::repaint(&ctx);
                     p.fetch_account(&s);
                 }
@@ -76,14 +77,14 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                         size_at.mark();
                         p.data_dir().map(|d| crate::kit::fs::dir_size(&d)).unwrap_or(0)
                     });
-                    let mut g = s.lock().unwrap();
+                    let mut g = s.lock_ok();
                     g.projects = projects;
                     g.local = local;
                     if let Some(d) = data {
                         g.data_bytes = d;
                     }
                 }
-                s.lock().unwrap().loading = false;
+                s.lock_ok().loading = false;
                 activity::repaint(&ctx);
                 // once per launch, load the other providers too, so the first
                 // switch to one shows its data right away
@@ -99,7 +100,7 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                         }
                         let tmp: Shared = Arc::new(Mutex::new(UsageInfo::new(q.name())));
                         q.fetch_account(&tmp);
-                        let mut info = tmp.lock().unwrap().clone();
+                        let mut info = tmp.lock_ok().clone();
                         info.projects = q.projects();
                         info.local = q.local_tokens();
                         info.loading = false;
@@ -131,6 +132,6 @@ pub fn request_refresh() {
 pub fn select(info: &Shared, demo: bool, i: usize) {
     ai::select(i, !demo);
     if demo {
-        *info.lock().unwrap() = ai::make(ai::selected()).demo();
+        *info.lock_ok() = ai::make(ai::selected()).demo();
     }
 }
