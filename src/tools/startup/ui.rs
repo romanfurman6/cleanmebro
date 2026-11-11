@@ -6,7 +6,7 @@ use super::{plural, Filter, Startup};
 use crate::core::tool::{Cx, Size};
 use crate::kit::glass::*;
 use crate::kit::{macos, tile};
-use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
+use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
 use std::path::{Path, PathBuf};
 
 const ROW_H: f32 = 44.0;
@@ -16,10 +16,12 @@ const HEAD_H: f32 = 34.0;
 const ICONS_PER_FRAME: usize = 4;
 /// Faint red behind suggested rows and the suggestion card.
 fn red_wash(a: f32) -> Color32 {
-    with_alpha(tint::STARTUP, a)
+    with_alpha(tint::STARTUP(), a)
 }
-const SUGGEST_TEXT: Color32 = Color32::from_rgb(0xFF, 0x8A, 0x80);
-const ORPHAN_TEXT: Color32 = Color32::from_rgb(0xF2, 0xC4, 0x6B);
+#[allow(non_snake_case)]
+fn SUGGEST_TEXT() -> Color32 { AMBER() }
+#[allow(non_snake_case)]
+fn ORPHAN_TEXT() -> Color32 { AMBER() }
 
 fn letter_color(name: &str) -> Color32 {
     const PALETTE: [Color32; 8] = [
@@ -60,13 +62,13 @@ fn app_icon(s: &mut Startup, ctx: &egui::Context, p: &egui::Painter, r: Rect, pa
 fn outline_chip(p: &egui::Painter, pos: Pos2, align: Align2, label: &str, col: Color32) -> Rect {
     let g = p.layout_no_wrap(label.to_string(), font(10.0), col);
     let r = align.anchor_size(pos, g.size() + Vec2::new(10.0, 2.0));
-    p.rect_stroke(r, 4.0, Stroke::new(1.0, with_alpha(col, 0.45)), StrokeKind::Inside);
+    // quiet text, no box: a tag is meta, not a button
     p.galley(r.center() - g.size() / 2.0, g, col);
     r
 }
 
 fn why_color(w: Why) -> Color32 {
-    if w == Why::Removed { ORPHAN_TEXT } else { SUGGEST_TEXT }
+    if w == Why::Removed { ORPHAN_TEXT() } else { SUGGEST_TEXT() }
 }
 
 /// An app in /Applications that the Uninstaller can show.
@@ -103,7 +105,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     } else {
         format!("{} start with your Mac · {running} running now", plural(total, "thing"))
     };
-    let btns = page_header(&p, r, "Startup", &sub, TEXT_DIM);
+    let btns = page_header(&p, r, "Startup", &sub, TEXT_DIM());
 
     // filter + search on the right of the header
     let labels_owned = [format!("All {total}"), format!("Suggested {}", suggested.len()), format!("Off {off}")];
@@ -124,8 +126,8 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
 
     let body = Rect::from_min_max(Pos2::new(r.left() + 24.0, r.top() + PAGE_HEADER_H + 1.0), Pos2::new(r.right() - 24.0, r.bottom()));
     if !loaded {
-        spinner(&p, Pos2::new(body.left() + 8.0, body.top() + 30.0), 7.0, ctx.input(|i| i.time), ACCENT);
-        p.text(Pos2::new(body.left() + 24.0, body.top() + 30.0), Align2::LEFT_CENTER, "Reading what starts with your Mac…", font(13.0), TEXT_DIM);
+        spinner(&p, Pos2::new(body.left() + 8.0, body.top() + 30.0), 7.0, ctx.input(|i| i.time), ACCENT());
+        p.text(Pos2::new(body.left() + 24.0, body.top() + 30.0), Align2::LEFT_CENTER, "Reading what starts with your Mac…", font(13.0), TEXT_DIM());
         crate::kit::glass::animate(&ctx);
         return;
     }
@@ -153,18 +155,18 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     if s.filter != Filter::Suggested {
         let a: Vec<&LoginApp> = apps.iter().filter(|a| app_ok(a)).collect();
         if !a.is_empty() || (s.filter == Filter::All && needle.is_empty()) {
-            rows.push(Row::Head("OPEN AT LOGIN", "Apps macOS opens when you log in", true));
+            rows.push(Row::Head("Open at login", "", true));
             match (&apps_err, apps_loaded) {
-                (Some(e), _) => rows.push(Row::Note(format!("Couldn't read the list ({e}). Allow Cmd+Meow to control System Events in System Settings › Privacy & Security › Automation."))),
+                (Some(e), _) => rows.push(Row::Note(format!("Couldn't read the list ({e}). Allow System Events in Privacy & Security › Automation"))),
                 (None, false) => rows.push(Row::Note("Reading…".into())),
-                (None, true) if a.is_empty() => rows.push(Row::Note("No apps open at login.".into())),
+                (None, true) if a.is_empty() => rows.push(Row::Note("None".into())),
                 _ => rows.extend(a.into_iter().cloned().map(Row::App)),
             }
         }
     }
     for (scopes, title, hint) in [
-        (&[Scope::User, Scope::AllUsers][..], "BACKGROUND AGENTS", "~/Library/LaunchAgents and /Library/LaunchAgents"),
-        (&[Scope::System][..], "SYSTEM DAEMONS", "/Library/LaunchDaemons · run as admin, ask your password"),
+        (&[Scope::User, Scope::AllUsers][..], "Background agents", ""),
+        (&[Scope::System][..], "System daemons", ""),
     ] {
         let js: Vec<&Job> = jobs.iter().filter(|j| scopes.contains(&j.scope) && job_ok(j)).collect();
         if js.is_empty() {
@@ -175,9 +177,9 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     }
     if rows.is_empty() {
         rows.push(Row::Note(match s.filter {
-            Filter::Suggested => "Nothing to turn off. Everything that starts with your Mac looks needed.".into(),
-            Filter::Off => "Nothing is turned off.".into(),
-            Filter::All => "Nothing matches.".into(),
+            Filter::Suggested => "Nothing to turn off".into(),
+            Filter::Off => "Nothing turned off".into(),
+            Filter::All => "No matches".into(),
         }));
     }
 
@@ -209,22 +211,22 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             let cr = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 58.0));
             if let Some(line) = &busy {
                 glass_card(&p, cr, R_CARD, 0.0, false);
-                spinner(&p, Pos2::new(cr.left() + 24.0, cr.center().y), 7.0, ctx.input(|i| i.time), ACCENT);
-                p.text(Pos2::new(cr.left() + 42.0, cr.center().y), Align2::LEFT_CENTER, line, font(13.0), TEXT_SOFT);
+                spinner(&p, Pos2::new(cr.left() + 24.0, cr.center().y), 7.0, ctx.input(|i| i.time), ACCENT());
+                p.text(Pos2::new(cr.left() + 42.0, cr.center().y), Align2::LEFT_CENTER, line, font(13.0), TEXT_SOFT());
             } else if let Some(n) = undo {
                 glass_card(&p, cr, R_CARD, 0.0, false);
                 let c = Pos2::new(cr.left() + 30.0, cr.center().y);
-                p.circle_filled(c, 17.0, with_alpha(GREEN, 0.16));
-                icon(&p, Icon::Check, Rect::from_center_size(c, Vec2::splat(18.0)), GREEN);
+                p.circle_filled(c, 17.0, with_alpha(GREEN(), 0.16));
+                icon(&p, Icon::Check, Rect::from_center_size(c, Vec2::splat(18.0)), GREEN());
                 let br = Rect::from_min_size(Pos2::new(cr.right() - 14.0 - 76.0, cr.center().y - 15.0), Vec2::new(76.0, 30.0));
                 if pill_button(ui, br, "Undo", BTN_SECONDARY, true).clicked() {
                     do_undo = true;
                 }
-                p.text(Pos2::new(cr.left() + 58.0, cr.center().y - 9.0), Align2::LEFT_CENTER, format!("{} turned off", plural(n, "item")), bold(13.0), TEXT);
-                text_fit(&p, Pos2::new(cr.left() + 58.0, cr.center().y + 9.0), Align2::LEFT_CENTER, "Nothing was removed. The apps still work when you open them.", font(12.0), TEXT_DIM, br.left() - cr.left() - 70.0);
+                p.text(Pos2::new(cr.left() + 58.0, cr.center().y - 9.0), Align2::LEFT_CENTER, format!("{} turned off", plural(n, "item")), bold(13.0), TEXT());
+                text_fit(&p, Pos2::new(cr.left() + 58.0, cr.center().y + 9.0), Align2::LEFT_CENTER, "The apps still open", font(12.0), TEXT_DIM(), br.left() - cr.left() - 70.0);
             } else {
                 glass_card(&p, cr, R_CARD, 0.0, false);
-                tool_chip(&p, Rect::from_center_size(Pos2::new(cr.left() + 30.0, cr.center().y), Vec2::splat(34.0)), Icon::Power, tint::STARTUP);
+                tool_chip(&p, Rect::from_center_size(Pos2::new(cr.left() + 30.0, cr.center().y), Vec2::splat(34.0)), Icon::Power, tint::STARTUP());
                 let label = format!("Turn off {}", suggested.len());
                 let bw = button_width(&p, &label, BTN_PRIMARY);
                 let br = Rect::from_min_size(Pos2::new(cr.right() - 14.0 - bw, cr.center().y - 15.0), Vec2::new(bw, 30.0));
@@ -232,8 +234,8 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                     turn_off_all = true;
                 }
                 let title = if suggested.len() == 1 { "1 item you likely don't need".to_string() } else { format!("{} items you likely don't need", suggested.len()) };
-                p.text(Pos2::new(cr.left() + 58.0, cr.center().y - 9.0), Align2::LEFT_CENTER, title, bold(13.0), TEXT);
-                text_fit(&p, Pos2::new(cr.left() + 58.0, cr.center().y + 9.0), Align2::LEFT_CENTER, &why_line(&suggested), font(12.0), TEXT_SOFT, br.left() - cr.left() - 70.0);
+                p.text(Pos2::new(cr.left() + 58.0, cr.center().y - 9.0), Align2::LEFT_CENTER, title, bold(13.0), TEXT());
+                text_fit(&p, Pos2::new(cr.left() + 58.0, cr.center().y + 9.0), Align2::LEFT_CENTER, &why_line(&suggested), font(12.0), TEXT_SOFT(), br.left() - cr.left() - 70.0);
             }
             y += top_h;
         }
@@ -242,7 +244,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             match row {
                 Row::Head(t, hint, settings) => {
                     let tr = section_header(&p, Pos2::new(a.left() + 4.0, y + 22.0), Align2::LEFT_CENTER, t);
-                    p.text(Pos2::new(tr.right() + 8.0, y + 22.0), Align2::LEFT_CENTER, *hint, font(11.0), TEXT_FAINT);
+                    p.text(Pos2::new(tr.right() + 8.0, y + 22.0), Align2::LEFT_CENTER, *hint, font(11.0), TEXT_FAINT());
                     if *settings && link(ui, Pos2::new(a.right() - 4.0, y + 22.0), Align2::RIGHT_CENTER, "Open in System Settings", 12.0).clicked() {
                         super::items::open_settings();
                     }
@@ -251,7 +253,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 Row::Note(t) => {
                     let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 36.0));
                     glass_card(&p, r, 10.0, 0.0, false);
-                    text_fit(&p, Pos2::new(r.left() + 14.0, r.center().y), Align2::LEFT_CENTER, t, font(12.0), TEXT_DIM, r.width() - 28.0);
+                    text_fit(&p, Pos2::new(r.left() + 14.0, r.center().y), Align2::LEFT_CENTER, t, font(12.0), TEXT_DIM(), r.width() - 28.0);
                     y += 40.0;
                 }
                 Row::App(la) => {
@@ -260,8 +262,8 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                     let ir = Rect::from_center_size(Pos2::new(r.left() + 27.0, r.center().y), Vec2::splat(26.0));
                     app_icon(s, &ctx, &p, ir, Some(&la.path), &la.name, !la.on, &mut budget);
                     let cols = columns(r);
-                    text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &la.name, bold(13.0), if la.on { TEXT } else { TEXT_DIM }, cols.when - ir.right() - 24.0);
-                    p.text(Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, if la.hidden { "Opens hidden" } else { "Opens its window" }, font(11.0), TEXT_FAINT);
+                    text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &la.name, bold(13.0), if la.on { TEXT() } else { TEXT_DIM() }, cols.when - ir.right() - 24.0);
+                    p.text(Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, if la.hidden { "Opens hidden" } else { "Opens its window" }, font(11.0), TEXT_FAINT());
                     when_cell(&p, cols.when, r.center().y, Icon::Power, "at login");
                     if !la.on {
                         state_cell(&p, cols.state, r.center().y, Some("off"), false);
@@ -293,7 +295,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                         right_btn = rb.left() - 8.0;
                     }
                     let name_max = cols.when - ir.right() - 24.0;
-                    let nr = text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &j.name, bold(13.0), if j.on { TEXT } else { TEXT_DIM }, name_max * 0.6);
+                    let nr = text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &j.name, bold(13.0), if j.on { TEXT() } else { TEXT_DIM() }, name_max * 0.6);
                     let mut cx0 = nr.right() + 6.0;
                     let mut chip = |label: &str, col: Color32| {
                         let cr = outline_chip(&p, Pos2::new(cx0, r.center().y - 8.0), Align2::LEFT_CENTER, label, col);
@@ -302,20 +304,20 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                     if let Some(w) = why {
                         chip(if w == Why::Removed { "app removed" } else { "suggested" }, why_color(w));
                     } else if j.orphan {
-                        chip("app removed", ORPHAN_TEXT);
+                        chip("app removed", ORPHAN_TEXT());
                     }
                     if new_labels.contains(&j.label) {
-                        chip("new", ACCENT);
+                        chip("new", ACCENT());
                     }
                     if j.admin() {
-                        chip("admin", TEXT_DIM);
+                        chip("admin", TEXT_DIM());
                     }
                     let detail = match (j.owner_name(), why) {
                         (_, Some(w)) if w != Why::Removed => format!("{} · {}", j.label, w.short()),
                         (Some(o), _) if o != j.name => format!("{} · {o}", j.label),
                         _ => j.label.clone(),
                     };
-                    let dr = text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, &detail, font(11.0), TEXT_FAINT, name_max);
+                    let dr = text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, &detail, font(11.0), TEXT_FAINT(), name_max);
                     let tip = match &j.program {
                         Some(pr) => format!("{}\nRuns {}", j.plist.display(), pr.display()),
                         None => j.plist.display().to_string(),
@@ -341,7 +343,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                             ui.ctx().copy_text(j.label.clone());
                         }
                         ui.separator();
-                        if ui.add_enabled(busy.is_none(), egui::Button::new(egui::RichText::new("Move file to Trash…").color(SUGGEST_TEXT))).clicked() {
+                        if ui.add_enabled(busy.is_none(), egui::Button::new(egui::RichText::new("Move file to Trash…").color(RED()))).clicked() {
                             trash = Some(j.clone());
                         }
                     });
@@ -356,7 +358,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         // the notification switch
         y += 10.0;
         let nr = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 40.0));
-        p.text(Pos2::new(nr.left() + 4.0, nr.center().y), Align2::LEFT_CENTER, "Tell me when an app adds itself to startup", font(13.0), TEXT_SOFT);
+        p.text(Pos2::new(nr.left() + 4.0, nr.center().y), Align2::LEFT_CENTER, "Tell me when an app adds itself to startup", font(13.0), TEXT_SOFT());
         let sw = Rect::from_center_size(Pos2::new(nr.right() - 30.0, nr.center().y), Vec2::new(36.0, 20.0));
         if switch(ui, sw, ui.scope_id().with("su-notify"), notify, true).clicked() {
             set_notify = Some(!notify);
@@ -407,7 +409,7 @@ fn why_line(list: &[&Job]) -> String {
     };
     let mut c = s.chars();
     let s: String = c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default();
-    format!("{s}. Apps still work when you open them.")
+    s
 }
 
 struct Cols {
@@ -431,14 +433,14 @@ fn when_icon(j: &Job) -> Icon {
 }
 
 fn when_cell(p: &egui::Painter, x: f32, cy: f32, ic: Icon, label: &str) {
-    icon(p, ic, Rect::from_center_size(Pos2::new(x + 6.0, cy), Vec2::splat(12.0)), TEXT_DIM);
-    text_fit(p, Pos2::new(x + 17.0, cy), Align2::LEFT_CENTER, label, font(12.0), TEXT_DIM, 110.0);
+    icon(p, ic, Rect::from_center_size(Pos2::new(x + 6.0, cy), Vec2::splat(12.0)), TEXT_DIM());
+    text_fit(p, Pos2::new(x + 17.0, cy), Align2::LEFT_CENTER, label, font(12.0), TEXT_DIM(), 110.0);
 }
 
 /// `label` None = running (green dot).
 fn state_cell(p: &egui::Painter, x: f32, cy: f32, label: Option<&str>, running: bool) {
-    p.circle_filled(Pos2::new(x + 4.0, cy), 3.5, if running { GREEN } else { white(56) });
-    p.text(Pos2::new(x + 13.0, cy), Align2::LEFT_CENTER, label.unwrap_or("running"), font(12.0), TEXT_DIM);
+    p.circle_filled(Pos2::new(x + 4.0, cy), 3.5, if running { GREEN() } else { white(56) });
+    p.text(Pos2::new(x + 13.0, cy), Align2::LEFT_CENTER, label.unwrap_or("running"), font(12.0), TEXT_DIM());
 }
 
 /// The ⋯ button of a row.
@@ -450,7 +452,7 @@ fn icon_dots(ui: &mut Ui, r: Rect, id: egui::Id) -> egui::Response {
         p.rect_filled(r, 6.0, white((18.0 * h) as u8));
     }
     for dx in [-5.0, 0.0, 5.0] {
-        p.circle_filled(r.center() + Vec2::new(dx, 0.0), 1.6, TEXT_FAINT);
+        p.circle_filled(r.center() + Vec2::new(dx, 0.0), 1.6, TEXT_FAINT());
     }
     resp.on_hover_text("More")
 }
@@ -468,11 +470,11 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
         Size::S11 => {
             let resp = tile::card(ui, rect, id, false);
             let p = ui.painter();
-            tool_chip(p, Rect::from_min_size(rect.min + Vec2::splat(9.0), Vec2::splat(24.0)), Icon::Power, tint::STARTUP);
+            tool_chip(p, Rect::from_min_size(rect.min + Vec2::splat(9.0), Vec2::splat(24.0)), Icon::Power, tint::STARTUP());
             if n > 0 {
                 count_badge(p, Pos2::new(rect.right() - 9.0, rect.top() + 9.0), n);
             }
-            tile::small_text(p, rect, &if loaded { total.to_string() } else { "…".into() }, "at startup", TEXT_DIM);
+            tile::small_text(p, rect, &if loaded { total.to_string() } else { "…".into() }, "at startup", TEXT_DIM());
             if resp.clicked() {
                 cx.open_page(super::ID, if n > 0 { "suggested" } else { "" });
             }
@@ -481,24 +483,24 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
             let resp = tile::card(ui, rect, id, false);
             let p = ui.painter().clone();
             let (x0, x1) = (rect.left() + tile::PAD, rect.right() - tile::PAD);
-            tool_chip(&p, Rect::from_min_size(Pos2::new(x0, rect.top() + 9.0), Vec2::splat(18.0)), Icon::Power, tint::STARTUP);
-            p.text(Pos2::new(x0 + 24.0, rect.top() + 18.0), Align2::LEFT_CENTER, "Startup", bold(12.0), TEXT);
-            p.text(Pos2::new(x1, rect.top() + 18.0), Align2::RIGHT_CENTER, total.to_string(), font(11.0), TEXT_DIM);
+            tool_chip(&p, Rect::from_min_size(Pos2::new(x0, rect.top() + 9.0), Vec2::splat(18.0)), Icon::Power, tint::STARTUP());
+            p.text(Pos2::new(x0 + 24.0, rect.top() + 18.0), Align2::LEFT_CENTER, "Startup", bold(12.0), TEXT());
+            p.text(Pos2::new(x1, rect.top() + 18.0), Align2::RIGHT_CENTER, total.to_string(), font(11.0), TEXT_DIM());
             let cy = rect.bottom() - 21.0;
             if let Some(k) = undo {
-                p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, format!("{k} off"), font(12.0), GREEN);
+                p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, format!("{k} off"), font(12.0), GREEN());
                 let br = Rect::from_min_max(Pos2::new(x1 - 54.0, cy - 12.0), Pos2::new(x1, cy + 12.0));
                 if pill_button(ui, br, "Undo", BTN_SECONDARY, !busy).clicked() {
                     s.undo();
                 }
             } else if n > 0 {
-                p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, format!("{n} can go"), font(12.0), SUGGEST_TEXT);
+                p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, format!("{n} can go"), font(12.0), TEXT_SOFT());
                 let br = Rect::from_min_max(Pos2::new(x1 - 64.0, cy - 12.0), Pos2::new(x1, cy + 12.0));
                 if pill_button(ui, br, "Turn off", BTN_PRIMARY, !busy).clicked() {
                     s.turn_off_suggested();
                 }
             } else {
-                p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, format!("{running} running · all needed"), font(12.0), TEXT_DIM);
+                p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, format!("{running} running · all needed"), font(12.0), TEXT_DIM());
             }
             if resp.clicked() {
                 cx.open_page(super::ID, "");
@@ -510,7 +512,7 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
             let note = if loaded { format!("{} · {running} running", plural(total, "item")) } else { "Reading…".into() };
             let (x0, x1) = (rect.left() + tile::PAD, rect.right() - tile::PAD);
             let cy = rect.top() + tile::PAD + 10.0;
-            let tr = p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, "Startup", ty::title(), TEXT);
+            let tr = p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, "Startup", ty::title(), TEXT());
             let mut right = x1;
             if undo.is_none() && n > 0 {
                 let label = format!("Turn off {n}");
@@ -525,16 +527,16 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
             let body = Rect::from_min_max(Pos2::new(x0, rect.top() + tile::PAD + 20.0 + sp::S), Pos2::new(x1, rect.bottom() - tile::PAD));
             if let Some(k) = undo {
                 let c = Pos2::new(body.left() + 20.0, body.center().y);
-                p.circle_filled(c, 18.0, with_alpha(GREEN, 0.16));
-                icon(&p, Icon::Check, Rect::from_center_size(c, Vec2::splat(18.0)), GREEN);
+                p.circle_filled(c, 18.0, with_alpha(GREEN(), 0.16));
+                icon(&p, Icon::Check, Rect::from_center_size(c, Vec2::splat(18.0)), GREEN());
                 let br = Rect::from_min_max(Pos2::new(body.right() - 64.0, c.y - 13.0), Pos2::new(body.right(), c.y + 13.0));
                 if pill_button(ui, br, "Undo", BTN_SECONDARY, !busy).clicked() {
                     s.undo();
                 }
-                p.text(Pos2::new(c.x + 30.0, c.y - 9.0), Align2::LEFT_CENTER, format!("{} turned off", plural(k, "item")), bold(13.0), TEXT);
-                text_fit(&p, Pos2::new(c.x + 30.0, c.y + 9.0), Align2::LEFT_CENTER, "Nothing removed. The apps still open.", font(12.0), TEXT_DIM, br.left() - c.x - 40.0);
+                p.text(Pos2::new(c.x + 30.0, c.y - 9.0), Align2::LEFT_CENTER, format!("{} turned off", plural(k, "item")), bold(13.0), TEXT());
+                text_fit(&p, Pos2::new(c.x + 30.0, c.y + 9.0), Align2::LEFT_CENTER, "The apps still open", font(12.0), TEXT_DIM(), br.left() - c.x - 40.0);
             } else if n == 0 {
-                let msg = if loaded { "Everything that starts with your Mac looks needed." } else { "Reading what starts with your Mac…" };
+                let msg = if loaded { "Nothing to turn off" } else { "Reading what starts with your Mac…" };
                 tile::empty_note(&p, body.shrink2(Vec2::new(0.0, 6.0)), msg);
             } else {
                 let lh = 28.0;
@@ -547,15 +549,15 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
                     let ir = Rect::from_center_size(Pos2::new(r.left() + 10.0, r.center().y), Vec2::splat(20.0));
                     app_icon(s, &ctx, &p, ir, j.owner.as_deref(), &j.name, false, &mut budget);
                     let why = j.why().map(|w| w.short()).unwrap_or("");
-                    let wr = p.text(Pos2::new(r.right() - 42.0, r.center().y), Align2::RIGHT_CENTER, why, font(11.0), TEXT_FAINT);
-                    text_fit(&p, Pos2::new(ir.right() + 8.0, r.center().y), Align2::LEFT_CENTER, &j.name, font(12.5), TEXT, wr.left() - ir.right() - 16.0);
+                    let wr = p.text(Pos2::new(r.right() - 42.0, r.center().y), Align2::RIGHT_CENTER, why, font(11.0), TEXT_FAINT());
+                    text_fit(&p, Pos2::new(ir.right() + 8.0, r.center().y), Align2::LEFT_CENTER, &j.name, font(12.5), TEXT(), wr.left() - ir.right() - 16.0);
                     let sw = Rect::from_center_size(Pos2::new(r.right() - 15.0, r.center().y), Vec2::new(30.0, 18.0));
                     if switch(ui, sw, id.with(("w-sw", &j.label)), true, !busy).clicked() {
                         s.toggle_job(j);
                     }
                 }
                 if n > 3 {
-                    p.text(Pos2::new(body.left(), body.bottom() - 4.0), Align2::LEFT_BOTTOM, format!("+{} more · open Startup", n - 3), font(11.0), TEXT_FAINT);
+                    p.text(Pos2::new(body.left(), body.bottom() - 4.0), Align2::LEFT_BOTTOM, format!("+{} more · open Startup", n - 3), font(11.0), TEXT_FAINT());
                 }
             }
             if resp.clicked() {
@@ -567,10 +569,10 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
 
 /// A red count in the corner of the 1:1 widget.
 fn count_badge(p: &egui::Painter, pos: Pos2, n: usize) {
-    let g = p.layout_no_wrap(n.to_string(), bold(11.0), Color32::WHITE);
+    let g = p.layout_no_wrap(n.to_string(), bold(11.0), ON_ACTION);
     let r = Align2::RIGHT_TOP.anchor_size(pos, Vec2::new((g.size().x + 10.0).max(18.0), 18.0));
-    p.rect_filled(r, 9.0, tint::STARTUP);
-    p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
+    p.rect_filled(r, 9.0, tint::STARTUP());
+    p.galley(r.center() - g.size() / 2.0, g, ON_ACTION);
 }
 
 #[cfg(test)]
@@ -583,7 +585,7 @@ mod tests {
         super::super::demo(&mut g, false);
         let list = g.suggested();
         let refs: Vec<&Job> = list.iter().collect();
-        assert_eq!(why_line(&refs), "2 updaters that check in the background, Steam Cleaner, and 1 agent of an app you removed. Apps still work when you open them.");
+        assert_eq!(why_line(&refs), "2 updaters that check in the background, Steam Cleaner, and 1 agent of an app you removed");
     }
 
     /// Every demo view renders without a panic.

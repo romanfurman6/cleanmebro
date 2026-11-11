@@ -54,10 +54,27 @@ fn data_root() -> PathBuf {
     static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     ROOT.get_or_init(|| {
         let base = dirs::data_dir().unwrap_or_else(std::env::temp_dir);
+        // the dev build keeps its own data, so it never marks setup done or
+        // shares history and settings with the installed app
+        if is_dev() {
+            return base.join("cmdmeow-dev");
+        }
         migrate_dir(&base.join("cleanmebro"), &base.join("cmdmeow"));
         base.join("cmdmeow")
     })
     .clone()
+}
+
+/// True when running from the dev build ("… Dev.app"), which keeps its own
+/// data, window state and Keychain items apart from the installed app.
+pub fn is_dev() -> bool {
+    static DEV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DEV.get_or_init(|| std::env::current_exe().ok().is_some_and(|p| is_dev_bundle(&p)))
+}
+
+/// True for a binary inside a "… Dev.app" bundle.
+fn is_dev_bundle(exe: &Path) -> bool {
+    exe.ancestors().any(|a| a.extension().is_some_and(|e| e == "app") && a.file_stem().is_some_and(|n| n.to_string_lossy().ends_with(" Dev")))
 }
 
 /// Rename `old` to `new` when only `old` exists.
@@ -205,6 +222,8 @@ mod tests {
     #[test]
     fn data_folder_moves_over_from_the_old_name() {
         let base = std::env::temp_dir().join(format!("cmdmeow-migrate-{}", std::process::id()));
+        assert!(is_dev_bundle(Path::new("/Applications/CmdMeow Dev.app/Contents/MacOS/cmdmeow")));
+        assert!(!is_dev_bundle(Path::new("/Applications/CmdMeow.app/Contents/MacOS/cmdmeow")));
         let (old, new) = (base.join("cleanmebro"), base.join("cmdmeow"));
         std::fs::create_dir_all(old.join("clipboard")).unwrap();
         std::fs::write(old.join("clipboard/history.json"), "[]").unwrap();

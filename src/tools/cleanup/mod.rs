@@ -6,7 +6,7 @@
 pub mod engine;
 mod page;
 
-use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
+use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec};
 use crate::kit::glass::{human_bytes, tint, Icon, ACCENT};
 use crate::kit::tile;
 use egui::{Rect, Ui};
@@ -43,7 +43,7 @@ impl Cleanup {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Broom, color: tint::CLEANUP }
+    Badge { icon: Icon::Broom, color: tint::CLEANUP() }
 }
 
 impl Tool for Cleanup {
@@ -68,7 +68,7 @@ impl Tool for Cleanup {
         "Clean"
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: "clean", title: "Clean", about: "Junk found by the last scan; opens Cleanup.", sizes: UP_TO_MEDIUM, size: Size::S11, default_on: true }]
+        vec![WidgetSpec { id: "clean", title: "Clean", about: "What the last clean removed, and a scan.", sizes: &[Size::S12, Size::S14], size: Size::S12, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let g = self.clean.lock().unwrap().clone();
@@ -77,15 +77,24 @@ impl Tool for Cleanup {
             engine::Phase::Scanning | engine::Phase::Judging => ("Scanning…".into(), g.current.clone(), Some(g.progress)),
             engine::Phase::Cleaning => ("Cleaning…".into(), g.current.clone(), Some(g.progress)),
             engine::Phase::Done => (human_bytes(g.cleaned_bytes), "cleaned".into(), None),
-            engine::Phase::Intro => ("Scan".into(), "Find junk you can remove".into(), None),
+            engine::Phase::Intro => ("Scan".into(), String::new(), None),
+        };
+        // before a scan: what past cleans removed (the disk itself is Storage's)
+        let hist = if g.phase == engine::Phase::Intro { engine::history() } else { Vec::new() };
+        let last = hist.last().copied();
+        let freed: u64 = hist.iter().map(|h| h.1).sum();
+        let intro = g.phase == engine::Phase::Intro;
+        let (value, sub) = match last {
+            Some(_) if intro => (human_bytes(freed), "freed so far".to_string()),
+            None if intro && size != Size::S12 => ("Not cleaned".to_string(), String::new()),
+            _ => (value, sub),
         };
         let id = ui.scope_id().with("w-clean");
-        let col = tint::CLEANUP;
-        let bar = frac.map(|f| (f.clamp(0.01, 1.0), ACCENT)).ok_or(sub.as_str());
+        let col = tint::CLEANUP();
+        let bar = frac.map(|f| (f.clamp(0.01, 1.0), ACCENT())).ok_or(sub.as_str());
         let resp = match size {
-            Size::S11 => tile::small(ui, rect, id, Icon::Broom, col, "Clean", &value, false),
             Size::S12 => tile::wide(ui, rect, id, Icon::Broom, col, "Clean", &value, bar, false),
-            Size::S14 => {
+            _ => {
                 let (resp, right) = tile::row_split(ui, rect, id, Icon::Broom, col, "Clean", &value, &sub, false);
                 let p = ui.painter();
                 let lines: Vec<(String, Option<(f32, egui::Color32)>, String)> = match g.phase {
@@ -93,30 +102,25 @@ impl Tool for Cleanup {
                         let tot = g.total().max(1) as f32;
                         let mut groups: Vec<(engine::Group, u64)> = engine::Group::ALL.iter().map(|k| (*k, g.group_bytes(*k))).filter(|(_, b)| *b > 0).collect();
                         groups.sort_by_key(|g| std::cmp::Reverse(g.1));
-                        groups.iter().take(3).map(|(grp, b)| (grp.title().to_string(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), human_bytes(*b))).collect()
+                        groups.iter().take(3).map(|(grp, b)| (grp.title().to_string(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT())), human_bytes(*b))).collect()
                     }
-                    engine::Phase::Scanning | engine::Phase::Judging | engine::Phase::Cleaning => vec![("Progress".into(), frac.map(|f| (f.clamp(0.01, 1.0), ACCENT)), format!("{:.0}%", frac.unwrap_or(0.0) * 100.0))],
+                    engine::Phase::Scanning | engine::Phase::Judging | engine::Phase::Cleaning => vec![("Progress".into(), frac.map(|f| (f.clamp(0.01, 1.0), ACCENT())), format!("{:.0}%", frac.unwrap_or(0.0) * 100.0))],
+                    engine::Phase::Intro if !hist.is_empty() => vec![
+                        ("Last clean".into(), None, last.map(|l| engine::days_ago(l.0)).unwrap_or_default()),
+                        ("It freed".into(), None, last.map(|l| human_bytes(l.1)).unwrap_or_default()),
+                    ],
                     _ => Vec::new(),
                 };
-                let empty = if g.phase == engine::Phase::Done { "All clean" } else { "Click to scan" };
-                tile::lines(p, right, &lines, empty);
-                resp
-            }
-            _ => {
-                let resp = tile::card(ui, rect, id, false);
-                let p = ui.painter();
-                let body = tile::head(p, rect, Icon::Broom, col, "Clean", &value);
-                if g.phase == engine::Phase::Results {
-                    let tot = g.total().max(1) as f32;
-                    let mut groups: Vec<(engine::Group, u64)> = engine::Group::ALL.iter().map(|k| (*k, g.group_bytes(*k))).filter(|(_, b)| *b > 0).collect();
-                    groups.sort_by_key(|g| std::cmp::Reverse(g.1));
-                    let lh = 22.0;
-                    for (k, (grp, b)) in groups.iter().take(4).enumerate() {
-                        let lr = Rect::from_min_size(egui::pos2(body.left(), body.top() + k as f32 * lh), egui::vec2(body.width(), lh));
-                        tile::bar_line(p, lr, grp.title(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), &human_bytes(*b));
+                if g.phase == engine::Phase::Intro && hist.is_empty() {
+                    // never cleaned: the right half is the way in
+                    let bw = crate::kit::glass::button_width(p, "Scan", crate::kit::glass::BTN_PRIMARY);
+                    let br = Rect::from_center_size(egui::pos2(right.right() - bw / 2.0, right.center().y), egui::vec2(bw, 28.0));
+                    if crate::kit::glass::pill_button(ui, br, "Scan", crate::kit::glass::BTN_PRIMARY, true).clicked() {
+                        cx.open_page(ID, "");
                     }
                 } else {
-                    tile::empty_note(p, body, &sub);
+                    let empty = if g.phase == engine::Phase::Done { "All clean" } else { "" };
+                    tile::lines(p, right, &lines, empty);
                 }
                 resp
             }
@@ -145,7 +149,7 @@ impl Tool for Cleanup {
         // always on offer, at the lowest priority
         let mut v = vec![Recommendation {
             priority: 0,
-            title: "Let's give your Mac a quick clean".into(),
+            title: "Clean caches and logs".into(),
             body: if self.demo || crate::kit::claude_code::availability().ready() {
                 "Claude checks each cache and log path and tells you what's safe to remove.".into()
             } else {

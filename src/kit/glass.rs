@@ -10,55 +10,138 @@ use egui::{
 use std::f32::consts::{PI, TAU};
 
 // ---------------------------------------------------------------- palette
+//
+// "Moss & Lime": a deep moss window with a lime action colour in dark mode,
+// a pale sage window with darker lime in light mode. The app follows the
+// system appearance ([`set_light`] is called once per frame by the shell).
+// Every colour is a function so it can answer for the current mode.
 
-/// Window / panel background.
-pub const BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x20);
-/// Card surface: a little darker than `BG`, no border.
-pub const CARD: Color32 = Color32::from_rgb(0x15, 0x15, 0x17);
+static LIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True while the app is drawn in light mode.
+pub fn is_light() -> bool {
+    LIGHT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Switch the palette. Returns true when the mode changed.
+pub fn set_light(light: bool) -> bool {
+    LIGHT.swap(light, std::sync::atomic::Ordering::Relaxed) != light
+}
+
+/// `dark` in dark mode, `light` in light mode.
+pub fn pick(dark: Color32, light: Color32) -> Color32 {
+    if is_light() { light } else { dark }
+}
+
+const fn hex(v: u32) -> Color32 {
+    Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
+
+/// Ink: white in dark mode, near-black in light mode.
+const INK_LIGHT: (u8, u8, u8) = (0x14, 0x18, 0x1A);
+
+fn ink(a: f32) -> Color32 {
+    let (r, g, b) = if is_light() { INK_LIGHT } else { (255, 255, 255) };
+    Color32::from_rgba_unmultiplied(r, g, b, (a * 255.0) as u8)
+}
+
+/// Solid window colour (the middle of the backdrop gradient).
+#[allow(non_snake_case)]
+pub fn BG() -> Color32 { pick(hex(0x0E1B0D), hex(0xE6F0DA)) }
+/// Card surface.
+#[allow(non_snake_case)]
+pub fn CARD() -> Color32 { pick(Color32::from_rgba_unmultiplied(255, 255, 255, 14), Color32::from_rgba_unmultiplied(255, 255, 255, 191)) }
+/// Card edge.
+#[allow(non_snake_case)]
+pub fn CARD_EDGE() -> Color32 { pick(Color32::from_rgba_unmultiplied(255, 255, 255, 20), Color32::from_rgba_unmultiplied(20, 24, 26, 20)) }
 /// Hovered card, quick-action tiles and selected rows.
-pub const RAISED: Color32 = Color32::from_rgb(0x2C, 0x2C, 0x2E);
+#[allow(non_snake_case)]
+pub fn RAISED() -> Color32 { pick(Color32::from_rgba_unmultiplied(255, 255, 255, 28), Color32::from_rgba_unmultiplied(255, 255, 255, 242)) }
+/// Floating surfaces: menus, toasts, drop targets, previews.
+#[allow(non_snake_case)]
+pub fn POPOVER() -> Color32 { pick(hex(0x1A2818), hex(0xFFFFFF)) }
 /// Window sidebar.
-pub const SIDEBAR: Color32 = Color32::from_rgb(0x18, 0x18, 0x1A);
+#[allow(non_snake_case)]
+pub fn SIDEBAR() -> Color32 { pick(Color32::from_rgba_unmultiplied(3, 8, 3, 128), Color32::from_rgba_unmultiplied(255, 255, 255, 128)) }
 /// Window footer strip.
-pub const FOOTER: Color32 = Color32::from_rgb(0x1A, 0x1A, 0x1C);
+#[allow(non_snake_case)]
+pub fn FOOTER() -> Color32 { pick(Color32::from_rgba_unmultiplied(3, 8, 3, 90), Color32::from_rgba_unmultiplied(255, 255, 255, 110)) }
 
-pub const TEXT: Color32 = Color32::from_rgb(0xF5, 0xF5, 0xF7);
-/// Secondary text on dark surfaces.
-pub const TEXT_SOFT: Color32 = Color32::from_rgb(0xD1, 0xD1, 0xD6);
-pub const TEXT_DIM: Color32 = Color32::from_rgb(0xA1, 0xA1, 0xA6);
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x8E, 0x8E, 0x93);
+#[allow(non_snake_case)]
+pub fn TEXT() -> Color32 { ink(1.0) }
+/// Secondary text.
+#[allow(non_snake_case)]
+pub fn TEXT_SOFT() -> Color32 { ink(0.84) }
+#[allow(non_snake_case)]
+pub fn TEXT_DIM() -> Color32 { ink(0.68) }
+#[allow(non_snake_case)]
+pub fn TEXT_FAINT() -> Color32 { ink(0.56) }
 /// Chevrons, drag handles.
-pub const TEXT_MUTED: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x73);
+#[allow(non_snake_case)]
+pub fn TEXT_MUTED() -> Color32 { ink(0.40) }
 
-/// System blue: primary buttons, selection, checkboxes, sidebar icons.
-pub const BLUE: Color32 = Color32::from_rgb(0x0A, 0x84, 0xFF);
-/// Links and blue text on dark cards.
-pub const ACCENT: Color32 = Color32::from_rgb(0x64, 0xB5, 0xFF);
-pub const GREEN: Color32 = Color32::from_rgb(0x30, 0xD1, 0x58);
-/// Orange: attention (busy spikes, "suggested", warnings).
-pub const AMBER: Color32 = Color32::from_rgb(0xFF, 0x9F, 0x0A);
-pub const RED: Color32 = Color32::from_rgb(0xFF, 0x45, 0x3A);
-/// Claude's tint (limit bars and rings).
-pub const CLAUDE: Color32 = Color32::from_rgb(0xBF, 0x5A, 0xF2);
-/// Second blue for charts (wired memory, second series).
-pub const INDIGO: Color32 = Color32::from_rgb(0x5E, 0x5C, 0xE6);
-pub const TEAL: Color32 = Color32::from_rgb(0x64, 0xD2, 0xFF);
-pub const PURPLE: Color32 = Color32::from_rgb(0xBF, 0x8C, 0xFF);
-pub const GRAY: Color32 = Color32::from_rgb(152, 152, 157);
+/// The action colour (lime): primary buttons, selection, checkboxes,
+/// switches, the active sidebar icon. Text on it is [`ON_ACTION`].
+#[allow(non_snake_case)]
+pub fn BLUE() -> Color32 { pick(hex(0xC8F05A), hex(0xA8D83A)) }
+/// Text and glyphs drawn on [`BLUE`].
+pub const ON_ACTION: Color32 = hex(0x0E1405);
+/// Links and lime text on cards.
+#[allow(non_snake_case)]
+pub fn ACCENT() -> Color32 { pick(hex(0xD9F78A), hex(0x3F6B0A)) }
+#[allow(non_snake_case)]
+pub fn GREEN() -> Color32 { pick(hex(0x94D45A), hex(0x4B8625)) }
+/// Apricot: attention (busy spikes, "suggested", warnings).
+#[allow(non_snake_case)]
+pub fn AMBER() -> Color32 { pick(hex(0xF7B267), hex(0xC06A12)) }
+/// Problems and low battery.
+#[allow(non_snake_case)]
+pub fn RED() -> Color32 { pick(hex(0xFF9B7A), hex(0xC2391D)) }
+/// Claude's limit bars and rings: the Monitor cyan.
+#[allow(non_snake_case)]
+pub fn CLAUDE() -> Color32 { tint::HEALTH() }
+/// Second series in charts: a paler step of the Monitor cyan.
+#[allow(non_snake_case)]
+pub fn INDIGO() -> Color32 { pick(hex(0xB4EAF3), hex(0x5AB4C6)) }
+#[allow(non_snake_case)]
+pub fn TEAL() -> Color32 { tint::HEALTH() }
+/// Third series / "other": a neutral step, not a hue.
+#[allow(non_snake_case)]
+pub fn PURPLE() -> Color32 { pick(hex(0x4A5A47), hex(0xA9B5A0)) }
+#[allow(non_snake_case)]
+pub fn GRAY() -> Color32 { pick(hex(0x98A096), hex(0x6E766B)) }
 
-/// Tool tints. D6 drops the rainbow: every tool uses system blue, and only
-/// Claude keeps its own colour because its data is Claude's.
+/// Junk ring segments, largest to smallest: lime stepping into green.
+pub fn junk_ramp(i: usize) -> Color32 {
+    const DARK: [u32; 7] = [0xC8F05A, 0xAEE35A, 0x94D45A, 0x7CC25A, 0x66AE57, 0x549852, 0x46824B];
+    const LIGHT: [u32; 7] = [0x7DB519, 0x6AA61E, 0x5A9622, 0x4B8625, 0x3E7626, 0x336626, 0x2A5724];
+    let i = i.min(6);
+    pick(hex(DARK[i]), hex(LIGHT[i]))
+}
+
+/// Tool tints by group: Clean (lime), Monitor (cyan), Create (apricot),
+/// Utilities (lavender).
 pub mod tint {
+    use super::{hex, pick};
     use egui::Color32;
-    pub const CLEANUP: Color32 = super::BLUE;
-    pub const DISK_MAP: Color32 = super::BLUE;
-    pub const HEALTH: Color32 = super::BLUE;
-    pub const CLAUDE: Color32 = super::CLAUDE;
-    pub const CAPTURE: Color32 = super::BLUE;
-    pub const KEEP_AWAKE: Color32 = super::BLUE;
-    pub const FAN: Color32 = super::BLUE;
-    pub const STARTUP: Color32 = super::BLUE;
-    pub const NEUTRAL: Color32 = Color32::from_rgb(0x8E, 0x8E, 0x93);
+    #[allow(non_snake_case)]
+    pub fn CLEANUP() -> Color32 { pick(hex(0xC8F05A), hex(0x7DB519)) }
+    #[allow(non_snake_case)]
+    pub fn DISK_MAP() -> Color32 { CLEANUP() }
+    #[allow(non_snake_case)]
+    pub fn STARTUP() -> Color32 { CLEANUP() }
+    #[allow(non_snake_case)]
+    pub fn HEALTH() -> Color32 { pick(hex(0x6FD6E8), hex(0x1F8AA0)) }
+    #[allow(non_snake_case)]
+    pub fn CLAUDE() -> Color32 { HEALTH() }
+    #[allow(non_snake_case)]
+    pub fn FAN() -> Color32 { HEALTH() }
+    #[allow(non_snake_case)]
+    pub fn CAPTURE() -> Color32 { pick(hex(0xF7B267), hex(0xC06A12)) }
+    #[allow(non_snake_case)]
+    pub fn KEEP_AWAKE() -> Color32 { pick(hex(0xE8E1FF), hex(0x6A5AC8)) }
+    #[allow(non_snake_case)]
+    pub fn NEUTRAL() -> Color32 { super::TEXT_FAINT() }
 }
 
 /// The spacing scale. Only these six values; nothing in between.
@@ -84,9 +167,9 @@ pub mod ty {
     use super::{bold, font, white};
     use egui::{Color32, FontId};
     /// 28/600: one per card at most ("4.2 GB").
-    pub fn hero() -> FontId { bold(28.0) }
+    pub fn hero() -> FontId { FontId::new(28.0, egui::FontFamily::Name("hero".into())) }
     /// 22/600: secondary numbers ("3.2 MB/s").
-    pub fn number() -> FontId { bold(22.0) }
+    pub fn number() -> FontId { FontId::new(22.0, egui::FontFamily::Name("hero".into())) }
     /// 15/600: page titles and lead lines ("Clean Up finished").
     pub fn lead() -> FontId { bold(15.0) }
     /// 13/600: card titles.
@@ -102,20 +185,29 @@ pub mod ty {
 }
 
 /// Status chip colours: (background, text).
-pub const CHIP_SAFE: (Color32, Color32) = (Color32::from_rgba_premultiplied(7, 29, 12, 36), Color32::from_rgb(0x5B, 0xE0, 0x7F));
-pub const CHIP_ASK: (Color32, Color32) = (Color32::from_rgba_premultiplied(41, 29, 10, 41), Color32::from_rgb(0xFF, 0xC2, 0x66));
-pub const CHIP_KEPT: (Color32, Color32) = (Color32::from_rgba_premultiplied(20, 20, 20, 20), TEXT_DIM);
-pub const CHIP_RISK: (Color32, Color32) = (Color32::from_rgba_premultiplied(41, 11, 9, 41), Color32::from_rgb(0xFF, 0x7A, 0x70));
+#[allow(non_snake_case)]
+pub fn CHIP_SAFE() -> (Color32, Color32) { (with_alpha(GREEN(), 0.16), GREEN()) }
+#[allow(non_snake_case)]
+pub fn CHIP_ASK() -> (Color32, Color32) { (with_alpha(AMBER(), 0.16), AMBER()) }
+#[allow(non_snake_case)]
+pub fn CHIP_KEPT() -> (Color32, Color32) { (white(20), TEXT_DIM()) }
+#[allow(non_snake_case)]
+pub fn CHIP_RISK() -> (Color32, Color32) { (with_alpha(RED(), 0.16), RED()) }
 
 /// Radii and spacing on the 8 pt grid.
 pub const R_CARD: f32 = 12.0;
-pub const R_BUTTON: f32 = 8.0;
+pub const R_BUTTON: f32 = 10.0;
 pub const R_SMALL: f32 = 7.0;
 pub const HAIRLINE: u8 = 15; // white at ~6%
 pub const HAIRLINE_STRONG: u8 = 26; // white at ~10%
 
+/// An overlay at alpha `a`: white in dark mode, ink in light mode.
 pub fn white(a: u8) -> Color32 {
-    Color32::from_white_alpha(a)
+    if is_light() {
+        Color32::from_rgba_unmultiplied(INK_LIGHT.0, INK_LIGHT.1, INK_LIGHT.2, a)
+    } else {
+        Color32::from_white_alpha(a)
+    }
 }
 
 pub fn with_alpha(c: Color32, a: f32) -> Color32 {
@@ -167,21 +259,88 @@ pub fn rounded_points(rect: Rect, r: f32) -> Vec<Pos2> {
     pts
 }
 
-/// The window surface: near-opaque dark material with a 1 pt hairline edge.
-/// Live, the system material behind it only shows through a few percent, so
-/// text stays readable over busy windows. `opaque` (screenshots) paints it solid.
+/// The window surface: a radial glow from the top centre (moss in dark
+/// mode, sage in light mode) with a 1 pt hairline edge. Live, the system
+/// glass behind it only shows through a few percent; `opaque` (screenshots)
+/// paints it solid.
 pub fn backdrop(painter: &Painter, rect: Rect, radius: f32, opaque: bool, _t: f64) {
-    let fill = if opaque { BG } else { with_alpha(BG, 0.97) };
-    painter.rect_filled(rect, radius, fill);
+    let stops: &[(f32, Color32)] = if is_light() {
+        &[(0.0, hex(0xFFFFFF)), (0.55, hex(0xEAF2DF)), (1.0, hex(0xD9E8C8))]
+    } else {
+        &[(0.0, hex(0x22401D)), (0.35, hex(0x132610)), (0.7, hex(0x0A150A)), (1.0, hex(0x070D07))]
+    };
+    let alpha = if opaque { 1.0 } else { 0.97 };
+    let glow = Pos2::new(rect.center().x, rect.top());
+    // the glow is an ellipse: wide across, reaching the bottom edge
+    let (rx, ry) = (rect.width() * 0.75, rect.height() * 1.05);
+    let color_at = |q: Pos2| {
+        let d = (((q.x - glow.x) / rx).powi(2) + ((q.y - glow.y) / ry).powi(2)).sqrt().min(1.0);
+        let k = stops.iter().position(|(t, _)| *t >= d).unwrap_or(stops.len() - 1).max(1);
+        let (t0, c0) = stops[k - 1];
+        let (t1, c1) = stops[k];
+        with_alpha(lerp_color(c0, c1, (d - t0) / (t1 - t0).max(1e-3)), alpha)
+    };
+    // a fan of rings from the centre out to the rounded outline
+    let outline = densify(&rounded_points(rect, radius), 24.0);
+    let c = rect.center();
+    let rings = 14;
+    let mut mesh = egui::epaint::Mesh::default();
+    mesh.colored_vertex(c, color_at(c));
+    let n = outline.len() as u32;
+    for k in 1..=rings {
+        let f = k as f32 / rings as f32;
+        for q in &outline {
+            let v = c + (*q - c) * f;
+            mesh.colored_vertex(v, color_at(v));
+        }
+    }
+    for i in 0..n {
+        let j = (i + 1) % n;
+        mesh.add_triangle(0, 1 + i, 1 + j);
+    }
+    for k in 1..rings as u32 {
+        let (a, b) = (1 + (k - 1) * n, 1 + k * n);
+        for i in 0..n {
+            let j = (i + 1) % n;
+            mesh.add_triangle(a + i, b + i, b + j);
+            mesh.add_triangle(a + i, b + j, a + j);
+        }
+    }
+    painter.add(Shape::mesh(mesh));
     painter.rect_stroke(rect, radius, Stroke::new(1.0, white(HAIRLINE_STRONG)), StrokeKind::Inside);
 }
 
-/// A flat card: `CARD` fill with a hairline. `hover` 0..1 lifts it a little,
+/// `pts` (a closed outline) with extra points so no edge is longer than `step`.
+fn densify(pts: &[Pos2], step: f32) -> Vec<Pos2> {
+    let mut out = Vec::with_capacity(pts.len() * 2);
+    for (i, a) in pts.iter().enumerate() {
+        let b = pts[(i + 1) % pts.len()];
+        let n = ((b - *a).length() / step).ceil().max(1.0) as usize;
+        for k in 0..n {
+            out.push(*a + (b - *a) * (k as f32 / n as f32));
+        }
+    }
+    out
+}
+
+/// The colour of a sidebar section: Clean, Monitor, Create, Utilities.
+pub fn group_color(section: &str) -> Color32 {
+    match section {
+        "Clean" => tint::CLEANUP(),
+        "Monitor" => tint::HEALTH(),
+        "Create" => tint::CAPTURE(),
+        "Utilities" => tint::KEEP_AWAKE(),
+        _ => TEXT_FAINT(),
+    }
+}
+
+/// A flat card: `CARD()` fill with a hairline. `hover` 0..1 lifts it a little,
 /// `selected` adds the blue ring.
 pub fn glass_card(painter: &Painter, rect: Rect, r: f32, hover: f32, selected: bool) {
-    painter.rect_filled(rect, r, lerp_color(CARD, RAISED, hover * 0.5));
+    painter.rect_filled(rect, r, lerp_color(CARD(), RAISED(), hover * 0.5));
+    painter.rect_stroke(rect, r, Stroke::new(1.0, CARD_EDGE()), StrokeKind::Inside);
     if selected {
-        painter.rect_stroke(rect, r, Stroke::new(1.5, BLUE), StrokeKind::Inside);
+        painter.rect_stroke(rect, r, Stroke::new(1.5, BLUE()), StrokeKind::Inside);
     }
 }
 
@@ -200,15 +359,15 @@ pub fn pill_button(ui: &mut Ui, rect: Rect, label: &str, kind: u8, enabled: bool
     let pressed = resp.is_pointer_button_down_on() && enabled;
     let p = ui.painter();
     let tint = match kind {
-        BTN_PRIMARY => Some(BLUE),
-        BTN_DANGER => Some(RED),
+        BTN_PRIMARY => Some(BLUE()),
+        BTN_DANGER => Some(RED()),
         _ => None,
     };
     let a = if enabled { 1.0 } else { 0.45 };
     liquid_capsule(p, rect, tint, if pressed { 1.6 } else { hover }, a);
     let (f, col) = match tint {
-        Some(_) => (bold(13.0), Color32::WHITE),
-        None => (font(13.0), TEXT),
+        Some(c) => (bold(13.0), on_color(c)),
+        None => (font(13.0), TEXT()),
     };
     let col = if enabled { col } else { with_alpha(col, 0.5) };
     text_fit(p, rect.center(), Align2::CENTER_CENTER, label, f, col, rect.width() - 12.0);
@@ -219,9 +378,16 @@ pub fn pill_button(ui: &mut Ui, rect: Rect, label: &str, kind: u8, enabled: bool
 }
 
 /// Width a [`pill_button`] needs for `label` (14 pt padding each side).
+/// Text and glyph colour on a solid `fill`: near-black on light fills
+/// (lime, apricot), white on dark ones.
+pub fn on_color(fill: Color32) -> Color32 {
+    let [r, g, b, _] = fill.to_srgba_unmultiplied();
+    if 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32 > 150.0 { ON_ACTION } else { Color32::WHITE }
+}
+
 pub fn button_width(p: &Painter, label: &str, kind: u8) -> f32 {
     let f = if kind == BTN_SECONDARY { font(13.0) } else { bold(13.0) };
-    p.layout_no_wrap(label.to_owned(), f, TEXT).size().x + 28.0
+    p.layout_no_wrap(label.to_owned(), f, TEXT()).size().x + 28.0
 }
 
 /// The body of a standard button: flat tint (or quiet white) with a hairline.
@@ -230,8 +396,13 @@ pub fn liquid_capsule(p: &Painter, rect: Rect, tint: Option<Color32>, hover: f32
     let r = R_BUTTON.min(rect.height() / 2.0);
     match tint {
         Some(c) => {
-            let fill = if hover > 1.0 { lerp_color(c, Color32::BLACK, 0.15) } else { lerp_color(c, Color32::WHITE, 0.10 * hover) };
+            let fill = if hover > 1.0 { lerp_color(c, Color32::BLACK, 0.12) } else { lerp_color(c, Color32::WHITE, 0.12 * hover) };
+            // a soft glow of its own colour below, a darker lip inside
+            let glow = egui::epaint::Shadow { offset: [0, 6], blur: 18, spread: 0, color: with_alpha(c, 0.25 * alpha) };
+            p.add(glow.as_shape(rect, r));
             p.rect_filled(rect, r, with_alpha(fill, alpha));
+            let lip = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 2.0), rect.max);
+            p.with_clip_rect(lip).rect_filled(rect, r, Color32::from_black_alpha((46.0 * alpha) as u8));
         }
         None => {
             let a = if hover > 1.0 { 26.0 } else { 10.0 + 10.0 * hover };
@@ -248,7 +419,7 @@ pub fn icon_button(ui: &mut Ui, rect: Rect, ic: Icon, tip: &str) -> Response {
     let h = ui.ctx().animate_bool(id, resp.hovered());
     let p = ui.painter();
     p.rect_filled(rect, R_BUTTON, white((15.0 + 13.0 * h) as u8));
-    icon(p, ic, Rect::from_center_size(rect.center(), Vec2::splat(rect.height() * 0.53)), TEXT_SOFT);
+    icon(p, ic, Rect::from_center_size(rect.center(), Vec2::splat(rect.height() * 0.53)), TEXT_SOFT());
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -262,17 +433,17 @@ pub fn round_button(ui: &mut Ui, rect: Rect, ic: Icon, tip: &str) -> Response {
     let h = ui.ctx().animate_bool(id, resp.hovered());
     let p = ui.painter();
     p.circle_filled(rect.center(), rect.height() / 2.0, white((20.0 + 18.0 * h) as u8));
-    icon(p, ic, Rect::from_center_size(rect.center(), Vec2::splat(rect.height() * 0.46)), TEXT_SOFT);
+    icon(p, ic, Rect::from_center_size(rect.center(), Vec2::splat(rect.height() * 0.46)), TEXT_SOFT());
     resp.on_hover_text(tip)
 }
 
 /// Text link in the accent blue.
 pub fn link(ui: &mut Ui, pos: Pos2, align: Align2, label: &str, size: f32) -> Response {
-    let galley = ui.painter().layout_no_wrap(label.to_owned(), bold(size), ACCENT);
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), bold(size), ACCENT());
     let rect = align.anchor_size(pos, galley.size());
     let id = ui.scope_id().with(("link", label, pos.x as i32, pos.y as i32));
     let resp = ui.interact(rect.expand(4.0), id, Sense::click());
-    let col = if resp.hovered() { Color32::from_rgb(0x7D, 0xBB, 0xFF) } else { ACCENT };
+    let col = if resp.hovered() { Color32::from_rgb(0x7D, 0xBB, 0xFF) } else { ACCENT() };
     ui.painter().galley(rect.min, galley, col);
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -354,11 +525,11 @@ pub fn checkbox(ui: &mut Ui, rect: Rect, id: egui::Id, on: bool, enabled: bool) 
     let p = ui.painter();
     let r = 4.0;
     if on && enabled {
-        p.rect_filled(rect, r, BLUE);
+        p.rect_filled(rect, r, BLUE());
         let a = rect.left_top() + Vec2::new(rect.width() * 0.24, rect.height() * 0.52);
         let b = rect.left_top() + Vec2::new(rect.width() * 0.43, rect.height() * 0.71);
         let c = rect.left_top() + Vec2::new(rect.width() * 0.78, rect.height() * 0.31);
-        p.add(PathShape::line(vec![a, b, c], PathStroke::new(2.0, Color32::WHITE)));
+        p.add(PathShape::line(vec![a, b, c], PathStroke::new(2.0, ON_ACTION)));
     } else {
         p.rect_stroke(rect, r, Stroke::new(1.5, white(if enabled { 90 } else { 30 })), StrokeKind::Inside);
     }
@@ -377,10 +548,10 @@ pub fn chip(p: &Painter, pos: Pos2, align: Align2, label: &str, colors: (Color32
 
 /// An amber count badge (e.g. "2" next to "Needs your OK").
 pub fn badge(p: &Painter, pos: Pos2, align: Align2, label: &str) -> Rect {
-    let g = p.layout_no_wrap(label.to_owned(), bold(11.0), BG);
+    let g = p.layout_no_wrap(label.to_owned(), bold(11.0), BG());
     let r = align.anchor_size(pos, Vec2::new((g.size().x + 14.0).max(20.0), 18.0));
-    p.rect_filled(r, 9.0, AMBER);
-    p.galley(r.center() - g.size() / 2.0, g, BG);
+    p.rect_filled(r, 9.0, AMBER());
+    p.galley(r.center() - g.size() / 2.0, g, BG());
     r
 }
 
@@ -395,9 +566,9 @@ pub fn segmented(ui: &mut Ui, rect: Rect, id: egui::Id, labels: &[&str], selecte
         let r = Rect::from_min_size(Pos2::new(inner.left() + w * i as f32, inner.top()), Vec2::new(w, inner.height()));
         let resp = ui.interact(r, id.with(i), Sense::click());
         if i == selected {
-            p.rect_filled(r, 6.0, Color32::from_rgb(0x3A, 0x3A, 0x3F));
+            p.rect_filled(r, 6.0, pick(Color32::from_white_alpha(36), Color32::WHITE));
         }
-        let col = if i == selected || resp.hovered() { TEXT } else { TEXT_DIM };
+        let col = if i == selected || resp.hovered() { TEXT() } else { TEXT_DIM() };
         text_fit(&p, r.center(), Align2::CENTER_CENTER, l, font(12.0), col, r.width() - 8.0);
         if resp.clicked() && i != selected {
             out = Some(i);
@@ -415,7 +586,7 @@ pub fn switch(ui: &mut Ui, rect: Rect, id: egui::Id, on: bool, enabled: bool) ->
         return resp;
     }
     let t = ui.ctx().animate_bool(id.with("t"), on);
-    p.rect_filled(rect, rect.height() / 2.0, lerp_color(white(41), BLUE, t));
+    p.rect_filled(rect, rect.height() / 2.0, lerp_color(white(41), BLUE(), t));
     let d = rect.height() - 4.0;
     let x = rect.left() + 2.0 + d / 2.0 + (rect.width() - 4.0 - d) * t;
     p.circle_filled(Pos2::new(x, rect.center().y), d / 2.0, Color32::WHITE);
@@ -434,13 +605,19 @@ pub fn dashed_rect(p: &Painter, rect: Rect, r: f32, color: Color32) {
 /// (system blue for every tool; no rainbow of filled squircles).
 pub fn tool_chip(p: &Painter, rect: Rect, glyph: Icon, color: Color32) {
     let r = (rect.width() * 0.27).round();
-    p.rect_filled(rect, r, white(18));
+    if color == tint::NEUTRAL() || color == BLUE() {
+        p.rect_filled(rect, r, white(18));
+    } else {
+        // a group tile: its colour faint behind, a little stronger as the edge
+        p.rect_filled(rect, r, with_alpha(color, 0.12));
+        p.rect_stroke(rect, r, Stroke::new(1.0, with_alpha(color, 0.28)), StrokeKind::Inside);
+    }
     icon(p, glyph, Rect::from_center_size(rect.center(), rect.size() * 0.6), lift(color));
 }
 
 /// A tint made readable as a glyph or text on a dark card (blue → lighter blue).
 pub fn lift(c: Color32) -> Color32 {
-    if c == BLUE { ACCENT } else { c }
+    if c == BLUE() { ACCENT() } else { c }
 }
 
 /// 1 pt separator line.
@@ -449,6 +626,12 @@ pub fn hairline(p: &Painter, a: Pos2, b: Pos2) {
 }
 
 /// Small section header ("Clean", "Monitor", table column titles).
+/// A sidebar section title with its group's 6 pt dot in front.
+pub fn group_header(p: &Painter, pos: Pos2, label: &str) -> Rect {
+    p.circle_filled(Pos2::new(pos.x + 3.0, pos.y + 7.0), 3.0, group_color(label));
+    section_header(p, Pos2::new(pos.x + 12.0, pos.y), Align2::LEFT_TOP, label)
+}
+
 pub fn section_header(p: &Painter, pos: Pos2, align: Align2, label: &str) -> Rect {
     p.text(pos, align, label, bold(11.0), white(120))
 }
@@ -458,8 +641,8 @@ pub fn section_header(p: &Painter, pos: Pos2, align: Align2, label: &str) -> Rec
 pub fn sheet_header(ui: &mut Ui, rect: Rect, glyph: Icon, color: Color32, title: &str, sub: &str) -> bool {
     let p = ui.painter().clone();
     tool_chip(&p, Rect::from_min_size(rect.min + Vec2::new(16.0, 14.0), Vec2::splat(30.0)), glyph, color);
-    text_fit(&p, rect.min + Vec2::new(56.0, 12.0), Align2::LEFT_TOP, title, bold(15.0), TEXT, rect.width() - 110.0);
-    text_fit(&p, rect.min + Vec2::new(56.0, 31.0), Align2::LEFT_TOP, sub, font(12.0), TEXT_DIM, rect.width() - 110.0);
+    text_fit(&p, rect.min + Vec2::new(56.0, 12.0), Align2::LEFT_TOP, title, bold(15.0), TEXT(), rect.width() - 110.0);
+    text_fit(&p, rect.min + Vec2::new(56.0, 31.0), Align2::LEFT_TOP, sub, font(12.0), TEXT_DIM(), rect.width() - 110.0);
     hairline(&p, Pos2::new(rect.left(), rect.top() + 57.0), Pos2::new(rect.right(), rect.top() + 57.0));
     let cr = Rect::from_center_size(Pos2::new(rect.right() - 27.0, rect.top() + 29.0), Vec2::splat(26.0));
     round_button(ui, cr, Icon::Close, "Close").clicked()
@@ -470,12 +653,12 @@ pub fn sheet_header(ui: &mut Ui, rect: Rect, glyph: Icon, color: Color32, title:
 
 /// A sheet's big number: "1.44 TB free of 2 TB". Returns the height used.
 pub fn hero_number(p: &Painter, pos: Pos2, big: &str, unit: &str, caption: &str) -> f32 {
-    let g = p.layout_no_wrap(big.to_owned(), bold(34.0), TEXT);
+    let g = p.layout_no_wrap(big.to_owned(), bold(34.0), TEXT());
     let (w, h) = (g.size().x, g.size().y);
     let base = pos.y + h * 0.80;
-    p.galley(pos, g, TEXT);
-    let u = p.text(Pos2::new(pos.x + w + 6.0, base), Align2::LEFT_BOTTOM, unit, bold(15.0), TEXT_SOFT);
-    p.text(Pos2::new(u.right() + if unit.is_empty() { 0.0 } else { 8.0 }, base), Align2::LEFT_BOTTOM, caption, font(13.0), TEXT_DIM);
+    p.galley(pos, g, TEXT());
+    let u = p.text(Pos2::new(pos.x + w + 6.0, base), Align2::LEFT_BOTTOM, unit, bold(15.0), TEXT_SOFT());
+    p.text(Pos2::new(u.right() + if unit.is_empty() { 0.0 } else { 8.0 }, base), Align2::LEFT_BOTTOM, caption, font(13.0), TEXT_DIM());
     h
 }
 
@@ -485,27 +668,28 @@ pub fn sidebar_item(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: C
     let resp = ui.interact(rect, id, if planned { Sense::hover() } else { Sense::click() });
     let h = ui.ctx().animate_bool(id.with("h"), resp.hovered() && !planned);
     let p = ui.painter();
+    let active_text = pick(hex(0xD9F78A), hex(0x3F6B0A));
     if selected {
-        p.rect_filled(rect, 6.0, with_alpha(BLUE, 0.9));
+        p.rect_filled(rect, 8.0, pick(Color32::from_rgba_unmultiplied(200, 240, 90, 41), Color32::from_rgba_unmultiplied(125, 181, 25, 41)));
     } else if h > 0.0 {
         p.rect_filled(rect, 6.0, white((12.0 * h) as u8));
     }
     let chip_r = Rect::from_min_size(Pos2::new(rect.left() + 8.0, rect.center().y - 8.0), Vec2::splat(16.0));
     let glyph_col = if planned {
-        TEXT_MUTED
+        TEXT_MUTED()
     } else if selected {
-        Color32::WHITE
-    } else if color == tint::NEUTRAL || color == Color32::TRANSPARENT {
-        TEXT_DIM
+        active_text
+    } else if color == tint::NEUTRAL() || color == Color32::TRANSPARENT {
+        TEXT_DIM()
     } else {
         color
     };
     icon(p, glyph, chip_r, glyph_col);
     let mut right = rect.right() - 8.0;
     if !meta.is_empty() {
-        right = p.text(Pos2::new(right, rect.center().y), Align2::RIGHT_CENTER, meta, font(11.0), if selected { white(205) } else { white(120) }).left() - 6.0;
+        right = p.text(Pos2::new(right, rect.center().y), Align2::RIGHT_CENTER, meta, font(11.0), if selected { with_alpha(active_text, 0.8) } else { white(120) }).left() - 6.0;
     }
-    text_fit(p, Pos2::new(chip_r.right() + 9.0, rect.center().y), Align2::LEFT_CENTER, label, font(13.0), if planned { TEXT_FAINT } else if selected { Color32::WHITE } else { white(217) }, right - chip_r.right() - 9.0);
+    text_fit(p, Pos2::new(chip_r.right() + 9.0, rect.center().y), Align2::LEFT_CENTER, label, font(13.0), if planned { TEXT_FAINT() } else if selected { active_text } else { white(217) }, right - chip_r.right() - 9.0);
     if planned {
         return resp.on_hover_text("Planned: not built yet");
     }
@@ -526,9 +710,9 @@ pub const PAGE_FOOTER_H: f32 = 60.0;
 /// hairline. Returns the rect for buttons on the right (vertically centred).
 pub fn page_header(p: &Painter, r: Rect, title: &str, sub: &str, sub_col: Color32) -> Rect {
     let cy = r.top() + PAGE_HEADER_H / 2.0;
-    let t = p.text(Pos2::new(r.left() + 20.0, cy), Align2::LEFT_CENTER, title, ty::lead(), TEXT);
+    let t = p.text(Pos2::new(r.left() + 20.0, cy), Align2::LEFT_CENTER, title, ty::lead(), TEXT());
     // status sits on the same line as the title, like a macOS toolbar
-    let sub_col = if sub_col == TEXT_DIM { ty::caption_color() } else { sub_col };
+    let sub_col = if sub_col == TEXT_DIM() { ty::caption_color() } else { sub_col };
     text_fit(p, Pos2::new(t.right() + 10.0, cy + 1.0), Align2::LEFT_CENTER, sub, ty::label(), sub_col, (r.right() - 260.0 - t.right()).max(40.0));
     p.line_segment([Pos2::new(r.left(), r.top() + PAGE_HEADER_H), Pos2::new(r.right(), r.top() + PAGE_HEADER_H)], Stroke::new(1.0, Color32::from_black_alpha(115)));
     Rect::from_min_max(Pos2::new(r.right() - 20.0, cy - 13.0), Pos2::new(r.right() - 20.0, cy + 13.0))
@@ -538,7 +722,7 @@ pub fn page_header(p: &Painter, r: Rect, title: &str, sub: &str, sub_col: Color3
 pub fn page_footer(p: &Painter, r: Rect, window_radius: f32) -> Rect {
     let f = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - PAGE_FOOTER_H), r.max);
     let rr = window_radius.round().clamp(0.0, 255.0) as u8;
-    p.rect_filled(f, CornerRadius { nw: 0, ne: 0, sw: 0, se: rr }, FOOTER);
+    p.rect_filled(f, CornerRadius { nw: 0, ne: 0, sw: 0, se: rr }, FOOTER());
     p.line_segment([f.left_top(), f.right_top()], Stroke::new(1.0, white(20)));
     f
 }
@@ -551,11 +735,11 @@ pub const SHEET_HEADER_H: f32 = 58.0;
 pub fn fact_row(p: &Painter, r: Rect, label: &str, value: &str, value_col: Color32, hint: &str) -> f32 {
     let top = r.top() + 8.0;
     let vr = p.text(Pos2::new(r.right() - 12.0, top), Align2::RIGHT_TOP, value, bold(13.0), value_col);
-    text_fit(p, Pos2::new(r.left() + 12.0, top), Align2::LEFT_TOP, label, font(13.0), TEXT_DIM, (vr.left() - r.left() - 24.0).max(40.0));
+    text_fit(p, Pos2::new(r.left() + 12.0, top), Align2::LEFT_TOP, label, font(13.0), TEXT_DIM(), (vr.left() - r.left() - 24.0).max(40.0));
     if hint.is_empty() {
         return 32.0;
     }
-    let h = paragraph(p, Pos2::new(r.left() + 12.0, top + 19.0), hint, font(12.0), TEXT_FAINT, r.width() - 24.0);
+    let h = paragraph(p, Pos2::new(r.left() + 12.0, top + 19.0), hint, font(12.0), TEXT_FAINT(), r.width() - 24.0);
     27.0 + h + 8.0
 }
 
@@ -564,7 +748,7 @@ pub fn legend_row(p: &Painter, r: Rect, color: Color32, label: &str, value: &str
     let c = Pos2::new(r.left() + 16.5, r.center().y);
     p.rect_filled(Rect::from_center_size(c, Vec2::splat(9.0)), 3.0, color);
     let vr = p.text(Pos2::new(r.right() - 12.0, r.center().y), Align2::RIGHT_CENTER, value, font(13.0), value_col);
-    text_fit(p, Pos2::new(r.left() + 31.0, r.center().y), Align2::LEFT_CENTER, label, font(13.0), TEXT, (vr.left() - r.left() - 40.0).max(40.0));
+    text_fit(p, Pos2::new(r.left() + 31.0, r.center().y), Align2::LEFT_CENTER, label, font(13.0), TEXT(), (vr.left() - r.left() - 40.0).max(40.0));
 }
 
 /// Text that is cut with an ellipsis to fit `max_w`.
@@ -695,6 +879,8 @@ pub enum Icon {
     Gauge,
     /// An app with a cross: the Uninstaller.
     AppRemove,
+    /// A file.
+    Doc,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -715,10 +901,11 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Headphones => "headphones",
         Icon::Shield => "checkmark.shield",
         Icon::Sparkle => "sparkle",
-        Icon::Broom => "bubbles.and.sparkles",
+        Icon::Broom => "wind",
         Icon::Gear => "gearshape",
         Icon::Trash => "trash",
         Icon::Folder => "folder",
+        Icon::Doc => "doc",
         Icon::Lens => "magnifyingglass",
         Icon::Laptop => "laptopcomputer",
         Icon::Heart => "heart",
@@ -840,7 +1027,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             boxr(3.0, 8.0, 18.0, 16.0, 2.0);
             open(&[(21.0, 11.0), (21.0, 13.0)]);
             let f = level.min(100) as f32 / 100.0;
-            let fill = if level <= 20 { RED } else { color };
+            let fill = if level <= 20 { RED() } else { color };
             p.rect_filled(Rect::from_min_max(pt(5.0, 10.0), pt(5.0 + 11.0 * f, 14.0)), 1.0 * u, fill);
         }
         Icon::Cpu => {
@@ -882,8 +1069,8 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             closed(&[(9.0, 8.0), (16.0, 15.0), (13.0, 21.0), (3.0, 11.0)]);
         }
         Icon::Gear => {
-            p.circle_stroke(pt(12.0, 12.0), 3.0 * u, st);
-            p.circle_stroke(pt(12.0, 12.0), 7.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 3.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 7.0 * u, st);
             for i in 0..8 {
                 let a = i as f32 / 8.0 * TAU;
                 let d = Vec2::new(a.cos(), a.sin());
@@ -896,8 +1083,9 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             open(&[(6.0, 6.0), (7.0, 20.5), (17.0, 20.5), (18.0, 6.0)]);
         }
         Icon::Folder => closed(&[(3.0, 6.0), (9.5, 6.0), (11.5, 8.0), (21.0, 8.0), (21.0, 19.0), (3.0, 19.0)]),
+        Icon::Doc => closed(&[(6.0, 3.0), (14.0, 3.0), (19.0, 8.0), (19.0, 21.0), (6.0, 21.0)]),
         Icon::Lens | Icon::Search => {
-            p.circle_stroke(pt(11.0, 11.0), 7.0 * u, st);
+            stroke_circle(&p, pt(11.0, 11.0), 7.0 * u, st);
             open(&[(16.0, 16.0), (21.0, 21.0)]);
         }
         Icon::Laptop => {
@@ -916,11 +1104,11 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         }
         Icon::Thermo => {
             boxr(10.0, 3.0, 14.0, 15.0, 2.0);
-            p.circle_stroke(pt(12.0, 18.0), 3.0 * u, st);
+            stroke_circle(&p, pt(12.0, 18.0), 3.0 * u, st);
             open(&[(12.0, 8.0), (12.0, 16.0)]);
         }
         Icon::Clock => {
-            p.circle_stroke(pt(12.0, 12.0), 9.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 9.0 * u, st);
             open(&[(12.0, 7.0), (12.0, 12.0), (15.5, 14.0)]);
         }
         Icon::Up => {
@@ -934,7 +1122,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         Icon::Back => open(&[(15.0, 6.0), (9.0, 12.0), (15.0, 18.0)]),
         Icon::Forward => open(&[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)]),
         Icon::Info => {
-            p.circle_stroke(pt(12.0, 12.0), 9.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 9.0 * u, st);
             dot(12.0, 7.8, 1.2);
             open(&[(12.0, 11.0), (12.0, 16.5)]);
         }
@@ -981,7 +1169,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         }
         Icon::Fan => {
             // six curved blades around a hub (four straight arms read wrong)
-            p.circle_stroke(pt(12.0, 12.0), 1.8 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 1.8 * u, st);
             for k in 0..6 {
                 let a0 = k as f32 * TAU / 6.0;
                 let pts: Vec<Pos2> = (0..=6)
@@ -1171,13 +1359,20 @@ mod tests {
 pub fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, focus: bool, size: f32) -> egui::Response {
     let p = ui.painter().clone();
     p.rect_filled(r, 7.0, white(15));
-    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(size)), TEXT_FAINT);
+    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(size)), TEXT_FAINT());
     let tr = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top()), Pos2::new(r.right() - 8.0, r.bottom()));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT)).frame(egui::Frame::NONE).font(font(size)).text_color(TEXT).desired_width(tr.width());
+    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT())).frame(egui::Frame::NONE).font(font(size)).text_color(TEXT()).desired_width(tr.width());
     let resp = child.add(te);
     if focus && !resp.has_focus() {
         resp.request_focus();
     }
     resp
+}
+
+/// A circle outline centred on `r`. egui 0.37 paints circle strokes outside
+/// the radius, which put ring tracks a half-stroke off the arcs drawn on them.
+pub fn stroke_circle(p: &Painter, c: Pos2, r: f32, stroke: impl Into<Stroke>) {
+    let s: Stroke = stroke.into();
+    p.circle_stroke(c, (r - s.width / 2.0).max(0.0), s);
 }

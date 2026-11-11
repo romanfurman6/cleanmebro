@@ -28,7 +28,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub const ID: ToolId = "uninstaller";
-pub const TINT: Color32 = crate::kit::glass::BLUE;
+#[allow(non_snake_case)]
+pub fn TINT() -> Color32 { crate::kit::glass::tint::CLEANUP() }
 
 /// Apps unused this long count as unused.
 pub const UNUSED_DAYS: i64 = 90;
@@ -282,7 +283,7 @@ impl Uninstaller {
             tab: Tab::Apps,
             search: String::new(),
             filter: Filter::All,
-            sort: Sort::Size,
+            sort: Sort::Name,
             selected: None,
             checked: Vec::new(),
             review: None,
@@ -345,6 +346,7 @@ impl Uninstaller {
                     st2.lock().unwrap().working = Some(line);
                     c2.request_repaint();
                 });
+                crate::kit::sound::play(if rep.failed.is_empty() { crate::kit::sound::Cue::Done } else { crate::kit::sound::Cue::Oops });
                 {
                     let mut g = st.lock().unwrap();
                     g.working = None;
@@ -717,7 +719,7 @@ impl Tool for Uninstaller {
         "Uninstaller"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::AppRemove, color: TINT }
+        Badge { icon: Icon::AppRemove, color: TINT() }
     }
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};
@@ -798,6 +800,9 @@ mod tests {
     fn filters_and_sorting() {
         let env = ToolEnv { ctx: egui::Context::default(), demo: true };
         let mut u = Uninstaller::new(&env);
+        // opens by name, so rows don't jump while sizes come in
+        assert!(matches!(u.sort, Sort::Name));
+        u.sort = Sort::Size;
         let all = u.visible();
         assert!(all.len() > 5);
         {

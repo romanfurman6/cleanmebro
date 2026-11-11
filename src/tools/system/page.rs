@@ -20,9 +20,9 @@ const BENTO_MIN_H: f32 = 520.0;
 
 fn level_color(l: Level) -> Color32 {
     match l {
-        Level::Good => BLUE,
-        Level::Fair => AMBER,
-        Level::Critical => RED,
+        Level::Good => tint::HEALTH(),
+        Level::Fair => AMBER(),
+        Level::Critical => RED(),
     }
 }
 
@@ -44,8 +44,8 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
         sub.push(format!("up {}", human_duration(s.uptime_secs)));
     }
     let (sub, sub_col) = match recs.first() {
-        Some(rec) => (rec.title.clone(), AMBER),
-        None => (sub.join(" · "), TEXT_DIM),
+        Some(rec) => (rec.title.clone(), AMBER()),
+        None => (sub.join(" · "), TEXT_DIM()),
     };
     let btns = page_header(&p, r, "Mac Health", &sub, sub_col);
     let mut right = btns.right();
@@ -135,10 +135,10 @@ fn card_title(p: &egui::Painter, r: Rect, title: &str, caption: &str, big: Optio
     let mut right = r.right();
     if let Some((num, unit)) = big {
         let u = p.text(Pos2::new(r.right(), r.top() + 26.0), Align2::RIGHT_BOTTOM, unit, ty::body(), ty::caption_color());
-        let n = p.text(Pos2::new(u.left() - 3.0, r.top() + 28.0), Align2::RIGHT_BOTTOM, num, ty::hero(), TEXT);
+        let n = p.text(Pos2::new(u.left() - 3.0, r.top() + 28.0), Align2::RIGHT_BOTTOM, num, ty::hero(), TEXT());
         right = n.left() - sp::M;
     }
-    text_fit(p, r.left_top(), Align2::LEFT_TOP, title, ty::title(), TEXT, right - r.left());
+    text_fit(p, r.left_top(), Align2::LEFT_TOP, title, ty::title(), TEXT(), right - r.left());
     text_fit(p, Pos2::new(r.left(), r.top() + 17.0 + sp::XS - 2.0), Align2::LEFT_TOP, caption, ty::caption(), ty::caption_color(), right - r.left());
     r.top() + 34.0 + sp::M
 }
@@ -153,7 +153,7 @@ fn legend(p: &egui::Painter, r: Rect, rows: &[(Option<Color32>, String, String)]
             p.rect_filled(Rect::from_center_size(Pos2::new(x + 4.0, cy), Vec2::splat(8.0)), 2.0, *c);
             x += 14.0;
         }
-        let vr = p.text(Pos2::new(r.right(), cy), Align2::RIGHT_CENTER, value, ty::label(), TEXT);
+        let vr = p.text(Pos2::new(r.right(), cy), Align2::RIGHT_CENTER, value, ty::label(), TEXT());
         text_fit(p, Pos2::new(x, cy), Align2::LEFT_CENTER, label, ty::label(), white(166), vr.left() - x - 8.0);
     }
     top
@@ -161,7 +161,7 @@ fn legend(p: &egui::Painter, r: Rect, rows: &[(Option<Color32>, String, String)]
 
 fn cpu_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
     let load = format!("{:.0}", s.cpu_load);
-    let y = card_title(p, r, "CPU", &format!("{} · orange = busy spike", s.thermal_word()), Some((&load, "%")));
+    let y = card_title(p, r, "CPU", &s.thermal_word(), Some((&load, "%")));
     let foot = r.bottom() - 18.0;
     let gr = Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), foot - sp::M));
     let peak = s.cpu_history.iter().copied().fold(0.0f32, f32::max);
@@ -184,12 +184,12 @@ fn disk_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option<Sh
     let avail = (r.bottom() - foot_h - sp::M - y).max(60.0);
     let rr = (avail / 2.0).min(46.0);
     let c = Pos2::new(r.left() + rr + 2.0, y + avail / 2.0);
-    tile::ring(p, c, rr - 5.0, 10.0, used.max(0.01), if s.disk_level() == Level::Good { INDIGO } else { level_color(s.disk_level()) });
-    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, &human_bytes(s.disk_free), bold(14.0), TEXT, rr * 1.5);
+    tile::ring(p, c, rr - 5.0, 10.0, used.max(0.01), if s.disk_level() == Level::Good { INDIGO() } else { level_color(s.disk_level()) });
+    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, &human_bytes(s.disk_free), bold(14.0), TEXT(), rr * 1.5);
     p.text(c + Vec2::new(0.0, 10.0), Align2::CENTER_CENTER, "free", ty::caption(), ty::caption_color());
     // biggest folders beside the ring
     let lr = Rect::from_min_max(Pos2::new(c.x + rr + sp::L, y), Pos2::new(r.right(), y + avail));
-    let colors = [BLUE, INDIGO, TEAL];
+    let colors = [tint::HEALTH(), INDIGO(), PURPLE()];
     let rows: Vec<(Option<Color32>, String, String)> = s.categories.iter().take(3).enumerate().map(|(i, (n, b))| (Some(colors[i]), n.clone(), human_bytes(*b))).collect();
     if rows.is_empty() {
         text_fit(p, Pos2::new(lr.left(), lr.center().y), Align2::LEFT_CENTER, if s.sizing { "Measuring folders…" } else { "Folders not measured" }, ty::label(), ty::caption_color(), lr.width());
@@ -221,22 +221,21 @@ fn memory_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
     let y = card_title(p, r, "Memory", &format!("{} · {word}", human_bytes(s.mem_total)), Some((&pct, "%")));
     // one stacked bar of what holds the memory
     let tot = s.mem_total.max(1) as f32;
-    let parts = [(s.mem_active, BLUE), (s.mem_wired, INDIGO), (s.mem_compressed, CLAUDE)];
+    let parts = [(s.mem_active, tint::HEALTH()), (s.mem_wired, INDIGO()), (s.mem_compressed, PURPLE())];
     let segs: Vec<(f32, Color32)> = parts.iter().map(|(b, c)| (*b as f32 / tot, *c)).collect();
     let rows = vec![
-        (Some(BLUE), "App memory".to_string(), human_bytes(s.mem_active)),
-        (Some(INDIGO), "Wired".to_string(), human_bytes(s.mem_wired)),
-        (Some(CLAUDE), "Compressed".to_string(), human_bytes(s.mem_compressed)),
+        (Some(tint::HEALTH()), "App memory".to_string(), human_bytes(s.mem_active)),
+        (Some(INDIGO()), "Wired".to_string(), human_bytes(s.mem_wired)),
+        (Some(PURPLE()), "Compressed".to_string(), human_bytes(s.mem_compressed)),
         (None, "Swap used".to_string(), human_bytes(s.swap_used)),
     ];
     let lt = legend(p, r, &rows);
     // pressure over the last minutes, then what holds the memory
     let bar_y = lt - sp::M - 10.0;
     stacked_bar(p, Rect::from_min_size(Pos2::new(r.left(), bar_y), Vec2::new(r.width(), 10.0)), &segs);
-    let cap_y = bar_y - sp::M - 14.0;
-    p.text(Pos2::new(r.left(), cap_y), Align2::LEFT_TOP, "Pressure, last minutes", ty::caption(), ty::caption_color());
-    if cap_y - sp::XS - y > 24.0 {
-        tile::spark_to(p, Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), cap_y - sp::XS)), &s.mem_history, level_color(s.mem_level()), (s.mem_history.iter().copied().fold(0.0f32, f32::max) * 1.5).max(30.0));
+    let cap_y = bar_y - sp::M;
+    if cap_y - y > 24.0 {
+        tile::spark_to(p, Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), cap_y)), &s.mem_history, level_color(s.mem_level()), (s.mem_history.iter().copied().fold(0.0f32, f32::max) * 1.5).max(30.0));
     }
 }
 
@@ -249,7 +248,7 @@ fn battery_glyph(p: &egui::Painter, r: Rect, frac: f32, color: Color32, label: &
     let w = (inner.width() * frac.clamp(0.0, 1.0)).max(4.0);
     p.rect_filled(Rect::from_min_size(inner.min, Vec2::new(w, inner.height())), 5.0, color);
     p.rect_filled(Rect::from_min_max(Pos2::new(body.right() + 2.0, r.center().y - 7.0), Pos2::new(r.right(), r.center().y + 7.0)), 2.0, white(70));
-    p.text(body.center(), Align2::CENTER_CENTER, label, bold((r.height() * 0.32).clamp(14.0, 20.0)), Color32::WHITE);
+    p.text(body.center(), Align2::CENTER_CENTER, label, bold((r.height() * 0.32).clamp(14.0, 20.0)), if frac > 0.5 { on_color(color) } else { TEXT() });
 }
 
 fn battery_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
@@ -271,7 +270,7 @@ fn battery_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
         "On battery".to_string()
     };
     let y = card_title(p, r, "Battery", &status, None);
-    let col = if b.percent <= 20 { RED } else { GREEN };
+    let col = if b.percent <= 20 { RED() } else { GREEN() };
     let mut rows = Vec::new();
     if let Some(h) = b.health_pct {
         rows.push((None, "Health".to_string(), format!("{h:.0}%")));
@@ -304,7 +303,7 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
     let y = card_title(p, r, &title, &cap.join(" · "), None);
     // two numbers side by side
     let colw = r.width() / 2.0;
-    for (k, (v, label, col)) in [(human_rate(s.net_down), "download", TEXT), (human_rate(s.net_up), "upload", TEAL)].into_iter().enumerate() {
+    for (k, (v, label, col)) in [(human_rate(s.net_down), "download", TEXT()), (human_rate(s.net_up), "upload", TEAL())].into_iter().enumerate() {
         let x = r.left() + k as f32 * colw;
         text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &v, ty::lead(), col, colw - sp::S);
         p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, label, ty::caption(), ty::caption_color());
@@ -326,7 +325,7 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
     let lt = legend(p, bottom, &rows);
     let gr = Rect::from_min_max(Pos2::new(r.left(), y + 34.0 + sp::M), Pos2::new(r.right(), lt - sp::M));
     if gr.height() > 20.0 {
-        tile::spark(p, gr, &s.net_history, TEAL, None);
+        tile::spark(p, gr, &s.net_history, TEAL(), None);
     }
     let mut out = None;
     let label = "Test speed";

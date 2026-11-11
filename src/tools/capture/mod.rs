@@ -157,6 +157,9 @@ pub struct Capture {
     uploads: share::Uploads,
     /// The secret key as it's being typed in settings (never shown back).
     share_secret: String,
+    /// Whether a secret key is in the Keychain: read once, off the frame loop
+    /// (and never in demo mode, where a Keychain prompt would block).
+    pub(crate) has_secret: Option<bool>,
 }
 
 impl Capture {
@@ -206,6 +209,7 @@ impl Capture {
             video: None,
             uploads: share::Uploads::default(),
             share_secret: String::new(),
+            has_secret: if env.demo { Some(false) } else { None },
         };
         c.apply_keys();
         c
@@ -521,7 +525,7 @@ impl Capture {
             }
         };
         self.forget_dropped_thumbs();
-        if self.settings.sound {
+        if self.settings.sound && crate::kit::sound::on() {
             mac::play_shutter();
         }
         let (copied, saved) = (self.settings.copy, self.settings.save);
@@ -735,11 +739,6 @@ impl Capture {
         }
     }
 
-    /// The folder's last part, e.g. "Desktop".
-    fn folder_name(&self) -> String {
-        self.settings.folder.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| self.shown_folder())
-    }
-
     fn choose_folder(&mut self) {
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
@@ -792,7 +791,7 @@ fn demo_folder() -> PathBuf {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Crop, color: tint::CAPTURE }
+    Badge { icon: Icon::Crop, color: tint::CAPTURE() }
 }
 
 impl Tool for Capture {

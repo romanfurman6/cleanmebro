@@ -90,7 +90,7 @@ pub fn show(c: &mut Capture, ctx: &egui::Context) {
 /// The whole window; true to close.
 fn draw(v: &mut Viewer, ui: &mut Ui, full: Rect, upload: Option<f32>) -> bool {
     let p = ui.painter().clone();
-    p.rect_filled(full, 12.0, BG);
+    p.rect_filled(full, 12.0, BG());
     let head = Rect::from_min_size(full.min, Vec2::new(full.width(), HEAD_H));
     let mut close = header(v, ui, head, upload);
     let tl = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - TIMELINE_H), full.max);
@@ -113,11 +113,11 @@ fn draw(v: &mut Viewer, ui: &mut Ui, full: Rect, upload: Option<f32>) -> bool {
     }
     if let Some((m, at)) = &v.status {
         if at.elapsed().as_secs_f32() < 2.5 {
-            let g = p.layout_no_wrap(m.clone(), font(13.0), TEXT);
+            let g = p.layout_no_wrap(m.clone(), font(13.0), TEXT());
             let r = Rect::from_center_size(Pos2::new(pic.center().x, pic.bottom() - 30.0), g.size() + Vec2::new(28.0, 16.0));
-            p.rect_filled(r, r.height() / 2.0, RAISED);
+            p.rect_filled(r, r.height() / 2.0, RAISED());
             p.rect_stroke(r, r.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
-            p.galley(r.center() - g.size() / 2.0, g, TEXT);
+            p.galley(r.center() - g.size() / 2.0, g, TEXT());
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else {
             v.status = None;
@@ -128,16 +128,16 @@ fn draw(v: &mut Viewer, ui: &mut Ui, full: Rect, upload: Option<f32>) -> bool {
 
 fn header(v: &mut Viewer, ui: &mut Ui, r: Rect, upload: Option<f32>) -> bool {
     let p = ui.painter().clone();
-    p.rect_filled(r, egui::CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, FOOTER);
+    p.rect_filled(r, egui::CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, FOOTER());
     hairline(&p, r.left_bottom(), r.right_bottom());
     let drag = ui.interact(Rect::from_min_max(r.min + Vec2::new(90.0, 0.0), r.max - Vec2::new(470.0, 0.0)), ui.scope_id().with("drag"), Sense::click_and_drag());
     if drag.drag_started() {
         ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
     }
     let y = r.center().y;
-    let t = p.text(Pos2::new(r.left() + 90.0, y), Align2::LEFT_CENTER, v.title(), bold(13.0), TEXT);
+    let t = p.text(Pos2::new(r.left() + 90.0, y), Align2::LEFT_CENTER, v.title(), bold(13.0), TEXT());
     let meta = if v.edited() { format!("{}  →  {}", clock_label(v.duration()), clock_label(v.edl.length())) } else { clock_label(v.duration()) };
-    p.text(Pos2::new(t.right() + 8.0, y), Align2::LEFT_CENTER, meta, font(12.0), TEXT_FAINT);
+    p.text(Pos2::new(t.right() + 8.0, y), Align2::LEFT_CENTER, meta, font(12.0), TEXT_FAINT());
 
     let mut close = false;
     let mut x = r.right() - 14.0;
@@ -158,7 +158,7 @@ fn header(v: &mut Viewer, ui: &mut Ui, r: Rect, upload: Option<f32>) -> bool {
         if button(ui, "Keep editing", BTN_SECONDARY, true) {
             v.asking = false;
         }
-        p.text(Pos2::new(x - 4.0, y), Align2::RIGHT_CENTER, "Close without saving?", font(12.0), AMBER);
+        p.text(Pos2::new(x - 4.0, y), Align2::RIGHT_CENTER, "Close without saving?", font(12.0), AMBER());
         return close;
     }
     let can = !v.saving && !v.busy();
@@ -184,7 +184,7 @@ fn header(v: &mut Viewer, ui: &mut Ui, r: Rect, upload: Option<f32>) -> bool {
             (true, false) => "Unsaved cuts",
             _ => "Unsaved voice cleanup",
         };
-        chip(&p, Pos2::new(x - 2.0, y), Align2::RIGHT_CENTER, what, CHIP_ASK);
+        chip(&p, Pos2::new(x - 2.0, y), Align2::RIGHT_CENTER, what, CHIP_ASK());
     }
     close
 }
@@ -193,7 +193,7 @@ fn picture(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
     p.rect_filled(r, 0.0, Color32::from_rgb(0x0E, 0x0E, 0x10));
     if let Some(e) = &v.error {
-        p.text(r.center(), Align2::CENTER_CENTER, format!("Can't play this video: {e}"), font(13.0), TEXT_DIM);
+        p.text(r.center(), Align2::CENTER_CENTER, format!("Can't play this video: {e}"), font(13.0), TEXT_DIM());
         return;
     }
     if let Some(f) = v.player.as_ref().and_then(|pl| pl.frame()) {
@@ -218,7 +218,7 @@ fn picture(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     // a cut piece shows dimmed, so it's clear it won't be in the file
     if v.player.is_some() && !v.edl.kept(v.time()) && v.time() < v.duration() - 1e-3 {
         p.rect_filled(fit, 0.0, Color32::from_black_alpha(150));
-        p.text(fit.center(), Align2::CENTER_CENTER, "Cut", bold(15.0), TEXT_SOFT);
+        p.text(fit.center(), Align2::CENTER_CENTER, "Cut", bold(15.0), TEXT_SOFT());
     }
     if let Some(text) = v.caption() {
         let wrap = (fit.width() * 0.8).max(120.0);
@@ -244,7 +244,7 @@ fn plain_icon(ui: &mut Ui, r: Rect, ico: Ico, tip: &str, on: bool) -> bool {
         p.rect_filled(r, 7.0, white(20));
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    icons::draw(p, ico, Rect::from_center_size(r.center(), Vec2::splat(15.0)), if on { TEXT } else { TEXT_MUTED });
+    icons::draw(p, ico, Rect::from_center_size(r.center(), Vec2::splat(15.0)), if on { TEXT() } else { TEXT_MUTED() });
     resp.on_hover_text(tip).clicked() && on
 }
 
@@ -256,14 +256,14 @@ fn transport(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     let presp = ui.interact(pr, ui.scope_id().with("play"), Sense::click());
     p.circle_filled(pr.center(), 17.0, white(if presp.hovered() { 40 } else { 26 }));
     let playing = v.playing();
-    icons::draw(&p, if playing { Ico::Pause } else { Ico::Play }, Rect::from_center_size(pr.center() + Vec2::new(if playing { 0.0 } else { 1.5 }, 0.0), Vec2::splat(15.0)), TEXT);
+    icons::draw(&p, if playing { Ico::Pause } else { Ico::Play }, Rect::from_center_size(pr.center() + Vec2::new(if playing { 0.0 } else { 1.5 }, 0.0), Vec2::splat(15.0)), TEXT());
     if presp.on_hover_text(if playing { "Pause (Space)" } else { "Play (Space)" }).clicked() {
         v.toggle_play();
     }
     // time in the edited video
     let now = v.edl.to_edited(v.time()).unwrap_or_else(|| v.edl.to_edited(v.edl.playable(v.time()).unwrap_or(v.edl.end())).unwrap_or(v.edl.length()));
-    let tr = p.text(Pos2::new(pr.right() + 14.0, y), Align2::LEFT_CENTER, clock_label(now), mono(13.0), TEXT);
-    p.text(Pos2::new(tr.right() + 4.0, y), Align2::LEFT_CENTER, format!("/ {}", clock_label(v.edl.length())), mono(13.0), TEXT_FAINT);
+    let tr = p.text(Pos2::new(pr.right() + 14.0, y), Align2::LEFT_CENTER, clock_label(now), mono(13.0), TEXT());
+    p.text(Pos2::new(tr.right() + 4.0, y), Align2::LEFT_CENTER, format!("/ {}", clock_label(v.edl.length())), mono(13.0), TEXT_FAINT());
     // speed
     let labels: Vec<String> = SPEEDS.iter().map(|s| format!("{s}×")).collect();
     let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
@@ -299,7 +299,7 @@ fn transport(v: &mut Viewer, ui: &mut Ui, r: Rect) {
         v.undo();
     }
     if !has_sel && v.edl.duration > 0.0 {
-        p.text(Pos2::new(ur.left() - 14.0, y), Align2::RIGHT_CENTER, "Drag on the timeline to choose a stretch", font(12.0), TEXT_FAINT);
+        p.text(Pos2::new(ur.left() - 14.0, y), Align2::RIGHT_CENTER, "Drag on the timeline to choose a stretch", font(12.0), TEXT_FAINT());
     }
 }
 
@@ -317,7 +317,7 @@ pub fn tick_step(duration: f64, width: f32, min_px: f32) -> f64 {
 
 fn timeline(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
-    p.rect_filled(r, egui::CornerRadius { nw: 0, ne: 0, sw: 12, se: 12 }, FOOTER);
+    p.rect_filled(r, egui::CornerRadius { nw: 0, ne: 0, sw: 12, se: 12 }, FOOTER());
     hairline(&p, r.left_top(), r.right_top());
     let d = v.duration().max(0.001);
     let full_lane = Rect::from_min_max(Pos2::new(r.left() + PAD + 8.0, r.top() + 30.0), Pos2::new(r.right() - PAD - 8.0, r.bottom() - 22.0));
@@ -332,7 +332,7 @@ fn timeline(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     while t <= d + 1e-6 {
         let x = x_of(t);
         p.line_segment([Pos2::new(x, r.top() + 20.0), Pos2::new(x, r.top() + 25.0)], Stroke::new(1.0, white(60)));
-        p.text(Pos2::new(x, r.top() + 12.0), Align2::CENTER_CENTER, tick_label(t), font(10.5), TEXT_FAINT);
+        p.text(Pos2::new(x, r.top() + 12.0), Align2::CENTER_CENTER, tick_label(t), font(10.5), TEXT_FAINT());
         t += step;
     }
 
@@ -374,7 +374,7 @@ fn timeline(v: &mut Viewer, ui: &mut Ui, r: Rect) {
             let hi = peaks[k..((k as f32 + step) as usize).min(n).max(k + 1)].iter().fold(0.0f32, |a, b| a.max(*b));
             let h = (hi.sqrt() * (wave.height() - 4.0)).max(1.0);
             let cx = wave.left() + x;
-            p.line_segment([Pos2::new(cx, wave.center().y - h / 2.0), Pos2::new(cx, wave.center().y + h / 2.0)], Stroke::new(1.0, with_alpha(GREEN, 0.75)));
+            p.line_segment([Pos2::new(cx, wave.center().y - h / 2.0), Pos2::new(cx, wave.center().y + h / 2.0)], Stroke::new(1.0, with_alpha(GREEN(), 0.75)));
             x += 2.0;
         }
     }
@@ -406,9 +406,9 @@ fn timeline(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     // selection
     if let Some((a, b)) = v.sel {
         let sr = Rect::from_min_max(Pos2::new(x_of(a), lane.top()), Pos2::new(x_of(b), lane.bottom()));
-        p.rect_filled(sr, 0.0, with_alpha(ACCENT, 0.28));
-        p.rect_stroke(sr, 0.0, Stroke::new(1.5, ACCENT), StrokeKind::Inside);
-        p.text(Pos2::new(sr.center().x, wave.bottom() + 11.0), Align2::CENTER_CENTER, format!("{:.1} s selected", b - a), font(11.0), ACCENT);
+        p.rect_filled(sr, 0.0, with_alpha(ACCENT(), 0.28));
+        p.rect_stroke(sr, 0.0, Stroke::new(1.5, ACCENT()), StrokeKind::Inside);
+        p.text(Pos2::new(sr.center().x, wave.bottom() + 11.0), Align2::CENTER_CENTER, format!("{:.1} s selected", b - a), font(11.0), ACCENT());
     }
 
     // playhead
@@ -474,7 +474,7 @@ fn timeline(v: &mut Viewer, ui: &mut Ui, r: Rect) {
 
 fn panel(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
-    p.rect_filled(r, 0.0, SIDEBAR);
+    p.rect_filled(r, 0.0, SIDEBAR());
     hairline(&p, r.left_top(), r.left_bottom());
     let tabs = Rect::from_min_size(r.min + Vec2::new(14.0, 12.0), Vec2::new(r.width() - 28.0, 28.0));
     let k = if v.tab == Tab::Transcript { 0 } else { 1 };
@@ -500,10 +500,10 @@ fn job_row(v: &mut Viewer, ui: &mut Ui, r: Rect, label: &str) -> f32 {
         }
         _ => format!("{:.0}%", frac * 100.0),
     };
-    spinner(&p, Pos2::new(r.left() + 8.0, r.top() + 10.0), 6.0, ui.input(|i| i.time), ACCENT);
-    p.text(Pos2::new(r.left() + 22.0, r.top() + 10.0), Align2::LEFT_CENTER, label, font(12.5), TEXT);
-    p.text(Pos2::new(r.right(), r.top() + 10.0), Align2::RIGHT_CENTER, detail, font(12.0), TEXT_FAINT);
-    bar(&p, Rect::from_min_size(Pos2::new(r.left(), r.top() + 26.0), Vec2::new(r.width(), 6.0)), frac, ACCENT);
+    spinner(&p, Pos2::new(r.left() + 8.0, r.top() + 10.0), 6.0, ui.input(|i| i.time), ACCENT());
+    p.text(Pos2::new(r.left() + 22.0, r.top() + 10.0), Align2::LEFT_CENTER, label, font(12.5), TEXT());
+    p.text(Pos2::new(r.right(), r.top() + 10.0), Align2::RIGHT_CENTER, detail, font(12.0), TEXT_FAINT());
+    bar(&p, Rect::from_min_size(Pos2::new(r.left(), r.top() + 26.0), Vec2::new(r.width(), 6.0)), frac, ACCENT());
     let stop = Rect::from_min_size(Pos2::new(r.left(), r.top() + 42.0), Vec2::new(70.0, 26.0));
     if pill_button(ui, stop, "Stop", BTN_SECONDARY, true).clicked() {
         v.cancel_job();
@@ -514,7 +514,7 @@ fn job_row(v: &mut Viewer, ui: &mut Ui, r: Rect, label: &str) -> f32 {
 fn error_row(v: &Viewer, p: &egui::Painter, r: Rect, y: f32) -> f32 {
     match &v.job_error {
         Some(e) => {
-            let h = paragraph(p, Pos2::new(r.left(), y), e, font(12.0), RED, r.width());
+            let h = paragraph(p, Pos2::new(r.left(), y), e, font(12.0), RED(), r.width());
             y + h + 10.0
         }
         None => y,
@@ -539,21 +539,21 @@ fn transcript(v: &mut Viewer, ui: &mut Ui, r: Rect) {
         }
         y = error_row(v, &p, r, y);
         // what's needed to start: a model (downloaded once), then Transcribe
-        p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Speech to text, on this Mac", bold(13.5), TEXT);
+        p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Speech to text, on this Mac", bold(13.5), TEXT());
         y += 22.0;
-        y += paragraph(&p, Pos2::new(r.left(), y), "Whisper runs here; the sound never leaves the Mac. The model is downloaded once.", font(12.0), TEXT_DIM, r.width()) + 12.0;
+        y += paragraph(&p, Pos2::new(r.left(), y), "Whisper runs here; the sound never leaves the Mac. The model is downloaded once.", font(12.0), TEXT_DIM(), r.width()) + 12.0;
         for m in Model::ALL {
             let row = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), 50.0));
             let resp = ui.interact(row, ui.scope_id().with(("model", m.name())), Sense::click());
             let on = m == model;
-            p.rect_filled(row, 8.0, if on { with_alpha(BLUE, 0.18) } else { white(if resp.hovered() { 14 } else { 8 }) });
+            p.rect_filled(row, 8.0, if on { with_alpha(BLUE(), 0.18) } else { white(if resp.hovered() { 14 } else { 8 }) });
             if on {
-                p.rect_stroke(row, 8.0, Stroke::new(1.0, with_alpha(ACCENT, 0.7)), StrokeKind::Inside);
+                p.rect_stroke(row, 8.0, Stroke::new(1.0, with_alpha(ACCENT(), 0.7)), StrokeKind::Inside);
             }
             let size = if m.ready() { "Downloaded".to_string() } else { human_bytes(m.bytes()) };
-            p.text(Pos2::new(row.left() + 12.0, row.top() + 16.0), Align2::LEFT_CENTER, m.name(), bold(13.0), TEXT);
-            p.text(Pos2::new(row.right() - 12.0, row.top() + 16.0), Align2::RIGHT_CENTER, size, font(11.5), if m.ready() { GREEN } else { TEXT_FAINT });
-            text_fit(&p, Pos2::new(row.left() + 12.0, row.top() + 34.0), Align2::LEFT_CENTER, m.about(), font(11.5), TEXT_DIM, row.width() - 24.0);
+            p.text(Pos2::new(row.left() + 12.0, row.top() + 16.0), Align2::LEFT_CENTER, m.name(), bold(13.0), TEXT());
+            p.text(Pos2::new(row.right() - 12.0, row.top() + 16.0), Align2::RIGHT_CENTER, size, font(11.5), if m.ready() { GREEN() } else { TEXT_FAINT() });
+            text_fit(&p, Pos2::new(row.left() + 12.0, row.top() + 34.0), Align2::LEFT_CENTER, m.about(), font(11.5), TEXT_DIM(), row.width() - 24.0);
             if resp.clicked() && !on {
                 v.prefs.model = m;
                 v.save_prefs();
@@ -584,22 +584,22 @@ fn transcript(v: &mut Viewer, ui: &mut Ui, r: Rect) {
             for (i, l) in v.lines.iter().enumerate() {
                 let cut = speech::line_cut(l, &v.edl);
                 let picked = v.picked.is_some_and(|(a, b)| i >= a && i <= b);
-                let g = ui.painter().layout(l.text.clone(), font(13.0), if cut { TEXT_MUTED } else { TEXT_SOFT }, w - 54.0);
+                let g = ui.painter().layout(l.text.clone(), font(13.0), if cut { TEXT_MUTED() } else { TEXT_SOFT() }, w - 54.0);
                 let (row, resp) = ui.allocate_exact_size(Vec2::new(w, g.size().y + 12.0), Sense::click());
                 let pp = ui.painter();
                 if picked {
-                    pp.rect_filled(row, 6.0, with_alpha(ACCENT, 0.22));
+                    pp.rect_filled(row, 6.0, with_alpha(ACCENT(), 0.22));
                 } else if Some(i) == now {
                     pp.rect_filled(row, 6.0, white(14));
                 } else if resp.hovered() {
                     pp.rect_filled(row, 6.0, white(8));
                 }
-                pp.text(Pos2::new(row.left() + 6.0, row.top() + 6.0), Align2::LEFT_TOP, clock_label(v.edl.edited_at(l.start)), mono(11.0), if Some(i) == now { ACCENT } else { TEXT_FAINT });
+                pp.text(Pos2::new(row.left() + 6.0, row.top() + 6.0), Align2::LEFT_TOP, clock_label(v.edl.edited_at(l.start)), mono(11.0), if Some(i) == now { ACCENT() } else { TEXT_FAINT() });
                 let at = Pos2::new(row.left() + 48.0, row.top() + 6.0);
                 let rect = Rect::from_min_size(at, g.size());
-                pp.galley(at, g, TEXT_SOFT);
+                pp.galley(at, g, TEXT_SOFT());
                 if cut {
-                    pp.line_segment([Pos2::new(rect.left(), rect.center().y), Pos2::new(rect.right(), rect.center().y)], Stroke::new(1.0, TEXT_MUTED));
+                    pp.line_segment([Pos2::new(rect.left(), rect.center().y), Pos2::new(rect.right(), rect.center().y)], Stroke::new(1.0, TEXT_MUTED()));
                 }
                 if Some(i) == now && v.playing() {
                     ui.scroll_to_rect(row, None);
@@ -633,7 +633,7 @@ fn transcript(v: &mut Viewer, ui: &mut Ui, r: Rect) {
         v.prefs.captions = !v.prefs.captions;
         v.save_prefs();
     }
-    p.text(Pos2::new(cb.right() + 8.0, cb.center().y), Align2::LEFT_CENTER, "Captions", font(12.0), TEXT_SOFT);
+    p.text(Pos2::new(cb.right() + 8.0, cb.center().y), Align2::LEFT_CENTER, "Captions", font(12.0), TEXT_SOFT());
     let mut x = r.right();
     for (label, k) in [(".txt", 2), (".srt", 1), ("Copy", 0)] {
         let w = button_width(&p, label, BTN_SECONDARY) - 6.0;
@@ -657,7 +657,7 @@ fn transcript(v: &mut Viewer, ui: &mut Ui, r: Rect) {
 fn voice_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
     let mut y = r.top();
-    p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Clean up voice", bold(13.5), TEXT);
+    p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Clean up voice", bold(13.5), TEXT());
     y += 22.0;
     let about = if v.tracks >= 3 {
         "Takes background noise out of the microphone; system sound stays as it was. Runs on this Mac."
@@ -666,7 +666,7 @@ fn voice_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     } else {
         "This video has no sound."
     };
-    y += paragraph(&p, Pos2::new(r.left(), y), about, font(12.0), TEXT_DIM, r.width()) + 14.0;
+    y += paragraph(&p, Pos2::new(r.left(), y), about, font(12.0), TEXT_DIM(), r.width()) + 14.0;
     if v.tracks == 0 {
         return;
     }
@@ -676,15 +676,15 @@ fn voice_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     y = error_row(v, &p, r, y);
 
     // strength
-    p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Strength", font(12.5), TEXT_SOFT);
+    p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Strength", font(12.5), TEXT_SOFT());
     let pct = v.prefs.strength;
-    p.text(Pos2::new(r.right(), y + 8.0), Align2::RIGHT_CENTER, if pct >= 0.99 { "Full".to_string() } else { format!("{:.0} dB", super::voice::atten_db(pct)) }, font(12.0), TEXT_FAINT);
+    p.text(Pos2::new(r.right(), y + 8.0), Align2::RIGHT_CENTER, if pct >= 0.99 { "Full".to_string() } else { format!("{:.0} dB", super::voice::atten_db(pct)) }, font(12.0), TEXT_FAINT());
     y += 22.0;
     let track = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), 20.0));
     let resp = ui.interact(track, ui.scope_id().with("strength"), Sense::click_and_drag());
     let rail = Rect::from_center_size(track.center(), Vec2::new(track.width(), 4.0));
     p.rect_filled(rail, 2.0, white(30));
-    p.rect_filled(Rect::from_min_max(rail.min, Pos2::new(rail.left() + rail.width() * pct, rail.bottom())), 2.0, ACCENT);
+    p.rect_filled(Rect::from_min_max(rail.min, Pos2::new(rail.left() + rail.width() * pct, rail.bottom())), 2.0, ACCENT());
     p.circle_filled(Pos2::new(rail.left() + rail.width() * pct, rail.center().y), 8.0, Color32::WHITE);
     if let Some(pos) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked()) {
         v.prefs.strength = ((pos.x - rail.left()) / rail.width()).clamp(0.0, 1.0);
@@ -693,8 +693,8 @@ fn voice_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
         v.save_prefs();
     }
     y = track.bottom() + 4.0;
-    p.text(Pos2::new(r.left(), y + 6.0), Align2::LEFT_CENTER, "Gentle", font(11.0), TEXT_FAINT);
-    p.text(Pos2::new(r.right(), y + 6.0), Align2::RIGHT_CENTER, "Strong", font(11.0), TEXT_FAINT);
+    p.text(Pos2::new(r.left(), y + 6.0), Align2::LEFT_CENTER, "Gentle", font(11.0), TEXT_FAINT());
+    p.text(Pos2::new(r.right(), y + 6.0), Align2::RIGHT_CENTER, "Strong", font(11.0), TEXT_FAINT());
     y += 22.0;
     let go = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), 32.0));
     let label = if v.voice.is_some() { "Clean up again" } else { "Clean up voice" };
@@ -711,7 +711,7 @@ fn voice_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
         }
         y = seg.bottom() + 12.0;
         for (label, peaks, on) in [("Before", &v.peaks, !v.voice_on), ("After", &v.clean_peaks, v.voice_on)] {
-            p.text(Pos2::new(r.left(), y + 6.0), Align2::LEFT_CENTER, label, font(11.0), if on { TEXT } else { TEXT_FAINT });
+            p.text(Pos2::new(r.left(), y + 6.0), Align2::LEFT_CENTER, label, font(11.0), if on { TEXT() } else { TEXT_FAINT() });
             let w = Rect::from_min_size(Pos2::new(r.left(), y + 14.0), Vec2::new(r.width(), 36.0));
             p.rect_filled(w, 4.0, Color32::from_rgb(0x1E, 0x24, 0x20));
             if !peaks.is_empty() {
@@ -720,13 +720,13 @@ fn voice_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
                 while x < w.width() {
                     let k = ((x / w.width()) * n as f32) as usize;
                     let h = (peaks[k.min(n - 1)].sqrt() * (w.height() - 4.0)).max(1.0);
-                    p.line_segment([Pos2::new(w.left() + x, w.center().y - h / 2.0), Pos2::new(w.left() + x, w.center().y + h / 2.0)], Stroke::new(1.0, with_alpha(GREEN, if on { 0.85 } else { 0.4 })));
+                    p.line_segment([Pos2::new(w.left() + x, w.center().y - h / 2.0), Pos2::new(w.left() + x, w.center().y + h / 2.0)], Stroke::new(1.0, with_alpha(GREEN(), if on { 0.85 } else { 0.4 })));
                     x += 2.0;
                 }
             }
             y = w.bottom() + 10.0;
         }
-        paragraph(&p, Pos2::new(r.left(), y), "What plays is what Save writes into the video.", font(11.5), TEXT_FAINT, r.width());
+        paragraph(&p, Pos2::new(r.left(), y), "What plays is what Save writes into the video.", font(11.5), TEXT_FAINT(), r.width());
     }
 }
 

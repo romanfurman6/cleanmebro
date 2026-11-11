@@ -37,13 +37,13 @@ fn claude_note(ui: &mut Ui, pos: Pos2, width: f32, a: Availability, cx: &mut Cx)
     let p = ui.painter().clone();
     let x = pos.x + 40.0;
     let w = width - 54.0;
-    let body = format!("Cleanup still works with its built-in rules. {} Then Claude double-checks each path too.", a.how());
-    let text_h = p.layout(body.clone(), font(12.0), TEXT_DIM, w).size().y;
+    let body = a.how().to_string();
+    let text_h = p.layout(body.clone(), font(12.0), TEXT_DIM(), w).size().y;
     let r = Rect::from_min_size(pos, Vec2::new(width, 32.0 + text_h + 12.0 + 26.0 + 14.0));
     glass_card(&p, r, R_CARD, 0.0, false);
-    icon(&p, Icon::Gauge, Rect::from_min_size(r.min + Vec2::new(14.0, 14.0), Vec2::splat(16.0)), TEXT_FAINT);
-    text_fit(&p, Pos2::new(x, r.top() + 13.0), Align2::LEFT_TOP, a.title(), bold(13.0), TEXT, w);
-    paragraph(&p, Pos2::new(x, r.top() + 32.0), &body, font(12.0), TEXT_DIM, w);
+    icon(&p, Icon::Gauge, Rect::from_min_size(r.min + Vec2::new(14.0, 14.0), Vec2::splat(16.0)), TEXT_FAINT());
+    text_fit(&p, Pos2::new(x, r.top() + 13.0), Align2::LEFT_TOP, a.title(), bold(13.0), TEXT(), w);
+    paragraph(&p, Pos2::new(x, r.top() + 32.0), &body, font(12.0), TEXT_DIM(), w);
     // buttons, bottom left
     let by = r.bottom() - 12.0 - 26.0;
     let mut bx = x;
@@ -97,114 +97,95 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     let avail = claude_now(app);
     let has_claude = avail.ready();
     let p = ui.painter().clone();
-    page_header(&p, r, "Cleanup", "Caches, logs and leftovers", TEXT_DIM);
+    page_header(&p, r, "Cleanup", "Caches, logs and leftovers", TEXT_DIM());
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
-    let cw = (body.width() - sp::L) / 2.0;
-    let left = Rect::from_min_size(body.min, Vec2::new(cw, body.height()));
-    let right = Rect::from_min_max(Pos2::new(left.right() + sp::L, body.top()), body.max);
-    glass_card(&p, left, R_CARD, 0.0, false);
-    glass_card(&p, right, R_CARD, 0.0, false);
 
-    // left: the disk, how it works, Scan
-    let li = left.shrink(sp::L);
+    // past cleans fill the space under the cards; before the first clean the
+    // cards sit in the middle instead of at the top of an empty page
+    let hist = super::engine::history();
+    let per_col0 = Group::ALL.len().div_ceil(4);
+    let cards_h = 128.0 + sp::L + 2.0 * sp::L + 16.0 + sp::M + per_col0 as f32 * 32.0;
+    let y0 = if hist.is_empty() && has_claude { body.top() + ((body.height() - cards_h) * 0.4).max(0.0) } else { body.top() };
+    // the disk, with Scan on the right
+    let top = Rect::from_min_size(Pos2::new(body.left(), y0), Vec2::new(body.width(), 128.0));
+    glass_card(&p, top, R_CARD, 0.0, false);
+    let ti = top.shrink(sp::L);
     let (total, free) = crate::kit::fs::volume_space("/");
-    p.text(li.left_top(), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT);
-    p.text(li.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, "Startup disk", ty::caption(), ty::caption_color());
-    let mut y = li.top() + 34.0 + sp::M;
-    let g = p.layout_no_wrap(human_bytes(free), ty::hero(), TEXT);
+    p.text(ti.left_top(), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT());
+    let y = ti.top() + 16.0 + sp::M;
+    let g = p.layout_no_wrap(human_bytes(free), ty::hero(), TEXT());
     let gw = g.size().x;
-    p.galley(Pos2::new(li.left(), y), g, TEXT);
+    p.galley(Pos2::new(ti.left(), y), g, TEXT());
     if total > 0 {
-        p.text(Pos2::new(li.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
+        p.text(Pos2::new(ti.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
     }
-    y += 34.0 + sp::M;
+    let bw = 200.0;
+    let bar_w = (ti.width() - bw - sp::XL * 2.0).max(120.0);
     let used = if total > 0 { 1.0 - free as f32 / total as f32 } else { 0.0 };
-    bar(&p, Rect::from_min_size(Pos2::new(li.left(), y), Vec2::new(li.width(), 8.0)), used, BLUE);
-    y += 8.0 + sp::XL;
-    let first = if has_claude && app.use_ai {
-        (Icon::Gauge, "Claude checks every path", "Safe, ask you, or keep. It sees paths, never contents.")
-    } else {
-        (Icon::Check, "Built-in rules check every path", "Safe, ask you, or keep.")
-    };
-    let points = [
-        first,
-        (Icon::Question, "You decide on anything unclear", "Projects you use are never touched."),
-        (Icon::Trash, "Goes to the Trash first", "Put anything back until you empty it."),
-    ];
-    for (ic, title, line) in points {
-        if y + 36.0 > li.bottom() - 44.0 - 16.0 - sp::XL {
-            break;
-        }
-        icon(&p, ic, Rect::from_min_size(Pos2::new(li.left(), y + 1.0), Vec2::splat(16.0)), ACCENT);
-        text_fit(&p, Pos2::new(li.left() + 16.0 + sp::M, y), Align2::LEFT_TOP, title, ty::body(), TEXT, li.width() - 28.0);
-        text_fit(&p, Pos2::new(li.left() + 16.0 + sp::M, y + 18.0), Align2::LEFT_TOP, line, ty::label(), ty::caption_color(), li.width() - 28.0);
-        y += 36.0 + sp::M;
-    }
-    // what is never touched (the hard-kept places in kit::fs)
-    let scan_top = li.bottom() - 16.0 - sp::S - 44.0;
-    if y + 16.0 + sp::M + 24.0 < scan_top - sp::XL {
-        y += sp::S;
-        p.text(Pos2::new(li.left(), y), Align2::LEFT_TOP, "Never touched", ty::title(), TEXT);
-        y += 16.0 + sp::M;
-        let mut cx = li.left();
-        for name in ["Documents", "Desktop", "Pictures", "Projects", "iCloud Drive", "Mail", "Messages", "Keychains", ".ssh", "Claude settings", "Folders with .git"] {
-            let gl = p.layout_no_wrap(name.to_string(), ty::label(), TEXT_SOFT);
-            let w = gl.size().x + 2.0 * sp::S + 4.0;
-            if cx + w > li.right() {
-                cx = li.left();
-                y += 24.0 + sp::S;
-                if y + 24.0 > scan_top - sp::L {
-                    break;
-                }
-            }
-            let pr = Rect::from_min_size(Pos2::new(cx, y), Vec2::new(w, 24.0));
-            p.rect_filled(pr, 12.0, white(15));
-            p.galley(pr.center() - gl.size() / 2.0, gl, TEXT_SOFT);
-            cx += w + sp::S;
-        }
-    }
-    let bw = 220.0f32.min(li.width());
-    let br = Rect::from_min_size(Pos2::new(li.center().x - bw / 2.0, scan_top), Vec2::new(bw, 44.0));
+    bar(&p, Rect::from_min_size(Pos2::new(ti.left(), ti.bottom() - 8.0), Vec2::new(bar_w, 8.0)), used, BLUE());
+    let scan_h = if has_claude { 44.0 + sp::M + 18.0 } else { 44.0 };
+    let br = Rect::from_min_size(Pos2::new(ti.right() - bw, ti.center().y - scan_h / 2.0), Vec2::new(bw, 44.0));
     if pill_button(ui, br, "Scan", BTN_PRIMARY, true).clicked() {
         cleanup::start_scan(app.clean.clone(), ctx, app.use_ai && has_claude);
     }
-    p.text(Pos2::new(li.center().x, li.bottom()), Align2::CENTER_BOTTOM, "About a minute. Nothing is removed until you confirm.", ty::caption(), ty::caption_color());
-
-    // right: where it looks, and Claude
-    let ri = right.shrink(sp::L);
-    p.text(ri.left_top(), Align2::LEFT_TOP, "Where it looks", ty::title(), TEXT);
-    p.text(ri.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} places", Group::ALL.len()), ty::caption(), ty::caption_color());
-    let foot_h = if has_claude {
-        18.0 + sp::M
-    } else {
-        let w = ri.width();
-        let body = format!("Cleanup still works with its built-in rules. {} Then Claude double-checks each path too.", avail.how());
-        p.layout(body, font(12.0), TEXT_DIM, w - 54.0).size().y + 32.0 + 12.0 + 26.0 + 14.0 + sp::M
-    };
-    let list_top = ri.top() + 34.0 + sp::S;
-    let list_bottom = ri.bottom() - foot_h;
-    let rh = ((list_bottom - list_top) / Group::ALL.len() as f32).min(sp::ROW_H);
-    for (k, g) in Group::ALL.iter().enumerate() {
-        let row = Rect::from_min_size(Pos2::new(ri.left(), list_top + k as f32 * rh), Vec2::new(ri.width(), rh));
-        if k > 0 {
-            p.line_segment([row.left_top(), row.right_top()], Stroke::new(1.0, white(15)));
-        }
-        if rh >= 40.0 {
-            text_fit(&p, Pos2::new(row.left(), row.center().y - 1.0), Align2::LEFT_BOTTOM, g.title(), ty::body(), TEXT, row.width());
-            text_fit(&p, Pos2::new(row.left(), row.center().y + 1.0), Align2::LEFT_TOP, g.blurb(), ty::caption(), ty::caption_color(), row.width());
-        } else {
-            text_fit(&p, Pos2::new(row.left(), row.center().y), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT, row.width());
-        }
-        ui.interact(row, ui.scope_id().with(("look", k)), Sense::hover()).on_hover_text(g.blurb());
-    }
     if has_claude {
-        let sw = Rect::from_min_size(Pos2::new(ri.left(), ri.bottom() - 18.0), Vec2::new(30.0, 18.0));
+        let sw = Rect::from_min_size(Pos2::new(br.left(), br.bottom() + sp::M), Vec2::new(30.0, 18.0));
         if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
             app.use_ai = !app.use_ai;
         }
-        text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Let Claude judge what's safe", ty::body(), TEXT, ri.width() - 40.0);
-    } else {
-        claude_note(ui, Pos2::new(right.left(), ri.bottom() - foot_h + sp::M), right.width(), avail, tcx);
+        text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Ask Claude what's safe", ty::body(), TEXT(), bw - 40.0);
+    }
+
+    // where it looks: one card, four columns; what it never touches is a tooltip
+    let row_h = 32.0;
+    let cols = 4;
+    let per_col = Group::ALL.len().div_ceil(cols);
+    let head = 16.0 + sp::M;
+    let left = Rect::from_min_size(Pos2::new(body.left(), top.bottom() + sp::L), Vec2::new(body.width(), 2.0 * sp::L + head + per_col as f32 * row_h));
+    glass_card(&p, left, R_CARD, 0.0, false);
+    let li = left.shrink(sp::L);
+    let title = p.text(li.left_top(), Align2::LEFT_TOP, "Where it looks", ty::title(), TEXT());
+    ui.interact(title, ui.scope_id().with("never"), Sense::hover())
+        .on_hover_text("Never touched: Documents, Desktop, Pictures, Projects, iCloud Drive, Mail, Messages, Keychains, .ssh, Claude settings, folders with .git");
+    let colw = li.width() / cols as f32;
+    for (k, g) in Group::ALL.iter().enumerate() {
+        let (c, rw) = (k / per_col, k % per_col);
+        let row = Rect::from_min_size(Pos2::new(li.left() + c as f32 * colw, li.top() + head + rw as f32 * row_h), Vec2::new(colw - sp::S, row_h));
+        icon(&p, Icon::Check, Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(12.0)), TEXT_FAINT());
+        text_fit(&p, Pos2::new(row.left() + 20.0, row.center().y), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT(), row.width() - 20.0);
+        ui.interact(row, ui.scope_id().with(("look", k)), Sense::hover()).on_hover_text(g.blurb());
+    }
+
+    let mut y = left.bottom() + sp::L;
+    if !has_claude {
+        y += claude_note(ui, Pos2::new(body.left(), y), body.width(), avail, tcx) + sp::L;
+    }
+    if !hist.is_empty() && body.bottom() - y > 120.0 {
+        past_cleans(&p, Rect::from_min_max(Pos2::new(body.left(), y), body.max), &hist);
+    }
+}
+
+/// What earlier cleans removed: the total, and one bar per clean.
+fn past_cleans(p: &egui::Painter, r: Rect, hist: &[(i64, u64)]) {
+    glass_card(p, r, R_CARD, 0.0, false);
+    let ri = r.shrink(sp::L);
+    let total: u64 = hist.iter().map(|h| h.1).sum();
+    p.text(ri.left_top(), Align2::LEFT_TOP, "Past cleans", ty::title(), TEXT());
+    p.text(Pos2::new(ri.right(), ri.top()), Align2::RIGHT_TOP, format!("{} freed in {} clean{}", human_bytes(total), hist.len(), if hist.len() == 1 { "" } else { "s" }), ty::body(), TEXT_DIM());
+    let chart = Rect::from_min_max(Pos2::new(ri.left(), ri.top() + 16.0 + sp::L), Pos2::new(ri.right(), ri.bottom() - 18.0));
+    let n = hist.len().min(((chart.width() + 8.0) / 44.0).floor().max(1.0) as usize);
+    let shown = &hist[hist.len() - n..];
+    let max = shown.iter().map(|h| h.1).max().unwrap_or(1).max(1) as f32;
+    let bw = ((chart.width() - (n as f32 - 1.0) * 8.0) / n as f32).min(56.0);
+    for (i, (when, b)) in shown.iter().enumerate() {
+        let x = chart.left() + i as f32 * (bw + 8.0);
+        let h = (chart.height() - 16.0) * (*b as f32 / max).max(0.02);
+        let last = i + 1 == n;
+        let br = Rect::from_min_max(Pos2::new(x, chart.bottom() - h), Pos2::new(x + bw, chart.bottom()));
+        p.rect_filled(br, 4.0, if last { BLUE() } else { white(46) });
+        text_fit(p, Pos2::new(br.center().x, br.top() - 3.0), Align2::CENTER_BOTTOM, &human_bytes(*b), font(11.0), TEXT_DIM(), bw + 8.0);
+        let day = chrono::DateTime::from_timestamp(*when, 0).map(|d| d.with_timezone(&chrono::Local).format("%b %-d").to_string()).unwrap_or_default();
+        text_fit(p, Pos2::new(br.center().x, chart.bottom() + 4.0), Align2::CENTER_TOP, &day, font(11.0), TEXT_FAINT(), bw + 8.0);
     }
 }
 
@@ -221,7 +202,7 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
         _ if !st.with_ai => "Looking for junk",
         _ => "Step 1 of 2 · Looking for junk",
     };
-    let btns = page_header(&p, r, "Cleanup", sub, TEXT_DIM);
+    let btns = page_header(&p, r, "Cleanup", sub, TEXT_DIM());
     if phase != Phase::Cleaning {
         let w = button_width(&p, "Stop", BTN_SECONDARY).max(64.0);
         let sr = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
@@ -239,47 +220,46 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
     } else {
         (human_bytes(st.items.iter().filter(|i| i.verdict != Verdict::Keep).map(|i| i.bytes).sum()), format!("found so far · {} items", st.items.len()))
     };
-    let g = p.layout_no_wrap(big, bold(28.0), TEXT);
+    let g = p.layout_no_wrap(big, bold(28.0), TEXT());
     let gw = g.size().x;
-    p.galley(Pos2::new(x0, y), g, TEXT);
-    p.text(Pos2::new(x0 + gw + 10.0, y + 22.0), Align2::LEFT_BOTTOM, caption, font(13.0), TEXT_DIM);
+    p.galley(Pos2::new(x0, y), g, TEXT());
+    p.text(Pos2::new(x0 + gw + 10.0, y + 22.0), Align2::LEFT_BOTTOM, caption, font(13.0), TEXT_DIM());
     if st.progress >= 0.0 {
-        p.text(Pos2::new(x1, y + 22.0), Align2::RIGHT_BOTTOM, format!("{:.0}%", st.progress.clamp(0.0, 1.0) * 100.0), font(13.0), TEXT_DIM);
+        p.text(Pos2::new(x1, y + 22.0), Align2::RIGHT_BOTTOM, format!("{:.0}%", st.progress.clamp(0.0, 1.0) * 100.0), font(13.0), TEXT_DIM());
     }
     y += 40.0;
     // progress bar (an indeterminate sweep while the scan can't count)
     let track = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, 6.0));
     if st.progress >= 0.0 {
-        bar(&p, track, st.progress, BLUE);
+        bar(&p, track, st.progress, BLUE());
     } else {
         p.rect_filled(track, 3.0, white(20));
         let w = track.width() * 0.25;
         let f = ((t * 0.6).fract() as f32) * (track.width() + w) - w;
         let seg = Rect::from_min_size(Pos2::new(track.left() + f, track.top()), Vec2::new(w, 6.0)).intersect(track);
         if seg.width() > 0.0 {
-            p.rect_filled(seg, 3.0, BLUE);
+            p.rect_filled(seg, 3.0, BLUE());
         }
     }
     y += 16.0;
     // what it's doing right now
     match phase {
         Phase::Judging => {
-            icon(&p, Icon::Sparkle, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(14.0)), CLAUDE);
             let line = if st.ai_status.is_empty() { "Asking Claude…".to_string() } else { st.ai_status.clone() };
-            text_fit(&p, Pos2::new(x0 + 22.0, y + 7.0), Align2::LEFT_CENTER, &format!("{line} · only paths, sizes and dates are sent"), font(12.0), TEXT_FAINT, x1 - x0 - 22.0);
+            text_fit(&p, Pos2::new(x0, y + 7.0), Align2::LEFT_CENTER, &line, font(12.0), TEXT_FAINT(), x1 - x0);
         }
         _ => {
             let line = st.current.replacen(&home_str(), "~", 1);
-            text_fit(&p, Pos2::new(x0, y + 7.0), Align2::LEFT_CENTER, &middle_ellipsis(&line, 110), mono(11.0), TEXT_FAINT, x1 - x0);
+            text_fit(&p, Pos2::new(x0, y + 7.0), Align2::LEFT_CENTER, &middle_ellipsis(&line, 110), mono(11.0), TEXT_FAINT(), x1 - x0);
         }
     }
     y += 34.0;
 
     // per-group table
     let cols = [x0 + 12.0, x0 + 48.0, x1 - 250.0, x1 - 12.0];
-    section_header(&p, Pos2::new(cols[1], y), Align2::LEFT_TOP, "GROUP");
-    section_header(&p, Pos2::new(cols[2], y), Align2::LEFT_TOP, "ITEMS");
-    section_header(&p, Pos2::new(cols[3], y), Align2::RIGHT_TOP, if phase == Phase::Cleaning { "SELECTED" } else { "FOUND" });
+    section_header(&p, Pos2::new(cols[1], y), Align2::LEFT_TOP, "Group");
+    section_header(&p, Pos2::new(cols[2], y), Align2::LEFT_TOP, "Items");
+    section_header(&p, Pos2::new(cols[3], y), Align2::RIGHT_TOP, if phase == Phase::Cleaning { "Selected" } else { "Found" });
     y += 22.0;
     for grp in Group::ALL {
         let row = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 38.0));
@@ -291,15 +271,15 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
         let bytes: u64 = items.iter().filter(|i| i.verdict != Verdict::Keep).map(|i| i.bytes).sum();
         let mark = Pos2::new(cols[0] + 8.0, row.center().y);
         if n > 0 {
-            p.circle_filled(mark, 8.0, tint::HEALTH);
-            icon(&p, Icon::Check, Rect::from_center_size(mark, Vec2::splat(11.0)), Color32::WHITE);
+            p.circle_filled(mark, 8.0, tint::HEALTH());
+            icon(&p, Icon::Check, Rect::from_center_size(mark, Vec2::splat(11.0)), ON_ACTION);
         } else {
-            p.circle_stroke(mark, 7.5, Stroke::new(1.5, white(64)));
+            crate::kit::glass::stroke_circle(&p, mark, 7.5, Stroke::new(1.5, white(64)));
         }
-        p.text(Pos2::new(cols[1], row.center().y), Align2::LEFT_CENTER, grp.title(), font(13.0), TEXT);
-        let (status, sc) = if n > 0 { (format!("{n} found"), Color32::from_rgb(0x5B, 0xE0, 0x7F)) } else { ("—".to_string(), TEXT_FAINT) };
+        p.text(Pos2::new(cols[1], row.center().y), Align2::LEFT_CENTER, grp.title(), font(13.0), TEXT());
+        let (status, sc) = if n > 0 { (format!("{n} found"), GREEN()) } else { ("—".to_string(), TEXT_FAINT()) };
         p.text(Pos2::new(cols[2], row.center().y), Align2::LEFT_CENTER, status, font(12.0), sc);
-        p.text(Pos2::new(cols[3], row.center().y), Align2::RIGHT_CENTER, if n > 0 { human_bytes(bytes) } else { "—".into() }, font(13.0), if n > 0 { TEXT } else { TEXT_FAINT });
+        p.text(Pos2::new(cols[3], row.center().y), Align2::RIGHT_CENTER, if n > 0 { human_bytes(bytes) } else { "—".into() }, font(13.0), if n > 0 { TEXT() } else { TEXT_FAINT() });
         y += 40.0;
     }
     ctx.request_repaint();
@@ -325,7 +305,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     if pending > 0 {
         sub.push_str(&format!(" · {pending} need your OK"));
     }
-    let btns = page_header(&p, r, "Cleanup", &sub, if ai_error.is_some() { AMBER } else { TEXT_DIM });
+    let btns = page_header(&p, r, "Cleanup", &sub, if ai_error.is_some() { AMBER() } else { TEXT_DIM() });
     let w = button_width(&p, "Scan again", BTN_SECONDARY);
     let sr = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
     if pill_button(ui, sr, "Scan again", BTN_SECONDARY, true).clicked() {
@@ -346,10 +326,10 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
 
     if total == 0 && pending == 0 {
         let c = Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + 150.0);
-        p.circle_filled(c, 28.0, tint::HEALTH);
-        icon(&p, Icon::Check, Rect::from_center_size(c, Vec2::splat(28.0)), Color32::WHITE);
-        p.text(c + Vec2::new(0.0, 56.0), Align2::CENTER_CENTER, "Nothing to clean", bold(22.0), TEXT);
-        p.text(c + Vec2::new(0.0, 84.0), Align2::CENTER_CENTER, "No caches, logs or leftovers worth removing were found.", font(13.0), TEXT_DIM);
+        p.circle_filled(c, 28.0, tint::HEALTH());
+        icon(&p, Icon::Check, Rect::from_center_size(c, Vec2::splat(28.0)), ON_ACTION);
+        p.text(c + Vec2::new(0.0, 56.0), Align2::CENTER_CENTER, "Nothing to clean", bold(22.0), TEXT());
+        p.text(c + Vec2::new(0.0, 84.0), Align2::CENTER_CENTER, "No caches, logs or leftovers worth removing were found.", font(13.0), TEXT_DIM());
         let dr = Rect::from_center_size(c + Vec2::new(0.0, 130.0), Vec2::new(96.0, 32.0));
         if pill_button(ui, dr, "Done", BTN_PRIMARY, true).clicked() {
             app.clean.lock().unwrap().phase = Phase::Intro;
@@ -392,14 +372,14 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         } else if hv > 0.0 {
             p.rect_filled(rr, R_BUTTON, white((10.0 * hv) as u8));
         }
-        let sz = p.text(Pos2::new(rr.right() - 10.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(*bytes), font(13.0), TEXT_DIM);
+        let sz = p.text(Pos2::new(rr.right() - 10.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(*bytes), font(13.0), TEXT_DIM());
         let mut right = sz.left() - 8.0;
         if *q > 0 && grp.is_none() {
             right = badge(&p, Pos2::new(right, rr.center().y), Align2::RIGHT_CENTER, &q.to_string()).left() - 8.0;
         } else if *q > 0 {
             right = badge(&p, Pos2::new(right, rr.center().y), Align2::RIGHT_CENTER, &q.to_string()).left() - 8.0;
         }
-        text_fit(&p, Pos2::new(rr.left() + 10.0, rr.center().y), Align2::LEFT_CENTER, title, font(13.0), TEXT, right - rr.left() - 14.0);
+        text_fit(&p, Pos2::new(rr.left() + 10.0, rr.center().y), Align2::LEFT_CENTER, title, font(13.0), TEXT(), right - rr.left() - 14.0);
         if resp.clicked() {
             app.clean_group = *grp;
         }
@@ -410,16 +390,16 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let tr = Rect::from_min_max(Pos2::new(lr.right() + 1.0, body.top()), body.max);
     let (gtitle, blurb) = match app.clean_group {
         Some(g) => (g.title(), g.blurb()),
-        None => ("Needs your OK", "Claude wasn't sure these are safe. Allow each one you're happy to remove, or keep it."),
+        None => ("Needs your OK", "Check these before removing"),
     };
     let gbytes = rows.iter().find(|r| r.0 == app.clean_group).map(|r| r.2).unwrap_or(0);
     let c_name = tr.left() + 24.0 + 28.0 + 12.0;
     let c_size = tr.right() - 24.0;
     let c_verdict = c_size - 80.0 - 12.0 - 110.0;
     let hy = tr.top() + 10.0;
-    section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_TOP, &format!("{} · {}", gtitle.to_uppercase(), human_bytes(gbytes)));
-    section_header(&p, Pos2::new(c_verdict, hy), Align2::LEFT_TOP, "VERDICT");
-    section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_TOP, "SIZE");
+    section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_TOP, &format!("{} · {}", gtitle, human_bytes(gbytes)));
+    section_header(&p, Pos2::new(c_verdict, hy), Align2::LEFT_TOP, "Verdict");
+    section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_TOP, "Size");
     // bulk actions on the right of the blurb line
     let la = Pos2::new(c_verdict - 16.0, hy + 20.0);
     let mut links_left = la.x;
@@ -464,7 +444,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
             }
         }
     }
-    let br = text_fit(&p, Pos2::new(c_name, hy + 20.0), Align2::LEFT_TOP, blurb, font(12.0), TEXT_FAINT, links_left - c_name - 16.0);
+    let br = text_fit(&p, Pos2::new(c_name, hy + 20.0), Align2::LEFT_TOP, blurb, font(12.0), TEXT_FAINT(), links_left - c_name - 16.0);
     ui.interact(br, ui.scope_id().with("blurb"), Sense::hover()).on_hover_text(blurb);
     let head_bottom = tr.top() + 48.0;
     hairline(&p, Pos2::new(tr.left(), head_bottom), Pos2::new(tr.right(), head_bottom));
@@ -493,14 +473,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     // footer
     let f = page_footer(&p, r, WIN_R);
     let fy = f.center().y;
-    p.text(Pos2::new(f.left() + 24.0, fy - 9.0), Align2::LEFT_CENTER, format!("{} selected", human_bytes(selected)), bold(13.0), TEXT);
-    p.text(
-        Pos2::new(f.left() + 24.0, fy + 10.0),
-        Align2::LEFT_CENTER,
-        if app.delete_now { "Deleted right away. This can't be undone." } else { "Goes to the Trash. You can put it back." },
-        font(12.0),
-        if app.delete_now { AMBER } else { TEXT_FAINT },
-    );
+    // the segmented control already says where it goes; only warn when it can't come back
+    let ty_ = if app.delete_now { fy - 9.0 } else { fy };
+    p.text(Pos2::new(f.left() + 24.0, ty_), Align2::LEFT_CENTER, format!("{} selected", human_bytes(selected)), bold(13.0), TEXT());
+    if app.delete_now {
+        p.text(Pos2::new(f.left() + 24.0, fy + 10.0), Align2::LEFT_CENTER, "Can't be undone", font(12.0), AMBER());
+    }
     let clean_label = format!("Clean {}", human_bytes(selected));
     let cw = button_width(&p, &clean_label, BTN_PRIMARY).max(120.0);
     let cr = Rect::from_min_size(Pos2::new(f.right() - 24.0 - cw, fy - 16.0), Vec2::new(cw, 32.0));
@@ -518,9 +496,9 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
 
 fn verdict_chip(it: &Item) -> (&'static str, (Color32, Color32)) {
     match it.verdict {
-        Verdict::Safe => ("Safe", CHIP_SAFE),
-        Verdict::Ask => ("Ask", CHIP_ASK),
-        Verdict::Keep => ("Kept", CHIP_KEPT),
+        Verdict::Safe => ("Safe", CHIP_SAFE()),
+        Verdict::Ask => ("Ask", CHIP_ASK()),
+        Verdict::Keep => ("Kept", CHIP_KEPT()),
     }
 }
 
@@ -552,21 +530,21 @@ fn item_row(app: &mut App, ui: &mut Ui, i: usize, w: f32, cols: (f32, f32, f32))
     }
     let (cn, cv, cs) = (rect.left() + cols.0, rect.left() + cols.1, rect.left() + cols.2);
     let name_w = cv - cn - 12.0;
-    text_fit(&p, Pos2::new(cn, rect.top() + 10.0), Align2::LEFT_TOP, &it.title, bold(13.0), TEXT, name_w);
-    text_fit(&p, Pos2::new(cn, rect.top() + 28.0), Align2::LEFT_TOP, &middle_ellipsis(&short_path(&it.path), 90), mono(11.0), TEXT_FAINT, name_w);
+    text_fit(&p, Pos2::new(cn, rect.top() + 10.0), Align2::LEFT_TOP, &it.title, bold(13.0), TEXT(), name_w);
+    text_fit(&p, Pos2::new(cn, rect.top() + 28.0), Align2::LEFT_TOP, &middle_ellipsis(&short_path(&it.path), 90), mono(11.0), TEXT_FAINT(), name_w);
     let who = match it.by {
-        Who::Ai => "Claude: ",
+        Who::Ai => "",
         Who::You => "",
         Who::Rule => "",
     };
-    text_fit(&p, Pos2::new(cn, rect.top() + 45.0), Align2::LEFT_TOP, &format!("{who}{}", it.reason), font(12.0), TEXT_DIM, name_w);
+    text_fit(&p, Pos2::new(cn, rect.top() + 45.0), Align2::LEFT_TOP, &format!("{who}{}", it.reason), font(12.0), TEXT_DIM(), name_w);
     let (label, colors) = verdict_chip(&it);
     let top = if asking { rect.top() + 10.0 } else { rect.center().y - 9.0 };
     let chip_r = chip(&p, Pos2::new(cv, top), Align2::LEFT_TOP, label, colors);
     if it.permanent {
-        chip(&p, Pos2::new(chip_r.right() + 6.0, top), Align2::LEFT_TOP, "Permanent", CHIP_RISK);
+        chip(&p, Pos2::new(chip_r.right() + 6.0, top), Align2::LEFT_TOP, "Permanent", CHIP_RISK());
     }
-    p.text(Pos2::new(cs, rect.center().y), Align2::RIGHT_CENTER, human_bytes(it.bytes), bold(13.0), TEXT);
+    p.text(Pos2::new(cs, rect.center().y), Align2::RIGHT_CENTER, human_bytes(it.bytes), bold(13.0), TEXT());
     if asking {
         let y = chip_r.bottom() + 6.0;
         let a = Rect::from_min_size(Pos2::new(cv, y), Vec2::new(52.0, 22.0));
@@ -602,12 +580,12 @@ fn small_button(ui: &mut Ui, r: Rect, label: &str, primary: bool) -> bool {
     let h = ui.ctx().animate_bool(id, resp.hovered());
     let p = ui.painter();
     if primary {
-        p.rect_filled(r, 6.0, lerp_color(BLUE, Color32::WHITE, 0.1 * h));
-        p.text(r.center(), Align2::CENTER_CENTER, label, bold(11.0), Color32::WHITE);
+        p.rect_filled(r, 6.0, lerp_color(BLUE(), Color32::WHITE, 0.1 * h));
+        p.text(r.center(), Align2::CENTER_CENTER, label, bold(11.0), ON_ACTION);
     } else {
         p.rect_filled(r, 6.0, white((10.0 * h) as u8));
         p.rect_stroke(r, 6.0, Stroke::new(1.0, white(36)), StrokeKind::Inside);
-        p.text(r.center(), Align2::CENTER_CENTER, label, font(11.0), TEXT);
+        p.text(r.center(), Align2::CENTER_CENTER, label, font(11.0), TEXT());
     }
     resp.clicked()
 }
@@ -629,14 +607,14 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
     }
     body.push_str(" Quit the apps involved first for the best result.");
     let bw = 440.0 - 44.0;
-    let body_h = p.layout(body.clone(), font(13.0), TEXT_SOFT, bw).size().y;
+    let body_h = p.layout(body.clone(), font(13.0), TEXT_SOFT(), bw).size().y;
     let m = Rect::from_center_size(r.center(), Vec2::new(440.0, 22.0 + 22.0 + 14.0 + body_h + 18.0 + 30.0 + 22.0));
     let shadow = egui::epaint::Shadow { offset: [0, 20], blur: 60, spread: 0, color: Color32::from_black_alpha(128) };
     p.add(shadow.as_shape(m, CornerRadius::same(14)));
-    p.rect_filled(m, 14.0, RAISED);
+    p.rect_filled(m, 14.0, RAISED());
     p.rect_stroke(m, 14.0, Stroke::new(1.0, white(31)), StrokeKind::Inside);
-    p.text(m.min + Vec2::new(22.0, 22.0), Align2::LEFT_TOP, format!("Clean {} items ({})?", n, human_bytes(bytes)), bold(17.0), TEXT);
-    paragraph(&p, m.min + Vec2::new(22.0, 58.0), &body, font(13.0), TEXT_SOFT, bw);
+    p.text(m.min + Vec2::new(22.0, 22.0), Align2::LEFT_TOP, format!("Clean {} items ({})?", n, human_bytes(bytes)), bold(17.0), TEXT());
+    paragraph(&p, m.min + Vec2::new(22.0, 58.0), &body, font(13.0), TEXT_SOFT(), bw);
     let danger = app.delete_now || perm;
     let ok_label = if app.delete_now { "Delete now" } else { "Move to Trash" };
     let okw = button_width(&p, ok_label, BTN_PRIMARY);
@@ -657,7 +635,7 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
 fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
     let st = app.clean.lock().unwrap().clone();
-    page_header(&p, r, "Cleanup", "Finished", TEXT_DIM);
+    page_header(&p, r, "Cleanup", "Finished", TEXT_DIM());
     let ok = st.failed.is_empty();
     let failed: std::collections::HashSet<&str> = st.failed.iter().map(|(n, _)| n.as_str()).collect();
     let mut rows: Vec<(Group, usize, u64)> = Group::ALL
@@ -682,31 +660,29 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     // left: the result
     let li = left.shrink(sp::L);
     let c = Pos2::new(li.left() + 22.0, li.top() + 22.0);
-    let col = if ok { GREEN } else { AMBER };
+    let col = if ok { GREEN() } else { AMBER() };
     crate::kit::tile::ring(&p, c, 19.0, 4.0, 1.0, col);
     icon(&p, if ok { Icon::Check } else { Icon::Info }, Rect::from_center_size(c, Vec2::splat(18.0)), col);
     let tx = c.x + 22.0 + sp::M;
     let total = st.cleaned_count + st.failed.len();
-    p.text(Pos2::new(tx, c.y - 1.0), Align2::LEFT_BOTTOM, "Cleanup finished", ty::title(), TEXT);
+    p.text(Pos2::new(tx, c.y - 1.0), Align2::LEFT_BOTTOM, "Cleanup finished", ty::title(), TEXT());
     p.text(Pos2::new(tx, c.y + 3.0), Align2::LEFT_TOP, format!("{} of {} items", st.cleaned_count, total), ty::caption(), ty::caption_color());
     let mut y = li.top() + 44.0 + sp::L;
-    let g = p.layout_no_wrap(human_bytes(st.cleaned_bytes), ty::hero(), TEXT);
+    let g = p.layout_no_wrap(human_bytes(st.cleaned_bytes), ty::hero(), TEXT());
     let gw = g.size().x;
-    p.galley(Pos2::new(li.left(), y), g, TEXT);
+    p.galley(Pos2::new(li.left(), y), g, TEXT());
     p.text(Pos2::new(li.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, if app.delete_now { "deleted" } else { "to the Trash" }, ty::body(), ty::caption_color());
     y += 34.0 + sp::XS;
-    let note = if app.delete_now { "Removed for good." } else { "Empty the Trash to get the space back." };
-    text_fit(&p, Pos2::new(li.left(), y), Align2::LEFT_TOP, note, ty::caption(), ty::caption_color(), li.width());
-    y += 16.0 + sp::L;
+    y += sp::L;
     if !ok {
         let n = st.failed.len();
-        p.text(Pos2::new(li.left(), y), Align2::LEFT_TOP, format!("{n} item{} couldn't be removed", if n == 1 { "" } else { "s" }), ty::title(), AMBER);
+        p.text(Pos2::new(li.left(), y), Align2::LEFT_TOP, format!("{n} item{} couldn't be removed", if n == 1 { "" } else { "s" }), ty::title(), AMBER());
         y += 16.0 + sp::S;
         for (name, err) in st.failed.iter().take(4) {
-            text_fit(&p, Pos2::new(li.left(), y), Align2::LEFT_TOP, &format!("{name}: {err}"), mono(11.0), TEXT_SOFT, li.width());
+            text_fit(&p, Pos2::new(li.left(), y), Align2::LEFT_TOP, &format!("{name}: {err}"), mono(11.0), TEXT_SOFT(), li.width());
             y += 18.0;
         }
-        text_fit(&p, Pos2::new(li.left(), y + sp::XS), Align2::LEFT_TOP, "Quit the apps involved and scan again.", ty::caption(), ty::caption_color(), li.width());
+        text_fit(&p, Pos2::new(li.left(), y + sp::XS), Align2::LEFT_TOP, "Quit the apps and scan again", ty::caption(), ty::caption_color(), li.width());
     }
     let db = Rect::from_min_size(Pos2::new(li.left(), li.bottom() - 34.0), Vec2::new(li.width(), 34.0));
     if pill_button(ui, db, "Done", BTN_PRIMARY, true).clicked() {
@@ -722,23 +698,20 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     if pill_button(ui, lb, log_label, BTN_SECONDARY, true).clicked() {
         app.clean_log = !app.clean_log;
     }
-    let list = Rect::from_min_max(Pos2::new(ri.left(), ri.top() + 34.0 + sp::S), ri.max);
+    let list = Rect::from_min_max(Pos2::new(ri.left(), ri.top() + 16.0 + sp::M), ri.max);
     if app.clean_log {
-        p.text(ri.left_top(), Align2::LEFT_TOP, "Cleanup log", ty::title(), TEXT);
-        p.text(ri.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} entries", st.log.len()), ty::caption(), ty::caption_color());
+        p.text(ri.left_top(), Align2::LEFT_TOP, "Cleanup log", ty::title(), TEXT());
         let mut child = ui.new_child(UiBuilder::new().max_rect(list).layout(egui::Layout::top_down(egui::Align::Min)));
         child.set_clip_rect(list);
         ScrollArea::vertical().id_salt("log").auto_shrink([false, false]).show(&mut child, |ui| {
             for l in &st.log {
-                let col = if l.starts_with("Couldn't") { AMBER } else { TEXT_DIM };
+                let col = if l.starts_with("Couldn't") { AMBER() } else { TEXT_DIM() };
                 ui.label(egui::RichText::new(l.replacen(&home_str(), "~", 1)).font(glass::mono(11.0)).color(col));
             }
         });
         return;
     }
-    p.text(ri.left_top(), Align2::LEFT_TOP, "What was cleaned", ty::title(), TEXT);
-    let sub = if app.delete_now { "Caches and logs are rebuilt by the apps that need them" } else { "Everything here can be put back from the Trash" };
-    text_fit(&p, ri.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, sub, ty::caption(), ty::caption_color(), lb.left() - ri.left() - sp::S);
+    p.text(ri.left_top(), Align2::LEFT_TOP, "What was cleaned", ty::title(), TEXT());
     for (k, (g, n, b)) in rows.iter().enumerate() {
         let row = Rect::from_min_size(Pos2::new(list.left(), list.top() + k as f32 * sp::ROW_H), Vec2::new(list.width(), sp::ROW_H));
         if row.bottom() > list.bottom() {
@@ -747,14 +720,14 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
         if k > 0 {
             p.line_segment([row.left_top(), row.right_top()], Stroke::new(1.0, white(15)));
         }
-        icon(&p, Icon::Check, Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(14.0)), GREEN);
+        icon(&p, Icon::Check, Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(14.0)), GREEN());
         let vr = p.text(Pos2::new(row.right(), row.center().y), Align2::RIGHT_CENTER, human_bytes(*b), ty::body(), white(166));
         let x = row.left() + 14.0 + sp::M;
-        text_fit(&p, Pos2::new(x, row.center().y - 1.0), Align2::LEFT_BOTTOM, g.title(), ty::body(), TEXT, vr.left() - x - sp::S);
+        text_fit(&p, Pos2::new(x, row.center().y - 1.0), Align2::LEFT_BOTTOM, g.title(), ty::body(), TEXT(), vr.left() - x - sp::S);
         text_fit(&p, Pos2::new(x, row.center().y + 1.0), Align2::LEFT_TOP, &format!("{n} item{}", if *n == 1 { "" } else { "s" }), ty::caption(), ty::caption_color(), vr.left() - x - sp::S);
     }
     if rows.is_empty() {
-        text_fit(&p, Pos2::new(list.left(), list.top() + sp::M), Align2::LEFT_TOP, "Nothing was selected.", ty::body(), TEXT_DIM, list.width());
+        text_fit(&p, Pos2::new(list.left(), list.top() + sp::M), Align2::LEFT_TOP, "Nothing selected", ty::body(), TEXT_DIM(), list.width());
     }
 }
 

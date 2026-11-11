@@ -13,11 +13,11 @@ use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
 /// Bar colour for a usage percentage: Claude's tint, amber from 70%, red from 90%.
 pub fn usage_color(pct: f32) -> Color32 {
     if pct >= 90.0 {
-        RED
+        RED()
     } else if pct >= 70.0 {
-        AMBER
+        AMBER()
     } else {
-        CLAUDE
+        CLAUDE()
     }
 }
 
@@ -31,7 +31,7 @@ pub fn day_bars(p: &egui::Painter, r: Rect, daily: &[u64], gap: f32) {
         let x = r.left() + i as f32 * (bw + gap);
         let br = Rect::from_min_max(Pos2::new(x, r.bottom() - h), Pos2::new(x + bw, r.bottom()));
         let last = i + 1 == daily.len();
-        p.rect_filled(br, 2.0, if last { CLAUDE } else { with_alpha(CLAUDE, 0.45) });
+        p.rect_filled(br, 2.0, if last { CLAUDE() } else { white(46) });
     }
 }
 
@@ -52,24 +52,25 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
     let p = ui.painter().clone();
     let m = ai::meta(cl.provider);
     let short = if a == Availability::SignedOut { format!("{} signed out", m.name) } else { format!("{} not installed", m.name) };
-    let btns = page_header(&p, r, m.name, &short, TEXT_DIM);
+    let btns = page_header(&p, r, m.name, &short, TEXT_DIM());
     picker(info, demo, ui, btns);
     let colw = 480.0f32.min(r.width() - 48.0);
     let x = r.center().x - colw / 2.0;
     let mut y = r.top() + PAGE_HEADER_H + 56.0;
-    tool_chip(&p, Rect::from_center_size(Pos2::new(r.center().x, y + 28.0), Vec2::splat(56.0)), Icon::Gauge, tint::CLAUDE);
+    tool_chip(&p, Rect::from_center_size(Pos2::new(r.center().x, y + 28.0), Vec2::splat(56.0)), Icon::Gauge, tint::CLAUDE());
     y += 56.0 + 20.0;
     let title = if a == Availability::SignedOut { format!("{} isn't signed in", m.name) } else { format!("{} isn't installed", m.name) };
-    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, title, bold(20.0), TEXT);
+    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, title, bold(20.0), TEXT());
     y += 32.0;
+    let verb = if a == Availability::SignedOut { "Sign in" } else { "Install it" };
     let intro = if m.id == "claude" {
-        "Set it up to see your plan limits, token use and Claude Code projects here, and to let Cleanup ask Claude about each path.".to_string()
+        format!("{verb} to see plan limits, token use and projects here")
     } else {
-        format!("Set it up to see your {} plan limits and token use here. Or switch back to the assistant you use above.", m.name)
+        format!("{verb} to see {} limits and token use here", m.name)
     };
-    let g = p.layout(intro, font(13.0), TEXT_DIM, colw);
+    let g = p.layout(intro, font(13.0), TEXT_DIM(), colw);
     let gh = g.size().y;
-    p.galley(Pos2::new(r.center().x - g.size().x / 2.0, y), g, TEXT_DIM);
+    p.galley(Pos2::new(r.center().x - g.size().x / 2.0, y), g, TEXT_DIM());
     y += gh + 20.0;
 
     let steps: &[&str] = if a == Availability::SignedOut { m.sign_in_steps } else { m.install_steps };
@@ -79,8 +80,8 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
         let cy = card.top() + 6.0 + 17.0 + i as f32 * 34.0;
         let c = Pos2::new(card.left() + 24.0, cy);
         p.circle_filled(c, 10.0, white(18));
-        p.text(c, Align2::CENTER_CENTER, format!("{}", i + 1), bold(11.0), TEXT);
-        text_fit(&p, Pos2::new(card.left() + 44.0, cy), Align2::LEFT_CENTER, s, font(13.0), TEXT_SOFT, colw - 58.0);
+        p.text(c, Align2::CENTER_CENTER, format!("{}", i + 1), bold(11.0), TEXT());
+        text_fit(&p, Pos2::new(card.left() + 44.0, cy), Align2::LEFT_CENTER, s, font(13.0), TEXT_SOFT(), colw - 58.0);
     }
     y = card.bottom() + 20.0;
 
@@ -105,7 +106,7 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
         cx.toast(format!("Looking for {}…", m.name));
     }
     y += 32.0 + 18.0;
-    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, "Cleanup and the rest of the app work without it.", font(12.0), TEXT_FAINT);
+    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, "", font(12.0), TEXT_FAINT());
 }
 
 pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
@@ -125,7 +126,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     if cl.data_bytes > 0 {
         sub.push_str(&format!(" · all {} data on this Mac {}", cl.provider, human_bytes(cl.data_bytes)));
     }
-    let btns = page_header(&p, r, cl.provider, &sub, TEXT_DIM);
+    let btns = page_header(&p, r, cl.provider, &sub, TEXT_DIM());
     let w = button_width(&p, "Refresh limits", BTN_SECONDARY);
     let rb = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
     if pill_button(ui, rb, "Refresh limits", BTN_SECONDARY, !cl.loading).clicked() {
@@ -147,10 +148,10 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(cw * 3.0 + gap * 2.0, ch));
         glass_card(&p, lr, R_CARD, 0.0, false);
         let msg = cl.error.clone().unwrap_or_else(|| if cl.loading { format!("Asking {} for your limits…", cl.provider) } else { "No limits yet.".into() });
-        p.text(lr.min + Vec2::splat(sp::L), Align2::LEFT_TOP, "Plan limits", ty::title(), TEXT);
-        paragraph(&p, lr.min + Vec2::new(sp::L, sp::L + 16.0 + sp::M), &msg, ty::body(), TEXT_SOFT, lr.width() - 2.0 * sp::L);
+        p.text(lr.min + Vec2::splat(sp::L), Align2::LEFT_TOP, "Plan limits", ty::title(), TEXT());
+        paragraph(&p, lr.min + Vec2::new(sp::L, sp::L + 16.0 + sp::M), &msg, ty::body(), TEXT_SOFT(), lr.width() - 2.0 * sp::L);
         if cl.loading {
-            spinner(&p, Pos2::new(lr.right() - 24.0, lr.top() + 24.0), 6.0, ui.ctx().input(|i| i.time), TEXT_DIM);
+            spinner(&p, Pos2::new(lr.right() - 24.0, lr.top() + 24.0), 6.0, ui.ctx().input(|i| i.time), TEXT_DIM());
             crate::kit::glass::animate(ui.ctx());
         }
         col = 3;
@@ -159,15 +160,15 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         let cr = Rect::from_min_size(Pos2::new(x0 + col as f32 * (cw + gap), y), Vec2::new(cw, ch));
         glass_card(&p, cr, R_CARD, 0.0, false);
         let inner = cr.shrink(sp::L);
-        text_fit(&p, inner.left_top(), Align2::LEFT_TOP, &claude::short_label(&l.label), ty::title(), TEXT, inner.width());
+        text_fit(&p, inner.left_top(), Align2::LEFT_TOP, &claude::short_label(&l.label), ty::title(), TEXT(), inner.width());
         let rr = 36.0;
         let c = Pos2::new(inner.left() + rr + 5.0, inner.bottom() - rr - 5.0);
-        crate::kit::tile::ring(&p, c, rr, 9.0, (l.pct / 100.0).max(0.01), usage_color(l.pct));
-        p.text(c, Align2::CENTER_CENTER, format!("{:.0}%", l.pct), ty::lead(), TEXT);
+        crate::kit::tile::ring(&p, c, rr, 9.0, l.pct / 100.0, usage_color(l.pct));
+        p.text(c, Align2::CENTER_CENTER, format!("{:.0}%", l.pct), ty::lead(), TEXT());
         let tx = c.x + rr + sp::L;
         if !l.resets.is_empty() {
             p.text(Pos2::new(tx, c.y - 2.0), Align2::LEFT_BOTTOM, "Resets", ty::label(), ty::caption_color());
-            text_fit(&p, Pos2::new(tx, c.y + 2.0), Align2::LEFT_TOP, l.resets.split(" (").next().unwrap_or(&l.resets), ty::lead(), TEXT, inner.right() - tx);
+            text_fit(&p, Pos2::new(tx, c.y + 2.0), Align2::LEFT_TOP, l.resets.split(" (").next().unwrap_or(&l.resets), ty::lead(), TEXT(), inner.right() - tx);
         }
         col += 1;
     }
@@ -175,9 +176,8 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     let tr = Rect::from_min_max(Pos2::new(x0 + col as f32 * (cw + gap), y), Pos2::new(x1, y + ch));
     glass_card(&p, tr, R_CARD, 0.0, false);
     let ti = tr.shrink(sp::L);
-    p.text(ti.left_top(), Align2::LEFT_TOP, "Today", ty::title(), TEXT);
-    p.text(ti.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, "Tokens on this Mac", ty::caption(), ty::caption_color());
-    p.text(Pos2::new(ti.left(), ti.top() + 34.0 + sp::M), Align2::LEFT_TOP, claude::human_tokens(cl.local.tokens_today), ty::hero(), TEXT);
+    p.text(ti.left_top(), Align2::LEFT_TOP, "Tokens today", ty::title(), TEXT());
+    p.text(Pos2::new(ti.left(), ti.top() + 16.0 + sp::M), Align2::LEFT_TOP, claude::human_tokens(cl.local.tokens_today), ty::hero(), TEXT());
     let req = if cl.local.requests_today > 0 { format!("{} requests", cl.local.requests_today) } else { String::new() };
     text_fit(&p, Pos2::new(ti.left(), ti.bottom()), Align2::LEFT_BOTTOM, &format!("{} in 7 days{}", claude::human_tokens(cl.local.tokens_7d), if req.is_empty() { String::new() } else { format!(" · {req}") }), ty::label(), white(166), ti.width());
 
@@ -194,9 +194,8 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     let pr = Rect::from_min_max(Pos2::new(wr.right() + gap, y2), Pos2::new(x1, if split { y2 + want } else { bottom }));
     glass_card(&p, wr, R_CARD, 0.0, false);
     let wi = wr.shrink(sp::L);
-    p.text(wi.left_top(), Align2::LEFT_TOP, "Last 7 days", ty::title(), TEXT);
-    p.text(wi.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, "Tokens per day", ty::caption(), ty::caption_color());
-    let br = Rect::from_min_max(Pos2::new(wi.left(), wi.top() + 34.0 + sp::M), Pos2::new(wi.right(), wi.bottom() - 18.0));
+    p.text(wi.left_top(), Align2::LEFT_TOP, "Tokens, last 7 days", ty::title(), TEXT());
+    let br = Rect::from_min_max(Pos2::new(wi.left(), wi.top() + 16.0 + sp::M), Pos2::new(wi.right(), wi.bottom() - 18.0));
     day_bars(&p, br, &cl.local.daily, 6.0);
     p.text(Pos2::new(wi.left(), wi.bottom()), Align2::LEFT_BOTTOM, "7 days ago", ty::caption(), ty::caption_color());
     p.text(Pos2::new(wi.right(), wi.bottom()), Align2::RIGHT_BOTTOM, "today", ty::caption(), ty::caption_color());
@@ -205,7 +204,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     let pi = pr.shrink(sp::L);
     if !is_claude {
         // no project list for other assistants (yet): say where the numbers come from
-        p.text(pi.left_top(), Align2::LEFT_TOP, "About these numbers", ty::title(), TEXT);
+        p.text(pi.left_top(), Align2::LEFT_TOP, "About these numbers", ty::title(), TEXT());
         let lines = [
             cl.note.clone(),
             format!("Tokens are counted from the {} session logs on this Mac: fresh input plus output, without cached input.", cl.provider),
@@ -213,18 +212,18 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         ];
         let mut ly = pi.top() + 16.0 + sp::M;
         for l in lines.iter().filter(|l| !l.is_empty()) {
-            let g = p.layout(l.clone(), ty::body(), TEXT_SOFT, pi.width());
+            let g = p.layout(l.clone(), ty::body(), TEXT_SOFT(), pi.width());
             let h = g.size().y;
             if ly + h > pi.bottom() {
                 break;
             }
-            p.galley(Pos2::new(pi.left(), ly), g, TEXT_SOFT);
+            p.galley(Pos2::new(pi.left(), ly), g, TEXT_SOFT());
             ly += h + sp::S;
         }
     } else {
-    p.text(pi.left_top(), Align2::LEFT_TOP, "Claude Code projects", ty::title(), TEXT);
+    p.text(pi.left_top(), Align2::LEFT_TOP, "Claude Code projects", ty::title(), TEXT());
     let used = cl.projects.iter().filter(|p| p.in_use()).count();
-    p.text(pi.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} on this Mac · {} in use, kept by Cleanup", cl.projects.len(), used), ty::caption(), ty::caption_color());
+    p.text(pi.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} on this Mac · {} in use", cl.projects.len(), used), ty::caption(), ty::caption_color());
     let list = Rect::from_min_max(Pos2::new(pr.left(), pi.top() + 34.0 + sp::S), Pos2::new(pr.right(), pr.bottom() - sp::S));
     let mut child = ui.new_child(UiBuilder::new().max_rect(list).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(list);
@@ -235,8 +234,8 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
             let (row, _) = ui.allocate_exact_size(Vec2::new(list.width(), 64.0), Sense::hover());
             let pp = ui.painter();
             let msg = if demo { "No Claude Code projects on this Mac yet." } else { "Looking for Claude Code projects…" };
-            pp.text(Pos2::new(row.left() + sp::L, row.top() + sp::M), Align2::LEFT_TOP, msg, ty::body(), TEXT_SOFT);
-            text_fit(pp, Pos2::new(row.left() + sp::L, row.top() + sp::M + 20.0), Align2::LEFT_TOP, "Each folder where you run Claude Code shows up here with its size and last use.", ty::label(), ty::caption_color(), row.width() - 2.0 * sp::L);
+            pp.text(Pos2::new(row.left() + sp::L, row.top() + sp::M), Align2::LEFT_TOP, msg, ty::body(), TEXT_SOFT());
+            text_fit(pp, Pos2::new(row.left() + sp::L, row.top() + sp::M + 20.0), Align2::LEFT_TOP, "", ty::label(), ty::caption_color(), row.width() - 2.0 * sp::L);
         }
         for (k, pj) in cl.projects.iter().enumerate() {
             let (row, _) = ui.allocate_exact_size(Vec2::new(list.width(), sp::ROW_H), Sense::hover());
@@ -245,20 +244,20 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
                 pp.line_segment([Pos2::new(row.left() + sp::L, row.top()), Pos2::new(row.right() - sp::L, row.top())], egui::Stroke::new(1.0, white(15)));
             }
             let (dot, label) = if pj.in_use() {
-                (GREEN, "in use")
+                (GREEN(), "in use")
             } else if !pj.cwd_exists {
-                (AMBER, "folder gone")
+                (AMBER(), "folder gone")
             } else {
                 (white(51), "idle")
             };
             pp.circle_filled(Pos2::new(row.left() + sp::L + 4.0, row.center().y), 4.0, dot);
             let x = row.left() + sp::L + 8.0 + sp::M;
-            let sr = pp.text(Pos2::new(row.right() - sp::L, row.center().y), Align2::RIGHT_CENTER, human_bytes(pj.bytes), ty::body(), TEXT);
+            let sr = pp.text(Pos2::new(row.right() - sp::L, row.center().y), Align2::RIGHT_CENTER, human_bytes(pj.bytes), ty::body(), TEXT());
             let idle = pj.days_idle();
             let when = if idle < 1.0 { "today".to_string() } else if idle < 2.0 { "yesterday".to_string() } else { format!("{} days ago", idle as u64) };
             let path = pj.cwd.as_ref().map(|c| c.display().to_string().replacen(&home, "~", 1)).unwrap_or_else(|| "unknown folder".into());
             let nw = sr.left() - x - sp::L;
-            text_fit(pp, Pos2::new(x, row.center().y - 1.0), Align2::LEFT_BOTTOM, &middle_ellipsis(&path, 70), mono(12.0), TEXT, nw);
+            text_fit(pp, Pos2::new(x, row.center().y - 1.0), Align2::LEFT_BOTTOM, &middle_ellipsis(&path, 70), mono(12.0), TEXT(), nw);
             text_fit(pp, Pos2::new(x, row.center().y + 1.0), Align2::LEFT_TOP, &format!("{label} · {when}"), ty::caption(), ty::caption_color(), nw);
         }
     });
@@ -267,17 +266,17 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         let ur = Rect::from_min_max(Pos2::new(pr.left(), pr.bottom() + gap), Pos2::new(x1, bottom));
         glass_card(&p, ur, R_CARD, 0.0, false);
         let ui_ = ur.shrink(sp::L);
-        p.text(ui_.left_top(), Align2::LEFT_TOP, "What uses your limits", ty::title(), TEXT);
+        p.text(ui_.left_top(), Align2::LEFT_TOP, "What uses your limits", ty::title(), TEXT());
         let c = &cl.contrib[0];
         p.text(ui_.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, &c.title, ty::caption(), ty::caption_color());
         let mut ly = ui_.top() + 34.0 + sp::M;
         for l in &c.lines {
-            let g = p.layout(l.trim().to_string(), ty::body(), TEXT_SOFT, ui_.width());
+            let g = p.layout(l.trim().to_string(), ty::body(), TEXT_SOFT(), ui_.width());
             if ly + g.size().y > ui_.bottom() {
                 break;
             }
             let h = g.size().y;
-            p.galley(Pos2::new(ui_.left(), ly), g, TEXT_SOFT);
+            p.galley(Pos2::new(ui_.left(), ly), g, TEXT_SOFT());
             ly += h + sp::S;
         }
     }
@@ -285,13 +284,12 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     // footer
     let f = page_footer(&p, r, 12.0);
     if !is_claude {
-        text_fit(&p, Pos2::new(f.left() + 24.0, f.center().y), Align2::LEFT_CENTER, &format!("{} limits update with each request you make in it.", cl.provider), font(13.0), TEXT_DIM, f.width() - 48.0);
         return;
     }
     let bl = "Review in Cleanup";
     let bw = button_width(&p, bl, BTN_PRIMARY);
     let br = Rect::from_min_size(Pos2::new(f.right() - 24.0 - bw, f.center().y - 16.0), Vec2::new(bw, 32.0));
-    text_fit(&p, Pos2::new(f.left() + 24.0, f.center().y), Align2::LEFT_CENTER, "Cleanup finds old Claude sessions, caches and logs and never touches projects in use.", font(13.0), TEXT_DIM, br.left() - f.left() - 40.0);
+    text_fit(&p, Pos2::new(f.left() + 24.0, f.center().y), Align2::LEFT_CENTER, "", font(13.0), TEXT_DIM(), br.left() - f.left() - 40.0);
     if pill_button(ui, br, bl, BTN_PRIMARY, true).clicked() {
         cx.open_page(CLEANUP, "claude");
     }

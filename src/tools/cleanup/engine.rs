@@ -357,6 +357,9 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
             g.phase = if use_ai && !stopped { Phase::Judging } else { Phase::Results };
         }
         ctx.request_repaint();
+        if !use_ai && !stopped {
+            crate::kit::sound::play(crate::kit::sound::Cue::Ready);
+        }
         if use_ai && !stopped {
             judge(&shared, &ctx);
             let mut g = shared.lock().unwrap();
@@ -365,6 +368,7 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
             }
             g.phase = Phase::Results;
             ctx.request_repaint();
+            crate::kit::sound::play(crate::kit::sound::Cue::Ready);
         }
     });
 }
@@ -888,8 +892,45 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
         let mut g = shared.lock().unwrap();
         g.progress = 1.0;
         g.phase = Phase::Done;
+        if g.cleaned_bytes > 0 {
+            record_clean(g.cleaned_bytes);
+        }
         ctx.request_repaint();
+        crate::kit::sound::play(if g.failed.is_empty() { crate::kit::sound::Cue::Done } else { crate::kit::sound::Cue::Oops });
     });
+}
+
+/// Past cleans, oldest first: (unix seconds, bytes removed). Kept so the
+/// widget can show what Cleanup did without a new scan.
+/// Read once from disk, then kept in memory (the widget asks every frame).
+pub fn history() -> Vec<(i64, u64)> {
+    let mut c = HISTORY.lock().unwrap();
+    c.get_or_insert_with(|| std::fs::read_to_string(crate::kit::fs::data_path("cleanup").join("history.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()).clone()
+}
+
+static HISTORY: Mutex<Option<Vec<(i64, u64)>>> = Mutex::new(None);
+
+fn record_clean(bytes: u64) {
+    let mut h = history();
+    h.push((chrono::Utc::now().timestamp(), bytes));
+    let keep = h.len().saturating_sub(200);
+    h.drain(..keep);
+    let dir = crate::kit::fs::data_path("cleanup");
+    if std::fs::create_dir_all(&dir).is_ok() {
+        if let Ok(s) = serde_json::to_string(&h) {
+            let _ = std::fs::write(dir.join("history.json"), s);
+        }
+    }
+    *HISTORY.lock().unwrap() = Some(h);
+}
+
+/// "today", "yesterday", "3 days ago".
+pub fn days_ago(when: i64) -> String {
+    match (chrono::Utc::now().timestamp() - when).max(0) / 86400 {
+        0 => "today".into(),
+        1 => "yesterday".into(),
+        d => format!("{d} days ago"),
+    }
 }
 
 fn remove(p: &Path) -> Result<(), String> {

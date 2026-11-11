@@ -9,7 +9,7 @@ use super::shell::App;
 use super::tool::{Cx, Size, GRID_COLUMNS};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
-use egui::{Align2, Color32, Id, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
+use egui::{Align2, Id, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 /// Height of the title line above the widgets.
 pub const HEADER: f32 = 60.0;
@@ -120,13 +120,17 @@ pub fn title_line(app: &App, p: &egui::Painter, x0: f32, top: f32, width: f32) {
         Some(h) => {
             // one line: "MacBook Pro  • All good"
             let cy = top + 31.0;
-            let t = text_fit(p, Pos2::new(x0, cy), Align2::LEFT_CENTER, &h.title, ty::lead(), TEXT, width * 0.65);
+            let t = text_fit(p, Pos2::new(x0, cy), Align2::LEFT_CENTER, &h.title, ty::lead(), TEXT(), width * 0.65);
             let dx = t.right() + 10.0;
+            // a healthy Mac shows just its name; a dot and word only when something needs a look
+            if h.status.is_empty() {
+                return;
+            }
             p.circle_filled(Pos2::new(dx + 3.0, cy + 1.0), 3.0, h.dot);
             text_fit(p, Pos2::new(dx + 11.0, cy + 1.0), Align2::LEFT_CENTER, &h.status, ty::label(), ty::caption_color(), x0 + width - dx - 11.0);
         }
         None => {
-            text_fit(p, Pos2::new(x0, top + 31.0), Align2::LEFT_CENTER, "Cmd+Meow", bold(15.0), TEXT, width);
+            text_fit(p, Pos2::new(x0, top + 31.0), Align2::LEFT_CENTER, "Cmd+Meow", bold(15.0), TEXT(), width);
         }
     }
 }
@@ -154,8 +158,8 @@ fn widgets(app: &mut App, ui: &mut Ui, origin: Rect, cx: &mut Cx) {
     let (placed, _) = place(app, origin.width());
     if placed.is_empty() {
         let p = ui.painter();
-        p.text(origin.center_top() + Vec2::new(0.0, 40.0), Align2::CENTER_CENTER, "No widgets shown", bold(15.0), TEXT_DIM);
-        p.text(origin.center_top() + Vec2::new(0.0, 64.0), Align2::CENTER_CENTER, "Use Edit widgets… to pick some.", font(13.0), TEXT_FAINT);
+        p.text(origin.center_top() + Vec2::new(0.0, 40.0), Align2::CENTER_CENTER, "No widgets shown", bold(15.0), TEXT_DIM());
+        p.text(origin.center_top() + Vec2::new(0.0, 64.0), Align2::CENTER_CENTER, "Use Edit widgets… to pick some.", font(13.0), TEXT_FAINT());
         return;
     }
     for w in &placed {
@@ -176,11 +180,11 @@ pub fn size_chips(ui: &mut Ui, rect: Rect, id: Id, offered: &[Size], cur: Size) 
         let ok = offered.contains(&z);
         let resp = ui.interact(r, id.with(i), if ok { Sense::click() } else { Sense::hover() });
         if z == cur {
-            p.rect_filled(r, 7.0, BLUE);
+            p.rect_filled(r, 7.0, BLUE());
         } else if ok && resp.hovered() {
             p.rect_filled(r, 7.0, white(20));
         }
-        let col = if z == cur { Color32::WHITE } else if ok { TEXT_SOFT } else { white(60) };
+        let col = if z == cur { ON_ACTION } else if ok { TEXT_SOFT() } else { white(60) };
         let g = p.text(r.center(), Align2::CENTER_CENTER, z.label(), if z == cur { bold(12.0) } else { font(12.0) }, col);
         if !ok {
             p.line_segment([g.left_center(), g.right_center()], Stroke::new(1.0, white(60)));
@@ -199,11 +203,11 @@ pub fn size_chips(ui: &mut Ui, rect: Rect, id: Id, offered: &[Size], cur: Size) 
 /// "Edit widgets…", centred under the widgets.
 fn footer(app: &mut App, ui: &mut Ui, rect: Rect) {
     let p = ui.painter().clone();
-    let g = p.layout_no_wrap("Edit widgets…".into(), font(12.0), TEXT_FAINT);
+    let g = p.layout_no_wrap("Edit widgets…".into(), font(12.0), TEXT_FAINT());
     let c = Pos2::new(rect.center().x, rect.bottom() - FOOTER / 2.0 - 2.0);
     let r = Rect::from_center_size(c, g.size() + Vec2::new(16.0, 8.0));
     let resp = ui.interact(r, ui.scope_id().with("edit-widgets"), Sense::click());
-    p.galley(c - g.size() / 2.0, g, if resp.hovered() { TEXT_DIM } else { TEXT_FAINT });
+    p.galley(c - g.size() / 2.0, g, if resp.hovered() { TEXT_DIM() } else { TEXT_FAINT() });
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -232,7 +236,7 @@ fn gear_menu(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let menu = Rect::from_min_size(Pos2::new(rect.right() - 14.0 - 210.0, rect.top() + 52.0), Vec2::new(210.0, h));
     let p = ui.painter().clone();
     p.rect_filled(menu.translate(Vec2::new(0.0, 4.0)).expand(2.0), R_CARD, egui::Color32::from_black_alpha(60));
-    p.rect_filled(menu, R_CARD, RAISED);
+    p.rect_filled(menu, R_CARD, RAISED());
     p.rect_stroke(menu, R_CARD, Stroke::new(1.0, white(HAIRLINE_STRONG)), egui::StrokeKind::Inside);
     let mut picked = None;
     for (k, (row, label)) in rows.iter().enumerate() {
@@ -242,9 +246,9 @@ fn gear_menu(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         }
         let resp = ui.interact(rr, ui.scope_id().with(("gear", k)), Sense::click());
         if resp.hovered() {
-            p.rect_filled(rr.shrink2(Vec2::new(0.0, 1.0)), R_SMALL, BLUE);
+            p.rect_filled(rr.shrink2(Vec2::new(0.0, 1.0)), R_SMALL, with_alpha(BLUE(), 0.18));
         }
-        p.text(rr.left_center() + Vec2::new(10.0, 0.0), Align2::LEFT_CENTER, label, font(13.0), TEXT);
+        p.text(rr.left_center() + Vec2::new(10.0, 0.0), Align2::LEFT_CENTER, label, font(13.0), TEXT());
         if resp.clicked() {
             picked = Some(k);
         }
