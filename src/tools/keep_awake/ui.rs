@@ -6,6 +6,7 @@
 //! drains in amber while it winds down. Nothing loops: the ring is the only
 //! thing that moves, and only because time passes.
 
+use crate::kit::sync::LockExt;
 use super::engine::{Engine, Span, State, GRACE_CHOICES, WORKING_SECS};
 use super::{KeepAwake, ID};
 use crate::core::tool::Size;
@@ -274,7 +275,7 @@ pub fn widget(k: &mut KeepAwake, size: Size, ui: &mut Ui, rect: Rect, cx: &mut c
     let t = ui.ctx().input(|i| i.time);
     let id = ui.scope_id().with("w-awake");
     let (st, frac, (title, reason, _), manual) = {
-        let e = k.engine.lock().unwrap();
+        let e = k.engine.lock_ok();
         let st = e.state(now);
         (st, ring_frac(&e, st, now), hero_text(&e, st, now), e.manual_since.is_some())
     };
@@ -293,7 +294,7 @@ pub fn widget(k: &mut KeepAwake, size: Size, ui: &mut Ui, rect: Rect, cx: &mut c
             p.text(Pos2::new(rect.center().x, rect.bottom() - 9.0), Align2::CENTER_BOTTOM, short_state(st), bold(11.0), if st.awake() { lk.soft } else { TEXT_DIM() });
         }
         Size::S24 => {
-            let mut e = k.engine.lock().unwrap();
+            let mut e = k.engine.lock_ok();
             // the state on top, today's awake time along the bottom
             let strip_h = 14.0;
             let hr = Rect::from_min_max(rect.min + Vec2::splat(1.0), Pos2::new(rect.right() - 1.0, rect.bottom() - strip_h - 22.0));
@@ -350,7 +351,7 @@ pub fn card(k: &mut KeepAwake, ui: &mut Ui, rect: Rect, cx: &mut crate::core::to
     let x1 = rect.right() - 12.0;
     let mut y = rect.top() + 10.0;
 
-    let mut e = k.engine.lock().unwrap();
+    let mut e = k.engine.lock_ok();
     let st = e.state(now);
     let manual = e.manual_since.is_some();
 
@@ -422,7 +423,7 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     let t = ui.ctx().input(|i| i.time);
     let p = ui.painter().clone();
     let id = ui.scope_id().with("awake-page");
-    let mut e = k.engine.lock().unwrap();
+    let mut e = k.engine.lock_ok();
     let st = e.state(now);
     let x0 = r.left() + 24.0;
     let x1 = r.right() - 24.0;

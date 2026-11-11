@@ -702,8 +702,14 @@ impl eframe::App for App {
                 self.save_widgets(s);
             }
         }
-        // keep animations and live numbers moving
-        ctx.request_repaint_after(std::time::Duration::from_millis(if self.visible { 500 } else { 2000 }));
+        // keep animations and live numbers moving; with nothing on screen the
+        // hidden heartbeat above is the only wake-up (a shorter one here would
+        // win, since egui keeps the earliest)
+        if self.visible {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        } else if self.app_open || self.setup.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(2000));
+        }
         self.screenshot_step(&ctx);
         crate::kit::viewport::end_pass();
     }

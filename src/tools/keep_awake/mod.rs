@@ -5,6 +5,7 @@
 //!
 //! Page routes: "" only.
 
+use crate::kit::sync::LockExt;
 mod engine;
 mod power;
 mod sessions;
@@ -53,12 +54,12 @@ impl KeepAwake {
     }
 
     fn state(&self) -> State {
-        self.engine.lock().unwrap().state(self.now())
+        self.engine.lock_ok().state(self.now())
     }
 
     pub fn toggle(&mut self) {
         let t = self.now();
-        let mut e = self.engine.lock().unwrap();
+        let mut e = self.engine.lock_ok();
         let on = e.manual_since.is_none();
         e.set_manual(on, t);
     }
@@ -72,10 +73,10 @@ fn watch(engine: Shared, ctx: egui::Context) {
     let root = crate::kit::claude_code::projects_dir();
     loop {
         let t = now();
-        let watch_claude = engine.lock().unwrap().settings.claude;
+        let watch_claude = engine.lock_ok().settings.claude;
         let found = if watch_claude { scanner.scan(&root, t) } else { Vec::new() };
         {
-            let mut e = engine.lock().unwrap();
+            let mut e = engine.lock_ok();
             let before = (e.state(t), e.sessions.clone());
             e.sessions = found;
             e.step(t);
@@ -172,7 +173,7 @@ impl Tool for KeepAwake {
         ui::page(self, ui, rect);
     }
     fn menu_items(&self) -> Vec<MenuItem> {
-        let on = self.engine.lock().unwrap().manual_since.is_some();
+        let on = self.engine.lock_ok().manual_since.is_some();
         vec![MenuItem { id: MENU_TOGGLE, label: if on { "Let the Mac sleep" } else { "Keep the Mac awake" }.into() }]
     }
     fn menu_action(&mut self, item: &str, _cx: &mut Cx) {
@@ -182,7 +183,7 @@ impl Tool for KeepAwake {
     }
     fn set_on(&mut self, on: bool) {
         let t = self.now();
-        self.engine.lock().unwrap().set_enabled(on, t);
+        self.engine.lock_ok().set_enabled(on, t);
     }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
         // steam and countdowns move while awake and on screen; the watcher
@@ -201,7 +202,7 @@ impl Tool for KeepAwake {
             _ => return None,
         };
         let (e, t) = demo_engine(state);
-        *self.engine.lock().unwrap() = e;
+        *self.engine.lock_ok() = e;
         self.demo_now = Some(t);
         Some(View::Page)
     }

@@ -2,6 +2,7 @@
 //! limits, local token use and, for Claude, the Claude Code projects on
 //! this Mac (which ones count as "in use" and are protected by Cleanup).
 
+use crate::kit::sync::LockExt;
 use super::backend as claude;
 use super::ui::CLEANUP;
 use crate::core::tool::Cx;
@@ -115,7 +116,7 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
 }
 
 pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
-    let cl = info.lock().unwrap().clone();
+    let cl = info.lock_ok().clone();
     if let Some(a) = cl.unavailable() {
         not_set_up(a, &cl, info, demo, ui, r, cx);
         return;

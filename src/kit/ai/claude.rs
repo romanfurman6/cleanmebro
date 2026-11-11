@@ -2,6 +2,7 @@
 //! (`claude auth status`, `claude -p /usage`, which spends no tokens), local
 //! activity comes from counting usage fields in ~/.claude/projects logs.
 
+use crate::kit::sync::LockExt;
 use super::{balanced, find, recent_jsonl, Contrib, Limit, LocalTokens, LogCache, Provider, Shared, UsageEntry, UsageInfo};
 use crate::kit::activity::Kick;
 use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd, projects_dir, scan_projects, Project};
@@ -48,7 +49,7 @@ impl Provider for ClaudeCode {
 fn fetch_cli(s: &Shared) {
     let Some(bin) = claude_bin() else {
         cc::set_signed_in(None);
-        let mut g = s.lock().unwrap();
+        let mut g = s.lock_ok();
         g.installed = false;
         g.signed_out = false;
         g.limits.clear();
@@ -70,7 +71,7 @@ fn fetch_cli(s: &Shared) {
     let usage = claude_cmd(&bin)
         .args(["-p", "/usage", "--output-format", "json", "--no-session-persistence"])
         .output();
-    let mut g = s.lock().unwrap();
+    let mut g = s.lock_ok();
     g.installed = true;
     g.logged_in = logged_in;
     g.signed_out = known == Some(false);

@@ -1,6 +1,7 @@
 //! Disk Map screens: choose what to map (with live progress while it runs)
 //! → bubbles you can zoom into folder by folder, with a list to pick from → review and move to Trash.
 
+use crate::kit::sync::LockExt;
 use super::scan::{self, Node};
 use super::Lens as App;
 use crate::core::tool::Cx;
@@ -39,7 +40,7 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         app.lens_rows.clear();
     }
     app.lens_live = None;
-    let guard = shared.result.lock().unwrap();
+    let guard = shared.result.lock_ok();
     let Some(root) = guard.as_ref() else {
         drop(guard);
         // show the last map if there is one (even from a previous run);
@@ -51,7 +52,7 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         }
         // nothing mapped yet: mapping walks the whole disk, so it waits
         // for a click
-        if shared.result.lock().unwrap().is_none() && intro(ui, r) {
+        if shared.result.lock_ok().is_none() && intro(ui, r) {
             begin(app, ui.ctx());
         }
         return;
@@ -59,7 +60,7 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let act = results(app, ui, r, root, None);
     drop(guard);
     if act == Act::NewMap {
-        *shared.result.lock().unwrap() = None;
+        *shared.result.lock_ok() = None;
         app.lens_selected.clear();
         app.lens_morph = None;
         begin(app, ui.ctx());
@@ -126,7 +127,7 @@ fn start(app: &mut App, ui: &mut Ui, r: Rect) {
     let f = ((t * 0.6).fract() as f32) * 1.35 - 0.35;
     let seg = Rect::from_min_max(Pos2::new(track.left() + track.width() * f.max(0.0), track.top()), Pos2::new(track.left() + track.width() * (f + 0.35).min(1.0), track.bottom()));
     p.with_clip_rect(track).rect_filled(seg, 3.0, tint::DISK_MAP());
-    let cur = app.lens.current.lock().unwrap().clone();
+    let cur = app.lens.current.lock_ok().clone();
     text_fit(&p, Pos2::new(pr.left() + 16.0, pr.top() + 102.0), Align2::LEFT_TOP, &tilde(Path::new(&cur)), mono(11.0), TEXT_FAINT(), pr.width() - 32.0);
     let sw = button_width(&p, "Stop", BTN_SECONDARY);
     if pill_button(ui, Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 44.0), Vec2::new(sw, 28.0)), "Stop", BTN_SECONDARY, true).clicked() {
@@ -329,7 +330,7 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
             text_fit(&p, Pos2::new(fr.left() + 18.0, fr.center().y), Align2::LEFT_CENTER, &tilde(&row.path), mono(12.0), TEXT_SOFT(), ir.left() - fr.left() - 34.0);
         }
         None => {
-            let cur = app.lens.current.lock().unwrap().clone();
+            let cur = app.lens.current.lock_ok().clone();
             text_fit(&p, Pos2::new(fr.left(), fr.center().y), Align2::LEFT_CENTER, &tilde(Path::new(&cur)), mono(12.0), TEXT_FAINT(), fr.width());
         }
     }
@@ -531,7 +532,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
     }
     let nb = button_width(&p, "Start over", BTN_SECONDARY);
     let new_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
-    let when = match *app.lens.when.lock().unwrap() {
+    let when = match *app.lens.when.lock_ok() {
         Some(w) => format!("Mapped {}", ago(w)),
         None => String::new(),
     };
@@ -849,7 +850,7 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 Err(_) => failed += 1,
             }
         }
-        if let Some(root) = app.lens.result.lock().unwrap().as_mut() {
+        if let Some(root) = app.lens.result.lock_ok().as_mut() {
             scan::prune(root, &removed);
         }
         scan::save_later(&app.lens);
@@ -892,7 +893,7 @@ pub fn demo_tree(app: &mut App) {
     app.lens_path = root.path.clone();
     app.lens_focus = Some(root.path.join("Movies"));
     app.lens_selected = vec![(root.path.join("Downloads/Xcode_16.xip"), (12.0 * GB) as u64), (root.path.join("Movies"), (31.0 * GB) as u64)];
-    *app.lens.result.lock().unwrap() = Some(root);
+    *app.lens.result.lock_ok() = Some(root);
 }
 
 /// Mapping in progress, for screenshots: some folders done, others still
@@ -901,7 +902,7 @@ pub fn demo_live(app: &mut App) {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
     demo_tree(app);
-    let root = app.lens.result.lock().unwrap().take().unwrap();
+    let root = app.lens.result.lock_ok().take().unwrap();
     let live: Vec<scan::LiveChild> = root
         .children
         .iter()
@@ -914,8 +915,8 @@ pub fn demo_live(app: &mut App) {
         .collect();
     app.lens.bytes.store(live.iter().map(|l| l.bytes.load(Ordering::Relaxed)).sum(), Ordering::Relaxed);
     app.lens.files.store(1_284_311, Ordering::Relaxed);
-    *app.lens.current.lock().unwrap() = root.path.join("Library/Containers/com.apple.mail/Data").display().to_string();
-    *app.lens.live.lock().unwrap() = Some((root.path.clone(), live));
+    *app.lens.current.lock_ok() = root.path.join("Library/Containers/com.apple.mail/Data").display().to_string();
+    *app.lens.live.lock_ok() = Some((root.path.clone(), live));
     app.lens.running.store(true, Ordering::SeqCst);
     app.lens_selected.clear();
 }

@@ -8,6 +8,7 @@
 //!
 //! Page routes: "" (Apps), "leftovers", "app:<path>" (select an app).
 
+use crate::kit::sync::LockExt;
 mod apps;
 mod leftovers;
 mod mac;
@@ -299,7 +300,7 @@ impl Uninstaller {
             ui::demo::fill(&mut u, "uninstaller");
             return u;
         }
-        u.st.lock().unwrap().settings = Settings::load();
+        u.st.lock_ok().settings = Settings::load();
         watch(u.st.clone(), u.app_roots.clone(), u.roots.clone(), env.ctx.clone());
         watch_drag(u.st.clone(), u.app_roots.clone(), env.ctx.clone());
         u
@@ -322,7 +323,7 @@ impl Uninstaller {
         if targets.is_empty() {
             return;
         }
-        let mut g = self.st.lock().unwrap();
+        let mut g = self.st.lock_ok();
         if g.working.is_some() {
             return;
         }
@@ -343,12 +344,12 @@ impl Uninstaller {
                 let st2 = st.clone();
                 let c2 = ctx.clone();
                 let rep = remove::run(&targets, &roots, &app_roots, move |line| {
-                    st2.lock().unwrap().working = Some(line);
+                    st2.lock_ok().working = Some(line);
                     c2.request_repaint();
                 });
                 crate::kit::sound::play(if rep.failed.is_empty() { crate::kit::sound::Cue::Done } else { crate::kit::sound::Cue::Oops });
                 {
-                    let mut g = st.lock().unwrap();
+                    let mut g = st.lock_ok();
                     g.working = None;
                     g.last = Some((rep, Instant::now()));
                     g.drop = Drop::Idle;
@@ -361,18 +362,18 @@ impl Uninstaller {
 
     /// Put the last removal back.
     pub fn undo(&self) {
-        let Some((rep, _)) = self.st.lock().unwrap().last.take() else { return };
+        let Some((rep, _)) = self.st.lock_ok().last.take() else { return };
         if self.demo {
             return;
         }
         let (st, roots, app_roots, ctx) = (self.st.clone(), self.roots.clone(), self.app_roots.clone(), self.ctx.clone());
-        st.lock().unwrap().working = Some("Putting things back…".into());
+        st.lock_ok().working = Some("Putting things back…".into());
         std::thread::Builder::new()
             .name("uninstaller-undo".into())
             .spawn(move || {
                 let (n, failed) = remove::undo(&rep);
                 {
-                    let mut g = st.lock().unwrap();
+                    let mut g = st.lock_ok();
                     g.working = None;
                     if !failed.is_empty() {
                         let mut r = Report { names: vec![format!("{n} put back")], ..Default::default() };
@@ -389,7 +390,7 @@ impl Uninstaller {
     /// An app was dropped (page, widget or drop zone): find its files, then confirm.
     pub fn dropped(&self, path: PathBuf) {
         let path = path.ancestors().find(|a| a.extension().is_some_and(|e| e == "app")).map(Path::to_path_buf).unwrap_or(path);
-        let mut g = self.st.lock().unwrap();
+        let mut g = self.st.lock_ok();
         if !path.extension().is_some_and(|e| e == "app") {
             g.drop = Drop::Refused(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "Not an app. Drop an app from Applications.".into());
             return;
@@ -408,9 +409,9 @@ impl Uninstaller {
             .name("uninstaller-drop".into())
             .spawn(move || {
                 let casks = apps::cask_apps();
-                let others: Vec<Owner> = st.lock().unwrap().apps.iter().map(|a| a.owner()).collect();
+                let others: Vec<Owner> = st.lock_ok().apps.iter().map(|a| a.owner()).collect();
                 let res = read_app(&path, &casks, &roots, &others, &app_roots);
-                let mut g = st.lock().unwrap();
+                let mut g = st.lock_ok();
                 if matches!(&g.drop, Drop::Reading(p) if *p == path) {
                     g.drop = match res {
                         Some(row) => match row.locked {
@@ -427,7 +428,7 @@ impl Uninstaller {
 
     /// Visible apps for the current search, filter and sort.
     pub fn visible(&self) -> Vec<usize> {
-        let g = self.st.lock().unwrap();
+        let g = self.st.lock_ok();
         let q = self.search.trim().to_lowercase();
         let now = self.now();
         let mut idx: Vec<usize> = (0..g.apps.len())
@@ -492,7 +493,7 @@ fn fill_items(row: &mut AppRow, index: &Index, all: &[Owner]) {
 
 fn start_scan(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) {
     {
-        let mut g = st.lock().unwrap();
+        let mut g = st.lock_ok();
         if matches!(g.phase, Phase::Listing | Phase::Sizing { .. }) {
             g.again = true;
             return;
@@ -503,7 +504,7 @@ fn start_scan(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Cont
         .name("uninstaller-scan".into())
         .spawn(move || loop {
             let full = scan(&st, &app_roots, &roots, &ctx);
-            let mut g = st.lock().unwrap();
+            let mut g = st.lock_ok();
             if g.again {
                 g.again = false;
                 g.phase = Phase::Listing;
@@ -521,7 +522,7 @@ fn start_scan(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Cont
 /// sizes app by app (the list shows right away and fills in), then find
 /// orphans. Returns whether it went that far.
 fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) -> bool {
-    let full = st.lock().unwrap().page_seen;
+    let full = st.lock_ok().page_seen;
     let bundles = apps::find_bundles(app_roots);
     let casks = apps::cask_apps();
     let used = apps::last_used(&bundles);
@@ -532,7 +533,7 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
         rows.push(AppRow { path: b.clone(), name: info.name, id: info.id.clone(), version: info.version, source, locked: apps::locked(b, &info.id, source), last_used: used[k], items: Vec::new(), sized: false });
     }
     {
-        let mut g = st.lock().unwrap();
+        let mut g = st.lock_ok();
         // keep what an earlier scan knew until it is measured again
         for r in rows.iter_mut() {
             if let Some(old) = g.apps.iter().find(|a| a.path == r.path && a.id == r.id) {
@@ -558,7 +559,7 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
     for (n, i) in order.into_iter().enumerate() {
         let mut row = rows[i].clone();
         fill_items(&mut row, &index, &owners);
-        let mut g = st.lock().unwrap();
+        let mut g = st.lock_ok();
         if let Some(slot) = g.apps.iter_mut().find(|a| a.path == row.path) {
             // keep the user's ticks on files
             for it in row.items.iter_mut() {
@@ -577,7 +578,7 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
     known.extend(apps::all_installed_ids());
     #[cfg(target_os = "macos")]
     known.extend(crate::kit::native::running_apps().0);
-    let names = st.lock().unwrap().settings.known.clone();
+    let names = st.lock_ok().settings.known.clone();
     let mut orphans: Vec<Orphan> = index
         .orphans(&known, now(), ORPHAN_MIN_AGE)
         .into_iter()
@@ -590,7 +591,7 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
         })
         .collect();
     orphans.sort_by_key(|o| std::cmp::Reverse(o.bytes()));
-    let mut g = st.lock().unwrap();
+    let mut g = st.lock_ok();
     for o in orphans.iter_mut() {
         if let Some(old) = g.orphans.iter().find(|x| x.id == o.id) {
             o.selected = old.selected;
@@ -634,7 +635,7 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
                 let gone: Vec<PathBuf> = last.iter().filter(|p| !now_b.contains(p)).cloned().collect();
                 last = now_b;
                 let (watching, rows, ours) = {
-                    let g = st.lock().unwrap();
+                    let g = st.lock_ok();
                     (g.settings.watch_removed, g.apps.clone(), g.removed_by_us.clone())
                 };
                 if watching {
@@ -655,7 +656,7 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
                         if items.iter().map(|i| i.bytes).sum::<u64>() < 100_000 {
                             continue;
                         }
-                        st.lock().unwrap().notice = Some(Notice { target: Target { name: row.name.clone(), id: row.id.clone(), app: None, items, reset: false }, at: Instant::now() });
+                        st.lock_ok().notice = Some(Notice { target: Target { name: row.name.clone(), id: row.id.clone(), app: None, items, reset: false }, at: Instant::now() });
                         ctx.request_repaint();
                     }
                 }
@@ -666,25 +667,43 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
 }
 
 /// Notice an app being dragged out of an app folder (any drag, anywhere) by
-/// watching the drag pasteboard, so the drop zone can appear.
+/// watching the drag pasteboard, so the drop zone can appear. A global mouse
+/// monitor wakes the watcher only while the mouse is dragging; between drags
+/// it sleeps. Without the monitor it falls back to polling.
 fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) {
     if !cfg!(target_os = "macos") {
         return;
     }
+    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+    let hooked = mac::on_mouse_drag(move || {
+        // a full queue already holds a wake-up
+        let _ = tx.try_send(());
+    });
     std::thread::Builder::new()
         .name("uninstaller-drag".into())
         .spawn(move || {
             let mut last = mac::drag_change_count();
             loop {
                 let on = {
-                    let g = st.lock().unwrap();
+                    let g = st.lock_ok();
                     g.settings.drop_zone && !g.off
                 };
-                // a drag lasts long enough for a relaxed look when the zone is off
-                std::thread::sleep(Duration::from_millis(if on { 150 } else { 1000 }));
+                // keep looking while the button is held: the drag pasteboard
+                // can fill a moment after the first drag event
+                let busy = !st.lock_ok().drag.apps.is_empty() || mac::mouse_down();
+                if hooked && !busy {
+                    // nothing dragged: sleep until the mouse drags somewhere
+                    if rx.recv().is_err() {
+                        return;
+                    }
+                } else {
+                    // a drag lasts long enough for a relaxed look when the zone is off
+                    std::thread::sleep(Duration::from_millis(if on { 150 } else { 1000 }));
+                    while rx.try_recv().is_ok() {}
+                }
                 let n = mac::drag_change_count();
                 let down = mac::mouse_down();
-                let mut g = st.lock().unwrap();
+                let mut g = st.lock_ok();
                 if n != last && on {
                     last = n;
                     if down {
@@ -733,7 +752,7 @@ impl Tool for Uninstaller {
         "Remove apps with everything they leave behind"
     }
     fn sidebar_meta(&self) -> String {
-        let g = self.st.lock().unwrap();
+        let g = self.st.lock_ok();
         if g.apps.is_empty() {
             String::new()
         } else {
@@ -760,15 +779,15 @@ impl Tool for Uninstaller {
     }
     fn set_on(&mut self, on: bool) {
         self.on = on;
-        self.st.lock().unwrap().off = !on;
+        self.st.lock_ok().off = !on;
         if !on {
-            let mut g = self.st.lock().unwrap();
+            let mut g = self.st.lock_ok();
             g.drag = Drag::default();
             g.notice = None;
         }
     }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
-        let g = self.st.lock().unwrap();
+        let g = self.st.lock_ok();
         let busy = g.working.is_some() || matches!(g.phase, Phase::Listing | Phase::Sizing { .. });
         // our own floating windows need frames while the shell is hidden
         let windows = self.on && (!g.drag.apps.is_empty() || g.notice.is_some() || !matches!(g.drop, Drop::Idle) || g.last.as_ref().is_some_and(|(_, t)| t.elapsed() < Duration::from_secs(8)));
@@ -806,7 +825,7 @@ mod tests {
         let all = u.visible();
         assert!(all.len() > 5);
         {
-            let g = u.st.lock().unwrap();
+            let g = u.st.lock_ok();
             // biggest first, locked ones last
             let sizes: Vec<u64> = all.iter().filter(|&&i| g.apps[i].locked.is_none()).map(|&i| g.apps[i].total()).collect();
             assert!(sizes.windows(2).all(|w| w[0] >= w[1]));
@@ -815,7 +834,7 @@ mod tests {
         u.filter = Filter::Unused;
         let unused = u.visible();
         {
-            let g = u.st.lock().unwrap();
+            let g = u.st.lock_ok();
             assert!(!unused.is_empty());
             assert!(unused.iter().all(|&i| g.apps[i].last_used.is_some_and(|t| u.now() - t > UNUSED_DAYS * 86400)));
         }

@@ -26,6 +26,7 @@ mod kit;
 mod tools;
 
 fn main() -> eframe::Result {
+    kit::sync::install_panic_log();
     if std::env::args().any(|a| a == "--fan-report") {
         tools::fan::probe::report();
         return Ok(());

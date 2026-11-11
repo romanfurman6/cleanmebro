@@ -1,6 +1,7 @@
 //! Live Mac health readings for the menu panel. A background thread refreshes a
 //! shared snapshot; slow sources (system_profiler, folder sizes) run less often.
 
+use crate::kit::sync::LockExt;
 use crate::kit::activity::{self, Every};
 use crate::kit::fs::dir_size;
 use crate::kit::mechanics as m;
@@ -202,7 +203,7 @@ pub type Shared = Arc<Mutex<Snapshot>>;
 /// Change the device alert / menu bar settings and save them.
 pub fn change_bt_prefs(mon: &Shared, f: impl FnOnce(&mut devices::Prefs)) {
     let prefs = {
-        let mut s = mon.lock().unwrap();
+        let mut s = mon.lock_ok();
         f(&mut s.bt_prefs);
         s.bt_prefs
     };
@@ -289,19 +290,20 @@ pub fn measure_folders(shared: Shared, ctx: egui::Context) {
         Perm::FullDisk.ask();
         return;
     }
-    shared.lock().unwrap().sizing = true;
+    shared.lock_ok().sizing = true;
     ctx.request_repaint();
     let s = shared.clone();
     in_background("folder-sizes", move || {
         let home = home_dir();
-        let cats = vec![
-            ("Applications".to_string(), dir_size(Path::new("/Applications"))),
-            ("Documents".to_string(), dir_size(&home.join("Documents"))),
-            ("Downloads".to_string(), dir_size(&home.join("Downloads"))),
-            ("Desktop".to_string(), dir_size(&home.join("Desktop"))),
-        ];
-        let trash = std::fs::read_dir(home.join(".Trash")).ok().map(|_| dir_size(&home.join(".Trash")));
-        let mut g = s.lock().unwrap();
+        let places = [("Applications", PathBuf::from("/Applications")), ("Documents", home.join("Documents")), ("Downloads", home.join("Downloads")), ("Desktop", home.join("Desktop"))];
+        // each folder on its own thread: the slowest one sets the wait
+        let (cats, trash) = std::thread::scope(|sc| {
+            let jobs: Vec<_> = places.iter().map(|(n, p)| sc.spawn(move || (n.to_string(), dir_size(p)))).collect();
+            let t = home.join(".Trash");
+            let trash = std::fs::read_dir(&t).ok().map(|_| dir_size(&t));
+            (jobs.into_iter().map(|j| j.join().unwrap_or_default()).collect::<Vec<_>>(), trash)
+        });
+        let mut g = s.lock_ok();
         g.categories = cats;
         g.trash_bytes = trash;
         g.sizing = false;
@@ -326,7 +328,7 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
     {
         let (model, chip) = hardware();
         let (vol, smart) = disk_info();
-        let mut s = shared.lock().unwrap();
+        let mut s = shared.lock_ok();
         s.model = model;
         s.chip = chip;
         s.volume_name = vol;
@@ -383,7 +385,7 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
         });
 
         {
-            let mut s = shared.lock().unwrap();
+            let mut s = shared.lock_ok();
             s.ready = true;
             s.disk_total = total;
             s.disk_free = free;
@@ -450,7 +452,7 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
             in_background("trash-size", move || {
                 let trash = home_dir().join(".Trash");
                 let bytes = std::fs::read_dir(&trash).ok().map(|_| dir_size(&trash));
-                shared.lock().unwrap().trash_bytes = bytes;
+                shared.lock_ok().trash_bytes = bytes;
                 activity::repaint(&ctx);
             });
         }
@@ -718,17 +720,17 @@ fn apply_ipconfig(w: &mut Wifi, out: &str) {
 
 pub fn start_speed_test(shared: Shared, ctx: egui::Context) {
     {
-        let mut s = shared.lock().unwrap();
+        let mut s = shared.lock_ok();
         if s.speed.running {
             return;
         }
         s.speed = SpeedTest { running: true, phase: SpeedPhase::Ping, ..Default::default() };
     }
-    let cancel = shared.lock().unwrap().speed.cancel.clone();
+    let cancel = shared.lock_ok().speed.cancel.clone();
     let stopped = move || cancel.load(Ordering::Relaxed);
     std::thread::spawn(move || {
         let set = |f: &dyn Fn(&mut SpeedTest)| {
-            let mut s = shared.lock().unwrap();
+            let mut s = shared.lock_ok();
             f(&mut s.speed);
             ctx.request_repaint();
         };

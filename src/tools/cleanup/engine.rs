@@ -2,6 +2,7 @@
 //! caches, AI Clutter), then let Claude judge each PATH (never contents) as
 //! safe / ask / keep. Anything not clearly safe waits for the person's OK.
 
+use crate::kit::sync::LockExt;
 use crate::kit::claude_code;
 use crate::kit::fs::{home, is_protected, move_to_trash};
 use crate::kit::mechanics as m;
@@ -178,10 +179,10 @@ struct Ctx {
 
 impl Ctx {
     fn stopped(&self) -> bool {
-        self.shared.lock().unwrap().stop
+        self.shared.lock_ok().stop
     }
     fn status(&self, s: &str, progress: f32) {
-        let mut g = self.shared.lock().unwrap();
+        let mut g = self.shared.lock_ok();
         g.current = s.to_string();
         g.progress = progress;
         self.egui.request_repaint();
@@ -265,12 +266,12 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
                 crate::kit::activity::low_priority();
                 loop {
                     let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if k >= n || shared.lock().unwrap().stop {
+                    if k >= n || shared.lock_ok().stop {
                         break;
                     }
                     sizes[k].store(dir_size(&items[k].path), std::sync::atomic::Ordering::Relaxed);
                     let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    let mut g = shared.lock().unwrap();
+                    let mut g = shared.lock_ok();
                     g.current = items[k].path.display().to_string();
                     g.progress = from + (1.0 - from) * d as f32 / n as f32;
                     drop(g);
@@ -359,7 +360,7 @@ const CHROMIUM_CACHES: [&str; 9] = [
 
 pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
     {
-        let mut g = shared.lock().unwrap();
+        let mut g = shared.lock_ok();
         *g = State { phase: Phase::Scanning, with_ai: use_ai, ..Default::default() };
     }
     std::thread::spawn(move || {
@@ -393,19 +394,19 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
         }
         let stopped = c.stopped();
         {
-            let mut g = shared.lock().unwrap();
+            let mut g = shared.lock_ok();
             g.items = std::mem::take(&mut c.items);
             g.hidden_kept = c.hidden_kept;
             g.phase = if use_ai && !stopped { Phase::Judging } else { Phase::Results };
         }
         ctx.request_repaint();
         if !use_ai && !stopped {
-            record_scan(&shared.lock().unwrap());
+            record_scan(&shared.lock_ok());
             crate::kit::sound::play(crate::kit::sound::Cue::Ready);
         }
         if use_ai && !stopped {
             judge(&shared, &ctx);
-            let mut g = shared.lock().unwrap();
+            let mut g = shared.lock_ok();
             for it in g.items.iter_mut() {
                 it.selected = it.verdict == Verdict::Safe && !it.permanent;
             }
@@ -724,13 +725,13 @@ fn scan_trash(c: &mut Ctx) {
 
 fn judge(shared: &Shared, ctx: &egui::Context) {
     let Some(bin) = claude_code::claude_bin().filter(|_| claude_code::availability().ready()) else {
-        let mut g = shared.lock().unwrap();
+        let mut g = shared.lock_ok();
         g.ai_error = Some(format!("{}, so only the built-in rules were used.", claude_code::availability().short()));
         return;
     };
     let h = home().display().to_string();
     let candidates: Vec<usize> = {
-        let g = shared.lock().unwrap();
+        let g = shared.lock_ok();
         g.items.iter().enumerate().filter(|(_, it)| !it.hard_keep && it.bytes >= m::AI_MIN_BYTES).map(|(i, _)| i).collect()
     };
     // what the person kept before tells Claude what they care about
@@ -745,11 +746,11 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
     let batches: Vec<Vec<usize>> = candidates.chunks(m::AI_BATCH).map(|c| c.to_vec()).collect();
     let n = batches.len().max(1);
     for (bi, batch) in batches.iter().enumerate() {
-        if shared.lock().unwrap().stop {
+        if shared.lock_ok().stop {
             break;
         }
         let lines: String = {
-            let g = shared.lock().unwrap();
+            let g = shared.lock_ok();
             batch
                 .iter()
                 .enumerate()
@@ -769,7 +770,7 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
                 .collect()
         };
         {
-            let mut g = shared.lock().unwrap();
+            let mut g = shared.lock_ok();
             g.ai_status = format!("Claude is reviewing {} paths (batch {} of {})…", batch.len(), bi + 1, n);
             g.progress = bi as f32 / n as f32;
         }
@@ -781,18 +782,18 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
         let text = match out {
             Ok(o) if !o.status.success() => {
                 let err = String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("").to_string();
-                let mut g = shared.lock().unwrap();
+                let mut g = shared.lock_ok();
                 g.ai_error = Some(if err.is_empty() { "Claude couldn't review the paths; the built-in rules were used.".into() } else { format!("Claude couldn't review the paths ({err}); the built-in rules were used.") });
                 return;
             }
             Ok(o) => serde_json::from_slice::<serde_json::Value>(&o.stdout).ok().and_then(|v| v["result"].as_str().map(|s| s.to_string())).unwrap_or_default(),
             Err(e) => {
-                shared.lock().unwrap().ai_error = Some(format!("Couldn't run Claude: {e}"));
+                shared.lock_ok().ai_error = Some(format!("Couldn't run Claude: {e}"));
                 return;
             }
         };
         let verdicts = parse_verdicts(&text);
-        let mut g = shared.lock().unwrap();
+        let mut g = shared.lock_ok();
         if verdicts.is_empty() {
             g.ai_error = Some("Claude's answer couldn't be read; the built-in rules were used for some items.".into());
             continue;
@@ -896,7 +897,7 @@ fn clean_order(items: &[Item]) -> Vec<Item> {
 
 pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
     let targets: Vec<Item> = {
-        let mut g = shared.lock().unwrap();
+        let mut g = shared.lock_ok();
         g.phase = Phase::Cleaning;
         g.cleaned_bytes = 0;
         g.cleaned_count = 0;
@@ -912,20 +913,20 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
         let (running_ids, running_names) = running_apps();
         for (k, it) in targets.iter().enumerate() {
             {
-                let mut g = shared.lock().unwrap();
+                let mut g = shared.lock_ok();
                 g.current = it.path.display().to_string();
                 g.progress = k as f32 / n as f32;
             }
             ctx.request_repaint();
             // last safety net
             if let Some(why) = is_protected(&it.path).filter(|_| it.group != Group::Trash) {
-                let mut g = shared.lock().unwrap();
+                let mut g = shared.lock_ok();
                 g.failed.push((it.title.clone(), why.to_string()));
                 g.log.push(format!("Skipped {}: {why}", it.path.display()));
                 continue;
             }
             if it.kind == "Caches" && !it.app_running && it.by != Who::You && app_open(&running_ids, &running_names, &it.path, &it.title) {
-                let mut g = shared.lock().unwrap();
+                let mut g = shared.lock_ok();
                 g.failed.push((it.title.clone(), "the app is open now".into()));
                 g.log.push(format!("Skipped {}: its app was opened after the scan", it.path.display()));
                 continue;
@@ -938,7 +939,7 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
             } else {
                 remove(&it.path)
             };
-            let mut g = shared.lock().unwrap();
+            let mut g = shared.lock_ok();
             match res {
                 Ok(()) => {
                     if to_trash {
@@ -956,7 +957,7 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
                 }
             }
         }
-        let mut g = shared.lock().unwrap();
+        let mut g = shared.lock_ok();
         g.progress = 1.0;
         g.phase = Phase::Done;
         if g.cleaned_bytes > 0 {
@@ -980,7 +981,7 @@ pub struct LastScan {
 }
 
 pub fn last_scan() -> Option<LastScan> {
-    let mut c = LAST_SCAN.lock().unwrap();
+    let mut c = LAST_SCAN.lock_ok();
     if c.is_none() {
         *c = Some(std::fs::read_to_string(crate::kit::fs::data_path("cleanup").join("last-scan.json")).ok().and_then(|s| serde_json::from_str(&s).ok()));
     }
@@ -997,11 +998,11 @@ fn record_scan(g: &State) {
             let _ = std::fs::write(dir.join("last-scan.json"), s);
         }
     }
-    *LAST_SCAN.lock().unwrap() = Some(Some(ls));
+    *LAST_SCAN.lock_ok() = Some(Some(ls));
 }
 
 pub fn history() -> Vec<(i64, u64)> {
-    let mut c = HISTORY.lock().unwrap();
+    let mut c = HISTORY.lock_ok();
     c.get_or_insert_with(|| std::fs::read_to_string(crate::kit::fs::data_path("cleanup").join("history.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()).clone()
 }
 
@@ -1018,7 +1019,7 @@ fn record_clean(bytes: u64) {
             let _ = std::fs::write(dir.join("history.json"), s);
         }
     }
-    *HISTORY.lock().unwrap() = Some(h);
+    *HISTORY.lock_ok() = Some(h);
 }
 
 /// "today", "yesterday", "3 days ago".

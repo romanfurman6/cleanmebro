@@ -1,6 +1,7 @@
 //! The Claude card for the panel and the limits sheet beside it (also the
 //! left half of the Claude page).
 
+use crate::kit::sync::LockExt;
 use super::backend;
 use crate::kit::ai::UsageInfo;
 use super::ID;
@@ -103,7 +104,7 @@ pub fn short_reset(s: &str) -> String {
 /// limits, and links to the page and to Cleanup.
 pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let ctx = ui.ctx().clone();
-    let cl = info.lock().unwrap().clone();
+    let cl = info.lock_ok().clone();
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time);
     let sub = match (&cl.fetched, cl.loading) {

@@ -6,6 +6,7 @@
 //! Each card shows real readings only: no chart is drawn for data the
 //! monitor does not keep a history of.
 
+use crate::kit::sync::LockExt;
 use super::monitor::{self, Level, Snapshot};
 use super::sheets::{Action as SheetAction, Section, Sheet};
 use crate::core::tool::{Cx, Recommendation};
@@ -27,7 +28,7 @@ fn level_color(l: Level) -> Color32 {
 }
 
 pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect, cx: &mut Cx) {
-    let s = mon.lock().unwrap().clone();
+    let s = mon.lock_ok().clone();
     let p = ui.painter().clone();
     let devices_id = ui.scope_id().with("health-devices");
     let show_devices = ui.ctx().data(|d| d.get_temp::<bool>(devices_id)).unwrap_or(false);

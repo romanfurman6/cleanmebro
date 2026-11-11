@@ -5,6 +5,7 @@
 //! events carry the tokens of each turn and the plan's rate limits as of
 //! that turn.
 
+use crate::kit::sync::LockExt;
 use super::{find, recent_jsonl, Limit, LocalTokens, LogCache, Provider, Shared, UsageEntry, UsageInfo};
 use crate::kit::activity::Kick;
 use crate::kit::claude_code as cc;
@@ -50,7 +51,7 @@ impl Provider for Codex {
         let installed = bin().is_some() || home.join("sessions").is_dir();
         let logged_in = home.join("auth.json").is_file();
         let latest = if installed { latest_limits(&home.join("sessions")) } else { None };
-        let mut g = s.lock().unwrap();
+        let mut g = s.lock_ok();
         g.installed = installed;
         g.logged_in = logged_in;
         g.signed_out = installed && !logged_in;

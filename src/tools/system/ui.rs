@@ -1,6 +1,7 @@
 //! Mac health rows for the panel (disk, memory, CPU, battery, network,
 //! devices), the panel's title line, and the detail sheet each row opens.
 
+use crate::kit::sync::LockExt;
 use super::devices;
 use super::devices_ui;
 use super::monitor::{self, Level, Snapshot};
@@ -112,7 +113,7 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
 /// A Mac Health widget at `size`; a click opens its sheet (the overview
 /// opens the Mac Health page).
 pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect, cx: &mut Cx) {
-    let s = mon.lock().unwrap().clone();
+    let s = mon.lock_ok().clone();
     let wid = ui.scope_id().with(("metric", id));
     let sel = cx.is_detail_open(ID, id);
     if id == "devices" {
@@ -332,7 +333,7 @@ pub fn detail(mon: &monitor::Shared, d: &str, ui: &mut Ui, rect: Rect, cx: &mut 
         "devices" => Sheet::Devices,
         _ => return,
     };
-    let s = mon.lock().unwrap().clone();
+    let s = mon.lock_ok().clone();
     match sheets::sheet(ui, rect, kind, &s) {
         Action::Close => cx.close_detail(),
         Action::Open(tool) => cx.open_page(tool, ""),
