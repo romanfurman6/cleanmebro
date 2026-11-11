@@ -69,6 +69,31 @@ pub fn level(rms: f32) -> f32 {
 /// The [`level`] of the quietest speech: `silent`'s threshold.
 pub const VOICE_LEVEL: f32 = 0.25;
 
+/// Where to cut `pcm` between words: the middle of the last pause (a quarter
+/// second under a whisper) between `from` and `to`, in samples.
+pub fn pause(pcm: &[f32], rate: u32, from: usize, to: usize) -> Option<usize> {
+    let win = rate as usize / 50;
+    let need = 12;
+    let to = to.min(pcm.len());
+    let mut quiet = 0;
+    let mut k = to.saturating_sub(win);
+    while k >= from && k + win <= to {
+        if level(rms(&pcm[k..k + win])) < 0.12 {
+            quiet += 1;
+            if quiet >= need {
+                return Some(k + need * win / 2);
+            }
+        } else {
+            quiet = 0;
+        }
+        if k < win {
+            break;
+        }
+        k -= win;
+    }
+    None
+}
+
 /// Nothing above a whisper in any tenth of a second: don't bother the
 /// model (on silence it makes words up).
 pub fn silent(pcm: &[f32], rate: u32) -> bool {
@@ -114,7 +139,7 @@ impl Mic {
     pub fn failed(&self) -> Option<String> {
         None
     }
-    pub fn tail(&self, _secs: f32) -> Vec<f32> {
+    pub fn from(&self, _start: usize) -> Vec<f32> {
         Vec::new()
     }
     pub fn stop(self) -> Vec<f32> {
@@ -312,10 +337,9 @@ mod imp {
             self.buf.lock().ok().and_then(|b| b.failed.clone())
         }
 
-        /// A copy of the last `secs` of voice, still listening.
-        pub fn tail(&self, secs: f32) -> Vec<f32> {
-            let n = (secs * MODEL_RATE as f32) as usize;
-            self.buf.lock().map(|b| b.pcm[b.pcm.len().saturating_sub(n)..].to_vec()).unwrap_or_default()
+        /// A copy of the voice from sample `start` on, still listening.
+        pub fn from(&self, start: usize) -> Vec<f32> {
+            self.buf.lock().map(|b| b.pcm[start.min(b.pcm.len())..].to_vec()).unwrap_or_default()
         }
 
         /// Stop listening; the voice at 16 kHz mono.
@@ -352,6 +376,24 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cuts_in_the_last_pause() {
+        let r = MODEL_RATE as usize;
+        let voice = |n: usize| (0..n).map(|k| if k % 2 == 0 { 0.3 } else { -0.3 }).collect::<Vec<f32>>();
+        // 2 s voice, 0.5 s quiet, 2 s voice, 0.5 s quiet, 1 s voice
+        let mut pcm = voice(2 * r);
+        pcm.extend(vec![0.0; r / 2]);
+        pcm.extend(voice(2 * r));
+        pcm.extend(vec![0.0; r / 2]);
+        pcm.extend(voice(r));
+        let p = pause(&pcm, MODEL_RATE, 0, pcm.len()).unwrap();
+        assert!(p > 4 * r + r / 2 && p < 5 * r, "{p}");
+        // not past `to`, and none in voice only
+        let p = pause(&pcm, MODEL_RATE, 0, 4 * r).unwrap();
+        assert!(p > 2 * r && p < 2 * r + r / 2, "{p}");
+        assert_eq!(pause(&voice(3 * r), MODEL_RATE, 0, 3 * r), None);
+    }
 
     #[test]
     fn stereo_becomes_mono() {

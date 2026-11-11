@@ -47,10 +47,12 @@ const PASTE_DELAY: Duration = Duration::from_millis(90);
 /// Wait after ⌘V before putting the old clipboard back.
 const RESTORE_DELAY: Duration = Duration::from_millis(600);
 /// Typing as you speak: the words so far are read this often.
-const PEEK_EVERY: Duration = Duration::from_millis(700);
-/// Longer than this, the rest is typed at the end (reading it all again
-/// each time gets slow).
-const PEEK_SECS: f32 = 90.0;
+const PEEK_EVERY: Duration = Duration::from_millis(350);
+/// Typing as you speak: past this much voice since the last cut, the part
+/// before a pause is read once and set aside, so each reading stays short.
+const CUT_AFTER: usize = 8 * MODEL_RATE as usize;
+/// Never cut closer than this to the end: the words there still change.
+const CUT_MARGIN: usize = 3 * MODEL_RATE as usize / 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -96,7 +98,8 @@ enum Job {
     Warm(Engine),
     Run { job: u64, engine: Engine, lang: Option<&'static str>, pcm: Vec<f32> },
     /// The words so far, to type as you speak; `job` is the take listened to.
-    Peek { job: u64, engine: Engine, lang: Option<&'static str>, pcm: Vec<f32> },
+    /// `cut`: this voice is set aside up to that sample, read once.
+    Peek { job: u64, engine: Engine, lang: Option<&'static str>, pcm: Vec<f32>, cut: Option<usize> },
 }
 
 struct Heard {
@@ -104,6 +107,7 @@ struct Heard {
     text: Result<String, String>,
     /// An answer to a Peek.
     live: bool,
+    cut: Option<usize>,
 }
 
 /// A model download running on a thread.
@@ -145,6 +149,9 @@ pub struct Dictation {
     /// What this take typed so far, and the words last read.
     typed: String,
     last_read: String,
+    /// The voice up to this sample is set aside, and this is its text.
+    cut_at: usize,
+    cut_text: String,
     /// When the words were last asked for, and whether an answer is due.
     peek_at: Instant,
     peeking: bool,
@@ -196,6 +203,8 @@ impl Dictation {
             typing: false,
             typed: String::new(),
             last_read: String::new(),
+            cut_at: 0,
+            cut_text: String::new(),
             peek_at: Instant::now(),
             peeking: false,
             paste_at: None,
@@ -308,6 +317,8 @@ impl Dictation {
         self.levels.clear();
         self.typed.clear();
         self.last_read.clear();
+        self.cut_at = 0;
+        self.cut_text.clear();
         self.typing = false;
         match Perm::Microphone.status() {
             Status::Allowed => {}
@@ -359,6 +370,8 @@ impl Dictation {
         }
         self.next_job += 1;
         self.voice_secs = secs;
+        // typing as you speak: what was set aside is read already
+        let pcm = if self.typing && self.cut_at > 0 { pcm[self.cut_at.min(pcm.len())..].to_vec() } else { pcm };
         let job = Job::Run { job: self.next_job, engine: self.settings.engine, lang: self.settings.lang.code(), pcm };
         if self.jobs.send(job).is_err() {
             return self.show(Note::Problem("Speech to text isn't running".into()), 2.5);
@@ -382,13 +395,22 @@ impl Dictation {
         if h.live {
             if h.job == self.next_job && matches!(self.phase, Phase::Listening { .. }) {
                 self.peeking = false;
-                if let Ok(t) = h.text {
+                // a reading in the wrong alphabet (the model's first guess
+                // on a second of voice) is skipped
+                let text = h.text.and_then(|t| if self.settings.lang.fits(&t) { Ok(t) } else { Err(t) });
+                if let (Some(c), Ok(t)) = (h.cut, &text) {
+                    self.cut_text = join(&self.cut_text, t);
+                    self.cut_at = c;
+                    return;
+                }
+                if let Ok(t) = text.map(|t| join(&self.cut_text, &t)) {
                     let sure = settled(&self.last_read, &t);
                     self.last_read = t;
-                    // a shorter reading waits; only new or changed words are typed
-                    if !self.typed.starts_with(&sure) {
-                        let (back, add) = edit(&self.typed, &sure);
-                        mac::type_text(back, &add);
+                    // while speaking, words are only added, never taken back:
+                    // a reading that changes typed words waits for the end,
+                    // where the full reading puts them right once
+                    if sure.len() > self.typed.len() && sure.starts_with(&self.typed) {
+                        mac::type_text(0, &sure[self.typed.len()..]);
                         self.typed = sure;
                     }
                 }
@@ -401,6 +423,11 @@ impl Dictation {
         }
         match h.text {
             Err(e) => self.show(Note::Problem(e), 3.0),
+            Ok(t) if self.typing && !self.cut_text.is_empty() => {
+                let t = join(&self.cut_text, &t);
+                self.cut_text.clear();
+                self.on_heard(Heard { job: h.job, text: Ok(t), live: false, cut: None })
+            }
             Ok(t) if t.is_empty() => self.show(Note::Problem("Didn't catch that".into()), 1.6),
             Ok(t) => {
                 if self.settings.keep_history {
@@ -517,12 +544,20 @@ impl Dictation {
             if quiet {
                 eprintln!("[dictation] stopped after silence");
             }
-            let peek = self.typing && !too_long && !self.peeking && self.peek_at.elapsed() > PEEK_EVERY && mic.seconds() < PEEK_SECS;
+            let peek = self.typing && !too_long && !self.peeking && self.peek_at.elapsed() > PEEK_EVERY;
             if peek {
-                let pcm = mic.tail(PEEK_SECS);
+                let mut pcm = mic.from(self.cut_at);
                 self.peek_at = Instant::now();
-                if !audio::silent(&pcm, MODEL_RATE) {
-                    let job = Job::Peek { job: self.next_job, engine: self.settings.engine, lang: self.settings.lang.code(), pcm };
+                // a long stretch: set the part before a pause aside
+                let mut cut = None;
+                if pcm.len() > CUT_AFTER {
+                    if let Some(p) = audio::pause(&pcm, MODEL_RATE, MODEL_RATE as usize, pcm.len().saturating_sub(CUT_MARGIN)) {
+                        pcm.truncate(p);
+                        cut = Some(self.cut_at + p);
+                    }
+                }
+                if cut.is_some() || !audio::silent(&pcm, MODEL_RATE) {
+                    let job = Job::Peek { job: self.next_job, engine: self.settings.engine, lang: self.settings.lang.code(), pcm, cut };
                     self.peeking = self.jobs.send(job).is_ok();
                 }
             }
@@ -606,17 +641,17 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
                 Err(e) => {
                     eprintln!("[dictation] {e}");
                     if let Job::Run { job, .. } = job {
-                        let _ = tx.send(Heard { job, text: Err(e), live: false });
+                        let _ = tx.send(Heard { job, text: Err(e), live: false, cut: None });
                         ctx.request_repaint();
                     }
                     continue;
                 }
             }
         }
-        let (job, lang, pcm, live) = match job {
+        let (job, lang, pcm, live, cut) = match job {
             Job::Warm(_) => continue,
-            Job::Run { job, lang, pcm, .. } => (job, lang, pcm, false),
-            Job::Peek { job, lang, pcm, .. } => (job, lang, pcm, true),
+            Job::Run { job, lang, pcm, .. } => (job, lang, pcm, false, None),
+            Job::Peek { job, lang, pcm, cut, .. } => (job, lang, pcm, true, cut),
         };
         let t0 = Instant::now();
         let text = match &loaded {
@@ -627,7 +662,7 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
         if !live {
             eprintln!("[dictation] {:.1} s of voice in {} ms", pcm.len() as f32 / MODEL_RATE as f32, t0.elapsed().as_millis());
         }
-        let _ = tx.send(Heard { job, text, live });
+        let _ = tx.send(Heard { job, text, live, cut });
         ctx.request_repaint();
     }
 }
@@ -637,6 +672,15 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
 fn settled(before: &str, now: &str) -> String {
     let same = before.split_whitespace().zip(now.split_whitespace()).take_while(|(a, b)| a == b).count();
     now.split_whitespace().take(same).collect::<Vec<_>>().join(" ")
+}
+
+/// Two runs of text with a space between, when both have some.
+fn join(a: &str, b: &str) -> String {
+    match (a.is_empty(), b.is_empty()) {
+        (true, _) => b.to_string(),
+        (_, true) => a.to_string(),
+        _ => format!("{a} {b}"),
+    }
 }
 
 /// From `typed` to `want`: how many characters to delete from the end, then
@@ -795,13 +839,13 @@ mod tests {
     fn an_answer_for_an_old_job_is_ignored() {
         let mut d = demo();
         d.phase = Phase::Working { job: 2 };
-        d.on_heard(Heard { job: 1, text: Ok("old".into()), live: false });
+        d.on_heard(Heard { job: 1, text: Ok("old".into()), live: false, cut: None });
         assert!(matches!(d.phase, Phase::Working { job: 2, .. }));
         // words so far never end a take
-        d.on_heard(Heard { job: 2, text: Ok("so far".into()), live: true });
+        d.on_heard(Heard { job: 2, text: Ok("so far".into()), live: true, cut: None });
         assert!(matches!(d.phase, Phase::Working { job: 2, .. }));
         assert!(d.typed.is_empty());
-        d.on_heard(Heard { job: 2, text: Ok(String::new()), live: false });
+        d.on_heard(Heard { job: 2, text: Ok(String::new()), live: false, cut: None });
         assert!(matches!(&d.phase, Phase::Showing { note: Note::Problem(_), .. }));
     }
 

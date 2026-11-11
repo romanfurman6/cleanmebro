@@ -356,8 +356,7 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     let mut changed = false;
     let x0 = col.left();
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Speaking", bold(15.0), TEXT());
-    let whisper = d.settings.engine == Engine::Whisper;
-    let rows = if whisper { 6 } else { 5 };
+    let rows = 6;
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), rows);
 
     // shortcut
@@ -465,8 +464,8 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
         changed = true;
     }
 
-    // language (Whisper only; Parakeet tells it itself)
-    if whisper {
+    // language
+    {
         label(p, card, 5, "Language");
         let y = row_y(card, 5);
         let lr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 300.0, y - 13.0), Pos2::new(card.right() - 12.0, y + 13.0));

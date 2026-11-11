@@ -66,6 +66,25 @@ impl Lang {
         }
     }
 
+    /// Whether `text` is written in this language's alphabet (Auto takes
+    /// any): most of its letters are Cyrillic for Ukrainian and Russian,
+    /// Latin for English.
+    pub fn fits(self, text: &str) -> bool {
+        let (mut cyr, mut lat) = (0, 0);
+        for c in text.chars().filter(|c| c.is_alphabetic()) {
+            if ('\u{0400}'..='\u{04FF}').contains(&c) {
+                cyr += 1;
+            } else if c.is_ascii_alphabetic() {
+                lat += 1;
+            }
+        }
+        match self {
+            Lang::Auto => true,
+            Lang::Uk | Lang::Ru => cyr >= lat,
+            Lang::En => lat >= cyr,
+        }
+    }
+
     /// The model's language code; None to detect it.
     pub fn code(self) -> Option<&'static str> {
         match self {
@@ -83,7 +102,8 @@ pub struct Settings {
     /// Hold to talk, or tap to start and tap again to stop.
     pub shortcut: Option<Shortcut>,
     pub engine: Engine,
-    /// Whisper only; Parakeet tells the language itself.
+    /// Whisper is told it; with Parakeet, which finds it itself, words in
+    /// another alphabet aren't typed as you speak.
     pub lang: Lang,
     /// Put back what was on the clipboard after pasting.
     pub restore_clipboard: bool,
@@ -219,6 +239,10 @@ mod tests {
         assert_eq!(s.shortcut, Some(default_shortcut()));
         assert!(s.restore_clipboard);
         assert!(!s.live_typing);
+        assert!(Lang::Uk.fits("Привіт, як справи"));
+        assert!(!Lang::Uk.fits("Hello, how are"));
+        assert!(Lang::En.fits("Hello"));
+        assert!(Lang::Auto.fits("Hello"));
         assert_eq!(s.stop_after_silence(), Some(std::time::Duration::from_secs(5)));
         assert_eq!(Settings { silence_secs: 0, ..s.clone() }.stop_after_silence(), None);
         assert_eq!(Lang::Uk.code(), Some("uk"));
