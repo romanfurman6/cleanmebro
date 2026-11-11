@@ -249,7 +249,7 @@ fn gear_menu(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let menu = Rect::from_min_size(Pos2::new(rect.right() - 14.0 - 210.0, rect.top() + 52.0), Vec2::new(210.0, h));
     let p = ui.painter().clone();
     p.rect_filled(menu.translate(Vec2::new(0.0, 4.0)).expand(2.0), R_CARD, egui::Color32::from_black_alpha(60));
-    p.rect_filled(menu, R_CARD, RAISED());
+    p.rect_filled(menu, R_CARD, POPOVER());
     p.rect_stroke(menu, R_CARD, Stroke::new(1.0, white(HAIRLINE_STRONG)), egui::StrokeKind::Inside);
     let mut picked = None;
     for (k, (row, label)) in rows.iter().enumerate() {

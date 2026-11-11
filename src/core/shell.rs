@@ -508,7 +508,9 @@ impl App {
         let Some(tray) = &self.tray else { return };
         let title = self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).find_map(|(_, t)| t.tray_title()).unwrap_or_default();
         if title != self.tray_title {
-            tray.set_title(if title.is_empty() { None } else { Some(&title) });
+            // tray-icon's set_title(None) leaves the old text on macOS (the
+            // recording clock stayed after a stop); an empty title clears it
+            tray.set_title(Some(&title));
             self.tray_title = title;
         }
     }
@@ -678,7 +680,8 @@ impl eframe::App for App {
                 let p = ui.painter();
                 let g = p.layout_no_wrap(msg.clone(), font(13.0), TEXT());
                 let r = Rect::from_center_size(Pos2::new(full.center().x, full.bottom() - 40.0), g.size() + Vec2::new(28.0, 16.0));
-                glass_card(p, r, r.height() / 2.0, 1.0, false);
+                p.rect_filled(r, r.height() / 2.0, POPOVER());
+                p.rect_stroke(r, r.height() / 2.0, egui::Stroke::new(1.0, CARD_EDGE()), egui::StrokeKind::Inside);
                 p.galley(r.center() - g.size() / 2.0, g, TEXT());
                 ctx.request_repaint();
             } else {
