@@ -88,6 +88,8 @@ pub struct Settings {
     /// Put back what was on the clipboard after pasting.
     pub restore_clipboard: bool,
     pub keep_history: bool,
+    /// Hands-free: stop after this many quiet seconds; 0 never.
+    pub silence_secs: u32,
     /// Settings format; 1 moved the old default ⌥Space to ⌥D. Missing in
     /// a file means 0, not today's.
     #[serde(default)]
@@ -99,13 +101,22 @@ fn old_default() -> Shortcut {
     Shortcut { cmd: false, shift: false, alt: true, ctrl: false, key: "Space".into() }
 }
 
+/// The choices for [`Settings::silence_secs`].
+pub const SILENCE_CHOICES: [u32; 4] = [0, 3, 5, 10];
+
+impl Settings {
+    pub fn stop_after_silence(&self) -> Option<std::time::Duration> {
+        (self.silence_secs > 0).then(|| std::time::Duration::from_secs(self.silence_secs as u64))
+    }
+}
+
 pub fn default_shortcut() -> Shortcut {
     Shortcut { cmd: false, shift: false, alt: true, ctrl: false, key: "D".into() }
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, lang: Lang::Auto, restore_clipboard: true, keep_history: true, version: VERSION }
+        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, lang: Lang::Auto, restore_clipboard: true, keep_history: true, silence_secs: 5, version: VERSION }
     }
 }
 
@@ -205,6 +216,8 @@ mod tests {
         assert_eq!(s.lang, Lang::Uk);
         assert_eq!(s.shortcut, Some(default_shortcut()));
         assert!(s.restore_clipboard);
+        assert_eq!(s.stop_after_silence(), Some(std::time::Duration::from_secs(5)));
+        assert_eq!(Settings { silence_secs: 0, ..s.clone() }.stop_after_silence(), None);
         assert_eq!(Lang::Uk.code(), Some("uk"));
         assert_eq!(Lang::Auto.code(), None);
     }

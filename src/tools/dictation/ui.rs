@@ -1,7 +1,7 @@
 //! Drawing for Dictation: the pill under the caret, the panel widget and
 //! the window page (history and settings).
 
-use super::settings::{Engine, Lang};
+use super::settings::{Engine, Lang, SILENCE_CHOICES};
 use super::{mac, Dictation, Note, Phase, Tab, ID, TINT};
 use crate::core::tool::{Cx, Size};
 use crate::kit::glass::*;
@@ -357,7 +357,7 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     let x0 = col.left();
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Speaking", bold(15.0), TEXT());
     let whisper = d.settings.engine == Engine::Whisper;
-    let rows = if whisper { 4 } else { 3 };
+    let rows = if whisper { 5 } else { 4 };
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), rows);
 
     // shortcut
@@ -444,10 +444,22 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
         }
     }
 
+    // hands-free stop
+    label(p, card, 3, "Stop after silence");
+    let y = row_y(card, 3);
+    let sr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 230.0, y - 13.0), Pos2::new(card.right() - 12.0, y + 13.0));
+    let si = SILENCE_CHOICES.iter().position(|s| *s == d.settings.silence_secs).unwrap_or(2);
+    let names: Vec<String> = SILENCE_CHOICES.iter().map(|s| if *s == 0 { "Never".to_string() } else { format!("{s} s") }).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    if let Some(i) = segmented(ui, sr, id.with("silence"), &names, si) {
+        d.settings.silence_secs = SILENCE_CHOICES[i];
+        changed = true;
+    }
+
     // language (Whisper only; Parakeet tells it itself)
     if whisper {
-        label(p, card, 3, "Language");
-        let y = row_y(card, 3);
+        label(p, card, 4, "Language");
+        let y = row_y(card, 4);
         let lr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 300.0, y - 13.0), Pos2::new(card.right() - 12.0, y + 13.0));
         let li = Lang::ALL.iter().position(|l| *l == d.settings.lang).unwrap_or(0);
         let names: Vec<&str> = Lang::ALL.iter().map(|l| l.label()).collect();

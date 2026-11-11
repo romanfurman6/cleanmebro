@@ -71,7 +71,8 @@ pub enum Note {
 /// Where dictation is.
 pub enum Phase {
     Idle,
-    Listening { mic: Mic, since: Instant, tapped: bool },
+    /// `heard` is when the voice was last above a whisper.
+    Listening { mic: Mic, since: Instant, tapped: bool, heard: Instant },
     Working { job: u64 },
     Showing { note: Note, until: Instant },
 }
@@ -298,7 +299,7 @@ impl Dictation {
         match Mic::start() {
             Ok(mic) => {
                 let _ = self.jobs.send(Job::Warm(engine));
-                self.phase = Phase::Listening { mic, since: Instant::now(), tapped: false };
+                self.phase = Phase::Listening { mic, since: Instant::now(), tapped: false, heard: Instant::now() };
             }
             Err(e) => self.show(Note::Problem(e), 2.5),
         }
@@ -435,10 +436,17 @@ impl Dictation {
         if !cancels.is_empty() {
             self.cancel();
         }
-        if let Phase::Listening { mic, since, .. } = &self.phase {
+        let stop_after = self.settings.stop_after_silence();
+        if let Phase::Listening { mic, since, tapped, heard } = &mut self.phase {
             let failed = mic.failed();
-            let too_long = since.elapsed() > MAX_TALK;
-            self.levels.push(mic.level());
+            let level = mic.level();
+            if level > audio::VOICE_LEVEL {
+                *heard = Instant::now();
+            }
+            // hands-free (tapped) only: holding the key is its own stop
+            let quiet = *tapped && stop_after.is_some_and(|d| heard.elapsed() > d);
+            let too_long = since.elapsed() > MAX_TALK || quiet;
+            self.levels.push(level);
             if self.levels.len() > 64 {
                 self.levels.remove(0);
             }
