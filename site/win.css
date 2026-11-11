@@ -13,6 +13,7 @@
 .app code { font: 400 11.5px/16px "SF Mono", ui-monospace, Menlo, monospace; color: var(--t2); }
 
 /* Sidebar */
+.sb .tabs { display: contents; }
 .sb { display: flex; flex-direction: column; gap: 1px; padding: 12px 8px; background: rgba(3,8,3,.5); border-right: 1px solid rgba(255,255,255,.06); }
 .tl3 { display: flex; gap: 8px; padding: 2px 6px 14px; }
 .tl3 i { width: 12px; height: 12px; border-radius: 50%; background: #FF5F57; }
@@ -314,9 +315,11 @@
   .switcher .cpr .src, .switcher .cfl .fc:nth-child(n+4) { display: none; } .switcher .srch2 { width: 110px; }
   .switcher .bubbles { max-height: 360px; }
   .switcher .sr2 .chip { display: none; }
-  .switcher .sb { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 10px 12px; }
-  .switcher .sb::-webkit-scrollbar { display: none; }
-  .switcher .tl3 { flex: none; flex-basis: auto; align-self: center; padding: 0 6px 0 0; }
+  .switcher .sb { flex-direction: column; flex-wrap: nowrap; gap: 10px; padding: 12px 0 10px; }
+  .switcher .tl3 { flex-basis: auto; padding: 0 14px; }
+  .switcher .sb .tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding: 0 12px; scroll-padding: 0 12px;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 calc(100% - 28px), transparent); }
+  .switcher .sb .tabs::-webkit-scrollbar { display: none; }
   .switcher .nv { flex: none; }
   .switcher .fb > span:first-child { white-space: nowrap; } .switcher .fb .btn2 { display: none; }
 }
