@@ -559,7 +559,7 @@ fn sessions(p: &Painter, r: Rect, e: &Engine, now: i64) {
     section_card(p, card);
     let mut y = card.top() + 6.0;
     if shown.is_empty() {
-        p.text(card.center(), Align2::CENTER_CENTER, "None today", font(12.0), TEXT_FAINT);
+        p.text(card.center(), Align2::CENTER_CENTER, if e.settings.claude { "None today" } else { "Monitoring off" }, font(12.0), TEXT_FAINT);
     }
     for s in &shown {
         let cy = y + 16.0;

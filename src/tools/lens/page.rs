@@ -323,7 +323,7 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     // aside
     let ar = Rect::from_min_max(Pos2::new(area.right() + 16.0, body.top()), body.max);
     section_header(&p, ar.min, Align2::LEFT_TOP, "To remove");
-    paragraph(&p, Pos2::new(ar.left(), ar.top() + 24.0), "", font(12.0), TEXT_FAINT, ar.width());
+    paragraph(&p, Pos2::new(ar.left(), ar.top() + 24.0), "Available when mapping finishes", font(12.0), TEXT_FAINT, ar.width());
     let rb = Rect::from_min_max(Pos2::new(ar.left(), ar.bottom() - 34.0), ar.max);
     pill_button(ui, rb, "Review and remove", BTN_PRIMARY, false);
 

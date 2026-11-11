@@ -723,7 +723,9 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     let resp = field(ui, frect(7), &mut c.share_secret, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
     if resp.lost_focus() && !c.share_secret.is_empty() {
         let v = std::mem::take(&mut c.share_secret);
-        match secret::set(v.trim()) {
+        let v = v.trim();
+        match secret::set(v) {
+            Ok(()) if v.is_empty() => c.has_secret = Some(false),
             Ok(()) => {
                 c.has_secret = Some(true);
                 c.hud("Secret key saved in the Keychain")

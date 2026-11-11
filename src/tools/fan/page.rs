@@ -2,7 +2,7 @@
 //! spinning blades, a heat map of the chip, the fan mode (with the speed
 //! slider and curve editor) and the last 10 minutes of speed and temperature.
 
-use super::control::{speed, Mode, Preset, Settings, Source, CURVE_HI, CURVE_LO};
+use super::control::{speed, Mode, Preset, Settings, Source, CURVE_HI, CURVE_LO, RESUME_C};
 use super::data::{heat, heat_text, rpm_text, Fan, Snapshot, HISTORY, SAMPLE_SECS};
 use super::{Cmd, HelperState, Live};
 use super::ui::{blades, dial, fan_name, heat_pos, heat_scale, hottest_text, is_block, keep_spinning, plural, sparkline, spin, thermal_hint, BLADE, HOT_LINE, LINE};
@@ -95,7 +95,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
     cmds
 }
 
-const MODE_HINTS: [&str; 5] = ["Set by macOS", "Stops when cool", "One speed", "", "Full speed"];
+const MODE_HINTS: [&str; 5] = ["Set by macOS", "May stop when cool", "One speed", "", "Full speed"];
 const INSTALL_H: f32 = 52.0;
 const FIXED_H: f32 = 40.0;
 const CURVE_H: f32 = 222.0;
@@ -157,10 +157,10 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
     let mut y = mr.top() + 56.0;
     let temp = st.curve.source.read(s);
     let hint = if st.mode != Mode::Auto && l.guard.tripped {
-        format!("Back on Auto: a sensor hit {:.0} °C", l.guard.peak)
+        format!("On Auto until below {:.0} °C · a sensor hit {:.0} °C", RESUME_C, l.guard.peak)
     } else if st.mode == Mode::Curve {
         match temp {
-            Some(t) => format!("{t:.0} °C · {} rpm", rpm_text(speed(&fan0, st.curve.at(t)))),
+            Some(t) => format!("{t:.0} °C · target {} rpm", rpm_text(speed(&fan0, st.curve.at(t)))),
             None => "No temperature".into(),
         }
     } else {

@@ -466,7 +466,6 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
     if let Some(why) = a.locked {
         icon(&p, Icon::Lock, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(16.0)), TEXT_FAINT);
         p.text(Pos2::new(x0 + 24.0, y + 8.0), Align2::LEFT_CENTER, why, bold(13.0), TEXT_SOFT);
-        paragraph(&p, Pos2::new(x0, y + 26.0), "Part of macOS", font(12.0), TEXT_DIM, x1 - x0);
         return;
     }
     if !a.sized {

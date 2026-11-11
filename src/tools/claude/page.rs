@@ -62,10 +62,11 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
     let title = if a == Availability::SignedOut { format!("{} isn't signed in", m.name) } else { format!("{} isn't installed", m.name) };
     p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, title, bold(20.0), TEXT);
     y += 32.0;
+    let verb = if a == Availability::SignedOut { "Sign in" } else { "Install it" };
     let intro = if m.id == "claude" {
-        "Install it to see plan limits, token use and projects here".to_string()
+        format!("{verb} to see plan limits, token use and projects here")
     } else {
-        format!("Install it to see {} limits and token use here", m.name)
+        format!("{verb} to see {} limits and token use here", m.name)
     };
     let g = p.layout(intro, font(13.0), TEXT_DIM, colw);
     let gh = g.size().y;

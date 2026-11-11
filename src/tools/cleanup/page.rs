@@ -388,7 +388,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let tr = Rect::from_min_max(Pos2::new(lr.right() + 1.0, body.top()), body.max);
     let (gtitle, blurb) = match app.clean_group {
         Some(g) => (g.title(), g.blurb()),
-        None => ("Needs your OK", "Claude wasn't sure about these"),
+        None => ("Needs your OK", "Check these before removing"),
     };
     let gbytes = rows.iter().find(|r| r.0 == app.clean_group).map(|r| r.2).unwrap_or(0);
     let c_name = tr.left() + 24.0 + 28.0 + 12.0;

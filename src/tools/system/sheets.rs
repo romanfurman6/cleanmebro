@@ -157,7 +157,7 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 Level::Fair => "elevated",
                 Level::Critical => "high",
             };
-            let hint = if l == Level::Good { "Plenty free" } else { "Memory is tight" };
+            let hint = if l == Level::Good { "" } else { "Memory is tight" };
             sp.facts.push(fact("Pressure", format!("{:.0}% · {word}", s.mem_pressure), level_color(l), hint));
             sp.facts.push(fact("Swap used", human_bytes(s.swap_used), TEXT, ""));
             sp
