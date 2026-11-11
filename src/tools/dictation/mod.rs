@@ -548,7 +548,7 @@ fn demo_history() -> History {
         (3 * 3600, "Ship the dictation widget before Friday, then we test it on the real Mac together.", "Slack"),
         (40 * 60, "Привіт! Скинь, будь ласка, посилання на дизайн, я гляну ввечері.", "Telegram"),
         (12 * 60, "Fix the caret position in Electron apps and fall back to the mouse.", "Linear"),
-        (90, "Нужно обновить README и добавить скриншоты нового окна.", "Notes"),
+        (90, "Треба оновити README і додати скріншоти нового вікна.", "Notes"),
     ] {
         h.add(Said { at: now - ago, text: text.into(), app: app.into(), secs: text.len() as f32 / 14.0 });
     }
