@@ -142,11 +142,11 @@ impl Device {
 /// Green above the low line, amber when low, red when almost empty.
 pub fn color(pct: u8) -> Color32 {
     if pct <= m::BT_CRITICAL_BATTERY_MAX_PCT {
-        RED
+        RED()
     } else if pct <= m::BT_LOW_BATTERY_MAX_PCT {
-        AMBER
+        AMBER()
     } else {
-        GREEN
+        GREEN()
     }
 }
 
@@ -155,7 +155,7 @@ pub fn text_color(pct: u8) -> Color32 {
     if pct <= m::BT_LOW_BATTERY_MAX_PCT {
         color(pct)
     } else {
-        TEXT
+        TEXT()
     }
 }
 

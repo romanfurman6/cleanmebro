@@ -24,9 +24,9 @@ pub fn card(ui: &mut Ui, rect: Rect, id: egui::Id, selected: bool) -> Response {
 }
 
 pub fn paint_card(p: &egui::Painter, rect: Rect, hover: f32, selected: bool) {
-    p.rect_filled(rect, R_TILE, lerp_color(CARD, RAISED, hover * 0.5));
+    p.rect_filled(rect, R_TILE, lerp_color(CARD(), RAISED(), hover * 0.5));
     if selected {
-        p.rect_stroke(rect, R_TILE, Stroke::new(1.5, BLUE), StrokeKind::Inside);
+        p.rect_stroke(rect, R_TILE, Stroke::new(1.5, BLUE()), StrokeKind::Inside);
     }
 }
 
@@ -36,15 +36,15 @@ pub fn small(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32,
     let resp = card(ui, rect, id, selected);
     let p = ui.painter();
     icon(p, glyph, Rect::from_min_size(rect.min + Vec2::splat(PAD), Vec2::splat(18.0)), lift(color));
-    small_text(p, rect, title, sub, TEXT_DIM);
+    small_text(p, rect, title, sub, TEXT_DIM());
     resp
 }
 
 /// The two lines at the bottom of a Small widget.
 pub fn small_text(p: &egui::Painter, rect: Rect, title: &str, sub: &str, sub_col: Color32) {
     let w = rect.width() - 2.0 * PAD;
-    text_fit(p, Pos2::new(rect.left() + PAD, rect.bottom() - 26.0), Align2::LEFT_BOTTOM, title, ty::title(), TEXT, w);
-    let sub_col = if sub_col == TEXT_DIM { ty::caption_color() } else { sub_col };
+    text_fit(p, Pos2::new(rect.left() + PAD, rect.bottom() - 26.0), Align2::LEFT_BOTTOM, title, ty::title(), TEXT(), w);
+    let sub_col = if sub_col == TEXT_DIM() { ty::caption_color() } else { sub_col };
     text_fit(p, Pos2::new(rect.left() + PAD, rect.bottom() - 10.0), Align2::LEFT_BOTTOM, sub, ty::caption(), sub_col, w);
 }
 
@@ -55,8 +55,8 @@ pub fn small_ring(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, frac: f32,
     let p = ui.painter();
     let c = Pos2::new(rect.center().x, rect.top() + 32.0);
     ring(p, c, 20.0, 4.0, frac, color);
-    icon(p, glyph, Rect::from_center_size(c, Vec2::splat(15.0)), TEXT_SOFT);
-    text_fit(p, Pos2::new(rect.center().x, rect.bottom() - 10.0), Align2::CENTER_BOTTOM, caption, ty::title(), TEXT, rect.width() - 10.0);
+    icon(p, glyph, Rect::from_center_size(c, Vec2::splat(15.0)), TEXT_SOFT());
+    text_fit(p, Pos2::new(rect.center().x, rect.bottom() - 10.0), Align2::CENTER_BOTTOM, caption, ty::title(), TEXT(), rect.width() - 10.0);
     resp
 }
 
@@ -71,7 +71,7 @@ pub fn wide(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, 
     let caption = match bar_or_caption {
         Ok((f, col)) => {
             ring(p, c, 15.0, 4.0, f, col);
-            icon(p, glyph, Rect::from_center_size(c, Vec2::splat(13.0)), TEXT_SOFT);
+            icon(p, glyph, Rect::from_center_size(c, Vec2::splat(13.0)), TEXT_SOFT());
             ""
         }
         Err(cap) => {
@@ -82,7 +82,7 @@ pub fn wide(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, 
     };
     let x0 = c.x + 17.0 + sp::M;
     let w = rect.right() - PAD - x0;
-    let lines: Vec<(&str, egui::FontId, Color32)> = [(label, ty::caption(), ty::caption_color()), (value, ty::title(), TEXT), (caption, ty::caption(), ty::caption_color())]
+    let lines: Vec<(&str, egui::FontId, Color32)> = [(label, ty::caption(), ty::caption_color()), (value, ty::title(), TEXT()), (caption, ty::caption(), ty::caption_color())]
         .into_iter()
         .filter(|l| !l.0.is_empty())
         .collect();
@@ -115,8 +115,8 @@ pub fn row_split(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Colo
     let cy = rect.center().y;
     text_fit(p, Pos2::new(x0, cy - 20.0), Align2::LEFT_CENTER, label, ty::caption(), ty::caption_color(), x1 - x0);
     // the value shrinks a step before it gets cut
-    let f = if p.layout_no_wrap(value.to_string(), ty::number(), TEXT).size().x <= x1 - x0 { ty::number() } else { ty::lead() };
-    text_fit(p, Pos2::new(x0, cy + 1.0), Align2::LEFT_CENTER, value, f, TEXT, x1 - x0);
+    let f = if p.layout_no_wrap(value.to_string(), ty::number(), TEXT()).size().x <= x1 - x0 { ty::number() } else { ty::lead() };
+    text_fit(p, Pos2::new(x0, cy + 1.0), Align2::LEFT_CENTER, value, f, TEXT(), x1 - x0);
     text_fit(p, Pos2::new(x0, cy + 21.0), Align2::LEFT_CENTER, caption, ty::caption(), ty::caption_color(), x1 - x0);
     p.line_segment([Pos2::new(split, rect.top() + 16.0), Pos2::new(split, rect.bottom() - 16.0)], Stroke::new(1.0, white(15)));
     (resp, Rect::from_min_max(Pos2::new(split + sp::M, rect.top() + PAD), Pos2::new(rect.right() - PAD, rect.bottom() - PAD)))
@@ -126,7 +126,7 @@ pub fn row_split(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Colo
 /// `empty` is shown when there are none.
 pub fn lines(p: &egui::Painter, r: Rect, lines: &[(String, Option<(f32, Color32)>, String)], empty: &str) {
     if lines.is_empty() {
-        text_fit(p, r.center(), Align2::CENTER_CENTER, empty, font(11.0), TEXT_FAINT, r.width());
+        text_fit(p, r.center(), Align2::CENTER_CENTER, empty, font(11.0), TEXT_FAINT(), r.width());
         return;
     }
     // one line each: label, a short inline bar, the value. Bars sit between
@@ -154,7 +154,7 @@ pub fn head_with(p: &egui::Painter, rect: Rect, title: &str, caption: &str, note
     let top = rect.top() + PAD;
     let nr = text_fit(p, Pos2::new(x1, top + 8.0), Align2::RIGHT_CENTER, note, ty::label(), white(166), (x1 - x0) * 0.5);
     let tw = if note.is_empty() { x1 - x0 } else { nr.left() - x0 - 8.0 };
-    text_fit(p, Pos2::new(x0, top + 8.0), Align2::LEFT_CENTER, title, ty::title(), TEXT, tw);
+    text_fit(p, Pos2::new(x0, top + 8.0), Align2::LEFT_CENTER, title, ty::title(), TEXT(), tw);
     let mut y = top + 16.0;
     if !caption.is_empty() {
         text_fit(p, Pos2::new(x0, y + 2.0), Align2::LEFT_TOP, caption, ty::caption(), ty::caption_color(), tw);
@@ -202,18 +202,18 @@ pub fn spark_to(p: &egui::Painter, r: Rect, values: &[f32], color: Color32, top:
         let h = ((v / hi) * r.height()).max(2.0);
         let x = r.left() + k as f32 * (bw + gap);
         let hot = *v > median * 1.6 && *v >= hi * 0.6 && *v > 1.0;
-        let c = if hot { AMBER } else { with_alpha(color, 0.8) };
+        let c = if hot { AMBER() } else { with_alpha(color, 0.8) };
         p.rect_filled(Rect::from_min_max(Pos2::new(x, r.bottom() - h), Pos2::new(x + bw, r.bottom())), egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, c);
     }
 }
 
 /// A list line inside a Medium or Large widget: label, bar, value.
 pub fn bar_line(p: &egui::Painter, r: Rect, label: &str, frac: Option<(f32, Color32)>, value: &str) {
-    let vw = p.layout_no_wrap(value.to_string(), font(12.0), TEXT).size().x.clamp(40.0, r.width() * 0.45);
-    let lw = p.layout_no_wrap(label.to_string(), font(12.0), TEXT).size().x;
+    let vw = p.layout_no_wrap(value.to_string(), font(12.0), TEXT()).size().x.clamp(40.0, r.width() * 0.45);
+    let lw = p.layout_no_wrap(label.to_string(), font(12.0), TEXT()).size().x;
     // the label keeps its full width when it can; the bar takes what's left
     let bw = if frac.is_some() { (r.width() - vw - lw - 22.0).clamp(24.0, (r.width() * 0.3).min(110.0)) } else { 0.0 };
-    text_fit(p, Pos2::new(r.right(), r.center().y), Align2::RIGHT_CENTER, value, font(12.0), TEXT, vw);
+    text_fit(p, Pos2::new(r.right(), r.center().y), Align2::RIGHT_CENTER, value, font(12.0), TEXT(), vw);
     if let Some((f, c)) = frac {
         bar(p, Rect::from_min_max(Pos2::new(r.right() - vw - 10.0 - bw, r.center().y - 2.0), Pos2::new(r.right() - vw - 10.0, r.center().y + 2.0)), f, c);
     }
@@ -223,5 +223,5 @@ pub fn bar_line(p: &egui::Painter, r: Rect, label: &str, frac: Option<(f32, Colo
 /// A dashed box with a quiet message (nothing to show yet).
 pub fn empty_note(p: &egui::Painter, r: Rect, msg: &str) {
     dashed_rect(p, r, 8.0, white(40));
-    text_fit(p, r.center(), Align2::CENTER_CENTER, msg, font(12.0), TEXT_FAINT, r.width() - 16.0);
+    text_fit(p, r.center(), Align2::CENTER_CENTER, msg, font(12.0), TEXT_FAINT(), r.width() - 16.0);
 }

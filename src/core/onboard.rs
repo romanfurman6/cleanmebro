@@ -252,7 +252,7 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     for i in 0..STEPS {
         let w = egui::lerp(6.0..=dw(i), ease(t * 3.0).max(if i == step { 0.0 } else { 1.0 }));
         let r = Rect::from_min_size(Pos2::new(x, full.top() + TOP_H / 2.0 - 3.0), Vec2::new(w, 6.0));
-        p.rect_filled(r, 3.0, if i <= step { BLUE } else { white(46) });
+        p.rect_filled(r, 3.0, if i <= step { BLUE() } else { white(46) });
         x += w + 6.0;
     }
     let body = Rect::from_min_max(Pos2::new(full.left() + 40.0, full.top() + TOP_H), Pos2::new(full.right() - 40.0, full.bottom() - BOTTOM_H));
@@ -341,7 +341,7 @@ fn all_required(app: &App) -> bool {
 
 fn ghost_button(ui: &mut Ui, r: Rect, label: &str) -> egui::Response {
     let resp = ui.interact(r, ui.scope_id().with(("ghost", label)), Sense::click());
-    let col = if resp.hovered() { TEXT } else { TEXT_DIM };
+    let col = if resp.hovered() { TEXT() } else { TEXT_DIM() };
     ui.painter().text(r.center(), Align2::CENTER_CENTER, label, font(13.0), col);
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -387,7 +387,7 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let start = -std::f32::consts::FRAC_PI_2;
     let k = ease(t / 1.4);
     if k > 0.0 {
-        p.add(egui::Shape::line(arc_points(c, ring, start, start + std::f32::consts::TAU * k, 96), Stroke::new(2.0, BLUE)));
+        p.add(egui::Shape::line(arc_points(c, ring, start, start + std::f32::consts::TAU * k, 96), Stroke::new(2.0, BLUE())));
     }
     let n = app.tools.len().max(1);
     for (i, tool) in app.tools.iter().enumerate() {
@@ -397,14 +397,14 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
         if s <= 0.0 {
             continue;
         }
-        p.circle_filled(at, 15.0 * s, Color32::from_rgb(0x1E, 0x1E, 0x20));
+        p.circle_filled(at, 15.0 * s, BG());
         crate::kit::glass::stroke_circle(&p, at, 15.0 * s, Stroke::new(1.0, white(36)));
-        icon(&p, tool.badge().icon, Rect::from_center_size(at, Vec2::splat(14.0 * s)), TEXT_SOFT);
+        icon(&p, tool.badge().icon, Rect::from_center_size(at, Vec2::splat(14.0 * s)), TEXT_SOFT());
     }
     let bob = if t > 1.8 { ((t - 1.8) * 1.6).sin() * 3.0 } else { 0.0 };
     app_mark(&p, c + Vec2::new(0.0, bob), 96.0, ease((t - 0.3) / 1.2));
-    p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT);
-    p.text(Pos2::new(c.x, c.y + 156.0), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(14.0), TEXT_FAINT);
+    p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT());
+    p.text(Pos2::new(c.x, c.y + 156.0), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(14.0), TEXT_FAINT());
     let r = Rect::from_center_size(Pos2::new(c.x, c.y + 214.0), Vec2::new(128.0, 40.0));
     pill_button(ui, r, "Set up", BTN_PRIMARY, true).clicked()
 }
@@ -429,8 +429,8 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let p = ui.painter().clone();
     let on = (0..app.tools.len()).filter(|&i| app.tool_on(i)).count();
     let head = body.top() + 6.0;
-    let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Tools", bold(22.0), TEXT);
-    p.text(Pos2::new(g.right() + 10.0, g.bottom() - 4.0), Align2::LEFT_BOTTOM, format!("{on}/{}", app.tools.len()), mono(13.0), TEXT_FAINT);
+    let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Tools", bold(22.0), TEXT());
+    p.text(Pos2::new(g.right() + 10.0, g.bottom() - 4.0), Align2::LEFT_BOTTOM, format!("{on}/{}", app.tools.len()), mono(13.0), TEXT_FAINT());
     let secs = sections(app);
     let cols = secs.len().max(1) as f32;
     let gap = 12.0;
@@ -440,7 +440,7 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let mut k = 0;
     for (ci, sec) in secs.iter().enumerate() {
         let x = body.left() + ci as f32 * (cw + gap);
-        p.text(Pos2::new(x + 2.0, top), Align2::LEFT_TOP, sec, font(11.0), TEXT_FAINT);
+        p.text(Pos2::new(x + 2.0, top), Align2::LEFT_TOP, sec, font(11.0), TEXT_FAINT());
         let mut y = top + 20.0;
         for i in 0..app.tools.len() {
             if app.tools[i].section() != *sec {
@@ -454,25 +454,25 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
             let o = app.tool_on(i);
             let s = ui.ctx().animate_bool_with_time(id.with("on"), o, 0.18);
             let hov = ui.ctx().animate_bool(id.with("h"), resp.hovered());
-            p.rect_filled(r, 10.0, lerp_color(CARD, white(30), hov * 0.15).gamma_multiply(a));
+            p.rect_filled(r, 10.0, lerp_color(CARD(), white(30), hov * 0.15).gamma_multiply(a));
             p.rect_stroke(r, 10.0, Stroke::new(1.0, white(12).gamma_multiply(a)), StrokeKind::Inside);
             let ib = Rect::from_min_size(Pos2::new(r.left() + 12.0, r.center().y - 17.0), Vec2::splat(34.0));
-            p.rect_filled(ib, 9.0, lerp_color(white(16), BLUE, s));
+            p.rect_filled(ib, 9.0, lerp_color(white(16), BLUE(), s));
             let b = app.tools[i].badge();
-            icon(&p, b.icon, ib.shrink(8.0), lerp_color(TEXT_MUTED, Color32::WHITE, s));
+            icon(&p, b.icon, ib.shrink(8.0), lerp_color(TEXT_MUTED(), Color32::WHITE, s));
             let tx = ib.right() + 10.0;
-            text_fit(&p, Pos2::new(tx, r.top() + 15.0), Align2::LEFT_TOP, app.tools[i].name(), bold(13.0), lerp_color(TEXT_MUTED, TEXT, s), r.right() - tx - 24.0);
+            text_fit(&p, Pos2::new(tx, r.top() + 15.0), Align2::LEFT_TOP, app.tools[i].name(), bold(13.0), lerp_color(TEXT_MUTED(), TEXT(), s), r.right() - tx - 24.0);
             // what it will ask for
             let mut gx = tx;
             for n in app.tools[i].needs() {
-                icon(&p, n.perm.icon(), Rect::from_min_size(Pos2::new(gx, r.top() + 37.0), Vec2::splat(12.0)), TEXT_MUTED);
+                icon(&p, n.perm.icon(), Rect::from_min_size(Pos2::new(gx, r.top() + 37.0), Vec2::splat(12.0)), TEXT_MUTED());
                 gx += 16.0;
             }
             if s > 0.01 {
                 let c = Pos2::new(r.right() - 14.0, r.top() + 14.0);
                 let z = pop(s);
-                p.circle_filled(c, 8.0 * z, BLUE);
-                check(&p, c, 7.0 * z, Color32::WHITE);
+                p.circle_filled(c, 8.0 * z, BLUE());
+                check(&p, c, 7.0 * z, ON_ACTION);
             }
             if resp.clicked() {
                 flip = Some((i, !o));
@@ -510,10 +510,10 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
     let full = done == req.len();
     if shown > 0.005 {
         let a0 = -std::f32::consts::FRAC_PI_2;
-        p.add(egui::Shape::line(arc_points(c, 18.0, a0, a0 + std::f32::consts::TAU * shown, 48), Stroke::new(4.0, if full { GREEN } else { BLUE })));
+        p.add(egui::Shape::line(arc_points(c, 18.0, a0, a0 + std::f32::consts::TAU * shown, 48), Stroke::new(4.0, if full { GREEN() } else { BLUE() })));
     }
-    p.text(c, Align2::CENTER_CENTER, format!("{done}/{}", req.len()), mono(11.0), TEXT);
-    p.text(Pos2::new(c.x + 36.0, c.y), Align2::LEFT_CENTER, "Permissions", bold(22.0), TEXT);
+    p.text(c, Align2::CENTER_CENTER, format!("{done}/{}", req.len()), mono(11.0), TEXT());
+    p.text(Pos2::new(c.x + 36.0, c.y), Align2::LEFT_CENTER, "Permissions", bold(22.0), TEXT());
     let area = Rect::from_min_max(Pos2::new(body.left(), body.top() + 56.0), body.max);
     perm_list(app, ui, area, &list, t, now);
 }
@@ -529,7 +529,7 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         if r.optional && !opt_head {
             opt_head = true;
             y += 6.0;
-            p.text(Pos2::new(area.left() + 2.0, y), Align2::LEFT_TOP, "Optional", font(11.0), TEXT_FAINT);
+            p.text(Pos2::new(area.left() + 2.0, y), Align2::LEFT_TOP, "Optional", font(11.0), TEXT_FAINT());
             y += 20.0;
         }
         let a = ease((t - 0.05 * k as f32) / 0.4);
@@ -537,20 +537,20 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         let st = app.perm_watch.status(r.perm);
         let waiting = app.perm_watch.waiting(r.perm, now);
         let ok = st == Status::Allowed;
-        p.rect_filled(rr, 10.0, CARD.gamma_multiply(a));
+        p.rect_filled(rr, 10.0, CARD().gamma_multiply(a));
         let ib = Rect::from_min_size(Pos2::new(rr.left() + 12.0, rr.center().y - 15.0), Vec2::splat(30.0));
         let tint = match st {
-            Status::Allowed => GREEN,
-            Status::Denied => Color32::from_rgb(0xFF, 0x9F, 0x0A),
-            Status::NotAsked => TEXT_SOFT,
+            Status::Allowed => GREEN(),
+            Status::Denied => AMBER(),
+            Status::NotAsked => TEXT_SOFT(),
         };
         p.rect_filled(ib, 8.0, white(16));
         icon(&p, r.perm.icon(), ib.shrink(7.0), tint);
-        p.text(Pos2::new(ib.right() + 12.0, rr.center().y), Align2::LEFT_CENTER, r.perm.name(), bold(13.0), TEXT.gamma_multiply(a));
+        p.text(Pos2::new(ib.right() + 12.0, rr.center().y), Align2::LEFT_CENTER, r.perm.name(), bold(13.0), TEXT().gamma_multiply(a));
         // the tools that want it
         let mut gx = ib.right() + 190.0;
         for &i in &r.tools {
-            icon(&p, app.tools[i].badge().icon, Rect::from_min_size(Pos2::new(gx, rr.center().y - 7.0), Vec2::splat(14.0)), TEXT_MUTED);
+            icon(&p, app.tools[i].badge().icon, Rect::from_min_size(Pos2::new(gx, rr.center().y - 7.0), Vec2::splat(14.0)), TEXT_MUTED());
             gx += 22.0;
         }
         // status on the right
@@ -559,12 +559,12 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
             let since = app.perm_watch.allowed_at.get(&r.perm).map(|t0| (now - t0) as f32).unwrap_or(1.0);
             let z = pop(since / 0.45);
             let c = Pos2::new(right - 13.0, rr.center().y);
-            check(&p, c, 12.0 * z, GREEN);
+            check(&p, c, 12.0 * z, GREEN());
         } else if waiting {
             let c = Pos2::new(right - 8.0, rr.center().y);
-            spinner(&p, c, 6.0, now, BLUE);
+            spinner(&p, c, 6.0, now, BLUE());
             let hint = if r.perm == Perm::FullDisk { "Switch it on in System Settings" } else { "System Settings" };
-            p.text(Pos2::new(c.x - 16.0, c.y), Align2::RIGHT_CENTER, hint, font(12.0), TEXT_FAINT);
+            p.text(Pos2::new(c.x - 16.0, c.y), Align2::RIGHT_CENTER, hint, font(12.0), TEXT_FAINT());
         } else {
             let (label, kind) = if st == Status::Denied { ("Open Settings", BTN_SECONDARY) } else { (r.perm.ask_label(), BTN_SECONDARY) };
             let w = button_width(&p, label, kind);
@@ -606,11 +606,11 @@ fn keycaps(p: &egui::Painter, right: Pos2, keys: &str) {
     };
     for c in caps.iter().rev() {
         let f: FontId = font(13.0);
-        let w = p.layout_no_wrap(c.clone(), f.clone(), TEXT).size().x.max(10.0) + 12.0;
+        let w = p.layout_no_wrap(c.clone(), f.clone(), TEXT()).size().x.max(10.0) + 12.0;
         let r = Rect::from_min_size(Pos2::new(x - w, right.y - 11.0), Vec2::new(w, 22.0));
         p.rect_filled(r, 5.0, white(26));
         p.rect_filled(Rect::from_min_max(Pos2::new(r.left() + 1.0, r.bottom() - 1.5), Pos2::new(r.right() - 1.0, r.bottom())), CornerRadius::same(2), Color32::from_black_alpha(90));
-        p.text(r.center(), Align2::CENTER_CENTER, c, f, TEXT);
+        p.text(r.center(), Align2::CENTER_CENTER, c, f, TEXT());
         x = r.left() - 3.0;
     }
 }
@@ -621,13 +621,13 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let p = ui.painter().clone();
     let left = Rect::from_min_max(body.min, Pos2::new(body.right() - 340.0, body.bottom()));
     let mut y = body.center().y - 120.0;
-    p.text(Pos2::new(left.left(), y), Align2::LEFT_TOP, "Ready", bold(22.0), TEXT);
+    p.text(Pos2::new(left.left(), y), Align2::LEFT_TOP, "Ready", bold(22.0), TEXT());
     y += 46.0;
     // open at login
     let row = Rect::from_min_size(Pos2::new(left.left(), y), Vec2::new(left.width(), 52.0));
-    p.rect_filled(row, 10.0, CARD);
-    icon(&p, Icon::Power, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), TEXT_SOFT);
-    p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, "Open at login", bold(13.0), TEXT);
+    p.rect_filled(row, 10.0, CARD());
+    icon(&p, Icon::Power, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), TEXT_SOFT());
+    p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, "Open at login", bold(13.0), TEXT());
     let now = ui.ctx().input(|i| i.time);
     let on = app.perm_watch.login_on(app.demo, now);
     let sw = Rect::from_min_size(Pos2::new(row.right() - 50.0, row.center().y - 11.0), Vec2::new(38.0, 22.0));
@@ -643,17 +643,17 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     for (k, (ic, label, keys)) in keys.iter().enumerate() {
         let a = ease((t - 0.08 * (k + 1) as f32) / 0.4);
         let row = Rect::from_min_size(Pos2::new(left.left(), y - (1.0 - a) * 8.0), Vec2::new(left.width(), 44.0));
-        p.rect_filled(row, 10.0, CARD.gamma_multiply(a));
-        icon(&p, *ic, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), TEXT_SOFT.gamma_multiply(a));
-        p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, *label, font(13.0), TEXT.gamma_multiply(a));
+        p.rect_filled(row, 10.0, CARD().gamma_multiply(a));
+        icon(&p, *ic, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), TEXT_SOFT().gamma_multiply(a));
+        p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, *label, font(13.0), TEXT().gamma_multiply(a));
         keycaps(&p, Pos2::new(row.right() - 12.0, row.center().y), keys);
         y += 52.0;
     }
     if needs_restart(app) {
         let row = Rect::from_min_size(Pos2::new(left.left(), y), Vec2::new(left.width(), 44.0));
-        p.rect_filled(row, 10.0, CARD);
-        icon(&p, Icon::ScreenRec, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), Color32::from_rgb(0xFF, 0x9F, 0x0A));
-        p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, "Screen Recording needs a restart", font(13.0), TEXT);
+        p.rect_filled(row, 10.0, CARD());
+        icon(&p, Icon::ScreenRec, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), AMBER());
+        p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, "Screen Recording needs a restart", font(13.0), TEXT());
         let bw = button_width(&p, "Restart", BTN_PRIMARY);
         let br = Rect::from_min_size(Pos2::new(row.right() - 10.0 - bw, row.center().y - 13.0), Vec2::new(bw, 26.0));
         if pill_button(ui, br, "Restart", BTN_PRIMARY, true).clicked() {
@@ -686,22 +686,22 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let bar = Rect::from_min_size(Pos2::new(px, top - 40.0), Vec2::new(pw, 24.0));
     p.rect_filled(bar, 6.0, white(18));
     let mut bx = bar.right() - 12.0;
-    let clock = p.text(Pos2::new(bx, bar.center().y), Align2::RIGHT_CENTER, "Tue 17:58", font(11.0), TEXT_FAINT);
+    let clock = p.text(Pos2::new(bx, bar.center().y), Align2::RIGHT_CENTER, "Tue 17:58", font(11.0), TEXT_FAINT());
     bx = clock.left() - 14.0;
     for ic in [Icon::Wifi, Icon::Battery(80)] {
-        icon(&p, ic, Rect::from_center_size(Pos2::new(bx - 7.0, bar.center().y), Vec2::splat(13.0)), TEXT_FAINT);
+        icon(&p, ic, Rect::from_center_size(Pos2::new(bx - 7.0, bar.center().y), Vec2::splat(13.0)), TEXT_FAINT());
         bx -= 24.0;
     }
     let me = Rect::from_center_size(Pos2::new(bx - 8.0, bar.center().y), Vec2::new(26.0, 20.0));
     let glow = ((t * 3.0).sin() * 0.5 + 0.5) * 0.25 + 0.2;
-    p.rect_filled(me, 5.0, with_alpha(BLUE, glow));
+    p.rect_filled(me, 5.0, with_alpha(BLUE(), glow));
     brand_glyph(&p, me.center(), 15.0, Color32::WHITE);
-    p.text(Pos2::new(bar.left() + 10.0, bar.center().y), Align2::LEFT_CENTER, "Click this icon", font(11.0), TEXT_FAINT);
+    p.text(Pos2::new(bar.left() + 10.0, bar.center().y), Align2::LEFT_CENTER, "Click this icon", font(11.0), TEXT_FAINT());
     // a little caret from the icon to the panel
     let c = Pos2::new(me.center().x, top);
-    p.add(egui::Shape::convex_polygon(vec![c + Vec2::new(-6.0, 0.5), c + Vec2::new(0.0, -6.0), c + Vec2::new(6.0, 0.5)], Color32::from_rgb(0x1E, 0x1E, 0x20), Stroke::NONE));
+    p.add(egui::Shape::convex_polygon(vec![c + Vec2::new(-6.0, 0.5), c + Vec2::new(0.0, -6.0), c + Vec2::new(6.0, 0.5)], BG(), Stroke::NONE));
     let panel = Rect::from_min_size(Pos2::new(px, top), Vec2::new(pw, ph));
-    p.rect_filled(panel, 12.0, Color32::from_rgb(0x1E, 0x1E, 0x20));
+    p.rect_filled(panel, 12.0, BG());
     p.rect_stroke(panel, 12.0, Stroke::new(1.0, white(36)), StrokeKind::Inside);
     let (mut col, mut row) = (0usize, 0usize);
     for (k, (&i, &s)) in on_tools.iter().zip(&spans).enumerate() {
@@ -716,8 +716,8 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
             continue;
         }
         let blue = false;
-        p.rect_filled(r, 9.0, (if blue { BLUE } else { SIDEBAR }).gamma_multiply(a.min(1.0)));
-        let fg = if blue { Color32::WHITE } else { TEXT_SOFT };
+        p.rect_filled(r, 9.0, (if blue { BLUE() } else { SIDEBAR() }).gamma_multiply(a.min(1.0)));
+        let fg = if blue { ON_ACTION } else { TEXT_SOFT() };
         icon(&p, app.tools[i].badge().icon, Rect::from_center_size(r.center() - Vec2::new(0.0, 8.0), Vec2::splat(18.0 * a)), fg);
         text_fit(&p, Pos2::new(r.center().x, r.bottom() - 9.0), Align2::CENTER_BOTTOM, app.tools[i].name(), font(10.0), fg.gamma_multiply(0.85 * a.min(1.0)), r.width() - 8.0);
     }
@@ -761,29 +761,29 @@ pub fn fda_helper(app: &mut App, ctx: &egui::Context) {
 /// The helper's card. Returns true when its close button was clicked.
 pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
     let p = ui.painter().clone();
-    p.rect_filled(full, 12.0, Color32::from_rgb(0x1E, 0x1E, 0x20));
+    p.rect_filled(full, 12.0, BG());
     p.rect_stroke(full, 12.0, Stroke::new(1.0, white(40)), StrokeKind::Inside);
     let name = perms::app_name();
     // a copy of the Settings row, its switch flipping on and off
     let row = Rect::from_min_size(full.min + Vec2::new(14.0, 14.0), Vec2::new(full.width() - 28.0, 40.0));
     p.rect_filled(row, 8.0, white(14));
     app_mark(&p, Pos2::new(row.left() + 20.0, row.center().y), 22.0, 0.75);
-    p.text(Pos2::new(row.left() + 40.0, row.center().y), Align2::LEFT_CENTER, &name, font(13.0), TEXT);
+    p.text(Pos2::new(row.left() + 40.0, row.center().y), Align2::LEFT_CENTER, &name, font(13.0), TEXT());
     let cycle = (now % 2.4) as f32 / 2.4;
     let on = ease(((cycle - 0.25) / 0.25).clamp(0.0, 1.0)) * (1.0 - ease(((cycle - 0.85) / 0.15).clamp(0.0, 1.0)));
     let sw = Rect::from_min_size(Pos2::new(row.right() - 50.0, row.center().y - 11.0), Vec2::new(38.0, 22.0));
-    p.rect_filled(sw, 11.0, lerp_color(white(46), BLUE, on));
+    p.rect_filled(sw, 11.0, lerp_color(white(46), BLUE(), on));
     p.circle_filled(Pos2::new(sw.left() + 11.0 + 16.0 * on, sw.center().y), 9.0, Color32::WHITE);
     // a pointer that clicks the switch
     let tip = sw.center() + Vec2::new(4.0, 6.0) + Vec2::new(14.0, 12.0) * (1.0 - ease((cycle / 0.25).clamp(0.0, 1.0)));
     let arrow = vec![tip, tip + Vec2::new(0.0, 13.0), tip + Vec2::new(3.5, 9.5), tip + Vec2::new(8.5, 10.0)];
     p.add(egui::Shape::convex_polygon(arrow, Color32::WHITE, Stroke::new(1.0, Color32::BLACK)));
     let y = row.bottom() + 14.0;
-    p.text(Pos2::new(full.left() + 16.0, y), Align2::LEFT_TOP, format!("Switch on {name} in the list"), bold(13.0), TEXT);
-    p.text(Pos2::new(full.left() + 16.0, y + 20.0), Align2::LEFT_TOP, "Not there? Drag it in from the Finder window.", font(12.0), TEXT_FAINT);
+    p.text(Pos2::new(full.left() + 16.0, y), Align2::LEFT_TOP, format!("Switch on {name} in the list"), bold(13.0), TEXT());
+    p.text(Pos2::new(full.left() + 16.0, y + 20.0), Align2::LEFT_TOP, "Not there? Drag it in from the Finder window.", font(12.0), TEXT_FAINT());
     let x = Rect::from_min_size(Pos2::new(full.right() - 26.0, full.bottom() - 26.0), Vec2::splat(18.0));
     let r = ui.interact(x, ui.scope_id().with("fda-help-close"), Sense::click());
-    icon(&p, Icon::Close, x.shrink(3.0), if r.hovered() { TEXT } else { TEXT_MUTED });
+    icon(&p, Icon::Close, x.shrink(3.0), if r.hovered() { TEXT() } else { TEXT_MUTED() });
     ui.ctx().request_repaint();
     r.clicked()
 }

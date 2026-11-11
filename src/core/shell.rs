@@ -571,6 +571,7 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.frame += 1;
         if self.frame <= 3 || self.frame.is_multiple_of(30) {
+            sync_theme(&ctx, self.screenshot.is_none());
             let r = if self.mode == Mode::Panel { m::CARD_RADIUS as f64 + 6.0 } else { 16.0 };
             if self.screenshot.is_none() {
                 crate::kit::native::apply_glass(r);
@@ -646,10 +647,10 @@ impl eframe::App for App {
         if let Some((msg, at)) = &self.toast {
             if at.elapsed().as_secs_f32() < 3.0 {
                 let p = ui.painter();
-                let g = p.layout_no_wrap(msg.clone(), font(13.0), TEXT);
+                let g = p.layout_no_wrap(msg.clone(), font(13.0), TEXT());
                 let r = Rect::from_center_size(Pos2::new(full.center().x, full.bottom() - 40.0), g.size() + Vec2::new(28.0, 16.0));
                 glass_card(p, r, r.height() / 2.0, 1.0, false);
-                p.galley(r.center() - g.size() / 2.0, g, TEXT);
+                p.galley(r.center() - g.size() / 2.0, g, TEXT());
                 ctx.request_repaint();
             } else {
                 self.toast = None;
@@ -839,6 +840,23 @@ fn tray_image() -> tray_icon::Icon {
     tray_icon::Icon::from_rgba(crate::kit::brand::glyph_rgba(n), n, n).expect("tray icon")
 }
 
+/// Follow the system appearance (or `CMDMEOW_THEME=light|dark`). On a
+/// change: new palette, font weights, egui visuals and window material.
+fn sync_theme(ctx: &egui::Context, live: bool) {
+    let light = match std::env::var("CMDMEOW_THEME").as_deref() {
+        Ok("light") => true,
+        Ok("dark") => false,
+        _ => live && crate::kit::native::system_light(),
+    };
+    if glass::set_light(light) {
+        install_fonts(ctx);
+        if live {
+            crate::kit::native::set_appearance(light);
+        }
+        ctx.request_repaint();
+    }
+}
+
 fn install_fonts(ctx: &egui::Context) {
     use egui::epaint::text::VariationCoords;
     use egui::{FontData, FontDefinitions, FontFamily};
@@ -846,30 +864,45 @@ fn install_fonts(ctx: &egui::Context) {
     let sf = std::fs::read("/System/Library/Fonts/SFNS.ttf").ok();
     let mono = std::fs::read("/System/Library/Fonts/SFNSMono.ttf").ok();
     let mut bold_family = vec![];
+    let mut hero_family = vec![];
     if let Some(bytes) = sf {
+        // light text on dark reads heavier than dark text on light, so light
+        // mode sets every weight a step up
+        let light = glass::is_light();
+        let (w_regular, w_bold, w_hero) = if light { (510.0, 680.0, 520.0) } else { (430.0, 620.0, 330.0) };
         let mut regular = FontData::from_owned(bytes.clone());
-        regular.tweak.coords = VariationCoords::new([("wght", 430.0)]);
-        let mut semibold = FontData::from_owned(bytes);
-        semibold.tweak.coords = VariationCoords::new([("wght", 620.0)]);
+        regular.tweak.coords = VariationCoords::new([("wght", w_regular)]);
+        let mut semibold = FontData::from_owned(bytes.clone());
+        semibold.tweak.coords = VariationCoords::new([("wght", w_bold)]);
+        let mut hero = FontData::from_owned(bytes);
+        hero.tweak.coords = VariationCoords::new([("wght", w_hero)]);
         fonts.font_data.insert("sf".into(), Arc::new(regular));
         fonts.font_data.insert("sf-bold".into(), Arc::new(semibold));
+        fonts.font_data.insert("sf-hero".into(), Arc::new(hero));
         fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "sf".into());
         bold_family.push("sf-bold".to_string());
+        hero_family.push("sf-hero".to_string());
     }
     if let Some(bytes) = mono {
         fonts.font_data.insert("sf-mono".into(), Arc::new(FontData::from_owned(bytes)));
         fonts.families.get_mut(&FontFamily::Monospace).unwrap().insert(0, "sf-mono".into());
     }
     let mut fallback = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    // without SF the hero family is the bold one
+    if hero_family.is_empty() {
+        hero_family = bold_family.clone();
+    }
+    hero_family.extend(fallback.iter().cloned());
     bold_family.append(&mut fallback);
     fonts.families.insert(FontFamily::Name("bold".into()), bold_family);
+    fonts.families.insert(FontFamily::Name("hero".into()), hero_family);
     ctx.set_fonts(fonts);
-    ctx.set_visuals(egui::Visuals::dark());
+    ctx.set_visuals(if glass::is_light() { egui::Visuals::light() } else { egui::Visuals::dark() });
     ctx.all_styles_mut(|s| {
         s.visuals.panel_fill = Color32::TRANSPARENT;
-        s.visuals.window_fill = Color32::from_rgb(30, 30, 34);
+        s.visuals.window_fill = glass::BG();
         s.spacing.scroll.bar_width = 6.0;
         s.spacing.scroll.floating = true;
-        s.visuals.widgets.noninteractive.fg_stroke.color = TEXT;
+        s.visuals.widgets.noninteractive.fg_stroke.color = TEXT();
     });
 }

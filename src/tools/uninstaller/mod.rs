@@ -28,7 +28,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub const ID: ToolId = "uninstaller";
-pub const TINT: Color32 = crate::kit::glass::BLUE;
+#[allow(non_snake_case)]
+pub fn TINT() -> Color32 { crate::kit::glass::tint::CLEANUP() }
 
 /// Apps unused this long count as unused.
 pub const UNUSED_DAYS: i64 = 90;
@@ -718,7 +719,7 @@ impl Tool for Uninstaller {
         "Uninstaller"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::AppRemove, color: TINT }
+        Badge { icon: Icon::AppRemove, color: TINT() }
     }
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};

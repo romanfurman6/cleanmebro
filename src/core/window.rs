@@ -23,7 +23,7 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
         ctx.send_viewport_cmd(ViewportCommand::StartDrag);
     }
     let p = ui.painter().clone();
-    p.rect_filled(side, egui::CornerRadius { nw: 12, sw: 12, ne: 0, se: 0 }, glass::SIDEBAR);
+    p.rect_filled(side, egui::CornerRadius { nw: 12, sw: 12, ne: 0, se: 0 }, glass::SIDEBAR());
     hairline(&p, side.right_top(), side.right_bottom());
     if draw_lights {
         traffic_lights(ui, &p, full);
@@ -45,14 +45,14 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
         let r = Rect::from_min_size(Pos2::new(side.left() + 16.0, logo_y), Vec2::splat(22.0));
         p.image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
     }
-    p.text(Pos2::new(side.left() + 46.0, logo_y + 11.0), Align2::LEFT_CENTER, "Cmd+Meow", bold(13.0), TEXT);
+    p.text(Pos2::new(side.left() + 46.0, logo_y + 11.0), Align2::LEFT_CENTER, "Cmd+Meow", bold(13.0), TEXT());
     let mut y = logo_y + 22.0 + 4.0;
     let mut section = "";
     for &i in &pages {
         if app.tools[i].section() != section {
             section = app.tools[i].section();
             y += 12.0;
-            section_header(&p, Pos2::new(x + 8.0, y), Align2::LEFT_TOP, section);
+            group_header(&p, Pos2::new(x + 8.0, y), section);
             y += 18.0;
         }
         let t = &app.tools[i];
@@ -78,7 +78,7 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
     }
     // settings: widgets and tools
     let r = Rect::from_min_size(Pos2::new(x, full.bottom() - 12.0 - 30.0 - 6.0 - SIDEBAR_ROW_H), Vec2::new(w, SIDEBAR_ROW_H));
-    if sidebar_item(ui, r, ui.scope_id().with("nav-settings"), Icon::Gear, tint::NEUTRAL, "Settings", "", app.settings_open, false).clicked() {
+    if sidebar_item(ui, r, ui.scope_id().with("nav-settings"), Icon::Gear, tint::NEUTRAL(), "Settings", "", app.settings_open, false).clicked() {
         app.settings_open = true;
     }
     // back to the menu bar panel
@@ -88,8 +88,8 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
     if hov > 0.0 {
         p.rect_filled(r, R_SMALL, white((12.0 * hov) as u8));
     }
-    icon(&p, Icon::Monitor, Rect::from_min_size(Pos2::new(r.left() + 10.0, r.center().y - 8.0), Vec2::splat(16.0)), TEXT_DIM);
-    p.text(Pos2::new(r.left() + 34.0, r.center().y), Align2::LEFT_CENTER, "Menu bar panel", font(13.0), TEXT_DIM);
+    icon(&p, Icon::Monitor, Rect::from_min_size(Pos2::new(r.left() + 10.0, r.center().y - 8.0), Vec2::splat(16.0)), TEXT_DIM());
+    p.text(Pos2::new(r.left() + 34.0, r.center().y), Align2::LEFT_CENTER, "Menu bar panel", font(13.0), TEXT_DIM());
     if resp.on_hover_text("Show the menu bar panel").clicked() {
         app.open_panel(&ctx);
     }
@@ -100,7 +100,7 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
         return;
     }
     let Some(tool) = app.tools.get_mut(app.page).filter(|t| t.has_page()) else {
-        p.text(content.center(), Align2::CENTER_CENTER, "No tools with a page are installed", font(15.0), TEXT_DIM);
+        p.text(content.center(), Align2::CENTER_CENTER, "No tools with a page are installed", font(15.0), TEXT_DIM());
         return;
     };
     let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt(("page", tool.id())));

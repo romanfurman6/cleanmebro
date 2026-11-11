@@ -6,7 +6,7 @@ mod mac {
     use objc2::rc::Retained;
     use objc2::MainThreadMarker;
     use objc2_app_kit::{
-        NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua, NSApplication, NSApplicationActivationPolicy,
+        NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSApplicationActivationPolicy,
         NSAutoresizingMaskOptions, NSColor, NSGlassEffectView, NSGlassEffectViewStyle, NSView, NSVisualEffectBlendingMode,
         NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode, NSWorkspace,
     };
@@ -15,6 +15,33 @@ mod mac {
 
     thread_local! {
         static GLASS: RefCell<Vec<(isize, Retained<NSView>)>> = const { RefCell::new(Vec::new()) };
+        static LIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// True when the system appearance is light. Our windows pin their own
+    /// appearance, so this asks the app, which follows the system.
+    pub fn system_light() -> bool {
+        let Some(mtm) = MainThreadMarker::new() else { return false };
+        let app = NSApplication::sharedApplication(mtm);
+        !app.effectiveAppearance().name().to_string().contains("Dark")
+    }
+
+    fn appearance(light: bool) -> Option<Retained<NSAppearance>> {
+        NSAppearance::appearanceNamed(if light { unsafe { NSAppearanceNameAqua } } else { unsafe { NSAppearanceNameDarkAqua } })
+    }
+
+    /// Give every glass window the light or dark material.
+    pub fn set_appearance(light: bool) {
+        LIGHT.with(|l| l.set(light));
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let Some(ap) = appearance(light) else { return };
+        let app = NSApplication::sharedApplication(mtm);
+        for w in app.windows().iter() {
+            let num = w.windowNumber();
+            if GLASS.with(|g| g.borrow().iter().any(|(n, _)| *n == num)) {
+                w.setAppearance(Some(&ap));
+            }
+        }
     }
 
     fn has_liquid_glass() -> bool {
@@ -42,9 +69,9 @@ mod mac {
             let Some(superview) = (unsafe { content.superview() }) else { continue };
             w.setOpaque(false);
             w.setBackgroundColor(Some(&NSColor::clearColor()));
-            // dark glass so white text stays readable on any wallpaper
-            if let Some(dark) = NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }) {
-                w.setAppearance(Some(&dark));
+            // glass in our own mode, so text stays readable on any wallpaper
+            if let Some(ap) = appearance(LIGHT.with(|l| l.get())) {
+                w.setAppearance(Some(&ap));
             }
             let frame = content.frame();
             let view: Retained<NSView> = if has_liquid_glass() {
@@ -218,6 +245,10 @@ pub const PLAIN_WINDOW: &str = "plain-";
 #[cfg(not(target_os = "macos"))]
 mod other {
     pub fn apply_glass(_r: f64) {}
+    pub fn system_light() -> bool {
+        false
+    }
+    pub fn set_appearance(_light: bool) {}
     pub fn debug_windows() -> String {
         String::new()
     }

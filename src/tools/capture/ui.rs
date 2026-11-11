@@ -45,7 +45,7 @@ pub fn widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
         Size::S11 => {
             let sub = if c.busy { "Capturing…".to_string() } else { key_label(c, Command::Area) };
             let sub = if sub.is_empty() { "Area".to_string() } else { sub };
-            if tile::small(ui, rect, id, Icon::Crop, tint::CAPTURE, "Capture", &sub, false).on_hover_text("Capture an area").clicked() {
+            if tile::small(ui, rect, id, Icon::Crop, tint::CAPTURE(), "Capture", &sub, false).on_hover_text("Capture an area").clicked() {
                 c.queue.push((Command::Area, c.settings.delay));
             }
         }
@@ -54,15 +54,15 @@ pub fn widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
             let p = ui.painter().clone();
             let mut x0 = rect.left() + 8.0;
             if size == Size::S12 {
-                tool_chip(&p, Rect::from_min_size(Pos2::new(x0 + 2.0, rect.top() + 9.0), Vec2::splat(18.0)), Icon::Crop, tint::CAPTURE);
-                p.text(Pos2::new(x0 + 26.0, rect.top() + 18.0), Align2::LEFT_CENTER, "Capture", font(11.0), TEXT_DIM);
+                tool_chip(&p, Rect::from_min_size(Pos2::new(x0 + 2.0, rect.top() + 9.0), Vec2::splat(18.0)), Icon::Crop, tint::CAPTURE());
+                p.text(Pos2::new(x0 + 26.0, rect.top() + 18.0), Align2::LEFT_CENTER, "Capture", font(11.0), TEXT_DIM());
                 let r = Rect::from_min_max(Pos2::new(x0, rect.top() + 32.0), Pos2::new(rect.right() - 8.0, rect.bottom() - 8.0));
                 modes(c, ui, &p, id, r, &MODES[..2], false);
             } else {
                 // the round chip every other row has
                 let chip = tile::row_chip(rect);
                 p.circle_filled(chip.center(), 17.0, white(14));
-                icon(&p, Icon::Crop, Rect::from_center_size(chip.center(), Vec2::splat(18.0)), lift(tint::CAPTURE));
+                icon(&p, Icon::Crop, Rect::from_center_size(chip.center(), Vec2::splat(18.0)), lift(tint::CAPTURE()));
                 x0 = chip.right() + 10.0;
                 modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, rect.top() + 9.0), Pos2::new(rect.right() - 9.0, rect.bottom() - 9.0)), &MODES, true);
             }
@@ -81,8 +81,8 @@ fn modes(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, id: egui::Id, r: Rect,
     for (k, (cmd, label)) in list.iter().enumerate() {
         // while recording, Record is the stop button with the time
         let (label, fg) = match (&live, cmd) {
-            (Some(t), Command::Record) => (t.trim_start_matches(['●', '❚', ' ']).to_string(), RED),
-            _ => (label.to_string(), TEXT),
+            (Some(t), Command::Record) => (t.trim_start_matches(['●', '❚', ' ']).to_string(), RED()),
+            _ => (label.to_string(), TEXT()),
         };
         let label = label.as_str();
         let b = Rect::from_min_size(Pos2::new(r.left() + k as f32 * (bw + gap), r.top()), Vec2::new(bw, r.height()));
@@ -95,7 +95,7 @@ fn modes(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, id: egui::Id, r: Rect,
             icons::draw(p, command_icon(*cmd), Rect::from_center_size(Pos2::new(b.center().x, top), Vec2::splat(17.0)), fg);
             p.text(Pos2::new(b.center().x, top + 17.0), Align2::CENTER_CENTER, label, font(11.0), fg);
             if keys {
-                p.text(Pos2::new(b.center().x, top + 29.0), Align2::CENTER_CENTER, key_label(c, *cmd), font(10.0), TEXT_FAINT);
+                p.text(Pos2::new(b.center().x, top + 29.0), Align2::CENTER_CENTER, key_label(c, *cmd), font(10.0), TEXT_FAINT());
             }
         } else {
             let g = p.layout_no_wrap(label.to_string(), font(11.0), fg);
@@ -124,8 +124,8 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let x0 = rect.left() + 12.0;
     let x1 = rect.right() - 12.0;
     let mut y = rect.top() + 10.0;
-    tool_chip(&p, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(20.0)), Icon::Crop, tint::CAPTURE);
-    p.text(Pos2::new(x0 + 28.0, y + 10.0), Align2::LEFT_CENTER, "Capture", bold(13.0), TEXT);
+    tool_chip(&p, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(20.0)), Icon::Crop, tint::CAPTURE());
+    p.text(Pos2::new(x0 + 28.0, y + 10.0), Align2::LEFT_CENTER, "Capture", bold(13.0), TEXT());
     let hl = link(ui, Pos2::new(x1, y + 10.0), Align2::RIGHT_CENTER, "History", 12.0);
     let h_left = hl.rect.left();
     if hl.clicked() {
@@ -152,7 +152,7 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     // the folder is chosen in Capture's settings; here it's only a label
     let label = "Recent".to_string();
     let lr = ui.interact(Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, 13.0)), id.with("recent-label"), Sense::click());
-    text_fit(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &label, bold(11.0), if lr.hovered() { TEXT_SOFT } else { TEXT_FAINT }, lr.rect.width());
+    text_fit(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &label, bold(11.0), if lr.hovered() { TEXT_SOFT() } else { TEXT_FAINT() }, lr.rect.width());
     if lr.on_hover_text("Open the folder view").clicked() {
         c.tab = if c.files.is_empty() { Tab::History } else { Tab::Folder };
         cx.open_page(ID, if c.files.is_empty() { "history" } else { "folder" });
@@ -165,7 +165,7 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
             Some(s) => format!("Press {} to capture an area", s.display()),
             None => "No captures yet.".into(),
         };
-        text_fit(&p, r.center(), Align2::CENTER_CENTER, &hint, font(12.0), TEXT_FAINT, r.width() - 16.0);
+        text_fit(&p, r.center(), Align2::CENTER_CENTER, &hint, font(12.0), TEXT_FAINT(), r.width() - 16.0);
         return;
     }
     for (k, it) in items.iter().enumerate() {
@@ -173,7 +173,7 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let resp = ui.interact(r, id.with(("recent", it.key)), Sense::click());
         let tex = c.thumb_at(it.key, it.path.clone());
         thumb(&p, r, tex, (it.w, it.h), 6.0);
-        p.rect_stroke(r, 6.0, Stroke::new(if resp.hovered() { 1.5 } else { 1.0 }, if resp.hovered() { ACCENT } else { white(26) }), StrokeKind::Inside);
+        p.rect_stroke(r, 6.0, Stroke::new(if resp.hovered() { 1.5 } else { 1.0 }, if resp.hovered() { ACCENT() } else { white(26) }), StrokeKind::Inside);
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
@@ -220,7 +220,7 @@ pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         }
         Tab::Settings => "".into(),
     };
-    let btns = page_header(&p, r, "Capture", &sub, TEXT_DIM);
+    let btns = page_header(&p, r, "Capture", &sub, TEXT_DIM());
     let mut right = btns.right();
     if c.tab != Tab::Settings {
         let label = "Capture area";
@@ -229,8 +229,8 @@ pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         if pill_button(ui, br, "", BTN_PRIMARY, !c.busy).clicked() {
             c.queue.push((Command::Area, 0));
         }
-        icons::draw(&p, Ico::Area, Rect::from_center_size(Pos2::new(br.left() + 18.0, br.center().y), Vec2::splat(15.0)), Color32::WHITE);
-        p.text(Pos2::new(br.left() + 31.0, br.center().y), Align2::LEFT_CENTER, label, bold(13.0), Color32::WHITE);
+        icons::draw(&p, Ico::Area, Rect::from_center_size(Pos2::new(br.left() + 18.0, br.center().y), Vec2::splat(15.0)), ON_ACTION);
+        p.text(Pos2::new(br.left() + 31.0, br.center().y), Align2::LEFT_CENTER, label, bold(13.0), ON_ACTION);
         right = br.left() - 12.0;
     }
     let tabs = [Tab::History, Tab::Folder, Tab::Settings];
@@ -458,7 +458,7 @@ fn tile_ui(ui: &mut Ui, p: &egui::Painter, r: Rect, it: &Item, tex: Option<egui:
     let resp = ui.interact(r, id, Sense::click()).on_hover_text(&it.title);
     let hovered = ui.rect_contains_pointer(r);
     thumb(p, r, tex, (it.w, it.h), 8.0);
-    p.rect_stroke(r, 8.0, if hovered { Stroke::new(2.0, ACCENT) } else { Stroke::new(1.0, white(26)) }, StrokeKind::Inside);
+    p.rect_stroke(r, 8.0, if hovered { Stroke::new(2.0, ACCENT()) } else { Stroke::new(1.0, white(26)) }, StrokeKind::Inside);
     if it.video.is_some() {
         p.circle_filled(r.center(), 18.0, Color32::from_black_alpha(170));
         icons::draw(p, Ico::Play, Rect::from_center_size(r.center() + Vec2::new(1.5, 0.0), Vec2::splat(16.0)), Color32::WHITE);
@@ -469,8 +469,8 @@ fn tile_ui(ui: &mut Ui, p: &egui::Painter, r: Rect, it: &Item, tex: Option<egui:
         icons::draw(p, Ico::Pin, b.shrink(4.0), Color32::WHITE);
     }
     let ly = r.bottom() + 12.0;
-    let mr = p.text(Pos2::new(r.right(), ly), Align2::RIGHT_CENTER, &it.meta, font(12.0), TEXT_FAINT);
-    text_fit(p, Pos2::new(r.left(), ly), Align2::LEFT_CENTER, &it.time.format("%-I:%M %P").to_string(), font(12.0), TEXT, mr.left() - r.left() - 6.0);
+    let mr = p.text(Pos2::new(r.right(), ly), Align2::RIGHT_CENTER, &it.meta, font(12.0), TEXT_FAINT());
+    text_fit(p, Pos2::new(r.left(), ly), Align2::LEFT_CENTER, &it.time.format("%-I:%M %P").to_string(), font(12.0), TEXT(), mr.left() - r.left() - 6.0);
     let mut out = None;
     if hovered {
         let bar = Rect::from_min_max(Pos2::new(r.left() + 1.0, r.bottom() - 38.0), Pos2::new(r.right() - 1.0, r.bottom() - 1.0));
@@ -490,7 +490,7 @@ fn tile_ui(ui: &mut Ui, p: &egui::Painter, r: Rect, it: &Item, tex: Option<egui:
             let br = Rect::from_min_size(Pos2::new(x, bar.center().y - 13.0), Vec2::splat(bw));
             let b = ui.interact(br, id.with(tip), Sense::click());
             p.rect_filled(br, 6.0, white(if b.hovered() { 46 } else { 26 }));
-            icons::draw(p, ico, br.shrink(6.0), if a == Act::Delete && b.hovered() { RED } else { TEXT });
+            icons::draw(p, ico, br.shrink(6.0), if a == Act::Delete && b.hovered() { RED() } else { TEXT() });
             if b.on_hover_text(tip).clicked() {
                 out = Some(a);
             }
@@ -511,13 +511,13 @@ fn history(c: &mut Capture, ui: &mut Ui, body: Rect) {
     let fy = body.top() + 12.0;
     let mut x = x0;
     for (i, f) in FILTERS.iter().enumerate() {
-        let g = p.layout_no_wrap(f.to_string(), font(12.0), TEXT);
+        let g = p.layout_no_wrap(f.to_string(), font(12.0), TEXT());
         let r = Rect::from_min_size(Pos2::new(x, fy), Vec2::new(g.size().x + 24.0, 26.0));
         let resp = ui.interact(r, ui.scope_id().with(("filter", i)), Sense::click());
         let on = c.filter == i;
-        p.rect_filled(r, 13.0, if on { with_alpha(BLUE, 0.22) } else if resp.hovered() { white(10) } else { Color32::TRANSPARENT });
-        p.rect_stroke(r, 13.0, Stroke::new(1.0, if on { with_alpha(ACCENT, 0.45) } else { white(26) }), StrokeKind::Inside);
-        p.text(r.center(), Align2::CENTER_CENTER, *f, font(12.0), if on { TEXT } else { TEXT_DIM });
+        p.rect_filled(r, 13.0, if on { with_alpha(BLUE(), 0.22) } else if resp.hovered() { white(10) } else { Color32::TRANSPARENT });
+        p.rect_stroke(r, 13.0, Stroke::new(1.0, if on { with_alpha(ACCENT(), 0.45) } else { white(26) }), StrokeKind::Inside);
+        p.text(r.center(), Align2::CENTER_CENTER, *f, font(12.0), if on { TEXT() } else { TEXT_DIM() });
         if resp.clicked() {
             c.filter = i;
         }
@@ -527,19 +527,19 @@ fn history(c: &mut Capture, ui: &mut Ui, body: Rect) {
     if lr.clicked() {
         c.tab = Tab::Settings;
     }
-    p.text(Pos2::new(lr.rect.left(), fy + 13.0), Align2::RIGHT_CENTER, format!("Keeps the last {} · ", c.settings.keep), font(12.0), TEXT_FAINT);
+    p.text(Pos2::new(lr.rect.left(), fy + 13.0), Align2::RIGHT_CENTER, format!("Keeps the last {} · ", c.settings.keep), font(12.0), TEXT_FAINT());
 
     let list = Rect::from_min_max(Pos2::new(body.left(), fy + 38.0), body.max);
     let items: Vec<Item> = c.store.shots.iter().filter(|s| passes(c.filter, s)).map(Item::from_shot).collect();
     if items.is_empty() {
         let msg = if c.store.shots.is_empty() { "No captures yet" } else { "Nothing here with this filter" };
-        p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT);
+        p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT());
         if c.store.shots.is_empty() {
             let hint = match c.settings.shortcut(Command::Area) {
                 Some(s) => format!("Press {} to capture an area", s.display()),
                 None => "Captures land here.".into(),
             };
-            p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM);
+            p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM());
         }
         return;
     }
@@ -555,7 +555,7 @@ fn folder_tab(c: &mut Capture, ui: &mut Ui, body: Rect) {
     let x1 = body.right() - 24.0;
     let fy = body.top() + 12.0;
     let cy = fy + 13.0;
-    icons::draw(&p, Ico::Folder, Rect::from_center_size(Pos2::new(x0 + 8.0, cy), Vec2::splat(16.0)), TEXT_DIM);
+    icons::draw(&p, Ico::Folder, Rect::from_center_size(Pos2::new(x0 + 8.0, cy), Vec2::splat(16.0)), TEXT_DIM());
     let ow = button_width(&p, "Open in Finder", BTN_SECONDARY) - 6.0;
     let or = Rect::from_min_max(Pos2::new(x1 - ow, cy - 13.0), Pos2::new(x1, cy + 13.0));
     if pill_button(ui, or, "Open in Finder", BTN_SECONDARY, true).clicked() {
@@ -566,7 +566,7 @@ fn folder_tab(c: &mut Capture, ui: &mut Ui, body: Rect) {
     if pill_button(ui, cr, "Change folder…", BTN_SECONDARY, true).clicked() {
         c.choose_folder();
     }
-    text_fit(&p, Pos2::new(x0 + 24.0, cy), Align2::LEFT_CENTER, &c.shown_folder(), mono(12.0), TEXT_SOFT, cr.left() - x0 - 36.0);
+    text_fit(&p, Pos2::new(x0 + 24.0, cy), Align2::LEFT_CENTER, &c.shown_folder(), mono(12.0), TEXT_SOFT(), cr.left() - x0 - 36.0);
 
     let list = Rect::from_min_max(Pos2::new(body.left(), fy + 38.0), body.max);
     let items: Vec<Item> = c.files.iter().map(|f| Item::from_file(c, f)).collect();
@@ -578,8 +578,8 @@ fn folder_tab(c: &mut Capture, ui: &mut Ui, body: Rect) {
         } else {
             ("No images in this folder", "".to_string())
         };
-        p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT);
-        p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM);
+        p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT());
+        p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM());
         return;
     }
     for (a, it) in grid(c, ui, list, &items, "capture-folder") {
@@ -610,7 +610,7 @@ fn card_rows(p: &egui::Painter, x: f32, y: f32, w: f32, rows: usize) -> Rect {
 fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) -> f32 {
     use super::settings::{RecQuality, RECORD_FPS};
     let x0 = col.left();
-    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Screen recording", bold(15.0), TEXT);
+    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Screen recording", bold(15.0), TEXT());
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), 7);
     let id = ui.scope_id().with("rec-options");
     let mut s = c.settings.rec.clone();
@@ -620,7 +620,7 @@ fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect)
     };
     let labels = ["Frame rate", "Quality", "Countdown", "Show the cursor", "Highlight clicks", "When it's saved", "Hide the card after"];
     for (k, l) in labels.iter().enumerate() {
-        p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT);
+        p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT());
     }
     if let Some(i) = seg(ui, 0, 110.0, &["30 fps", "60 fps"], if s.fps == 30 { 0 } else { 1 }) {
         s.fps = RECORD_FPS[i];
@@ -652,7 +652,7 @@ fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect)
     if let Some(i) = seg(ui, 6, 200.0, &["5 s", "8 s", "15 s", "Never"], secs_index(s.card_secs, &CARD_SECS)) {
         s.card_secs = CARD_SECS.get(i).copied();
     }
-    p.text(Pos2::new(x0, card.bottom() + 10.0), Align2::LEFT_TOP, "", font(12.0), TEXT_FAINT);
+    p.text(Pos2::new(x0, card.bottom() + 10.0), Align2::LEFT_TOP, "", font(12.0), TEXT_FAINT());
     if s != c.settings.rec {
         c.settings.rec = s;
         c.save_settings();
@@ -676,7 +676,7 @@ fn field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, secret: bool) -> e
     ui.painter().rect_filled(r, 6.0, white(15));
     let tr = r.shrink2(Vec2::new(8.0, 0.0));
     let mut child = ui.new_child(UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT)).frame(egui::Frame::NONE).font(font(12.0)).text_color(TEXT).password(secret).desired_width(tr.width());
+    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT())).frame(egui::Frame::NONE).font(font(12.0)).text_color(TEXT()).password(secret).desired_width(tr.width());
     child.add(te)
 }
 
@@ -686,12 +686,12 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     use super::share::{secret, LinkKind};
     let x0 = col.left();
     let id = ui.scope_id().with("share");
-    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Sharing", bold(15.0), TEXT);
+    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Sharing", bold(15.0), TEXT());
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), 9);
     let mut s = c.settings.share.clone();
     let labels = ["Upload each recording", "Copy the link when done", "Link", "Endpoint", "Bucket", "Folder", "Access key", "Secret key", "Region"];
     for (k, l) in labels.iter().enumerate() {
-        p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT);
+        p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT());
     }
     for (k, on) in [(0usize, s.auto), (1, s.copy_link)] {
         let y = row_y(card, k);
@@ -738,7 +738,7 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     } else {
         "S3-compatible storage".into()
     };
-    paragraph(p, Pos2::new(x0, card.bottom() + 10.0), &note, font(12.0), TEXT_FAINT, col.width());
+    paragraph(p, Pos2::new(x0, card.bottom() + 10.0), &note, font(12.0), TEXT_FAINT(), col.width());
     if s != c.settings.share {
         c.settings.share = s;
         c.save_settings();
@@ -803,30 +803,30 @@ fn record_keys(c: &mut Capture, ui: &mut Ui, cx: &mut Cx) {
 /// Returns the bottom of what it drew.
 fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) -> f32 {
     let x0 = col.left();
-    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Keyboard shortcuts", bold(15.0), TEXT);
+    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Keyboard shortcuts", bold(15.0), TEXT());
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), Command::ALL.len());
     for (k, cmd) in Command::ALL.iter().enumerate() {
         let y = row_y(card, k);
-        icons::draw(p, command_icon(*cmd), Rect::from_center_size(Pos2::new(card.left() + 21.0, y), Vec2::splat(16.0)), TEXT_DIM);
-        let lr = p.text(Pos2::new(card.left() + 38.0, y), Align2::LEFT_CENTER, cmd.label(), font(13.0), TEXT);
+        icons::draw(p, command_icon(*cmd), Rect::from_center_size(Pos2::new(card.left() + 21.0, y), Vec2::splat(16.0)), TEXT_DIM());
+        let lr = p.text(Pos2::new(card.left() + 38.0, y), Align2::LEFT_CENTER, cmd.label(), font(13.0), TEXT());
         let rec = c.recording == Some(*cmd);
         let cur = c.settings.shortcut(*cmd).cloned();
         let label = if rec { "Type a shortcut…".to_string() } else { cur.as_ref().map(|s| s.display()).unwrap_or_else(|| "Record".into()) };
-        let g = p.layout_no_wrap(label.clone(), font(12.0), TEXT);
+        let g = p.layout_no_wrap(label.clone(), font(12.0), TEXT());
         let bw = (g.size().x + 20.0).max(76.0);
         let clear = Rect::from_center_size(Pos2::new(card.right() - 22.0, y), Vec2::splat(20.0));
         let br = Rect::from_min_max(Pos2::new(clear.left() - 6.0 - bw, y - 12.0), Pos2::new(clear.left() - 6.0, y + 12.0));
         let resp = ui.interact(br, ui.scope_id().with(("key", k)), Sense::click());
         if rec {
-            p.rect_filled(br, 6.0, with_alpha(BLUE, 0.22));
-            p.rect_stroke(br, 6.0, Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+            p.rect_filled(br, 6.0, with_alpha(BLUE(), 0.22));
+            p.rect_stroke(br, 6.0, Stroke::new(1.0, ACCENT()), StrokeKind::Inside);
         } else if cur.is_some() {
             p.rect_filled(br, 6.0, white(if resp.hovered() { 30 } else { 20 }));
             p.rect_stroke(br, 6.0, Stroke::new(1.0, white(26)), StrokeKind::Inside);
         } else {
             dashed_rect(p, br, 6.0, white(60));
         }
-        p.text(br.center(), Align2::CENTER_CENTER, label, font(12.0), if cur.is_some() || rec { TEXT } else { TEXT_FAINT });
+        p.text(br.center(), Align2::CENTER_CENTER, label, font(12.0), if cur.is_some() || rec { TEXT() } else { TEXT_FAINT() });
         if resp.on_hover_text("Click, then press the keys. Esc cancels, ⌫ removes it.").clicked() {
             if rec {
                 stop_recording(c);
@@ -842,7 +842,7 @@ fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) -> f32 
             if cr.hovered() {
                 p.circle_filled(clear.center(), 10.0, white(26));
             }
-            icons::draw(p, Ico::Close, clear.shrink(5.0), TEXT_FAINT);
+            icons::draw(p, Ico::Close, clear.shrink(5.0), TEXT_FAINT());
             if cr.on_hover_text("Remove shortcut").clicked() {
                 c.settings.set_shortcut(*cmd, None);
                 c.save_settings();
@@ -859,18 +859,18 @@ fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) -> f32 
         if let Some(w) = warn {
             let wx = lr.right() + 10.0;
             if br.left() - 10.0 - wx > 40.0 {
-                text_fit(p, Pos2::new(wx, y), Align2::LEFT_CENTER, &w, font(11.0), AMBER, br.left() - 10.0 - wx);
+                text_fit(p, Pos2::new(wx, y), Align2::LEFT_CENTER, &w, font(11.0), AMBER(), br.left() - 10.0 - wx);
             }
         }
     }
     let ny = card.bottom() + 10.0;
-    icons::draw(p, Ico::Keyboard, Rect::from_min_size(Pos2::new(x0 + 2.0, ny), Vec2::splat(14.0)), TEXT_FAINT);
+    icons::draw(p, Ico::Keyboard, Rect::from_min_size(Pos2::new(x0 + 2.0, ny), Vec2::splat(14.0)), TEXT_FAINT());
     let h = paragraph(
         p,
         Pos2::new(x0 + 22.0, ny),
         "⌘⇧3, ⌘⇧4 and ⌘⇧5 belong to macOS. Pick one of them and you get a warning; turn the macOS one off in System Settings › Keyboard first.",
         font(12.0),
-        TEXT_DIM,
+        TEXT_DIM(),
         col.width() - 24.0,
     );
     ny + h
@@ -884,10 +884,10 @@ fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     let mut y = col.top();
 
     // after a capture
-    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "After a capture", bold(15.0), TEXT);
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "After a capture", bold(15.0), TEXT());
     let card = card_rows(p, x0, y + 28.0, w, 5);
     let ry = row_y(card, 0);
-    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Then", font(13.0), TEXT);
+    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Then", font(13.0), TEXT());
     let sr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 270.0, ry - 13.0), Pos2::new(card.right() - 12.0, ry + 13.0));
     let cur = match c.settings.after {
         After::Preview => 0,
@@ -899,7 +899,7 @@ fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
         changed = true;
     }
     let ry = row_y(card, 3);
-    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Hide preview after", font(13.0), TEXT);
+    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Hide preview after", font(13.0), TEXT());
     if let Some(i) = segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - 200.0, ry - 12.0), Pos2::new(card.right() - 12.0, ry + 12.0)), id.with("hide"), &["3 s", "6 s", "10 s", "Never"], secs_index(c.settings.preview_secs, &PREVIEW_SECS)) {
         c.settings.preview_secs = PREVIEW_SECS.get(i).copied();
         changed = true;
@@ -915,10 +915,10 @@ fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
             continue;
         }
         let ry = row_y(card, k + 1);
-        p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, *label, font(13.0), TEXT);
+        p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, *label, font(13.0), TEXT());
         let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, ry), Vec2::new(30.0, 18.0));
         if !hint.is_empty() {
-            p.text(Pos2::new(sw.left() - 10.0, ry), Align2::RIGHT_CENTER, *hint, font(12.0), TEXT_FAINT);
+            p.text(Pos2::new(sw.left() - 10.0, ry), Align2::RIGHT_CENTER, *hint, font(12.0), TEXT_FAINT());
         }
         if switch(ui, sw, id.with(("sw", k)), *on, true).clicked() {
             match k {
@@ -932,29 +932,29 @@ fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     y = card.bottom() + 16.0;
 
     // saving
-    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Saving", bold(15.0), TEXT);
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Saving", bold(15.0), TEXT());
     let card = card_rows(p, x0, y + 28.0, w, 4);
     let ry = row_y(card, 0);
-    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Folder", font(13.0), TEXT);
+    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Folder", font(13.0), TEXT());
     let bw = button_width(p, "Change…", BTN_SECONDARY) - 6.0;
     let br = Rect::from_min_max(Pos2::new(card.right() - 12.0 - bw, ry - 12.0), Pos2::new(card.right() - 12.0, ry + 12.0));
     if pill_button(ui, br, "Change…", BTN_SECONDARY, true).clicked() {
         c.choose_folder();
     }
-    text_fit(p, Pos2::new(br.left() - 10.0, ry), Align2::RIGHT_CENTER, &c.shown_folder(), mono(12.0), TEXT_DIM, br.left() - card.left() - 90.0);
+    text_fit(p, Pos2::new(br.left() - 10.0, ry), Align2::RIGHT_CENTER, &c.shown_folder(), mono(12.0), TEXT_DIM(), br.left() - card.left() - 90.0);
     let ry = row_y(card, 1);
-    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Format", font(13.0), TEXT);
+    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Format", font(13.0), TEXT());
     let fr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 110.0, ry - 13.0), Pos2::new(card.right() - 12.0, ry + 13.0));
     if let Some(i) = segmented(ui, fr, id.with("format"), &["PNG", "JPG"], (c.settings.format == Format::Jpg) as usize) {
         c.settings.format = if i == 1 { Format::Jpg } else { Format::Png };
         changed = true;
     }
     let ry = row_y(card, 2);
-    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "File name", font(13.0), TEXT);
+    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "File name", font(13.0), TEXT());
     let example = c.settings.file_name(chrono::Local::now());
-    text_fit(p, Pos2::new(card.right() - 12.0, ry), Align2::RIGHT_CENTER, &example, mono(12.0), TEXT_DIM, card.width() - 110.0);
+    text_fit(p, Pos2::new(card.right() - 12.0, ry), Align2::RIGHT_CENTER, &example, mono(12.0), TEXT_DIM(), card.width() - 110.0);
     let ry = row_y(card, 3);
-    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "History keeps", font(13.0), TEXT);
+    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "History keeps", font(13.0), TEXT());
     // − N +   then Clear history
     let confirming = c.confirm_clear.is_some_and(|t| t.elapsed().as_secs_f32() < 3.0);
     let clear_label = if confirming { "Click again to clear" } else { "Clear history" };
@@ -979,27 +979,27 @@ fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     for (r, s, delta) in [(minus, "−", -10i64), (plus, "+", 10)] {
         let resp = ui.interact(r, id.with(("step", s)), Sense::click());
         p.rect_filled(r, 6.0, white(if resp.hovered() { 34 } else { 20 }));
-        p.text(r.center(), Align2::CENTER_CENTER, s, bold(14.0), TEXT);
+        p.text(r.center(), Align2::CENTER_CENTER, s, bold(14.0), TEXT());
         if resp.clicked() {
             c.settings.keep = (c.settings.keep as i64 + delta).clamp(KEEP_MIN as i64, KEEP_MAX as i64) as usize;
             c.store.trim(c.settings.keep);
             changed = true;
         }
     }
-    p.text(num.center(), Align2::CENTER_CENTER, c.settings.keep.to_string(), bold(13.0), TEXT);
+    p.text(num.center(), Align2::CENTER_CENTER, c.settings.keep.to_string(), bold(13.0), TEXT());
     y = card.bottom() + 16.0;
 
     // permission
-    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Permission", bold(15.0), TEXT);
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Permission", bold(15.0), TEXT());
     let card = Rect::from_min_size(Pos2::new(x0, y + 28.0), Vec2::new(w, 56.0));
     glass_card(p, card, R_CARD, 0.0, false);
     let ok = mac::can_record_screen();
-    p.circle_filled(Pos2::new(card.left() + 18.0, card.top() + 19.0), 4.0, if ok { GREEN } else { AMBER });
-    p.text(Pos2::new(card.left() + 30.0, card.top() + 19.0), Align2::LEFT_CENTER, "Screen Recording", font(13.0), TEXT);
+    p.circle_filled(Pos2::new(card.left() + 18.0, card.top() + 19.0), 4.0, if ok { GREEN() } else { AMBER() });
+    p.text(Pos2::new(card.left() + 30.0, card.top() + 19.0), Align2::LEFT_CENTER, "Screen Recording", font(13.0), TEXT());
     let status = if ok { "Allowed" } else { "Not allowed: captures show only the desktop" };
     let bw = button_width(p, "Open System Settings", BTN_SECONDARY) - 6.0;
     let br = Rect::from_min_max(Pos2::new(card.right() - 12.0 - bw, card.center().y - 13.0), Pos2::new(card.right() - 12.0, card.center().y + 13.0));
-    text_fit(p, Pos2::new(card.left() + 30.0, card.top() + 38.0), Align2::LEFT_CENTER, status, font(12.0), TEXT_DIM, br.left() - card.left() - 40.0);
+    text_fit(p, Pos2::new(card.left() + 30.0, card.top() + 38.0), Align2::LEFT_CENTER, status, font(12.0), TEXT_DIM(), br.left() - card.left() - 40.0);
     if pill_button(ui, br, "Open System Settings", if ok { BTN_SECONDARY } else { BTN_PRIMARY }, true).clicked() {
         if !ok {
             mac::ask_to_record_screen();
