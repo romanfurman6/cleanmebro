@@ -4,230 +4,73 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cmd+Meow</title>
-<meta name="description" content="Menu bar app for macOS: cleaner, disk map, uninstaller, screenshots and screen recording, clipboard history, keep awake, fan and system monitor. Free, MIT, written in Rust.">
+<meta name="description" content="Menu bar app for macOS: cleaner, disk map, uninstaller, screenshots and screen recording, clipboard history, keep awake, fan and system monitor. Free and open source.">
 <meta property="og:title" content="Cmd+Meow">
-<meta property="og:description" content="Clean up, capture and keep your Mac awake from the menu bar. Free and open source.">
-<meta property="og:image" content="https://cmdmeow.furman.cat/icon.png">
-<meta name="theme-color" content="#141415">
+<meta property="og:description" content="Clean, capture and stay awake from the Mac menu bar. Free and open source.">
+<meta property="og:image" content="https://cmdmeow.furman.cat/desk.webp">
+<meta name="theme-color" content="#0E1016">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="style.css">
+<link rel="preload" as="image" href="desk.webp">
 </head>
 <body>
-
-<header class="nav wrap">
-  <a class="brand" href="./"><svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#mark"/></svg>Cmd+Meow</a>
-  <nav aria-label="Sections">
-    <a href="#tools">Tools</a>
-    <a href="#install">Install</a>
-    <a href="https://github.com/romanfurman6/cmdmeow">GitHub</a>
-  </nav>
-  <a class="btn pri sm" href="https://github.com/romanfurman6/cmdmeow/releases">Download</a>
-</header>
-
+<section class="desk">
+  <div class="mbar" aria-hidden="true">
+    <span class="l"><svg width="14" height="14"><use href="#mark-line"/></svg><b>Cmd+Meow</b></span>
+    <span class="r"><span class="num">16%</span><span class="cat on"><svg width="15" height="15"><use href="#mark-line"/></svg></span><span class="num">Tue 17:11</span></span>
+  </div>
+  <div class="drop"><div class="mk panel" aria-hidden="true">
+  <div class="ph-head"><span>MacBook Pro</span><span class="dm num">M3 Max</span></div>
+  <div class="card"><div class="kv"><span>CPU</span><b class="num">16%</b></div><div class="bars"><i style="height:22%"></i><i style="height:30%"></i><i style="height:18%"></i><i style="height:26%"></i><i style="height:40%"></i><i style="height:34%"></i><i style="height:28%"></i><i style="height:52%"></i><i style="height:46%"></i><i style="height:38%"></i><i style="height:30%"></i><i style="height:24%"></i><i style="height:36%"></i><i style="height:58%"></i><i style="height:74%" class=hot></i><i style="height:62%"></i><i style="height:44%"></i><i style="height:32%"></i><i style="height:28%"></i><i style="height:22%"></i><i style="height:30%"></i><i style="height:26%"></i><i style="height:20%"></i><i style="height:18%"></i></div></div>
+  <div class="row2">
+    <div class="card"><div class="dm">Memory</div><div class="big num">22.4 <span class="dm" style="font-size:13px;font-weight:400">GB</span></div><div class="meter"><b style="width:62%"></b></div></div>
+    <div class="card"><div class="dm">Fans</div><div class="big num">2,225 <span class="dm" style="font-size:13px;font-weight:400">rpm</span></div><div class="meter"><b style="width:30%"></b></div></div>
+  </div>
+  <div class="card" style="padding:2px 10px">
+    <div class="li"><svg class="ph" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><path d="M235.5,216.81c-22.56-11-35.5-34.58-35.5-64.8V134.73a15.94,15.94,0,0,0-10.09-14.87L165,110a8,8,0,0,1-4.48-10.34l21.32-53a28,28,0,0,0-16.1-37,28.14,28.14,0,0,0-35.82,16,.61.61,0,0,0,0,.12L108.9,79a8,8,0,0,1-10.37,4.49L73.11,73.14A15.89,15.89,0,0,0,55.74,76.8C34.68,98.45,24,123.75,24,152a111.45,111.45,0,0,0,31.18,77.53A8,8,0,0,0,61,232H232a8,8,0,0,0,3.5-15.19ZM67.14,88l25.41,10.3a24,24,0,0,0,31.23-13.45l21-53c2.56-6.11,9.47-9.27,15.43-7a12,12,0,0,1,6.88,15.92L145.69,93.76a24,24,0,0,0,13.43,31.14L184,134.73V152c0,.33,0,.66,0,1L55.77,101.71A108.84,108.84,0,0,1,67.14,88Zm48,128a87.53,87.53,0,0,1-24.34-42,8,8,0,0,0-15.49,4,105.16,105.16,0,0,0,18.36,38H64.44A95.54,95.54,0,0,1,40,152a85.9,85.9,0,0,1,7.73-36.29l137.8,55.12c3,18,10.56,33.48,21.89,45.16Z"/></svg><span>Clean Up</span><span class="r"><span class="dm num">4.2 GB</span><span class="pill">Review</span></span></div>
+    <div class="li"><svg class="ph" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><path d="M80,56V24a8,8,0,0,1,16,0V56a8,8,0,0,1-16,0Zm40,8a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,120,64Zm32,0a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,152,64Zm96,56v8a40,40,0,0,1-37.51,39.91,96.59,96.59,0,0,1-27,40.09H208a8,8,0,0,1,0,16H32a8,8,0,0,1,0-16H56.54A96.3,96.3,0,0,1,24,136V88a8,8,0,0,1,8-8H208A40,40,0,0,1,248,120ZM200,96H40v40a80.27,80.27,0,0,0,45.12,72h69.76A80.27,80.27,0,0,0,200,136Zm32,24a24,24,0,0,0-16-22.62V136a95.78,95.78,0,0,1-1.2,15A24,24,0,0,0,232,128Z"/></svg><span>Keep Awake</span><span class="r"><span class="sw"></span></span></div>
+  </div>
+</div></div>
+  <div class="float"><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Clipboard</span></div><div class="body"><div class="srch">Search</div><div class="cp cur"><span class="t mono">git push -u origin main</span><kbd>⌘1</kbd></div><div class="cp "><span class="t">Meeting moved to 15:30</span><kbd>⌘2</kbd></div><div class="cp "><span class="sq" style="background:#E8A33D"></span><span class="t mono">#E8A33D</span><kbd>⌘3</kbd></div><div class="cp "><span class="t">https://cmdmeow.furman.cat</span><kbd>⌘4</kbd></div><div class="cp "><span class="t">Screenshot 640 × 400</span><kbd>⌘5</kbd></div></div></div></div>
+  <div class="hero">
+    <h1>Clean. Capture.<br>Stay awake.</h1>
+    <div class="cta"><a class="btn pri" href="https://github.com/romanfurman6/cmdmeow/releases"><svg class="ph" width="18" height="18" viewBox="0 0 256 256" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg>Download for Mac</a><a class="btn ghost" href="https://github.com/romanfurman6/cmdmeow"><svg class="ph" width="18" height="18" viewBox="0 0 256 256" aria-hidden="true"><path d="M208.31,75.68A59.78,59.78,0,0,0,202.93,28,8,8,0,0,0,196,24a59.75,59.75,0,0,0-48,24H124A59.75,59.75,0,0,0,76,24a8,8,0,0,0-6.93,4,59.78,59.78,0,0,0-5.38,47.68A58.14,58.14,0,0,0,56,104v8a56.06,56.06,0,0,0,48.44,55.47A39.8,39.8,0,0,0,96,192v8H72a24,24,0,0,1-24-24A40,40,0,0,0,8,136a8,8,0,0,0,0,16,24,24,0,0,1,24,24,40,40,0,0,0,40,40H96v16a8,8,0,0,0,16,0V192a24,24,0,0,1,48,0v40a8,8,0,0,0,16,0V192a39.8,39.8,0,0,0-8.44-24.53A56.06,56.06,0,0,0,216,112v-8A58.14,58.14,0,0,0,208.31,75.68ZM200,112a40,40,0,0,1-40,40H112a40,40,0,0,1-40-40v-8a41.74,41.74,0,0,1,6.9-22.48A8,8,0,0,0,80,73.83a43.81,43.81,0,0,1,.79-33.58,43.88,43.88,0,0,1,32.32,20.06A8,8,0,0,0,119.82,64h32.35a8,8,0,0,0,6.74-3.69,43.87,43.87,0,0,1,32.32-20.06A43.81,43.81,0,0,1,192,73.83a8.09,8.09,0,0,0,1,7.65A41.72,41.72,0,0,1,200,104Z"/></svg>GitHub</a></div>
+  </div>
+</section>
 <main>
-
-<!-- Hero: a scene with the keycap, the headline on its calm side, the app rising from below -->
-<section class="hero">
-  <div class="hero-in wrap">
-    <h1>Clean up, capture and stay awake from the menu bar</h1>
-    <p class="sub">Cmd+Meow clears caches, maps your disk, records the screen, keeps what you copy and stops sleep during long builds. Free and open source, for macOS 12 or later.</p>
-    <div class="cta">
-      <a class="btn pri" href="https://github.com/romanfurman6/cmdmeow/releases"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg>Download for Mac</a>
-      <a class="btn sec" href="https://github.com/romanfurman6/cmdmeow"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M208.31,75.68A59.78,59.78,0,0,0,202.93,28,8,8,0,0,0,196,24a59.75,59.75,0,0,0-48,24H124A59.75,59.75,0,0,0,76,24a8,8,0,0,0-6.93,4,59.78,59.78,0,0,0-5.38,47.68A58.14,58.14,0,0,0,56,104v8a56.06,56.06,0,0,0,48.44,55.47A39.8,39.8,0,0,0,96,192v8H72a24,24,0,0,1-24-24A40,40,0,0,0,8,136a8,8,0,0,0,0,16,24,24,0,0,1,24,24,40,40,0,0,0,40,40H96v16a8,8,0,0,0,16,0V192a24,24,0,0,1,48,0v40a8,8,0,0,0,16,0V192a39.8,39.8,0,0,0-8.44-24.53A56.06,56.06,0,0,0,216,112v-8A58.14,58.14,0,0,0,208.31,75.68ZM200,112a40,40,0,0,1-40,40H112a40,40,0,0,1-40-40v-8a41.74,41.74,0,0,1,6.9-22.48A8,8,0,0,0,80,73.83a43.81,43.81,0,0,1,.79-33.58,43.88,43.88,0,0,1,32.32,20.06A8,8,0,0,0,119.82,64h32.35a8,8,0,0,0,6.74-3.69,43.87,43.87,0,0,1,32.32-20.06A43.81,43.81,0,0,1,192,73.83a8.09,8.09,0,0,0,1,7.65A41.72,41.72,0,0,1,200,104Z"/></svg>Source on GitHub</a>
-    </div>
-  </div>
-
-  <div class="product wrap" aria-label="Live demo">
-    <div class="window">
-      <div class="screen" id="screen">
-      <div class="mbar" aria-hidden="true">
-        <span class="mb-l"><b>CmdMeow</b><span>File</span><span>Edit</span><span>View</span></span>
-        <span class="mb-r">
-          <svg class="ic" width="15" height="15" viewBox="0 0 16 16"><path d="M1.5 4.5h11v7h-11zM12.5 6.5h2v3h-2"/></svg>
-          <span class="mb-cat" id="mb-cat"><svg viewBox="0 0 100 100" width="15" height="15"><use href="#mark-mono"/></svg></span>
-          <span class="num" id="clock">Tue 17:11</span>
-        </span>
-      </div>
-
-      <!-- 1. Menu bar panel -->
-      <div class="pane p-panel" data-pane="panel">
-        <div class="panel" aria-hidden="true">
-          <div class="p-head"><b>MacBook Pro</b><span class="cap">M3 Max · up 3 days</span></div>
-          <div class="card">
-            <div class="c-top"><div><div class="t">CPU</div><div class="cap">12 cores · Xcode uses most</div></div><b class="num" id="cpu">16%</b></div>
-            <div class="bars" id="bars"></div>
-          </div>
-          <div class="grid2">
-            <div class="card">
-              <div class="t">Memory</div>
-              <div class="ring-row">
-                <svg width="40" height="40" viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" class="ring-bg"/><circle cx="22" cy="22" r="18" class="ring" style="--p:.62" transform="rotate(-90 22 22)"/></svg>
-                <div><div class="n22 num">22.4</div><div class="cap">of 36 GB</div></div>
-              </div>
-            </div>
-            <div class="card">
-              <div class="t">Fans</div>
-              <div class="ring-row">
-                <svg class="fan" width="36" height="36" viewBox="0 0 40 40" id="fan"><g fill="none" stroke="#0A84FF" stroke-width="2" stroke-linecap="round"><circle cx="20" cy="20" r="3"/><path d="M20 17c0-6 2-10 6-11M23 20c6 0 10 2 11 6M20 23c0 6-2 10-6 11M17 20c-6 0-10-2-11-6M22 18c4-4 8-5 11-3M22 22c4 4 5 8 3 11M18 22c-4 4-8 5-11 3M18 18c-4-4-5-8-3-11"/></g></svg>
-                <div><div class="n22 num" id="rpm">2,225</div><div class="cap">rpm</div></div>
-              </div>
-            </div>
-          </div>
-          <div class="card rows">
-            <div class="rw"><span class="b"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M235.5,216.81c-22.56-11-35.5-34.58-35.5-64.8V134.73a15.94,15.94,0,0,0-10.09-14.87L165,110a8,8,0,0,1-4.48-10.34l21.32-53a28,28,0,0,0-16.1-37,28.14,28.14,0,0,0-35.82,16,.61.61,0,0,0,0,.12L108.9,79a8,8,0,0,1-10.37,4.49L73.11,73.14A15.89,15.89,0,0,0,55.74,76.8C34.68,98.45,24,123.75,24,152a111.45,111.45,0,0,0,31.18,77.53A8,8,0,0,0,61,232H232a8,8,0,0,0,3.5-15.19ZM67.14,88l25.41,10.3a24,24,0,0,0,31.23-13.45l21-53c2.56-6.11,9.47-9.27,15.43-7a12,12,0,0,1,6.88,15.92L145.69,93.76a24,24,0,0,0,13.43,31.14L184,134.73V152c0,.33,0,.66,0,1L55.77,101.71A108.84,108.84,0,0,1,67.14,88Zm48,128a87.53,87.53,0,0,1-24.34-42,8,8,0,0,0-15.49,4,105.16,105.16,0,0,0,18.36,38H64.44A95.54,95.54,0,0,1,40,152a85.9,85.9,0,0,1,7.73-36.29l137.8,55.12c3,18,10.56,33.48,21.89,45.16Z"/></svg></span><div><div>Clean Up</div><div class="cap">Caches, logs, Xcode data</div></div><span class="r"><span class="num dim">4.2 GB</span><span class="btn p xs">Review</span></span></div>
-            <div class="rw"><span class="b"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M80,56V24a8,8,0,0,1,16,0V56a8,8,0,0,1-16,0Zm40,8a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,120,64Zm32,0a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,152,64Zm96,56v8a40,40,0,0,1-37.51,39.91,96.59,96.59,0,0,1-27,40.09H208a8,8,0,0,1,0,16H32a8,8,0,0,1,0-16H56.54A96.3,96.3,0,0,1,24,136V88a8,8,0,0,1,8-8H208A40,40,0,0,1,248,120ZM200,96H40v40a80.27,80.27,0,0,0,45.12,72h69.76A80.27,80.27,0,0,0,200,136Zm32,24a24,24,0,0,0-16-22.62V136a95.78,95.78,0,0,1-1.2,15A24,24,0,0,0,232,128Z"/></svg></span><div><div>Keep Awake</div><div class="cap">While Claude Code works</div></div><span class="r"><span class="sw on"></span></span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 2. Clean Up -->
-      <div class="pane" data-pane="clean" hidden>
-        <div class="win w-clean" aria-hidden="true">
-          <div class="win-bar"><i></i><i></i><i></i><span>Clean Up</span></div>
-          <div class="clean">
-            <div class="clean-total"><div class="big num" id="cl-total">0 MB</div><div class="cap" id="cl-state">Scanning ~/Library…</div></div>
-            <div class="clean-rows" id="cl-rows"></div>
-            <div class="clean-foot"><span class="cap" id="cl-path">~/Library/Caches</span><span class="btn p sm" id="cl-btn">Move to Trash</span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 3. Disk Map -->
-      <div class="pane" data-pane="map" hidden>
-        <div class="win w-map">
-          <div class="win-bar"><i></i><i></i><i></i><span>Disk Map · Macintosh HD</span></div>
-          <div class="map">
-            <svg id="sun" viewBox="-160 -160 320 320" role="img" aria-label="Disk usage rings"></svg>
-            <div class="map-side">
-              <div class="cap">Selected</div>
-              <div class="lead" id="map-name">Macintosh HD</div>
-              <div class="big num" id="map-size">688 GB</div>
-              <div class="cap" id="map-hint">of 1 TB used</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 4. Capture -->
-      <div class="pane p-cap" data-pane="capture" hidden>
-        <div class="desk-area" id="cap-screen" aria-hidden="true">
-          <div class="s-win s1"><div class="win-bar"><i></i><i></i><i></i></div><div class="s-lines"><b></b><b></b><b></b><b style="width:40%"></b></div></div>
-          <div class="s-win s2"><div class="win-bar"><i></i><i></i><i></i></div><div class="s-chart"><i style="height:40%"></i><i style="height:65%"></i><i style="height:50%"></i><i style="height:85%"></i><i style="height:60%"></i><i style="height:75%"></i></div></div>
-          <div class="sel" id="cap-sel"><span class="dims num" id="cap-dims">0 × 0</span></div>
-          <div class="cross" id="cap-cross"></div>
-          <div class="rec" id="cap-rec"><i></i><span class="num" id="cap-time">0:00</span><span class="stop"></span></div>
-          <div class="toast" id="cap-toast"><svg class="ic" width="14" height="14" viewBox="0 0 16 16"><path d="M3 8.5 6.5 12 13 4.5"/></svg>Link copied<span class="cap">cmdmeow.furman.cat/play/…</span></div>
-        </div>
-      </div>
-
-      <!-- 5. Clipboard -->
-      <div class="pane" data-pane="clip" hidden>
-        <div class="clip" aria-hidden="true">
-          <div class="search"><svg class="ic" width="13" height="13" viewBox="0 0 16 16"><path d="M7 2.5a4.5 4.5 0 1 0 0.01 0M10.5 10.5l3.5 3.5"/></svg><span>Search</span></div>
-          <div class="clip-list" id="clip-list"></div>
-        </div>
-      </div>
-
-      <!-- 6. Keep Awake -->
-      <div class="pane" data-pane="awake" hidden>
-        <button class="awake" id="awake" type="button" aria-pressed="true" aria-label="Keep Awake">
-          <svg viewBox="0 0 200 200" width="200" height="200" aria-hidden="true">
-            <circle cx="100" cy="100" r="86" class="aw-bg"/>
-            <circle cx="100" cy="100" r="86" class="aw-ring" id="aw-ring" transform="rotate(-90 100 100)"/>
-            <g class="aw-cup" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M68 92h52v18a20 20 0 0 1-20 20H88a20 20 0 0 1-20-20z"/>
-              <path d="M120 98h6a9 9 0 0 1 0 18h-6"/>
-              <path class="steam s1" d="M84 82c-4-6 4-10 0-16"/>
-              <path class="steam s2" d="M98 82c-4-6 4-10 0-16"/>
-              <path class="steam s3" d="M112 82c-4-6 4-10 0-16"/>
-              <path class="moon" d="M110 62a14 14 0 1 1-16-18 11 11 0 0 0 16 18z"/>
-            </g>
-          </svg>
-          <span class="aw-label"><b id="aw-state">Awake</b><span class="cap" id="aw-sub">Claude Code is working</span></span>
-        </button>
-      </div>
-    </div>
-    </div>
-    <div class="keys" role="tablist" aria-label="Pick a tool">
-      <button class="key" role="tab" data-key="panel" aria-selected="true"><i class="led"></i><span class="lg"><svg viewBox="0 0 100 100" width="20" height="20" aria-hidden="true"><use href="#mark-line"/></svg></span><span class="kn">Menu bar</span><kbd>1</kbd></button>
-      <button class="key" role="tab" data-key="clean" aria-selected="false"><i class="led"></i><span class="lg"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M235.5,216.81c-22.56-11-35.5-34.58-35.5-64.8V134.73a15.94,15.94,0,0,0-10.09-14.87L165,110a8,8,0,0,1-4.48-10.34l21.32-53a28,28,0,0,0-16.1-37,28.14,28.14,0,0,0-35.82,16,.61.61,0,0,0,0,.12L108.9,79a8,8,0,0,1-10.37,4.49L73.11,73.14A15.89,15.89,0,0,0,55.74,76.8C34.68,98.45,24,123.75,24,152a111.45,111.45,0,0,0,31.18,77.53A8,8,0,0,0,61,232H232a8,8,0,0,0,3.5-15.19ZM67.14,88l25.41,10.3a24,24,0,0,0,31.23-13.45l21-53c2.56-6.11,9.47-9.27,15.43-7a12,12,0,0,1,6.88,15.92L145.69,93.76a24,24,0,0,0,13.43,31.14L184,134.73V152c0,.33,0,.66,0,1L55.77,101.71A108.84,108.84,0,0,1,67.14,88Zm48,128a87.53,87.53,0,0,1-24.34-42,8,8,0,0,0-15.49,4,105.16,105.16,0,0,0,18.36,38H64.44A95.54,95.54,0,0,1,40,152a85.9,85.9,0,0,1,7.73-36.29l137.8,55.12c3,18,10.56,33.48,21.89,45.16Z"/></svg></span><span class="kn">Clean Up</span><kbd>2</kbd></button>
-      <button class="key" role="tab" data-key="map" aria-selected="false"><i class="led"></i><span class="lg"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M100,116.43a8,8,0,0,0,4-6.93v-72A8,8,0,0,0,93.34,30,104.06,104.06,0,0,0,25.73,147a8,8,0,0,0,4.52,5.81,7.86,7.86,0,0,0,3.35.74,8,8,0,0,0,4-1.07ZM88,49.62v55.26L40.12,132.51C40,131,40,129.48,40,128A88.12,88.12,0,0,1,88,49.62ZM128,24a8,8,0,0,0-8,8v91.82L41.19,169.73a8,8,0,0,0-2.87,11A104,104,0,1,0,128,24Zm0,192a88.47,88.47,0,0,1-71.49-36.68l75.52-44a8,8,0,0,0,4-6.92V40.36A88,88,0,0,1,128,216Z"/></svg></span><span class="kn">Disk Map</span><kbd>3</kbd></button>
-      <button class="key" role="tab" data-key="capture" aria-selected="false"><i class="led"></i><span class="lg"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M240,192a8,8,0,0,1-8,8H200v32a8,8,0,0,1-16,0V200H64a8,8,0,0,1-8-8V72H24a8,8,0,0,1,0-16H56V24a8,8,0,0,1,16,0V184H232A8,8,0,0,1,240,192ZM96,72h88v88a8,8,0,0,0,16,0V64a8,8,0,0,0-8-8H96a8,8,0,0,0,0,16Z"/></svg></span><span class="kn">Capture</span><kbd>4</kbd></button>
-      <button class="key" role="tab" data-key="clip" aria-selected="false"><i class="led"></i><span class="lg"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M168,152a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,152Zm-8-40H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm56-64V216a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V48A16,16,0,0,1,56,32H92.26a47.92,47.92,0,0,1,71.48,0H200A16,16,0,0,1,216,48ZM96,64h64a32,32,0,0,0-64,0ZM200,48H173.25A47.93,47.93,0,0,1,176,64v8a8,8,0,0,1-8,8H88a8,8,0,0,1-8-8V64a47.93,47.93,0,0,1,2.75-16H56V216H200Z"/></svg></span><span class="kn">Clipboard</span><kbd>5</kbd></button>
-      <button class="key" role="tab" data-key="awake" aria-selected="false"><i class="led"></i><span class="lg"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M80,56V24a8,8,0,0,1,16,0V56a8,8,0,0,1-16,0Zm40,8a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,120,64Zm32,0a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,152,64Zm96,56v8a40,40,0,0,1-37.51,39.91,96.59,96.59,0,0,1-27,40.09H208a8,8,0,0,1,0,16H32a8,8,0,0,1,0-16H56.54A96.3,96.3,0,0,1,24,136V88a8,8,0,0,1,8-8H208A40,40,0,0,1,248,120ZM200,96H40v40a80.27,80.27,0,0,0,45.12,72h69.76A80.27,80.27,0,0,0,200,136Zm32,24a24,24,0,0,0-16-22.62V136a95.78,95.78,0,0,1-1.2,15A24,24,0,0,0,232,128Z"/></svg></span><span class="kn">Keep Awake</span><kbd>6</kbd></button>
-    </div>
-    <p class="now" id="now" aria-live="polite">Menu bar · CPU, memory and fans at a glance, with Clean Up and Keep Awake one click away</p>
-  </div>
+<section class="dock-sec wrap">
+  <ul class="dock"><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M235.5,216.81c-22.56-11-35.5-34.58-35.5-64.8V134.73a15.94,15.94,0,0,0-10.09-14.87L165,110a8,8,0,0,1-4.48-10.34l21.32-53a28,28,0,0,0-16.1-37,28.14,28.14,0,0,0-35.82,16,.61.61,0,0,0,0,.12L108.9,79a8,8,0,0,1-10.37,4.49L73.11,73.14A15.89,15.89,0,0,0,55.74,76.8C34.68,98.45,24,123.75,24,152a111.45,111.45,0,0,0,31.18,77.53A8,8,0,0,0,61,232H232a8,8,0,0,0,3.5-15.19ZM67.14,88l25.41,10.3a24,24,0,0,0,31.23-13.45l21-53c2.56-6.11,9.47-9.27,15.43-7a12,12,0,0,1,6.88,15.92L145.69,93.76a24,24,0,0,0,13.43,31.14L184,134.73V152c0,.33,0,.66,0,1L55.77,101.71A108.84,108.84,0,0,1,67.14,88Zm48,128a87.53,87.53,0,0,1-24.34-42,8,8,0,0,0-15.49,4,105.16,105.16,0,0,0,18.36,38H64.44A95.54,95.54,0,0,1,40,152a85.9,85.9,0,0,1,7.73-36.29l137.8,55.12c3,18,10.56,33.48,21.89,45.16Z"/></svg></span><span class="nm">Clean Up</span></li><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M100,116.43a8,8,0,0,0,4-6.93v-72A8,8,0,0,0,93.34,30,104.06,104.06,0,0,0,25.73,147a8,8,0,0,0,4.52,5.81,7.86,7.86,0,0,0,3.35.74,8,8,0,0,0,4-1.07ZM88,49.62v55.26L40.12,132.51C40,131,40,129.48,40,128A88.12,88.12,0,0,1,88,49.62ZM128,24a8,8,0,0,0-8,8v91.82L41.19,169.73a8,8,0,0,0-2.87,11A104,104,0,1,0,128,24Zm0,192a88.47,88.47,0,0,1-71.49-36.68l75.52-44a8,8,0,0,0,4-6.92V40.36A88,88,0,0,1,128,216Z"/></svg></span><span class="nm">Disk Map</span></li><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z"/></svg></span><span class="nm">Uninstaller</span></li><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M120,128V48a8,8,0,0,1,16,0v80a8,8,0,0,1-16,0Zm60.37-78.7a8,8,0,0,0-8.74,13.4C194.74,77.77,208,101.57,208,128a80,80,0,0,1-160,0c0-26.43,13.26-50.23,36.37-65.3a8,8,0,0,0-8.74-13.4C47.9,67.38,32,96.06,32,128a96,96,0,0,0,192,0C224,96.06,208.1,67.38,180.37,49.3Z"/></svg></span><span class="nm">Startup Items</span></li><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M240,192a8,8,0,0,1-8,8H200v32a8,8,0,0,1-16,0V200H64a8,8,0,0,1-8-8V72H24a8,8,0,0,1,0-16H56V24a8,8,0,0,1,16,0V184H232A8,8,0,0,1,240,192ZM96,72h88v88a8,8,0,0,0,16,0V64a8,8,0,0,0-8-8H96a8,8,0,0,0,0,16Z"/></svg></span><span class="nm">Capture</span></li><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M168,152a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,152Zm-8-40H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm56-64V216a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V48A16,16,0,0,1,56,32H92.26a47.92,47.92,0,0,1,71.48,0H200A16,16,0,0,1,216,48ZM96,64h64a32,32,0,0,0-64,0ZM200,48H173.25A47.93,47.93,0,0,1,176,64v8a8,8,0,0,1-8,8H88a8,8,0,0,1-8-8V64a47.93,47.93,0,0,1,2.75-16H56V216H200Z"/></svg></span><span class="nm">Clipboard</span></li><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M80,56V24a8,8,0,0,1,16,0V56a8,8,0,0,1-16,0Zm40,8a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,120,64Zm32,0a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,152,64Zm96,56v8a40,40,0,0,1-37.51,39.91,96.59,96.59,0,0,1-27,40.09H208a8,8,0,0,1,0,16H32a8,8,0,0,1,0-16H56.54A96.3,96.3,0,0,1,24,136V88a8,8,0,0,1,8-8H208A40,40,0,0,1,248,120ZM200,96H40v40a80.27,80.27,0,0,0,45.12,72h69.76A80.27,80.27,0,0,0,200,136Zm32,24a24,24,0,0,0-16-22.62V136a95.78,95.78,0,0,1-1.2,15A24,24,0,0,0,232,128Z"/></svg></span><span class="nm">Keep Awake</span></li><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M72,144H32a8,8,0,0,1,0-16H67.72l13.62-20.44a8,8,0,0,1,13.32,0l25.34,38,9.34-14A8,8,0,0,1,136,128h24a8,8,0,0,1,0,16H140.28l-13.62,20.44a8,8,0,0,1-13.32,0L88,126.42l-9.34,14A8,8,0,0,1,72,144ZM178,40c-20.65,0-38.73,8.88-50,23.89C116.73,48.88,98.65,40,78,40a62.07,62.07,0,0,0-62,62c0,.75,0,1.5,0,2.25a8,8,0,1,0,16-.5c0-.58,0-1.17,0-1.75A46.06,46.06,0,0,1,78,56c19.45,0,35.78,10.36,42.6,27a8,8,0,0,0,14.8,0c6.82-16.67,23.15-27,42.6-27a46.06,46.06,0,0,1,46,46c0,53.61-77.76,102.15-96,112.8-10.83-6.31-42.63-26-66.68-52.21a8,8,0,1,0-11.8,10.82c31.17,34,72.93,56.68,74.69,57.63a8,8,0,0,0,7.58,0C136.21,228.66,240,172,240,102A62.07,62.07,0,0,0,178,40Z"/></svg></span><span class="nm">Mac Health</span></li><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M233,135a60,60,0,0,0-89.62-35.45l16.39-65.44a8,8,0,0,0-3.45-8.68A60,60,0,1,0,95.69,128.91L30.82,147.44a8,8,0,0,0-5.8,7.32,60,60,0,0,0,44.42,60.66,60.52,60.52,0,0,0,15.62,2.07,60.07,60.07,0,0,0,59.88-62l48.48,46.92a8,8,0,0,0,9.25,1.35A60,60,0,0,0,233,135Zm-121-7a16,16,0,1,1,16,16A16,16,0,0,1,112,128ZM80,76a44,44,0,0,1,62.75-39.82L127.77,96A32,32,0,0,0,99.85,112.8,43.85,43.85,0,0,1,80,76Zm27,119.57a44,44,0,0,1-65.86-34.43l59.31-16.94A32,32,0,0,0,128,160l.91,0A43.82,43.82,0,0,1,107,195.57Zm106.17-23a43.92,43.92,0,0,1-13,14.14l-44.32-42.89a31.91,31.91,0,0,0-.59-32.57,44,44,0,0,1,57.91,61.32Z"/></svg></span><span class="nm">Fans</span></li><li><span class="tile"><svg class="ph" width="26" height="26" viewBox="0 0 256 256" aria-hidden="true"><path d="M207.06,72.67A111.24,111.24,0,0,0,128,40h-.4C66.07,40.21,16,91,16,153.13V176a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V152A111.25,111.25,0,0,0,207.06,72.67ZM224,176H119.71l54.76-75.3a8,8,0,0,0-12.94-9.42L99.92,176H32V153.13c0-3.08.15-6.12.43-9.13H56a8,8,0,0,0,0-16H35.27c10.32-38.86,44-68.24,84.73-71.66V80a8,8,0,0,0,16,0V56.33A96.14,96.14,0,0,1,221,128H200a8,8,0,0,0,0,16h23.67c.21,2.65.33,5.31.33,8Z"/></svg></span><span class="nm">Claude Usage</span></li></ul>
 </section>
-
-<!-- Every tool -->
-<section class="tools wrap" id="tools">
-  <div class="sec-head">
-    <h2>Ten tools, one icon in the menu bar</h2>
-    <p>Each one is a switch in Settings. A tool you turn off stops running.</p>
-  </div>
-  <div class="sheet">
-    <table>
-      <tbody>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M235.5,216.81c-22.56-11-35.5-34.58-35.5-64.8V134.73a15.94,15.94,0,0,0-10.09-14.87L165,110a8,8,0,0,1-4.48-10.34l21.32-53a28,28,0,0,0-16.1-37,28.14,28.14,0,0,0-35.82,16,.61.61,0,0,0,0,.12L108.9,79a8,8,0,0,1-10.37,4.49L73.11,73.14A15.89,15.89,0,0,0,55.74,76.8C34.68,98.45,24,123.75,24,152a111.45,111.45,0,0,0,31.18,77.53A8,8,0,0,0,61,232H232a8,8,0,0,0,3.5-15.19ZM67.14,88l25.41,10.3a24,24,0,0,0,31.23-13.45l21-53c2.56-6.11,9.47-9.27,15.43-7a12,12,0,0,1,6.88,15.92L145.69,93.76a24,24,0,0,0,13.43,31.14L184,134.73V152c0,.33,0,.66,0,1L55.77,101.71A108.84,108.84,0,0,1,67.14,88Zm48,128a87.53,87.53,0,0,1-24.34-42,8,8,0,0,0-15.49,4,105.16,105.16,0,0,0,18.36,38H64.44A95.54,95.54,0,0,1,40,152a85.9,85.9,0,0,1,7.73-36.29l137.8,55.12c3,18,10.56,33.48,21.89,45.16Z"/></svg>Clean Up</span></th><td>Finds caches, logs, Xcode DerivedData and old downloads. You tick what goes, and it goes to the Trash.</td></tr>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M100,116.43a8,8,0,0,0,4-6.93v-72A8,8,0,0,0,93.34,30,104.06,104.06,0,0,0,25.73,147a8,8,0,0,0,4.52,5.81,7.86,7.86,0,0,0,3.35.74,8,8,0,0,0,4-1.07ZM88,49.62v55.26L40.12,132.51C40,131,40,129.48,40,128A88.12,88.12,0,0,1,88,49.62ZM128,24a8,8,0,0,0-8,8v91.82L41.19,169.73a8,8,0,0,0-2.87,11A104,104,0,1,0,128,24Zm0,192a88.47,88.47,0,0,1-71.49-36.68l75.52-44a8,8,0,0,0,4-6.92V40.36A88,88,0,0,1,128,216Z"/></svg>Disk Map</span></th><td>Measures a folder tree and draws it, so the big folders stand out. Send what you pick to the Trash.</td></tr>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z"/></svg>Uninstaller</span></th><td>Removes an app with the files it left in ~/Library, and cleans up after apps that are already gone. Undo puts it back.</td></tr>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M120,128V48a8,8,0,0,1,16,0v80a8,8,0,0,1-16,0Zm60.37-78.7a8,8,0,0,0-8.74,13.4C194.74,77.77,208,101.57,208,128a80,80,0,0,1-160,0c0-26.43,13.26-50.23,36.37-65.3a8,8,0,0,0-8.74-13.4C47.9,67.38,32,96.06,32,128a96,96,0,0,0,192,0C224,96.06,208.1,67.38,180.37,49.3Z"/></svg>Startup Items</span></th><td>Shows what starts with the Mac: login apps, launchd agents and daemons. Turn any of them off without deleting it.</td></tr>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M240,192a8,8,0,0,1-8,8H200v32a8,8,0,0,1-16,0V200H64a8,8,0,0,1-8-8V72H24a8,8,0,0,1,0-16H56V24a8,8,0,0,1,16,0V184H232A8,8,0,0,1,240,192ZM96,72h88v88a8,8,0,0,0,16,0V64a8,8,0,0,0-8-8H96a8,8,0,0,0,0,16Z"/></svg>Capture</span><span class="sc"><kbd>⇧⌘2</kbd> <kbd>⇧⌘0</kbd></span></th><td>Screenshots with an editor. Screen recording with system audio, mic and camera, plus local transcription.</td></tr>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M168,152a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,152Zm-8-40H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm56-64V216a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V48A16,16,0,0,1,56,32H92.26a47.92,47.92,0,0,1,71.48,0H200A16,16,0,0,1,216,48ZM96,64h64a32,32,0,0,0-64,0ZM200,48H173.25A47.93,47.93,0,0,1,176,64v8a8,8,0,0,1-8,8H88a8,8,0,0,1-8-8V64a47.93,47.93,0,0,1,2.75-16H56V216H200Z"/></svg>Clipboard</span><span class="sc"><kbd>⌥⌘V</kbd></span></th><td>Keeps what you copy: text, links, images, code. Anything that looks like a password stays hidden.</td></tr>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M80,56V24a8,8,0,0,1,16,0V56a8,8,0,0,1-16,0Zm40,8a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,120,64Zm32,0a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,152,64Zm96,56v8a40,40,0,0,1-37.51,39.91,96.59,96.59,0,0,1-27,40.09H208a8,8,0,0,1,0,16H32a8,8,0,0,1,0-16H56.54A96.3,96.3,0,0,1,24,136V88a8,8,0,0,1,8-8H208A40,40,0,0,1,248,120ZM200,96H40v40a80.27,80.27,0,0,0,45.12,72h69.76A80.27,80.27,0,0,0,200,136Zm32,24a24,24,0,0,0-16-22.62V136a95.78,95.78,0,0,1-1.2,15A24,24,0,0,0,232,128Z"/></svg>Keep Awake</span></th><td>Stops the Mac from sleeping. It can turn on by itself while Claude Code is working.</td></tr>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M72,144H32a8,8,0,0,1,0-16H67.72l13.62-20.44a8,8,0,0,1,13.32,0l25.34,38,9.34-14A8,8,0,0,1,136,128h24a8,8,0,0,1,0,16H140.28l-13.62,20.44a8,8,0,0,1-13.32,0L88,126.42l-9.34,14A8,8,0,0,1,72,144ZM178,40c-20.65,0-38.73,8.88-50,23.89C116.73,48.88,98.65,40,78,40a62.07,62.07,0,0,0-62,62c0,.75,0,1.5,0,2.25a8,8,0,1,0,16-.5c0-.58,0-1.17,0-1.75A46.06,46.06,0,0,1,78,56c19.45,0,35.78,10.36,42.6,27a8,8,0,0,0,14.8,0c6.82-16.67,23.15-27,42.6-27a46.06,46.06,0,0,1,46,46c0,53.61-77.76,102.15-96,112.8-10.83-6.31-42.63-26-66.68-52.21a8,8,0,1,0-11.8,10.82c31.17,34,72.93,56.68,74.69,57.63a8,8,0,0,0,7.58,0C136.21,228.66,240,172,240,102A62.07,62.07,0,0,0,178,40Z"/></svg>Mac Health</span></th><td>Live disk, memory, battery, CPU and network, plus battery levels of Bluetooth devices.</td></tr>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M233,135a60,60,0,0,0-89.62-35.45l16.39-65.44a8,8,0,0,0-3.45-8.68A60,60,0,1,0,95.69,128.91L30.82,147.44a8,8,0,0,0-5.8,7.32,60,60,0,0,0,44.42,60.66,60.52,60.52,0,0,0,15.62,2.07,60.07,60.07,0,0,0,59.88-62l48.48,46.92a8,8,0,0,0,9.25,1.35A60,60,0,0,0,233,135Zm-121-7a16,16,0,1,1,16,16A16,16,0,0,1,112,128ZM80,76a44,44,0,0,1,62.75-39.82L127.77,96A32,32,0,0,0,99.85,112.8,43.85,43.85,0,0,1,80,76Zm27,119.57a44,44,0,0,1-65.86-34.43l59.31-16.94A32,32,0,0,0,128,160l.91,0A43.82,43.82,0,0,1,107,195.57Zm106.17-23a43.92,43.92,0,0,1-13,14.14l-44.32-42.89a31.91,31.91,0,0,0-.59-32.57,44,44,0,0,1,57.91,61.32Z"/></svg>Fans</span></th><td>Fan speeds and chip temperatures, live. Modes: Auto, Quiet, Fixed, Curve and Max.</td></tr>
-        <tr><th scope="row"><span class="tn"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M207.06,72.67A111.24,111.24,0,0,0,128,40h-.4C66.07,40.21,16,91,16,153.13V176a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V152A111.25,111.25,0,0,0,207.06,72.67ZM224,176H119.71l54.76-75.3a8,8,0,0,0-12.94-9.42L99.92,176H32V153.13c0-3.08.15-6.12.43-9.13H56a8,8,0,0,0,0-16H35.27c10.32-38.86,44-68.24,84.73-71.66V80a8,8,0,0,0,16,0V56.33A96.14,96.14,0,0,1,221,128H200a8,8,0,0,0,0,16h23.67c.21,2.65.33,5.31.33,8Z"/></svg>Claude Usage</span></th><td>Your Claude plan limits and token use. The session percentage sits next to the menu bar icon.</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <p class="aside">Shared screen recordings open in <a href="play/">the Cmd+Meow player</a></p>
+<section class="trio wrap">
+  <figure><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Clean Up</span></div><div class="body"><div class="cl-top"><span class="big num">4.2 GB</span><span class="dm">4 of 5 selected</span></div><div class="cl"><span class="ck"></span><span>Caches</span><span class="trk"><b style="width:100%"></b></span><span class="num dm">1.9 GB</span></div><div class="cl"><span class="ck"></span><span>Xcode DerivedData</span><span class="trk"><b style="width:68%"></b></span><span class="num dm">1.3 GB</span></div><div class="cl"><span class="ck"></span><span>Old downloads</span><span class="trk"><b style="width:32%"></b></span><span class="num dm">610 MB</span></div><div class="cl"><span class="ck"></span><span>Logs</span><span class="trk"><b style="width:22%"></b></span><span class="num dm">420 MB</span></div><div class="cl"><span class="ck off"></span><span>Trash</span><span class="trk"><b style="width:9%"></b></span><span class="num dm">180 MB</span></div><div class="ft"><span class="pill" style="height:28px;padding:0 14px">Move to Trash</span></div></div></div><figcaption>Clean</figcaption></figure>
+  <figure><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Capture</span></div><div class="body"><div class="dsk"><div class="fw w1"><i></i><i style="width:60%"></i><i style="width:75%"></i></div>
+<div class="fw w2"><i></i><i style="width:50%"></i></div><div class="cut"><span class="num">640 × 400</span></div>
+<div class="tools"><i class="on">▢</i><i>▭</i><i>◱</i><i class="rec">●</i></div></div></div></div><figcaption>Capture</figcaption></figure>
+  <figure><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Keep Awake</span></div><div class="body"><div class="aw"><svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="86" class="aw-bg"/>
+<circle cx="100" cy="100" r="86" class="aw-ring" transform="rotate(-90 100 100)"/>
+<g class="aw-cup" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M68 92h52v18a20 20 0 0 1-20 20H88a20 20 0 0 1-20-20z"/><path d="M120 98h6a9 9 0 0 1 0 18h-6"/></g></svg>
+<div class="aw-t"><b class="num">1:24:10</b><span class="dm">Awake</span></div></div></div></div><figcaption>Stay awake</figcaption></figure>
 </section>
-
-<!-- Install: a real sequence, so it is numbered -->
-<section class="install wrap" id="install">
-  <div class="sec-head">
-    <h2>Install</h2>
-    <p>The app isn't notarized yet, so macOS asks once before the first launch.</p>
-  </div>
-  <ol class="steps">
-    <li><span class="n">1</span><div><b>Download</b> CmdMeow from GitHub Releases<a class="btn sec sm" href="https://github.com/romanfurman6/cmdmeow/releases"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg>Releases</a></div></li>
-    <li><span class="n">2</span><div><b>Drag</b> it to Applications</div></li>
-    <li><span class="n">3</span><div><b>Open it</b> with right-click › Open, or run this once in Terminal
-      <div class="code"><pre><code id="cmd">xattr -dr com.apple.quarantine /Applications/CmdMeow.app</code></pre><button class="btn sec sm" type="button" data-copy="cmd"><svg class="ph" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path d="M184,64H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H184a8,8,0,0,0,8-8V72A8,8,0,0,0,184,64Zm-8,144H48V80H176ZM224,40V184a8,8,0,0,1-16,0V48H72a8,8,0,0,1,0-16H216A8,8,0,0,1,224,40Z"/></svg><span>Copy</span></button></div>
-    </div></li>
-  </ol>
+<section class="install wrap">
+  <h2>Install</h2>
+  <p>Drag to Applications, then run once</p>
+  <div class="code"><code id="cmd">xattr -dr com.apple.quarantine /Applications/CmdMeow.app</code><button type="button" data-copy="cmd"><svg class="ph" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><path d="M184,64H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H184a8,8,0,0,0,8-8V72A8,8,0,0,0,184,64Zm-8,144H48V80H176ZM224,40V184a8,8,0,0,1-16,0V48H72a8,8,0,0,1,0-16H216A8,8,0,0,1,224,40Z"/></svg><span>Copy</span></button></div>
 </section>
-
 </main>
-
-<footer class="foot wrap">
-  <span>Cmd+Meow · MIT licence · Roman Furman</span>
-  <span>Runs on your Mac. No account, no tracking.</span>
-</footer>
-
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <defs>
-    <symbol id="mark" viewBox="0 0 100 100">
-      <g fill="#EDEDED"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
-      <path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="#E8A33D" stroke-width="6.5" stroke-linecap="round"/>
-    </symbol>
-    <symbol id="mark-mono" viewBox="0 0 100 100">
-      <g fill="#fff"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
-      <path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="#2A2D33" stroke-width="6.5" stroke-linecap="round"/>
-    </symbol>
-    <symbol id="mark-line" viewBox="0 0 100 100">
-      <g fill="none" stroke="currentColor" stroke-width="6" stroke-linejoin="round"><path d="M16 34C18 22 23 12 27 11C30 10 34 16 38 22M84 34C82 22 77 12 73 11C70 10 66 16 62 22"/><rect x="14" y="22" width="72" height="68" rx="16"/></g>
-      <path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
-    </symbol>
-  </defs>
-</svg>
-
-<script src="site.js"></script>
+<footer class="foot wrap"><span>Cmd+Meow · Free and open source</span><a href="https://github.com/romanfurman6/cmdmeow">GitHub</a></footer>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="mark" viewBox="0 0 100 100"><g fill="currentColor"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
+<path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="#E8A33D" stroke-width="6.5" stroke-linecap="round"/></symbol>
+<symbol id="mark-line" viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="7" stroke-linejoin="round"><path d="M16 34C18 22 23 12 27 11C30 10 34 16 38 22M84 34C82 22 77 12 73 11C70 10 66 16 62 22"/><rect x="14" y="22" width="72" height="68" rx="16"/></g>
+<path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></symbol>
+</defs></svg>
+<script>
+document.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>{const t=document.getElementById(b.dataset.copy).textContent;const done=()=>{const s=b.querySelector('span');if(s){const o=s.textContent;s.textContent='Copied';setTimeout(()=>s.textContent=o,1500)}};(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(done,()=>{const r=document.createRange();r.selectNodeContents(document.getElementById(b.dataset.copy));const sel=getSelection();sel.removeAllRanges();sel.addRange(r)})}));
+</script>
 </body>
 </html>
