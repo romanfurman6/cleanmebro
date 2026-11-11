@@ -1,6 +1,7 @@
 //! Drawing for Dictation: the pill under the caret, the panel widget and
 //! the window page (history and settings).
 
+use super::polish::Polish;
 use super::settings::{Engine, Lang, SILENCE_CHOICES};
 use super::{mac, Dictation, Note, Phase, Tab, ID, TINT};
 use crate::core::tool::{Cx, Size};
@@ -356,8 +357,7 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     let mut changed = false;
     let x0 = col.left();
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Speaking", bold(15.0), TEXT());
-    let whisper = d.settings.engine == Engine::Whisper;
-    let rows = if whisper { 5 } else { 4 };
+    let rows = 6;
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), rows);
 
     // shortcut
@@ -456,10 +456,19 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
         changed = true;
     }
 
-    // language (Whisper only; Parakeet tells it itself)
-    if whisper {
-        label(p, card, 4, "Language");
-        let y = row_y(card, 4);
+    // typing: once at the end, or into the field while speaking
+    label(p, card, 4, "Type");
+    let y = row_y(card, 4);
+    let tr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 230.0, y - 13.0), Pos2::new(card.right() - 12.0, y + 13.0));
+    if let Some(i) = segmented(ui, tr, id.with("typing"), &["At the end", "As you speak"], d.settings.live_typing as usize) {
+        d.settings.live_typing = i == 1;
+        changed = true;
+    }
+
+    // language
+    {
+        label(p, card, 5, "Language");
+        let y = row_y(card, 5);
         let lr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 300.0, y - 13.0), Pos2::new(card.right() - 12.0, y + 13.0));
         let li = Lang::ALL.iter().position(|l| *l == d.settings.lang).unwrap_or(0);
         let names: Vec<&str> = Lang::ALL.iter().map(|l| l.label()).collect();
@@ -477,9 +486,19 @@ fn right_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     let mut changed = false;
     let x0 = col.left();
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "After", bold(15.0), TEXT());
-    let card = card_rows(p, x0, col.top() + 28.0, col.width(), 2);
+    let card = card_rows(p, x0, col.top() + 28.0, col.width(), 3);
+    label(p, card, 0, "Fix with AI");
+    let y = row_y(card, 0);
+    let pr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 200.0, y - 13.0), Pos2::new(card.right() - 12.0, y + 13.0));
+    let pi = Polish::ALL.iter().position(|x| *x == d.settings.polish).unwrap_or(0);
+    let names: Vec<&str> = Polish::ALL.iter().map(|x| x.label()).collect();
+    if let Some(i) = segmented(ui, pr, id.with("polish"), &names, pi) {
+        d.settings.polish = Polish::ALL[i];
+        changed = true;
+    }
     let rows: [(&str, &mut bool); 2] = [("Put the clipboard back", &mut d.settings.restore_clipboard), ("Keep history", &mut d.settings.keep_history)];
     for (k, (l, on)) in rows.into_iter().enumerate() {
+        let k = k + 1;
         label(p, card, k, l);
         let y = row_y(card, k);
         let sr = Rect::from_min_size(Pos2::new(card.right() - 12.0 - 40.0, y - 12.0), Vec2::new(40.0, 24.0));
@@ -489,7 +508,7 @@ fn right_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
         }
     }
     if !d.history.items.is_empty() {
-        let y = row_y(card, 1);
+        let y = row_y(card, 2);
         let lr = link(ui, Pos2::new(card.right() - 12.0 - 40.0 - 14.0, y), Align2::RIGHT_CENTER, "Clear", 12.0);
         if lr.clicked() {
             d.history.items.clear();
