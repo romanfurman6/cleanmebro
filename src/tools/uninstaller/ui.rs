@@ -145,7 +145,8 @@ fn scrim(ui: &mut Ui, r: Rect, salt: &str) {
 fn modal_card(p: &egui::Painter, m: Rect) {
     let shadow = egui::epaint::Shadow { offset: [0, 20], blur: 60, spread: 0, color: Color32::from_black_alpha(128) };
     p.add(shadow.as_shape(m, CornerRadius::same(14)));
-    p.rect_filled(m, 14.0, RAISED());
+    // opaque: nothing of the page behind may show through
+    p.rect_filled(m, 14.0, POPOVER());
     p.rect_stroke(m, 14.0, Stroke::new(1.0, white(31)), StrokeKind::Inside);
 }
 
@@ -660,7 +661,7 @@ fn review(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
     }
     if admin > 0 {
         icon(&p, Icon::Lock, Rect::from_min_size(Pos2::new(x0, y + 2.0), Vec2::splat(14.0)), TEXT_DIM());
-        text_fit(&p, Pos2::new(x0 + 22.0, y + 9.0), Align2::LEFT_CENTER, &format!("{admin} item{} outside your home folder: macOS will ask for your password once.", if admin == 1 { " is" } else { "s are" }), font(12.0), TEXT_DIM(), x1 - x0 - 22.0);
+        text_fit(&p, Pos2::new(x0 + 22.0, y + 9.0), Align2::LEFT_CENTER, &format!("{admin} item{} your password. macOS asks once.", if admin == 1 { " needs" } else { "s need" }), font(12.0), TEXT_DIM(), x1 - x0 - 22.0);
     }
     let Some(rv) = u.review.as_ref() else { return };
     let bytes: u64 = rv.targets.iter().map(target_bytes).sum();
@@ -708,25 +709,27 @@ fn working(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
     crate::kit::glass::animate(&ctx);
 }
 
-/// One line on the last removal, for the bar and the drop zone.
-pub fn result_text(u: &Uninstaller) -> Option<(String, bool, usize)> {
+/// The last removal, for the bar and the drop zone.
+pub struct Outcome {
+    pub title: String,
+    /// What stayed, when something did.
+    pub detail: Option<String>,
+    pub can_undo: bool,
+    pub can_retry: bool,
+    pub failed: usize,
+}
+
+pub fn result_text(u: &Uninstaller) -> Option<Outcome> {
     let g = u.st.lock().unwrap();
     let (rep, _) = g.last.as_ref()?;
-    let who = match rep.names.len() {
-        0 => "Nothing".to_string(),
-        1 => rep.names[0].clone(),
-        n => format!("{n} apps"),
-    };
-    let msg = if rep.moved.is_empty() && !rep.failed.is_empty() {
-        format!("{who} couldn't be removed")
-    } else if rep.reset {
-        format!("{who} is reset · {} to the Trash", human_bytes(rep.bytes()))
-    } else if rep.moved.iter().any(|m| m.from.extension().is_some_and(|e| e == "app")) {
-        format!("{who} moved to the Trash · {}", human_bytes(rep.bytes()))
-    } else {
-        format!("{} of {who}'s files moved to the Trash", human_bytes(rep.bytes()))
-    };
-    Some((msg, !rep.moved.is_empty(), rep.failed.len()))
+    let (title, detail) = rep.summary();
+    Some(Outcome { title, detail, can_undo: !rep.moved.is_empty(), can_retry: !rep.retry.is_empty(), failed: rep.failed.len() })
+}
+
+/// Try again with what stayed last time.
+fn retry(u: &mut Uninstaller) {
+    let again = u.st.lock().unwrap().last.take().map(|(r, _)| r.retry).unwrap_or_default();
+    u.run(again);
 }
 
 fn result_bar(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
@@ -734,9 +737,10 @@ fn result_bar(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
     if !fresh || u.st.lock().unwrap().working.is_some() {
         return;
     }
-    let Some((msg, can_undo, failed)) = result_text(u) else { return };
+    let Some(o) = result_text(u) else { return };
+    let failed = o.failed;
     let p = ui.painter().clone();
-    let w = 520.0f32.min(r.width() - 48.0);
+    let w = 560.0f32.min(r.width() - 48.0);
     let bar = Rect::from_center_size(Pos2::new(r.center().x, r.bottom() - 46.0), Vec2::new(w, 48.0));
     let shadow = egui::epaint::Shadow { offset: [0, 10], blur: 30, spread: 0, color: Color32::from_black_alpha(110) };
     p.add(shadow.as_shape(bar, CornerRadius::same(12)));
@@ -752,20 +756,38 @@ fn result_bar(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
         return;
     }
     let mut right = close.left() - 8.0;
-    if can_undo {
+    if o.can_undo {
         let uw = button_width(&p, "Undo", BTN_SECONDARY);
         let ur = Rect::from_min_size(Pos2::new(right - uw, bar.center().y - 15.0), Vec2::new(uw, 30.0));
         if pill_button(ui, ur, "Undo", BTN_SECONDARY, true).clicked() {
             u.undo();
+            return;
         }
         right = ur.left() - 8.0;
     }
-    let tr = text_fit(&p, Pos2::new(c.x + 20.0, bar.center().y - if failed > 0 { 8.0 } else { 0.0 }), Align2::LEFT_CENTER, &msg, font(13.0), TEXT(), right - c.x - 28.0);
-    if failed > 0 {
-        let fr = text_fit(&p, Pos2::new(c.x + 20.0, bar.center().y + 9.0), Align2::LEFT_CENTER, &format!("{failed} item{} couldn't be moved", if failed == 1 { "" } else { "s" }), font(11.0), AMBER(), right - c.x - 28.0);
-        let why: String = u.st.lock().unwrap().last.as_ref().map(|(r, _)| r.failed.iter().take(6).map(|(a, b)| format!("{a}: {b}")).collect::<Vec<_>>().join("\n")).unwrap_or_default();
-        ui.interact(fr.union(tr), ui.scope_id().with("un-fail-tip"), Sense::hover()).on_hover_text(why);
+    if o.can_retry {
+        let rw = button_width(&p, "Try again", BTN_PRIMARY);
+        let rr = Rect::from_min_size(Pos2::new(right - rw, bar.center().y - 15.0), Vec2::new(rw, 30.0));
+        if pill_button(ui, rr, "Try again", BTN_PRIMARY, true).clicked() {
+            retry(u);
+            return;
+        }
+        right = rr.left() - 8.0;
     }
+    let two = o.detail.is_some();
+    let tr = text_fit(&p, Pos2::new(c.x + 20.0, bar.center().y - if two { 8.0 } else { 0.0 }), Align2::LEFT_CENTER, &o.title, font(13.0), TEXT(), right - c.x - 28.0);
+    if let Some(d) = &o.detail {
+        let fr = text_fit(&p, Pos2::new(c.x + 20.0, bar.center().y + 9.0), Align2::LEFT_CENTER, d, font(11.0), if failed > 0 { AMBER() } else { TEXT_DIM() }, right - c.x - 28.0);
+        if failed > 0 {
+            let why: String = u.st.lock().unwrap().last.as_ref().map(|(r, _)| r.failed.iter().take(6).map(|(a, b)| format!("{}: {b}", short_path(a))).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+            ui.interact(fr.union(tr), ui.scope_id().with("un-fail-tip"), Sense::hover()).on_hover_text(why);
+        }
+    }
+}
+
+/// A failed path as its last part ("ClearVPN.app"); names stay as they are.
+fn short_path(s: &str) -> String {
+    Path::new(s).file_name().filter(|_| s.starts_with('/')).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| s.to_string())
 }
 
 // ---------------------------------------------------------------- Leftovers
@@ -1031,14 +1053,21 @@ fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
         if showing_done && !dragging {
             p.rect_filled(r, 16.0, POPOVER());
             p.rect_stroke(r, 16.0, Stroke::new(1.0, white(36)), StrokeKind::Inside);
-            if let Some((msg, can_undo, failed)) = result_text(u) {
+            if let Some(Outcome { title: msg, detail, can_undo, can_retry, failed }) = result_text(u) {
                 let c = Pos2::new(r.left() + 34.0, r.center().y);
                 p.circle_filled(c, 20.0, with_alpha(if failed > 0 { AMBER() } else { TINT() }, 0.25));
                 icon(&p, if failed > 0 { Icon::Info } else { Icon::Check }, Rect::from_center_size(c, Vec2::splat(18.0)), GREEN());
-                let ur = Rect::from_min_size(Pos2::new(r.right() - 14.0 - 64.0, r.center().y - 14.0), Vec2::new(64.0, 28.0));
+                let uw = if can_retry { button_width(&p, "Try again", BTN_PRIMARY) } else { 64.0 };
+                let ur = Rect::from_min_size(Pos2::new(r.right() - 14.0 - uw, r.center().y - 14.0), Vec2::new(uw, 28.0));
                 text_fit(&p, Pos2::new(c.x + 30.0, r.center().y - 8.0), Align2::LEFT_CENTER, &msg, bold(13.0), TEXT(), ur.left() - c.x - 40.0);
-                p.text(Pos2::new(c.x + 30.0, r.center().y + 10.0), Align2::LEFT_CENTER, if failed > 0 { "Some items stayed. See the Uninstaller." } else { "Undo puts everything back" }, font(11.0), TEXT_DIM());
-                if can_undo && pill_button(ui, ur, "Undo", BTN_SECONDARY, true).clicked() {
+                let sub = detail.unwrap_or_else(|| "Undo puts everything back".into());
+                text_fit(&p, Pos2::new(c.x + 30.0, r.center().y + 10.0), Align2::LEFT_CENTER, &sub, font(11.0), if failed > 0 { AMBER() } else { TEXT_DIM() }, ur.left() - c.x - 40.0);
+                if can_retry {
+                    if pill_button(ui, ur, "Try again", BTN_PRIMARY, true).clicked() {
+                        retry(u);
+                        u.done_until = None;
+                    }
+                } else if can_undo && pill_button(ui, ur, "Undo", BTN_SECONDARY, true).clicked() {
                     u.undo();
                     u.done_until = None;
                 }
