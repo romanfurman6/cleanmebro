@@ -209,14 +209,15 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let p = ui.painter().clone();
     p.rect_filled(pr, CornerRadius { se: 12, ..Default::default() }, BG());
     let bar = Rect::from_min_size(pr.min, Vec2::new(pr.width(), 26.0));
-    p.rect_filled(bar, CornerRadius::ZERO, white(13));
+    p.rect_filled(bar, CornerRadius::ZERO, POPOVER());
     hairline(&p, bar.left_bottom(), bar.right_bottom());
     let pw = m::PANEL_WIDTH;
     let px = pr.center().x - pw / 2.0;
-    // the app's menu bar icon, highlighted, above the panel it opens
+    // the app's menu bar icon, highlighted as when its panel is open
     let tray = Rect::from_center_size(Pos2::new(px + pw - 40.0, bar.center().y), Vec2::splat(15.0));
-    p.rect_filled(tray, 4.0, white(220));
-    p.rect_stroke(tray.expand(3.0), 6.0, Stroke::new(1.5, with_alpha(ACCENT(), 0.8)), StrokeKind::Outside);
+    p.rect_filled(tray.expand2(Vec2::new(5.0, 3.0)), 5.0, white(36));
+    let g = crate::kit::brand::glyph(&ctx);
+    p.image(g.id(), tray, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), TEXT());
     icon(&p, Icon::Wifi, Rect::from_center_size(Pos2::new(tray.center().x + 30.0, bar.center().y), Vec2::splat(14.0)), TEXT_SOFT());
     icon(&p, Icon::Battery(80), Rect::from_center_size(Pos2::new(tray.center().x - 30.0, bar.center().y), Vec2::splat(16.0)), TEXT_SOFT());
     let title_y = bar.bottom() + 12.0;

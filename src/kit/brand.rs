@@ -104,6 +104,23 @@ pub fn app_icon(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     Some(t)
 }
 
+/// The mark as a white texture (tint it when drawing), loaded once per context.
+pub fn glyph(ctx: &egui::Context) -> egui::TextureHandle {
+    let id = egui::Id::NULL.with("cmdmeow-glyph");
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    let n = 64;
+    let mut px = glyph_rgba(n);
+    for c in px.chunks_exact_mut(4) {
+        c[..3].fill(255);
+    }
+    let ci = egui::ColorImage::from_rgba_unmultiplied([n as usize, n as usize], &px);
+    let t = ctx.load_texture("cmdmeow-glyph", ci, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    t
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
