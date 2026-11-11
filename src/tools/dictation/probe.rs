@@ -52,7 +52,11 @@ pub fn probe(a: &[String]) -> Result<(), String> {
     };
     let secs = pcm.len() as f32 / MODEL_RATE as f32;
     let peak = pcm.iter().fold(0.0f32, |m, v| m.max(v.abs()));
-    eprintln!("[dictation] {secs:.2} s of voice, peak {peak:.3}, silent {}", audio::silent(&pcm, MODEL_RATE));
+    let silent = audio::silent(&pcm, MODEL_RATE);
+    eprintln!("[dictation] {secs:.2} s of voice, peak {peak:.3}, silent {silent}");
+    if silent {
+        return Err("Nothing heard (silent input; for the mic, check the Microphone permission)".into());
+    }
     let t = Instant::now();
     let text = match engine {
         Engine::Parakeet => {
