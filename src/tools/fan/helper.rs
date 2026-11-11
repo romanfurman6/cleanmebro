@@ -28,7 +28,7 @@ const BIN: &str = "/Library/PrivilegedHelperTools/com.romanfurman6.cleanmebro.fa
 const PLIST: &str = "/Library/LaunchDaemons/com.romanfurman6.cleanmebro.fanhelper.plist";
 /// Bump when the helper's behaviour or protocol changes: the app then
 /// offers to update it.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 /// How long a `set` holds without a fresh one.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const LEASE_SECS: u64 = 8;
