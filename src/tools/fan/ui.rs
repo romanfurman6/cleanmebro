@@ -207,7 +207,9 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         }
         Size::S12 => tile::wide(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, if rpm.is_some() { Ok((frac.max(0.02), LINE)) } else { Err(hot.as_str()) }, sel),
         _ => {
-            let (resp, right) = tile::row_split(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, &hot, sel);
+            // the hottest part is a line on the right; the left says how hard the fans work
+            let load = if rpm.is_some() { format!("{:.0}% of max", frac * 100.0) } else { hot.clone() };
+            let (resp, right) = tile::row_split(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, &load, sel);
             let mut lines: Vec<(String, Option<(f32, Color32)>, String)> = s.fans.iter().take(2).enumerate().map(|(i, f)| (fan_name(i, s.fans.len()), Some((f.frac().max(0.02), LINE)), format!("{} rpm", rpm_text(f.rpm)))).collect();
             if let Some((g, c)) = hottest_text(s) {
                 lines.push((g, None, format!("{c:.0} °C")));

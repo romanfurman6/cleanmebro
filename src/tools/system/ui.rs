@@ -126,7 +126,7 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
     let resp = match size {
         Size::S11 => match mt.bar {
             Some((f, c)) => tile::small_ring(ui, r, wid, mt.glyph, f, c, &mt.value(), sel),
-            None => tile::small(ui, r, wid, mt.glyph, col, &mt.big, &mt.label, sel),
+            None => tile::small(ui, r, wid, mt.glyph, col, &mt.value().replace("/sec", "/s"), &mt.label, sel),
         },
         Size::S12 => tile::wide(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), mt.bar.ok_or(mt.caption.as_str()), sel),
         Size::S14 => {
@@ -137,7 +137,8 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
         _ => {
             let resp = tile::card(ui, r, wid, sel);
             let p = ui.painter();
-            let body = tile::head(p, r, mt.glyph, col, &mt.label, &mt.caption);
+            let note = if id == "network" { "download" } else { mt.caption.as_str() };
+            let body = tile::head(p, r, mt.glyph, col, &mt.label, note);
             medium_body(&s, id, &mt, p, body);
             resp
         }
@@ -189,28 +190,59 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
     tile::lines(p, r, &lines, empty);
 }
 
-/// The body of a Medium metric: a big value and the reading's breakdown.
+/// The body of a Medium metric: the big value with its context on one line,
+/// a graph or bar that uses the width, then the breakdown. Bars in a list
+/// are scaled to the list's largest item so they read as a comparison.
 fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rect) {
     let big = p.text(body.left_top(), Align2::LEFT_TOP, &mt.big, bold(26.0), TEXT);
-    p.text(Pos2::new(big.right() + 4.0, big.bottom() - 5.0), Align2::LEFT_BOTTOM, &mt.unit, font(13.0), TEXT_DIM);
-    let list = Rect::from_min_max(Pos2::new(body.left(), big.bottom() + 8.0), body.max);
+    let unit = p.text(Pos2::new(big.right() + 4.0, big.bottom() - 5.0), Align2::LEFT_BOTTOM, &mt.unit, font(13.0), TEXT_DIM);
+    // right of the number: a live graph where there is history
+    let beside = Rect::from_min_max(Pos2::new(unit.right() + 16.0, big.top() + 4.0), Pos2::new(body.right(), big.bottom() - 2.0));
+    let mut y = big.bottom() + 8.0;
+    let rel = |items: &[(String, u64)]| -> Vec<Line> {
+        let hi = items.iter().map(|(_, b)| *b).max().unwrap_or(1).max(1) as f32;
+        items.iter().map(|(n, b)| (n.clone(), Some(((*b as f32 / hi).clamp(0.02, 1.0), ACCENT)), human_bytes(*b))).collect()
+    };
     let lines: Vec<Line> = match id {
         "storage" => {
-            let tot = s.disk_total.max(1) as f32;
-            s.categories.iter().take(3).map(|(n, b)| (n.clone(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), human_bytes(*b))).collect()
+            // used vs free across the width, then the biggest folders
+            if s.disk_total > 0 {
+                let used = 1.0 - s.disk_free as f32 / s.disk_total as f32;
+                let br = Rect::from_min_size(Pos2::new(body.left(), y), egui::Vec2::new(body.width(), 6.0));
+                bar(p, br, used, mt.bar.map(|b| b.1).unwrap_or(ACCENT));
+                text_fit(p, Pos2::new(body.right(), big.center().y), Align2::RIGHT_CENTER, &format!("of {}", human_bytes(s.disk_total)), font(12.0), TEXT_DIM, beside.width());
+                y += 6.0 + 10.0;
+            }
+            let items: Vec<(String, u64)> = s.categories.iter().take(3).cloned().collect();
+            rel(&items)
         }
         "memory" => {
-            let tot = s.mem_total.max(1) as f32;
-            [("App memory", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / tot).clamp(0.01, 1.0), PURPLE)), human_bytes(b))).collect()
+            if s.mem_history.len() > 1 {
+                tile::spark_to(p, beside, &s.mem_history, mt.bar.map(|b| b.1).unwrap_or(BLUE), (s.mem_history.iter().copied().fold(0.0f32, f32::max) * 1.5).max(30.0));
+            }
+            let items = vec![("App memory".to_string(), s.mem_active), ("Wired".to_string(), s.mem_wired), ("Compressed".to_string(), s.mem_compressed)];
+            rel(&items)
         }
         "cpu" => {
+            let list = Rect::from_min_max(Pos2::new(body.left(), y), body.max);
             tile::spark(p, list.shrink2(egui::Vec2::new(0.0, 2.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(BLUE), None);
             Vec::new()
         }
-        "network" => vec![("Download".into(), None, human_rate(s.net_down)), ("Upload".into(), None, human_rate(s.net_up)), ("Received today".into(), None, human_bytes(s.net_recv_total))],
+        "network" => {
+            let list = Rect::from_min_max(Pos2::new(body.left(), y), Pos2::new(body.right(), body.bottom() - 2.0 * 22.0 - 4.0));
+            if s.net_history.len() > 1 && list.height() > 16.0 {
+                tile::spark(p, list, &s.net_history, ACCENT, None);
+                y = list.bottom() + 4.0;
+            }
+            vec![("Upload".into(), None, human_rate(s.net_up)), ("Today".into(), None, format!("{} in · {} out", human_bytes(s.net_recv_total), human_bytes(s.net_sent_total)))]
+        }
         _ => vec![(mt.caption.clone(), mt.bar, String::new())],
     };
-    let lh = (list.height() / 3.0).min(22.0);
+    if lines.is_empty() {
+        return;
+    }
+    let list = Rect::from_min_max(Pos2::new(body.left(), y), body.max);
+    let lh = (list.height() / lines.len() as f32).min(24.0);
     for (k, (label, frac, value)) in lines.iter().enumerate() {
         let lr = Rect::from_min_size(Pos2::new(list.left(), list.top() + k as f32 * lh), egui::Vec2::new(list.width(), lh));
         tile::bar_line(p, lr, label, *frac, value);

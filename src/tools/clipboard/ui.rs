@@ -231,22 +231,25 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     }
     y += 30.0;
 
-    // search row: opens the history
-    let sr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 28.0));
-    let sresp = row_hover(ui, sr, id.with("search"));
-    p.rect_filled(sr, 7.0, white(if sresp.hovered() { 24 } else { 15 }));
-    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(sr.left() + 16.0, sr.center().y), Vec2::splat(13.0)), TEXT_FAINT);
-    let n = c.store.entries.len();
-    let hint = match c.pause_label() {
-        Some(l) => l,
-        None => format!("Search {n} item{}", if n == 1 { "" } else { "s" }),
-    };
-    p.text(Pos2::new(sr.left() + 30.0, sr.center().y), Align2::LEFT_CENTER, hint, font(12.0), if paused { AMBER } else { TEXT_FAINT });
-    if sresp.on_hover_text("Search the history").clicked() {
-        c.tab = Tab::History;
-        cx.open_page(ID, "history");
+    // search row (Large only; Medium spends the height on clips): opens the history
+    if rect.height() > 250.0 {
+        // search row: opens the history
+        let sr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 28.0));
+        let sresp = row_hover(ui, sr, id.with("search"));
+        p.rect_filled(sr, 7.0, white(if sresp.hovered() { 24 } else { 15 }));
+        icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(sr.left() + 16.0, sr.center().y), Vec2::splat(13.0)), TEXT_FAINT);
+        let n = c.store.entries.len();
+        let hint = match c.pause_label() {
+            Some(l) => l,
+            None => format!("Search {n} item{}", if n == 1 { "" } else { "s" }),
+        };
+        p.text(Pos2::new(sr.left() + 30.0, sr.center().y), Align2::LEFT_CENTER, hint, font(12.0), if paused { AMBER } else { TEXT_FAINT });
+        if sresp.on_hover_text("Search the history").clicked() {
+            c.tab = Tab::History;
+            cx.open_page(ID, "history");
+        }
+        y += 28.0 + 6.0;
     }
-    y += 28.0 + 6.0;
 
     let fit = ((rect.bottom() - 6.0 - y) / 34.0).floor().max(1.0) as usize;
     let ids: Vec<u64> = c.visible(Filter::All, "").into_iter().take(fit.min(PANEL_ROWS)).collect();
