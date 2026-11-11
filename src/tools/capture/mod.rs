@@ -739,11 +739,6 @@ impl Capture {
         }
     }
 
-    /// The folder's last part, e.g. "Desktop".
-    fn folder_name(&self) -> String {
-        self.settings.folder.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| self.shown_folder())
-    }
-
     fn choose_folder(&mut self) {
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
