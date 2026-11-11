@@ -382,6 +382,8 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     p.text(br.center(), Align2::CENTER_CENTER, text, font(12.0), if cur.is_some() || rec { TEXT() } else { TEXT_FAINT() });
     if resp.on_hover_text("Click, then press the keys. Esc cancels, ⌫ removes it.").clicked() {
         d.recording_key = !rec;
+        // counts as drawn now, so the next tick doesn't take it for abandoned
+        d.recording_seen = std::time::Instant::now();
     }
     if let Some(e) = &d.key_error {
         text_fit(p, Pos2::new(br.left() - 10.0, y), Align2::RIGHT_CENTER, e, font(11.0), AMBER(), br.left() - card.left() - 110.0);
