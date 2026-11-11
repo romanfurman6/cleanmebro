@@ -130,6 +130,8 @@ pub struct Capture {
     hud: Option<(String, Instant)>,
     /// The Screen Recording card, with the capture that waits for it.
     perm_card: Option<(Grab, Purpose, u32)>,
+    /// Screen Recording is allowed but only applies after a restart.
+    perm_restart: bool,
     /// The user said "Not now" this session: capture without asking.
     perm_skip: bool,
     perm_needed: bool,
@@ -190,6 +192,7 @@ impl Capture {
             overlay: None,
             hud: None,
             perm_card: None,
+            perm_restart: false,
             perm_skip: false,
             perm_needed: false,
             thumbs: Thumbs::default(),
@@ -388,6 +391,7 @@ impl Capture {
         self.preview = None;
         if !self.perm_skip && !mac::can_record_screen() {
             self.perm_needed = true;
+            self.perm_restart = crate::kit::perms::Perm::Screen.status() == crate::kit::perms::Status::Allowed;
             self.perm_card = Some((g, p, delay));
             return;
         }
