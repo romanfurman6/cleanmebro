@@ -439,11 +439,11 @@ impl Dictation {
             Ok(t) if !h.polished && self.settings.polish != polish::Polish::Off => {
                 // the pill keeps spinning; the words go in once fixed, or
                 // as heard when the tool fails
-                let (tool, tx, ctx, job) = (self.settings.polish, self.heard_tx.clone(), self.ctx.clone(), h.job);
+                let (tool, tx, ctx, job, lang) = (self.settings.polish, self.heard_tx.clone(), self.ctx.clone(), h.job, self.settings.lang.code());
                 std::thread::Builder::new()
                     .name("dictation-polish".into())
                     .spawn(move || {
-                        let text = polish::run(tool, &t).unwrap_or_else(|e| {
+                        let text = polish::run(tool, &t, lang).unwrap_or_else(|e| {
                             eprintln!("[dictation] {e}");
                             t
                         });
