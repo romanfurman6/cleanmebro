@@ -309,6 +309,13 @@ impl Dictation {
         let Phase::Listening { mic, .. } = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
         let pcm = mic.stop();
         let secs = pcm.len() as f32 / MODEL_RATE as f32;
+        let peak = pcm.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        eprintln!("[dictation] listened {secs:.1} s, peak {peak:.3}");
+        // a real room is never exactly zero: macOS hands out digital silence
+        // when it keeps the microphone from us
+        if secs >= MIN_VOICE_SECS && peak == 0.0 {
+            return self.show(Note::Problem("The microphone gives only silence".into()), 2.5);
+        }
         if secs < MIN_VOICE_SECS || audio::silent(&pcm, MODEL_RATE) {
             return self.show(Note::Problem("Didn't hear anything".into()), 1.4);
         }
