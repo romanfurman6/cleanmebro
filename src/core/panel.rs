@@ -9,7 +9,7 @@ use super::shell::App;
 use super::tool::{Cx, Size, GRID_COLUMNS};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
-use egui::{Align2, Color32, Id, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
+use egui::{Align2, Id, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 /// Height of the title line above the widgets.
 pub const HEADER: f32 = 60.0;
