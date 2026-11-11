@@ -18,7 +18,13 @@ pub fn probe(a: &[String]) -> Result<(), String> {
     let input = a.first().ok_or("say a WAV file or mic:SECS")?;
     let has = |f: &str| a.iter().any(|v| v == f);
     let engine = if has("--whisper") { Engine::Whisper } else { Engine::Parakeet };
-    let lang = a.iter().position(|v| v == "--lang").and_then(|k| a.get(k + 1)).map(String::as_str);
+    let lang = match a.iter().position(|v| v == "--lang") {
+        Some(k) => match a.get(k + 1) {
+            Some(l) if !l.starts_with("--") => Some(l.as_str()),
+            _ => return Err("--lang needs a language code, like uk".into()),
+        },
+        None => None,
+    };
     if !engine.ready() {
         if !has("--download") {
             return Err(format!("{} isn't downloaded; add --download", engine.name()));
@@ -33,10 +39,10 @@ pub fn probe(a: &[String]) -> Result<(), String> {
     }
     let pcm = match input.strip_prefix("mic:") {
         Some(secs) => {
-            let secs: f32 = secs.parse().map_err(|_| "mic:SECS needs a number")?;
+            let secs = secs.parse::<f32>().ok().and_then(|s| Duration::try_from_secs_f32(s).ok()).ok_or("mic:SECS needs a number of seconds")?;
             let mic = Mic::start()?;
-            eprintln!("[dictation] listening {secs} s");
-            std::thread::sleep(Duration::from_secs_f32(secs));
+            eprintln!("[dictation] listening {secs:?}");
+            std::thread::sleep(secs);
             if let Some(e) = mic.failed() {
                 return Err(e);
             }
@@ -66,9 +72,14 @@ pub fn probe(a: &[String]) -> Result<(), String> {
             audio::tidy_text(&segs.into_iter().map(|s| s.2).collect::<Vec<_>>())
         }
     };
+    if text.is_empty() {
+        return Err("Nothing heard".into());
+    }
     println!("{text}");
     if has("--paste") {
-        eprintln!("[dictation] accessibility {}", mac::accessibility());
+        if !mac::accessibility() {
+            return Err("pasting needs Accessibility for the process running the probe".into());
+        }
         let app = mac::front_app().map(|t| t.name).unwrap_or_default();
         let (saved, count) = mac::paste(&text, true).ok_or("pasting failed")?;
         std::thread::sleep(Duration::from_millis(600));
@@ -89,22 +100,36 @@ pub fn read_wav(b: &[u8]) -> Result<Vec<f32>, String> {
     let mut k = 12;
     while k + 8 <= b.len() {
         let len = u32_at(k + 4) as usize;
-        let body = k + 8..(k + 8 + len).min(b.len());
+        let body = k + 8..k + 8 + len;
+        if body.end > b.len() {
+            return Err("the WAV file is cut short".into());
+        }
         match &b[k..k + 4] {
-            b"fmt " if len >= 16 => fmt = Some((u16_at(k + 8), u16_at(k + 10) as usize, u32_at(k + 12), u16_at(k + 22))),
+            b"fmt " if len >= 16 => {
+                let mut format = u16_at(k + 8);
+                // extensible: the real format is the first two bytes of the subformat GUID
+                if format == 0xFFFE && len >= 40 {
+                    format = u16_at(k + 32);
+                }
+                fmt = Some((format, u16_at(k + 10) as usize, u32_at(k + 12), u16_at(k + 22)))
+            }
             b"data" => data = Some(body),
             _ => {}
         }
         k += 8 + len + (len & 1);
     }
     let (format, channels, rate, bits) = fmt.ok_or("WAV without a format")?;
+    if channels == 0 || rate == 0 {
+        return Err("the WAV header has no channels or no sample rate".into());
+    }
     let data = &b[data.ok_or("WAV without samples")?];
     let samples: Vec<f32> = match (format, bits) {
         (1, 16) => data.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect(),
-        (3, 32) | (0xFFFE, 32) => data.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect(),
+        (1, 32) => data.chunks_exact(4).map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f32 / 2_147_483_648.0).collect(),
+        (3, 32) => data.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect(),
         _ => return Err(format!("WAV format {format} at {bits} bits isn't read; use 16-bit PCM")),
     };
-    Ok(audio::resample(&audio::to_mono(&samples, channels.max(1), false), rate as f64, MODEL_RATE))
+    Ok(audio::resample(&audio::to_mono(&samples, channels, false), rate as f64, MODEL_RATE))
 }
 
 #[cfg(test)]
@@ -113,20 +138,36 @@ mod tests {
 
     fn wav(rate: u32, channels: u16, samples: &[i16]) -> Vec<u8> {
         let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        build(1, rate, channels, 16, &data)
+    }
+
+    /// A WAV of raw `data`; format 0xFFFE writes the extensible header with
+    /// PCM as its subformat.
+    fn build(format: u16, rate: u32, channels: u16, bits: u16, data: &[u8]) -> Vec<u8> {
+        let ext = format == 0xFFFE;
+        let fmt_len: u32 = if ext { 40 } else { 16 };
+        let block = channels * bits / 8;
         let mut b = Vec::new();
         b.extend_from_slice(b"RIFF");
-        b.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        b.extend_from_slice(&(20 + fmt_len + data.len() as u32).to_le_bytes());
         b.extend_from_slice(b"WAVEfmt ");
-        b.extend_from_slice(&16u32.to_le_bytes());
-        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&fmt_len.to_le_bytes());
+        b.extend_from_slice(&format.to_le_bytes());
         b.extend_from_slice(&channels.to_le_bytes());
         b.extend_from_slice(&rate.to_le_bytes());
-        b.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
-        b.extend_from_slice(&(channels * 2).to_le_bytes());
-        b.extend_from_slice(&16u16.to_le_bytes());
+        b.extend_from_slice(&(rate * block as u32).to_le_bytes());
+        b.extend_from_slice(&block.to_le_bytes());
+        b.extend_from_slice(&bits.to_le_bytes());
+        if ext {
+            b.extend_from_slice(&22u16.to_le_bytes());
+            b.extend_from_slice(&bits.to_le_bytes());
+            b.extend_from_slice(&0u32.to_le_bytes());
+            // KSDATAFORMAT_SUBTYPE_PCM
+            b.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71]);
+        }
         b.extend_from_slice(b"data");
         b.extend_from_slice(&(data.len() as u32).to_le_bytes());
-        b.extend_from_slice(&data);
+        b.extend_from_slice(data);
         b
     }
 
@@ -139,5 +180,20 @@ mod tests {
         let pcm = read_wav(&wav(32_000, 2, &[8192; 6400])).unwrap();
         assert!((pcm.len() as i64 - 1600).abs() <= 2, "{}", pcm.len());
         assert!(read_wav(b"nope").is_err());
+    }
+
+    #[test]
+    fn reads_extensible_pcm_and_rejects_bad_headers() {
+        let d16: Vec<u8> = [16384i16; 160].iter().flat_map(|s| s.to_le_bytes()).collect();
+        let pcm = read_wav(&build(0xFFFE, 16_000, 1, 16, &d16)).unwrap();
+        assert!((pcm[5] - 0.5).abs() < 1e-3);
+        let d32: Vec<u8> = [1i32 << 30; 160].iter().flat_map(|s| s.to_le_bytes()).collect();
+        let pcm = read_wav(&build(0xFFFE, 16_000, 1, 32, &d32)).unwrap();
+        assert!((pcm[5] - 0.5).abs() < 1e-3, "{}", pcm[5]);
+        assert!(read_wav(&build(1, 0, 1, 16, &d16)).is_err());
+        assert!(read_wav(&build(1, 16_000, 0, 16, &d16)).is_err());
+        let mut cut = build(1, 16_000, 1, 16, &d16);
+        cut.truncate(cut.len() - 10);
+        assert!(read_wav(&cut).is_err());
     }
 }
