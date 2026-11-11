@@ -169,7 +169,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
                 }
                 icon(&p, it.glyph, Rect::from_center_size(Pos2::new(rr.left() + 16.0, rr.center().y), Vec2::splat(14.0)), if sel { ON_ACTION } else { lift(it.color) });
                 let meta = if it.sizes == 1 { "1 size".to_string() } else { format!("{} sizes", it.sizes) };
-                let mr = p.text(Pos2::new(rr.right() - 8.0, rr.center().y), Align2::RIGHT_CENTER, meta, ty::caption(), if sel { white(205) } else { ty::caption_color() });
+                let mr = p.text(Pos2::new(rr.right() - 8.0, rr.center().y), Align2::RIGHT_CENTER, meta, ty::caption(), if sel { with_alpha(ON_ACTION, 0.7) } else { ty::caption_color() });
                 let mut right = mr.left() - 6.0;
                 if it.added {
                     p.circle_filled(Pos2::new(right - 3.0, rr.center().y), 3.0, GREEN());

@@ -3,7 +3,7 @@
 //! slider and curve editor) and the last 10 minutes of speed and temperature.
 
 use super::control::{speed, Mode, Preset, Settings, Source, CURVE_HI, CURVE_LO, RESUME_C};
-use super::data::{heat, heat_text, rpm_text, Fan, Snapshot, HISTORY, SAMPLE_SECS};
+use super::data::{heat, heat_text, rpm_text, Fan, Snapshot, HISTORY};
 use super::{Cmd, HelperState, Live};
 use super::ui::{blades, dial, fan_name, heat_pos, heat_scale, hottest_text, is_block, keep_spinning, plural, sparkline, spin, thermal_hint, BLADE, HOT_LINE, LINE};
 use crate::core::tool::Cx;
@@ -24,7 +24,8 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
     if let Some((g, c)) = hottest_text(s) {
         sub.push(format!("hottest {g} {c:.0} °C"));
     }
-    let br = page_header(&p, r, "Fan Control", &if s.loaded { sub.join(" · ") } else { "Reading sensors…".into() }, TEXT_DIM());
+    let _ = sub;
+    let br = page_header(&p, r, "Fan Control", if s.loaded { "" } else { "Reading sensors…" }, TEXT_DIM());
     if s.loaded && s.thermal > 0 {
         let (_, col) = thermal_hint(s.thermal);
         let label = format!("Thermal pressure: {}", s.thermal_word().to_lowercase());
@@ -48,7 +49,6 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
             let fr = Rect::from_min_size(Pos2::new(x0 + i as f32 * (fan_w + GAP), y), Vec2::new(fan_w, ROW1_H));
             glass_card(&p, fr, 14.0, 0.0, false);
             p.text(fr.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, format!("{} fan", fan_name(i, s.fans.len())).replace("Fan fan", "Fan"), bold(13.0), TEXT());
-            p.text(Pos2::new(fr.right() - 12.0, fr.top() + 13.0), Align2::RIGHT_TOP, format!("{:.0}% of max", f.frac() * 100.0), font(12.0), TEXT_FAINT());
             let c = Pos2::new(fr.center().x, fr.top() + 100.0);
             dial(&p, c, 58.0, 7.0, f.frac(), tint::FAN());
             p.circle_filled(c, 44.0, BG());
@@ -57,12 +57,12 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
             let g = p.layout_no_wrap(rpm_text(f.rpm), bold(26.0), TEXT());
             let u = p.layout_no_wrap("rpm".into(), font(13.0), TEXT_DIM());
             let tw = g.size().x + 4.0 + u.size().x;
-            let base = fr.top() + 170.0;
+            let base = fr.top() + 160.0;
             let gx = fr.center().x - tw / 2.0;
             let gh = g.size().y;
             p.galley(Pos2::new(gx, base), g.clone(), TEXT());
             p.galley(Pos2::new(gx + g.size().x + 4.0, base + gh * 0.80 - u.size().y * 0.85), u, TEXT_DIM());
-            p.text(Pos2::new(fr.center().x, fr.bottom() - 14.0), Align2::CENTER_BOTTOM, format!("min {} · max {}", rpm_text(f.min), rpm_text(f.max)), font(11.0), TEXT_FAINT());
+            p.text(Pos2::new(fr.center().x, base + gh + 8.0), Align2::CENTER_TOP, format!("{} – {} rpm", rpm_text(f.min), rpm_text(f.max)), font(11.0), TEXT_FAINT());
         }
         hx = x0 + n as f32 * (fan_w + GAP);
         keep_spinning(ui, s);
@@ -104,7 +104,9 @@ fn mode_height(s: &Snapshot, l: &Live) -> f32 {
     if s.fans.is_empty() {
         return 64.0;
     }
-    let mut h = 84.0;
+    let st = &l.settings;
+    let hint = (st.mode != Mode::Auto && l.guard.tripped) || st.mode == Mode::Curve;
+    let mut h = if hint { 76.0 } else { 56.0 };
     if l.needs_helper() || !l.error.is_empty() {
         h += INSTALL_H;
     }
@@ -143,18 +145,17 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
         n.mode = Mode::ALL[i];
         cmds.push(Cmd::Set(n, true));
     }
-    let (state, col) = match l.helper {
-        HelperState::Ready if l.manual => ("Helper holds the fans", GREEN()),
-        HelperState::Ready => ("Helper installed", GREEN()),
-        HelperState::Outdated => ("Helper needs an update", AMBER()),
-        HelperState::Missing => ("Helper not installed", TEXT_FAINT()),
-        HelperState::Unknown => ("Checking helper…", TEXT_FAINT()),
-    };
-    let tr = p.text(Pos2::new(rx, ty), Align2::RIGHT_CENTER, state, font(12.0), if col == GREEN() { TEXT_DIM() } else { col });
-    p.circle_filled(Pos2::new(tr.left() - 9.0, ty), 3.5, col);
+    // the helper only shows up when it can be removed; problems get the
+    // install box below
+    if matches!(l.helper, HelperState::Ready | HelperState::Outdated) && !l.busy {
+        let br = Rect::from_center_size(Pos2::new(rx - 15.0, ty), Vec2::splat(30.0));
+        if icon_button(ui, br, Icon::Trash, "Remove fan helper").clicked() {
+            cmds.push(Cmd::Uninstall);
+        }
+    }
 
     // what the mode does now
-    let mut y = mr.top() + 56.0;
+    let mut y = mr.top() + 48.0;
     let temp = st.curve.source.read(s);
     let hint = if st.mode != Mode::Auto && l.guard.tripped {
         format!("On Auto until below {:.0} °C · a sensor hit {:.0} °C", RESUME_C, l.guard.peak)
@@ -167,11 +168,10 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
         MODE_HINTS[st.mode.index()].into()
     };
     let hint_col = if l.guard.tripped && st.mode != Mode::Auto { AMBER() } else { TEXT_DIM() };
-    text_fit(&p, Pos2::new(lx, y), Align2::LEFT_CENTER, &hint, font(12.0), hint_col, mr.width() - 140.0);
-    if matches!(l.helper, HelperState::Ready | HelperState::Outdated) && !l.busy && link(ui, Pos2::new(rx, y), Align2::RIGHT_CENTER, "Remove helper", 11.0).clicked() {
-        cmds.push(Cmd::Uninstall);
+    if !hint.is_empty() {
+        text_fit(&p, Pos2::new(lx, y + 8.0), Align2::LEFT_CENTER, &hint, font(12.0), hint_col, mr.width() - 28.0);
+        y += 20.0;
     }
-    y += 20.0;
 
     // the helper, when the mode needs it
     if l.needs_helper() || !l.error.is_empty() {
@@ -351,7 +351,6 @@ fn curve_editor(ui: &mut Ui, r: Rect, st: &Settings, fan: &Fan, temp: Option<f32
 fn heat_map(p: &egui::Painter, r: Rect, s: &Snapshot) {
     glass_card(p, r, 14.0, 0.0, false);
     p.text(r.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "Chip heat map", bold(13.0), TEXT());
-    p.text(Pos2::new(r.right() - 12.0, r.top() + 13.0), Align2::RIGHT_TOP, "live · per sensor", font(12.0), TEXT_FAINT());
     let groups = s.groups();
     if groups.is_empty() {
         let msg = if s.loaded { "No temperature sensors found." } else { "Reading sensors…" };
@@ -446,9 +445,15 @@ fn history(p: &egui::Painter, r: Rect, s: &Snapshot) {
     let by = r.bottom() - 14.0;
     p.text(Pos2::new(cr.left(), by), Align2::LEFT_CENTER, "10 min ago", font(11.0), TEXT_FAINT());
     p.text(Pos2::new(cr.right(), by), Align2::RIGHT_CENTER, "now", font(11.0), TEXT_FAINT());
-    if let Some((i, (_, c))) = s.history.iter().enumerate().max_by(|a, b| (a.1).1.total_cmp(&(b.1).1)) {
-        let ago = (have - 1 - i) as u64 * SAMPLE_SECS;
-        let when = if ago < 60 { "just now".to_string() } else { format!("{} min ago", ago / 60) };
-        p.text(Pos2::new(cr.center().x, by), Align2::CENTER_CENTER, format!("Peak {c:.0} °C, {when}"), font(11.0), TEXT_FAINT());
+    // the hottest moment, marked on the line itself
+    if have >= 2 {
+        if let Some((i, (_, c))) = s.history.iter().enumerate().max_by(|a, b| (a.1).1.total_cmp(&(b.1).1)) {
+            let x = lr.left() + lr.width() * i as f32 / (have - 1) as f32;
+            let y = lr.bottom() - 1.0 - (lr.height() - 2.0) * ((c - 30.0) / 70.0).clamp(0.0, 1.0);
+            let at = Pos2::new(x, y);
+            p.circle_filled(at, 3.5, HOT_LINE());
+            let align = if x > cr.right() - 40.0 { Align2::RIGHT_BOTTOM } else if x < cr.left() + 40.0 { Align2::LEFT_BOTTOM } else { Align2::CENTER_BOTTOM };
+            p.text(at + Vec2::new(0.0, -7.0), align, format!("{c:.0}°"), bold(11.0), HOT_LINE());
+        }
     }
 }

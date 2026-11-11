@@ -427,12 +427,12 @@ impl Editor {
             rx = r.left() - 8.0;
             let resp = if lay.icons_only {
                 let resp = pill_button(ui, r, "", kind, true);
-                icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(14.0)), TEXT());
+                icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(14.0)), if kind == BTN_PRIMARY { on_color(BLUE()) } else { TEXT() });
                 resp
             } else if ic == Ico::Pin {
                 let resp = pill_button(ui, r, "", kind, true);
-                icons::draw(ui.painter(), ic, Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(14.0)), TEXT());
-                ui.painter().text(Pos2::new(r.left() + 28.0, y), Align2::LEFT_CENTER, label, font(12.0), TEXT());
+                icons::draw(ui.painter(), ic, Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(14.0)), if kind == BTN_PRIMARY { on_color(BLUE()) } else { TEXT() });
+                ui.painter().text(Pos2::new(r.left() + 28.0, y), Align2::LEFT_CENTER, label, font(12.0), if kind == BTN_PRIMARY { on_color(BLUE()) } else { TEXT() });
                 resp
             } else {
                 pill_button(ui, r, label, kind, true)
@@ -1055,7 +1055,7 @@ fn icon_toggle(ui: &mut Ui, r: Rect, ic: Ico, tip: &str, on: bool) -> egui::Resp
     } else if resp.hovered() {
         p.rect_filled(r, 6.0, white(20));
     }
-    icons::draw(p, ic, Rect::from_center_size(r.center(), Vec2::splat(16.0)), if on { Color32::WHITE } else { TEXT_SOFT() });
+    icons::draw(p, ic, Rect::from_center_size(r.center(), Vec2::splat(16.0)), if on { ON_ACTION } else { TEXT_SOFT() });
     resp.on_hover_text(tip)
 }
 
