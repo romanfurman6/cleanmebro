@@ -696,6 +696,8 @@ pub enum Icon {
     Gauge,
     /// An app with a cross: the Uninstaller.
     AppRemove,
+    /// A file.
+    Doc,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -720,6 +722,7 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Gear => "gearshape",
         Icon::Trash => "trash",
         Icon::Folder => "folder",
+        Icon::Doc => "doc",
         Icon::Lens => "magnifyingglass",
         Icon::Laptop => "laptopcomputer",
         Icon::Heart => "heart",
@@ -897,6 +900,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             open(&[(6.0, 6.0), (7.0, 20.5), (17.0, 20.5), (18.0, 6.0)]);
         }
         Icon::Folder => closed(&[(3.0, 6.0), (9.5, 6.0), (11.5, 8.0), (21.0, 8.0), (21.0, 19.0), (3.0, 19.0)]),
+        Icon::Doc => closed(&[(6.0, 3.0), (14.0, 3.0), (19.0, 8.0), (19.0, 21.0), (6.0, 21.0)]),
         Icon::Lens | Icon::Search => {
             stroke_circle(&p, pt(11.0, 11.0), 7.0 * u, st);
             open(&[(16.0, 16.0), (21.0, 21.0)]);
