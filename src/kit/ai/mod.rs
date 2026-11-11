@@ -260,7 +260,10 @@ impl LogCache {
             }
         }
         self.0.retain(|k, _| seen.contains(k));
-        sum(self.0.values().flat_map(|l| l.entries.iter().copied()))
+        // a resumed or forked session starts its log with a copy of the old
+        // one: the same reply (same time, same counts) in two files counts once
+        let mut once = HashSet::new();
+        sum(self.0.values().flat_map(|l| l.entries.iter().copied()).filter(|e| once.insert(*e)))
     }
 }
 
