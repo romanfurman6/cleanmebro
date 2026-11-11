@@ -132,7 +132,7 @@ fn demo_engine(state: State) -> (Engine, i64) {
         }
     }
     e.log.sort_by_key(|s| s.start);
-    let idle = Session { project: "notes".into(), last_write: t - 3 * 3600 };
+    let idle = Session { project: "notes".into(), last_write: t - 3 * 3600, tool_running: false };
     match state {
         State::Off => {
             e.sessions = vec![idle];
@@ -144,8 +144,8 @@ fn demo_engine(state: State) -> (Engine, i64) {
         }
         State::Claude => {
             e.sessions = vec![
-                Session { project: "cmdmeow".into(), last_write: h(11.9) },
-                Session { project: "api-server".into(), last_write: h(11.9) },
+                Session { project: "cmdmeow".into(), last_write: h(11.9), tool_running: false },
+                Session { project: "api-server".into(), last_write: h(11.9), tool_running: false },
                 idle.clone(),
             ];
             e.step(h(11.9));
@@ -153,7 +153,7 @@ fn demo_engine(state: State) -> (Engine, i64) {
             e.sessions[1].last_write = t - 48;
         }
         State::WindDown { .. } => {
-            e.sessions = vec![Session { project: "cmdmeow".into(), last_write: t - 300 }, idle];
+            e.sessions = vec![Session { project: "cmdmeow".into(), last_write: t - 300, tool_running: false }, idle];
             e.step(t - 300);
         }
     }

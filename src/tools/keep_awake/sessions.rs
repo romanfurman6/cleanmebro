@@ -1,7 +1,9 @@
 //! Which Claude Code sessions are busy. Claude Code appends to a session log
 //! (`~/.claude/projects/<project>/<session>.jsonl`, subagents in a folder
 //! named after the session) as it works, so a log written in the last couple
-//! of minutes means that session is working.
+//! of minutes means that session is working. A tool call still waiting for
+//! its result (a long build, tests) also counts as working, even though the
+//! log stays quiet while it runs.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -9,6 +11,11 @@ use std::time::UNIX_EPOCH;
 
 /// Sessions older than this aren't listed at all.
 const RECENT_SECS: i64 = 24 * 3600;
+/// A tool call silent for longer than this is taken as abandoned (Claude
+/// quit or crashed mid-call).
+pub const TOOL_CAP_SECS: i64 = 60 * 60;
+/// How much of a log's end is read to find an open tool call.
+const TAIL_BYTES: u64 = 256 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Session {
@@ -16,12 +23,31 @@ pub struct Session {
     pub project: String,
     /// Unix seconds of the last write to the session's logs.
     pub last_write: i64,
+    /// A tool call is under way (no result logged yet).
+    pub tool_running: bool,
+}
+
+impl Session {
+    /// When the session last showed it was busy: now while a tool runs
+    /// (up to [`TOOL_CAP_SECS`]), else its last write.
+    pub fn active_at(&self, now: i64) -> i64 {
+        if self.tool_running && now - self.last_write <= TOOL_CAP_SECS {
+            now
+        } else {
+            self.last_write
+        }
+    }
+    pub fn working(&self, now: i64) -> bool {
+        now - self.active_at(now) <= super::engine::WORKING_SECS
+    }
 }
 
 /// Remembers project names so each log's first lines are read only once.
 #[derive(Default)]
 pub struct Scanner {
     names: HashMap<PathBuf, String>,
+    /// Whether a log ends in an open tool call, by (log, mtime).
+    open: HashMap<PathBuf, (i64, bool)>,
 }
 
 impl Scanner {
@@ -53,11 +79,23 @@ impl Scanner {
                     continue;
                 }
                 let project = self.name(&folder, &log);
-                out.push(Session { project, last_write: t });
+                let tool_running = now - t <= TOOL_CAP_SECS && self.tool_open(&log, t);
+                out.push(Session { project, last_write: t, tool_running });
             }
         }
         out.sort_by_key(|s| std::cmp::Reverse(s.last_write));
         out
+    }
+
+    fn tool_open(&mut self, log: &Path, mtime: i64) -> bool {
+        if let Some((m, v)) = self.open.get(log) {
+            if *m == mtime {
+                return *v;
+            }
+        }
+        let v = ends_in_open_tool_call(log);
+        self.open.insert(log.to_path_buf(), (mtime, v));
+        v
     }
 
     fn name(&mut self, folder: &Path, log: &Path) -> String {
@@ -73,6 +111,39 @@ impl Scanner {
             None => fallback_name(folder),
         }
     }
+}
+
+/// Does the log end with Claude asking for a tool whose result isn't logged
+/// yet? Reads only the end of the log.
+fn ends_in_open_tool_call(log: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(log) else { return false };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    if f.seek(SeekFrom::Start(len.saturating_sub(TAIL_BYTES))).is_err() {
+        return false;
+    }
+    let mut buf = Vec::new();
+    if f.read_to_end(&mut buf).is_err() {
+        return false;
+    }
+    open_tool_call(&buf)
+}
+
+/// The same, on the log's text: the last assistant or user entry decides.
+fn open_tool_call(text: &[u8]) -> bool {
+    let has = |l: &[u8], pat: &[u8]| l.windows(pat.len()).any(|w| w == pat);
+    for line in text.split(|b| *b == b'\n').rev() {
+        if has(line, b"\"tool_result\"") {
+            return false;
+        }
+        if has(line, b"\"type\":\"assistant\"") {
+            return has(line, b"\"type\":\"tool_use\"");
+        }
+        if has(line, b"\"type\":\"user\"") {
+            return false;
+        }
+    }
+    false
 }
 
 /// The last dash-separated part of the encoded folder name.
@@ -131,6 +202,23 @@ mod tests {
         assert!(found.iter().all(|x| x.project == "cmdmeow"));
         assert!(s.scan(&root, now + RECENT_SECS + 60).is_empty());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_open_tool_call_counts_as_working() {
+        let a_tool = br#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash"}]}}"#;
+        let its_result = br#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1"}]}}"#;
+        let text = br#"{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}"#;
+        let log = |ls: &[&[u8]]| ls.join(&b'\n');
+        assert!(open_tool_call(&log(&[text, a_tool, b""])));
+        assert!(!open_tool_call(&log(&[a_tool, its_result])));
+        assert!(!open_tool_call(&log(&[a_tool, its_result, text])));
+        assert!(!open_tool_call(b""));
+        let s = Session { project: "x".into(), last_write: 1000, tool_running: true };
+        assert!(s.working(1000 + 1800), "a long build keeps it working");
+        assert!(!s.working(1000 + TOOL_CAP_SECS + 200), "an abandoned call stops counting");
+        let quiet = Session { tool_running: false, ..s };
+        assert!(!quiet.working(1000 + 1800));
     }
 
     #[test]

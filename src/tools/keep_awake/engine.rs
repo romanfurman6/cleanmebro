@@ -95,7 +95,7 @@ impl Engine {
     }
 
     pub fn working(&self, now: i64) -> Vec<&Session> {
-        self.sessions.iter().filter(|s| now - s.last_write <= WORKING_SECS).collect()
+        self.sessions.iter().filter(|s| s.working(now)).collect()
     }
 
     pub fn state(&self, now: i64) -> State {
@@ -128,7 +128,7 @@ impl Engine {
     /// Bring everything in line with the state at `now`.
     pub fn step(&mut self, now: i64) {
         if self.enabled && self.settings.claude {
-            if let Some(last) = self.working(now).iter().map(|s| s.last_write).max() {
+            if let Some(last) = self.working(now).iter().map(|s| s.active_at(now)).max() {
                 // Claude counts as working until WORKING_SECS after its last write
                 self.claude_last = Some(self.claude_last.unwrap_or(0).max(last + WORKING_SECS));
             }
@@ -273,7 +273,7 @@ mod tests {
     use super::*;
 
     fn session(t: i64) -> Session {
-        Session { project: "cmdmeow".into(), last_write: t }
+        Session { project: "cmdmeow".into(), last_write: t, tool_running: false }
     }
 
     #[test]
