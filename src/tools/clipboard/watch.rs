@@ -41,6 +41,10 @@ pub fn spawn(shared: Arc<Shared>, tx: Sender<Clip>, ctx: egui::Context) {
                 }
                 let images = shared.images.load(Ordering::Relaxed);
                 let mut clip = mac::read(MAX_IMAGE, images);
+                // temporary or generated clips never enter the history
+                if clip.transient {
+                    continue;
+                }
                 if clip.concealed {
                     if !shared.concealed.load(Ordering::Relaxed) {
                         continue;

@@ -799,7 +799,7 @@ fn right_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     let card = Rect::from_min_size(Pos2::new(x0, y + 28.0), Vec2::new(w, 64.0 + ROW_H + 4.0));
     glass_card(p, card, R_CARD, 0.0, false);
     let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, card.top() + 30.0), Vec2::new(30.0, 18.0));
-    p.text(Pos2::new(card.left() + 12.0, card.top() + 20.0), Align2::LEFT_CENTER, "Record passwords and hidden items", font(13.0), TEXT());
+    p.text(Pos2::new(card.left() + 12.0, card.top() + 20.0), Align2::LEFT_CENTER, "Record passwords (until quit)", font(13.0), TEXT());
     paragraph(p, Pos2::new(card.left() + 12.0, card.top() + 31.0), "", font(11.0), TEXT_FAINT(), sw.left() - card.left() - 24.0);
     if switch(ui, sw, id.with("concealed"), c.settings.record_concealed, true).clicked() {
         c.settings.record_concealed = !c.settings.record_concealed;
@@ -933,7 +933,7 @@ mod tests {
 
     #[test]
     fn filters_pass() {
-        let mut e = Entry { id: 1, kind: Kind::Link, text: "x".into(), app: String::new(), bundle: String::new(), first: 0, last: 0, count: 1, pinned: false, w: 0, h: 0, rtf: false, html: false, bytes: 0, hash: 0 };
+        let mut e = Entry { id: 1, kind: Kind::Link, text: "x".into(), app: String::new(), bundle: String::new(), first: 0, last: 0, count: 1, pinned: false, w: 0, h: 0, rtf: false, html: false, bytes: 0, hash: 0, secret: false };
         assert!(Filter::All.passes(&e));
         assert!(Filter::Kind(Kind::Link).passes(&e));
         assert!(!Filter::Kind(Kind::Text).passes(&e));

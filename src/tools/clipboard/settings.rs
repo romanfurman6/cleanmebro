@@ -26,7 +26,7 @@ pub struct Settings {
     pub max_days: u32,
     pub keep_images: bool,
     pub dedupe: bool,
-    /// Also record passwords and items apps mark as concealed or temporary.
+    /// Also record passwords (concealed clips), in memory only.
     pub record_concealed: bool,
     pub ignore: Vec<Ignored>,
 }
