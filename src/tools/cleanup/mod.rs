@@ -93,6 +93,20 @@ impl Tool for Cleanup {
         let col = tint::CLEANUP();
         let bar = frac.map(|f| (f.clamp(0.01, 1.0), ACCENT())).ok_or(sub.as_str());
         let resp = match size {
+            Size::S12 if intro && hist.is_empty() => {
+                // never cleaned: the label over a Scan button
+                let resp = tile::wide(ui, rect, id, Icon::Broom, col, "", "", Err(""), false);
+                let (c, rr) = tile::wide_ring(rect);
+                let x0 = c.x + rr + crate::kit::glass::sp::M;
+                let w = (rect.right() - 12.0 - x0).min(120.0);
+                let p = ui.painter();
+                p.text(egui::pos2(x0, c.y - 6.0), egui::Align2::LEFT_BOTTOM, "Clean", crate::kit::glass::ty::caption(), crate::kit::glass::ty::caption_color());
+                let br = Rect::from_min_size(egui::pos2(x0, c.y - 2.0), egui::vec2(w, 26.0));
+                if crate::kit::glass::pill_button(ui, br, "Scan", crate::kit::glass::BTN_PRIMARY, true).clicked() {
+                    cx.open_page(ID, "");
+                }
+                resp
+            }
             Size::S12 => tile::wide(ui, rect, id, Icon::Broom, col, "Clean", &value, bar, false),
             _ => {
                 let (resp, right) = tile::row_split(ui, rect, id, Icon::Broom, col, "Clean", &value, &sub, false);
