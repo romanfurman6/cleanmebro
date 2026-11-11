@@ -102,6 +102,15 @@ fn demo_engine(state: State) -> (Engine, i64) {
         engine::Span { start: h(10.7), end: h(11.3), claude: true },
         engine::Span { start: h(11.3), end: h(11.9), claude: false },
     ];
+    // earlier days of the week
+    for (d, c, m) in [(6, 2.5, 0.5), (5, 4.0, 1.0), (4, 1.0, 0.0), (3, 5.5, 0.8), (2, 0.0, 1.5), (1, 3.2, 0.4)] {
+        let base = t - d * 86_400;
+        e.log.insert(0, engine::Span { start: base - ((c + m) * 3600.0) as i64, end: base - (m * 3600.0) as i64, claude: true });
+        if m > 0.0 {
+            e.log.insert(1, engine::Span { start: base - (m * 3600.0) as i64, end: base, claude: false });
+        }
+    }
+    e.log.sort_by_key(|s| s.start);
     let idle = Session { project: "notes".into(), last_write: t - 3 * 3600 };
     match state {
         State::Off => {

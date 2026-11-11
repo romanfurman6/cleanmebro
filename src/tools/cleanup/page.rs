@@ -100,8 +100,14 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     page_header(&p, r, "Cleanup", "Caches, logs and leftovers", TEXT_DIM);
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
 
+    // past cleans fill the space under the cards; before the first clean the
+    // cards sit in the middle instead of at the top of an empty page
+    let hist = super::engine::history();
+    let per_col0 = Group::ALL.len().div_ceil(4);
+    let cards_h = 128.0 + sp::L + 2.0 * sp::L + 16.0 + sp::M + per_col0 as f32 * 32.0;
+    let y0 = if hist.is_empty() && has_claude { body.top() + ((body.height() - cards_h) * 0.4).max(0.0) } else { body.top() };
     // the disk, with Scan on the right
-    let top = Rect::from_min_size(body.min, Vec2::new(body.width(), 128.0));
+    let top = Rect::from_min_size(Pos2::new(body.left(), y0), Vec2::new(body.width(), 128.0));
     glass_card(&p, top, R_CARD, 0.0, false);
     let ti = top.shrink(sp::L);
     let (total, free) = crate::kit::fs::volume_space("/");
@@ -150,8 +156,36 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
         ui.interact(row, ui.scope_id().with(("look", k)), Sense::hover()).on_hover_text(g.blurb());
     }
 
+    let mut y = left.bottom() + sp::L;
     if !has_claude {
-        claude_note(ui, Pos2::new(body.left(), left.bottom() + sp::L), body.width(), avail, tcx);
+        y += claude_note(ui, Pos2::new(body.left(), y), body.width(), avail, tcx) + sp::L;
+    }
+    if !hist.is_empty() && body.bottom() - y > 120.0 {
+        past_cleans(&p, Rect::from_min_max(Pos2::new(body.left(), y), body.max), &hist);
+    }
+}
+
+/// What earlier cleans removed: the total, and one bar per clean.
+fn past_cleans(p: &egui::Painter, r: Rect, hist: &[(i64, u64)]) {
+    glass_card(p, r, R_CARD, 0.0, false);
+    let ri = r.shrink(sp::L);
+    let total: u64 = hist.iter().map(|h| h.1).sum();
+    p.text(ri.left_top(), Align2::LEFT_TOP, "Past cleans", ty::title(), TEXT);
+    p.text(Pos2::new(ri.right(), ri.top()), Align2::RIGHT_TOP, format!("{} freed in {} clean{}", human_bytes(total), hist.len(), if hist.len() == 1 { "" } else { "s" }), ty::body(), TEXT_DIM);
+    let chart = Rect::from_min_max(Pos2::new(ri.left(), ri.top() + 16.0 + sp::L), Pos2::new(ri.right(), ri.bottom() - 18.0));
+    let n = hist.len().min(((chart.width() + 8.0) / 44.0).floor().max(1.0) as usize);
+    let shown = &hist[hist.len() - n..];
+    let max = shown.iter().map(|h| h.1).max().unwrap_or(1).max(1) as f32;
+    let bw = ((chart.width() - (n as f32 - 1.0) * 8.0) / n as f32).min(56.0);
+    for (i, (when, b)) in shown.iter().enumerate() {
+        let x = chart.left() + i as f32 * (bw + 8.0);
+        let h = (chart.height() - 16.0) * (*b as f32 / max).max(0.02);
+        let last = i + 1 == n;
+        let br = Rect::from_min_max(Pos2::new(x, chart.bottom() - h), Pos2::new(x + bw, chart.bottom()));
+        p.rect_filled(br, 4.0, if last { BLUE } else { white(46) });
+        text_fit(p, Pos2::new(br.center().x, br.top() - 3.0), Align2::CENTER_BOTTOM, &human_bytes(*b), font(11.0), TEXT_DIM, bw + 8.0);
+        let day = chrono::DateTime::from_timestamp(*when, 0).map(|d| d.with_timezone(&chrono::Local).format("%b %-d").to_string()).unwrap_or_default();
+        text_fit(p, Pos2::new(br.center().x, chart.bottom() + 4.0), Align2::CENTER_TOP, &day, font(11.0), TEXT_FAINT, bw + 8.0);
     }
 }
 

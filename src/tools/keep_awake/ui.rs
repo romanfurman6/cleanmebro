@@ -486,6 +486,39 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     let right = Rect::from_min_max(Pos2::new(left.right() + gap, y), Pos2::new(x1, r.bottom() - 20.0));
     options(ui, &p, left, &mut e, now, id);
     sessions(&p, right, &e, now);
+    // the rest of the page: the last 7 days
+    let rows = e.sessions.len().clamp(1, 6) as f32;
+    let wy = y + 26.0 + (rows * 32.0 + 12.0).max(ROW * 4.0) + 20.0;
+    if r.bottom() - 20.0 - wy > 100.0 {
+        week(&p, Rect::from_min_max(Pos2::new(x0, wy), Pos2::new(x1, r.bottom() - 20.0)), &e.week(now));
+    }
+}
+
+/// Awake time per day for the last week, Claude's part and yours stacked.
+fn week(p: &Painter, r: Rect, days: &[(i64, i64, i64)]) {
+    let total: i64 = days.iter().map(|d| d.1 + d.2).sum();
+    p.text(r.min, Align2::LEFT_TOP, "Last 7 days", bold(15.0), TEXT);
+    p.text(Pos2::new(r.right(), r.top() + 2.0), Align2::RIGHT_TOP, format!("{} awake", span_text(total)), font(12.0), TEXT_DIM);
+    let card = Rect::from_min_max(r.min + Vec2::new(0.0, 26.0), r.max);
+    section_card(p, card);
+    let ci = card.shrink2(Vec2::new(16.0, 14.0));
+    let chart = Rect::from_min_max(ci.min + Vec2::new(0.0, 16.0), ci.max - Vec2::new(0.0, 18.0));
+    let max = days.iter().map(|d| d.1 + d.2).max().unwrap_or(0).max(3600) as f32;
+    let n = days.len().max(1) as f32;
+    let bw = ((chart.width() - (n - 1.0) * 12.0) / n).min(72.0);
+    let step = (chart.width() - bw) / (n - 1.0).max(1.0);
+    for (i, (d0, c, h)) in days.iter().enumerate() {
+        let x = chart.left() + i as f32 * step;
+        let hh = chart.height() * (*h as f32 / max);
+        let ch = chart.height() * (*c as f32 / max);
+        if c + h > 0 {
+            p.rect_filled(Rect::from_min_max(Pos2::new(x, chart.bottom() - ch - hh), Pos2::new(x + bw, chart.bottom() - ch)), 4.0, HAND);
+            p.rect_filled(Rect::from_min_max(Pos2::new(x, chart.bottom() - ch), Pos2::new(x + bw, chart.bottom())), 4.0, CLAUDE_ORANGE);
+            text_fit(p, Pos2::new(x + bw / 2.0, chart.bottom() - ch - hh - 3.0), Align2::CENTER_BOTTOM, &span_text(c + h), font(11.0), TEXT_DIM, bw + 10.0);
+        }
+        let day = chrono::DateTime::from_timestamp(*d0, 0).map(|d| d.with_timezone(&chrono::Local).format("%a").to_string()).unwrap_or_default();
+        p.text(Pos2::new(x + bw / 2.0, chart.bottom() + 4.0), Align2::CENTER_TOP, if i + 1 == days.len() { "Today".to_string() } else { day }, font(11.0), TEXT_FAINT);
+    }
 }
 
 fn today_strip(p: &Painter, r: Rect, spans: &[Span], now: i64) {
