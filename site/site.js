@@ -29,6 +29,8 @@
       sel = i; const key = navs[i].dataset.p;
       navs.forEach((b, k) => { b.classList.toggle('on', k === i); b.setAttribute('aria-pressed', k === i); });
       panes.forEach(p => { const on = p.dataset.p === key; p.hidden = !on; p.classList.toggle('on', on); });
+      const row = navs[i].parentElement; // on phones the tabs scroll sideways: keep the picked one in view
+      if (row.scrollWidth > row.clientWidth) row.scrollTo({ left: navs[i].offsetLeft - 48, behavior: 'smooth' });
     };
     navs.forEach((b, i) => b.addEventListener('click', () => { held = true; show(i); }));
     let inView = false;
