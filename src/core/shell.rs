@@ -66,6 +66,8 @@ pub struct App {
     last_hide: Instant,
     pub gear_open: bool,
     pub app_open: bool,
+    /// When the window was asked for (dev log: how long the first frame took).
+    pub app_asked: Option<Instant>,
     app_focus: bool,
     pending_shape: bool,
     screenshot: Option<PathBuf>,
@@ -146,6 +148,7 @@ impl App {
             last_hide: Instant::now(),
             gear_open: false,
             app_open: false,
+            app_asked: None,
             app_focus: false,
             pending_shape: true,
             screenshot: opts.screenshot,
@@ -462,6 +465,7 @@ impl App {
         }
         self.app_open = true;
         self.app_focus = true;
+        self.app_asked = Some(Instant::now());
         crate::kit::native::set_dock_icon(true);
         if self.visible {
             self.hide(ctx);
@@ -651,6 +655,8 @@ impl eframe::App for App {
         let off_before = self.tools_off.clone();
         if self.app_open {
             self.app_viewport(&ctx);
+        } else if self.visible && self.mode == Mode::Panel && self.screenshot.is_none() {
+            self.prewarm_app(&ctx);
         }
         if self.setup.is_some() && self.mode != Mode::Setup {
             self.setup_viewport(&ctx);
@@ -679,8 +685,8 @@ impl App {
     }
 
     /// The full app in its own native window (traffic lights, resizable).
-    fn app_viewport(&mut self, ctx: &egui::Context) {
-        let mut builder = egui::ViewportBuilder::default()
+    fn app_builder() -> egui::ViewportBuilder {
+        egui::ViewportBuilder::default()
             .with_title("Cmd+Meow")
             .with_inner_size([m::APP_WIDTH, m::APP_HEIGHT])
             .with_min_inner_size([980.0, 640.0])
@@ -688,13 +694,30 @@ impl App {
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false)
-            .with_has_shadow(true);
+            .with_has_shadow(true)
+    }
+
+    /// While the panel is open, keep the app window made but hidden, so a
+    /// click on a widget only shows it. Making the native window (and its GPU
+    /// surface) on the click was the lag before the window appeared.
+    fn prewarm_app(&mut self, ctx: &egui::Context) {
+        let id = egui::ViewportId::from_hash_of("cmdmeow-app");
+        ctx.show_viewport_deferred(id, Self::app_builder().with_visible(false), |_, _| {});
+    }
+
+    fn app_viewport(&mut self, ctx: &egui::Context) {
+        let mut builder = Self::app_builder().with_visible(true);
         if self.app_focus {
             builder = builder.with_active(true);
         }
         let id = egui::ViewportId::from_hash_of("cmdmeow-app");
         crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
             let vctx = ui.ctx().clone();
+            if let Some(at) = self.app_asked.take() {
+                if crate::kit::fs::is_dev() {
+                    eprintln!("[timing] window first frame {} ms after the click", at.elapsed().as_millis());
+                }
+            }
             if self.app_focus {
                 self.app_focus = false;
                 vctx.send_viewport_cmd(ViewportCommand::Focus);
