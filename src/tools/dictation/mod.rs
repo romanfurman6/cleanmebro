@@ -29,7 +29,8 @@ pub const ID: ToolId = "dictation";
 const CARD: &str = "card";
 /// The tool's own setup step: the speech model.
 const MODEL_NEED: &str = "dictation-model";
-pub const TINT: Color32 = crate::kit::glass::BLUE;
+#[allow(non_snake_case)]
+pub fn TINT() -> Color32 { crate::kit::glass::tint::CAPTURE() }
 
 /// Held shorter than this, the shortcut was a tap: keep listening until the
 /// next one.
@@ -114,6 +115,8 @@ pub struct Dictation {
     key_error: Option<String>,
     /// Recording a new shortcut on the Settings tab.
     recording_key: bool,
+    /// When the recorder was last drawn; it stops once the page is gone.
+    recording_seen: Instant,
     jobs: Sender<Job>,
     heard: Receiver<Heard>,
     next_job: u64,
@@ -158,6 +161,7 @@ impl Dictation {
             bound: None,
             key_error: None,
             recording_key: false,
+            recording_seen: Instant::now(),
             jobs,
             heard,
             next_job: 0,
@@ -444,6 +448,8 @@ impl Dictation {
             let (_, text) = self.paste_at.take().unwrap();
             if let Some((saved, count)) = mac::paste(&text, true) {
                 if self.settings.restore_clipboard {
+                    // a restore still pending holds the clipboard from before
+                    let saved = self.restore_at.take().map(|(_, old, _)| old).unwrap_or(saved);
                     self.restore_at = Some((Instant::now() + RESTORE_DELAY, saved, count));
                 }
             }
@@ -451,6 +457,9 @@ impl Dictation {
         if self.restore_at.as_ref().is_some_and(|(t, _, _)| Instant::now() >= *t) {
             let (_, saved, count) = self.restore_at.take().unwrap();
             mac::restore(saved, count);
+        }
+        if self.recording_key && self.recording_seen.elapsed() > Duration::from_secs(1) {
+            self.recording_key = false;
         }
         if let Phase::Showing { until, .. } = self.phase {
             if Instant::now() >= until {
@@ -539,7 +548,7 @@ fn demo_history() -> History {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Mic, color: TINT }
+    Badge { icon: Icon::Mic, color: TINT() }
 }
 
 impl Tool for Dictation {
@@ -598,6 +607,11 @@ impl Tool for Dictation {
         self.on = on;
         if !on {
             self.cancel();
+            self.paste_at = None;
+            if let Some((_, saved, count)) = self.restore_at.take() {
+                mac::restore(saved, count);
+            }
+            self.recording_key = false;
             self.release_keys();
         }
     }

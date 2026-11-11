@@ -100,18 +100,40 @@ impl Progress {
     }
 }
 
-/// Fetch `m`, picking up a download that stopped part way. Blocks.
+/// The HTTP client for model downloads: gives up on a server that stops
+/// answering, not on a long download.
+pub fn agent() -> ureq::Agent {
+    use std::time::Duration;
+    ureq::Agent::new_with_config(ureq::Agent::config_builder().timeout_connect(Some(Duration::from_secs(20))).timeout_recv_response(Some(Duration::from_secs(30))).http_status_as_error(false).build())
+}
+
+/// Fetch `m`, picking up a download that stopped part way. Blocks. One
+/// download at a time, so Capture and Dictation never share a `.part`.
 pub fn download(m: Model, p: &Progress) -> Result<(), String> {
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    if m.ready() {
+        return Ok(());
+    }
+    fetch(m, p)
+}
+
+fn fetch(m: Model, p: &Progress) -> Result<(), String> {
     std::fs::create_dir_all(models_dir()).map_err(|e| e.to_string())?;
     let part = part_path(m);
     let have = std::fs::metadata(&part).map(|x| x.len()).unwrap_or(0);
-    let agent = ureq::Agent::new_with_config(ureq::Agent::config_builder().timeout_connect(Some(std::time::Duration::from_secs(20))).http_status_as_error(false).build());
+    let agent = crate::kit::whisper::agent();
     let mut req = agent.get(&m.url()).header("User-Agent", "Cmd+Meow");
     if have > 0 {
         req = req.header("Range", format!("bytes={have}-"));
     }
     let resp = req.call().map_err(|e| format!("Couldn't reach the download: {e}"))?;
     let status = resp.status().as_u16();
+    if status == 416 && have > 0 {
+        // the part is already whole (or the file changed): start over
+        let _ = std::fs::remove_file(&part);
+        return fetch(m, p);
+    }
     let resumed = status == 206;
     if status != 200 && !resumed {
         return Err(format!("The download answered {status}"));

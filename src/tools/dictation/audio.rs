@@ -284,7 +284,7 @@ mod imp {
                 output.setSampleBufferDelegate_queue(Some(ProtocolObject::from_ref(&*sink)), Some(&queue));
                 // starting takes a moment; not on the UI thread
                 let s = SendBox(session.clone());
-                std::thread::spawn(move || {
+                serial(move || {
                     let s = s;
                     s.0.startRunning();
                 });
@@ -309,11 +309,30 @@ mod imp {
         /// Stop listening; the voice at 16 kHz mono.
         pub fn stop(self) -> Vec<f32> {
             let s = SendBox(self.session.clone());
-            std::thread::spawn(move || {
+            serial(move || {
                 let s = s;
                 unsafe { s.0.stopRunning() };
             });
             self.buf.lock().map(|mut b| std::mem::take(&mut b.pcm)).unwrap_or_default()
+        }
+    }
+
+    /// Run `f` on the one thread that starts and stops sessions, so a stop
+    /// never overtakes its start.
+    fn serial(f: impl FnOnce() + Send + 'static) {
+        type Job = Box<dyn FnOnce() + Send>;
+        static Q: std::sync::OnceLock<Mutex<std::sync::mpsc::Sender<Job>>> = std::sync::OnceLock::new();
+        let q = Q.get_or_init(|| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            std::thread::spawn(move || {
+                for job in rx {
+                    job();
+                }
+            });
+            Mutex::new(tx)
+        });
+        if let Ok(q) = q.lock() {
+            let _ = q.send(Box::new(f));
         }
     }
 }

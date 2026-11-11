@@ -51,21 +51,34 @@ pub fn download(p: &Progress, unpacking: &std::sync::atomic::AtomicBool) -> Resu
         fetch(p)?;
     }
     unpacking.store(true, Ordering::Relaxed);
-    let r = unpack(p);
+    let tmp = crate::kit::whisper::models_dir().join(format!("{NAME}.unpacking"));
+    let r = unpack(p, &tmp);
     unpacking.store(false, Ordering::Relaxed);
+    if let Err(e) = &r {
+        let _ = std::fs::remove_dir_all(&tmp);
+        // a damaged archive is fetched again next time; a stop keeps it
+        if e != "Stopped" {
+            let _ = std::fs::remove_file(archive());
+        }
+    }
     r
 }
 
 fn fetch(p: &Progress) -> Result<(), String> {
     let part = part();
     let have = std::fs::metadata(&part).map(|x| x.len()).unwrap_or(0);
-    let agent = ureq::Agent::new_with_config(ureq::Agent::config_builder().timeout_connect(Some(std::time::Duration::from_secs(20))).http_status_as_error(false).build());
+    let agent = crate::kit::whisper::agent();
     let mut req = agent.get(URL).header("User-Agent", "Cmd+Meow");
     if have > 0 {
         req = req.header("Range", format!("bytes={have}-"));
     }
     let resp = req.call().map_err(|e| format!("Couldn't reach the download: {e}"))?;
     let status = resp.status().as_u16();
+    if status == 416 && have > 0 {
+        // the part is already whole (or the file changed): start over
+        let _ = std::fs::remove_file(&part);
+        return fetch(p);
+    }
     let resumed = status == 206;
     if status != 200 && !resumed {
         return Err(format!("The download answered {status}"));
@@ -108,10 +121,9 @@ fn fetch(p: &Progress) -> Result<(), String> {
 
 /// Unpack only the files the recognizer needs into [`dir`], then drop the
 /// archive.
-fn unpack(p: &Progress) -> Result<(), String> {
-    let tmp = crate::kit::whisper::models_dir().join(format!("{NAME}.unpacking"));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+fn unpack(p: &Progress, tmp: &std::path::Path) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(tmp);
+    std::fs::create_dir_all(tmp).map_err(|e| e.to_string())?;
     let f = std::fs::File::open(archive()).map_err(|e| e.to_string())?;
     let mut tar = tar::Archive::new(bzip2::read::BzDecoder::new(std::io::BufReader::new(f)));
     let mut got = 0;

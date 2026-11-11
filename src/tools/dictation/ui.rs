@@ -103,24 +103,24 @@ pub fn pill(d: &mut Dictation, ctx: &egui::Context) {
             Phase::Listening { .. } => {
                 let pulse = 0.55 + 0.45 * (0.5 + 0.5 * (t * 5.0).sin()) as f32;
                 p.circle_filled(Pos2::new(r.left() + 16.0, cy), 4.5, with_alpha(LIVE, pulse));
-                let tr = p.text(Pos2::new(r.right() - 13.0, cy), Align2::RIGHT_CENTER, clock(phase_secs), mono(12.0), TEXT_SOFT);
+                let tr = p.text(Pos2::new(r.right() - 13.0, cy), Align2::RIGHT_CENTER, clock(phase_secs), mono(12.0), TEXT_SOFT());
                 bars(&p, Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top() + 8.0), Pos2::new(tr.left() - 10.0, r.bottom() - 8.0)), &levels, white(225));
             }
             Phase::Working { .. } => {
-                spinner(&p, Pos2::new(r.left() + 17.0, cy), 6.5, t, TEXT_SOFT);
+                spinner(&p, Pos2::new(r.left() + 17.0, cy), 6.5, t, TEXT_SOFT());
                 bars(&p, Rect::from_min_max(Pos2::new(r.left() + 32.0, r.top() + 8.0), Pos2::new(r.right() - 14.0, r.bottom() - 8.0)), &levels, white(70));
             }
             Phase::Showing { note: Note::Pasted, .. } => {
-                icon(&p, Icon::Check, Rect::from_center_size(r.center(), Vec2::splat(16.0)), GREEN);
+                icon(&p, Icon::Check, Rect::from_center_size(r.center(), Vec2::splat(16.0)), GREEN());
             }
             Phase::Showing { note, .. } => {
                 let (glyph, col) = match note {
-                    Note::Copied => (Icon::Clipboard, TEXT_SOFT),
-                    _ => (Icon::Mic, AMBER),
+                    Note::Copied => (Icon::Clipboard, TEXT_SOFT()),
+                    _ => (Icon::Mic, AMBER()),
                 };
                 icon(&p, glyph, Rect::from_center_size(Pos2::new(r.left() + 18.0, cy), Vec2::splat(14.0)), col);
                 if let Some(t) = &text {
-                    text_fit(&p, Pos2::new(r.left() + 32.0, cy), Align2::LEFT_CENTER, t, font(12.0), TEXT, r.width() - 44.0);
+                    text_fit(&p, Pos2::new(r.left() + 32.0, cy), Align2::LEFT_CENTER, t, font(12.0), TEXT(), r.width() - 44.0);
                 }
             }
             Phase::Idle => {}
@@ -158,24 +158,25 @@ pub fn widget(d: &mut Dictation, size: Size, ui: &mut Ui, rect: Rect, cx: &mut C
     let resp = match size {
         Size::S11 => {
             if listening {
-                let resp = tile::glow_card(ui, rect, id, LIVE, false);
+                let resp = tile::card(ui, rect, id, false);
                 let p = ui.painter();
+                p.rect_stroke(rect, tile::R_TILE, Stroke::new(1.5, LIVE), StrokeKind::Inside);
                 icon(p, Icon::Mic, Rect::from_min_size(rect.min + Vec2::splat(tile::PAD), Vec2::splat(18.0)), LIVE);
-                tile::small_text(p, rect, "Listening", &key, TEXT_DIM);
+                tile::small_text(p, rect, "Listening", &key, TEXT_DIM());
                 resp
             } else {
-                tile::small(ui, rect, id, Icon::Mic, TINT, "Dictation", &key, false)
+                tile::small(ui, rect, id, Icon::Mic, TINT(), "Dictation", &key, false)
             }
         }
         Size::S14 => {
-            let (resp, right) = tile::row_split(ui, rect, id, Icon::Mic, if listening { LIVE } else { TINT }, "Dictation", &today, &key, false);
+            let (resp, right) = tile::row_split(ui, rect, id, Icon::Mic, if listening { LIVE } else { TINT() }, "Dictation", &today, &key, false);
             latest(d, ui, right, 2);
             resp
         }
         _ => {
             let resp = tile::card(ui, rect, id, false);
             let p = ui.painter().clone();
-            let body = tile::head(&p, rect, Icon::Mic, TINT, "Dictation", &format!("{key} · {today}"));
+            let body = tile::head(&p, rect, Icon::Mic, TINT(), "Dictation", &format!("{key} · {today}"));
             latest(d, ui, body, 4);
             resp
         }
@@ -190,15 +191,15 @@ fn latest(d: &Dictation, ui: &mut Ui, r: Rect, n: usize) {
     let p = ui.painter();
     let items: Vec<_> = d.history.items.iter().take(n).collect();
     if items.is_empty() {
-        text_fit(p, r.center(), Align2::CENTER_CENTER, &format!("Hold {} and speak", d.shortcut_label()), font(11.0), TEXT_FAINT, r.width());
+        text_fit(p, r.center(), Align2::CENTER_CENTER, &format!("Hold {} and speak", d.shortcut_label()), font(11.0), TEXT_FAINT(), r.width());
         return;
     }
     let lh = (r.height() / n as f32).min(26.0);
     let top = r.center().y - lh * items.len() as f32 / 2.0;
     for (k, s) in items.iter().enumerate() {
         let y = top + lh * (k as f32 + 0.5);
-        let ag = p.text(Pos2::new(r.right(), y), Align2::RIGHT_CENTER, ago(s.at), font(11.0), TEXT_FAINT);
-        text_fit(p, Pos2::new(r.left(), y), Align2::LEFT_CENTER, &s.text, font(12.0), TEXT_SOFT, ag.left() - r.left() - 8.0);
+        let ag = p.text(Pos2::new(r.right(), y), Align2::RIGHT_CENTER, ago(s.at), font(11.0), TEXT_FAINT());
+        text_fit(p, Pos2::new(r.left(), y), Align2::LEFT_CENTER, &s.text, font(12.0), TEXT_SOFT(), ag.left() - r.left() - 8.0);
     }
 }
 
@@ -209,15 +210,16 @@ pub fn page(d: &mut Dictation, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let (sub, col) = if d.listening() {
         ("Listening".to_string(), LIVE)
     } else if !d.settings.engine.ready() {
-        ("Speech model not downloaded".to_string(), AMBER)
+        ("Speech model not downloaded".to_string(), AMBER())
     } else {
-        (format!("{} · {} · {}", d.shortcut_label(), d.settings.engine.name(), words(d.words_today())), TEXT_DIM)
+        (format!("{} · {} · {}", d.shortcut_label(), d.settings.engine.name(), words(d.words_today())), TEXT_DIM())
     };
     let btns = page_header(&p, r, "Dictation", &sub, col);
     let tr = Rect::from_min_max(Pos2::new(btns.right() - 180.0, btns.top()), btns.max);
     let cur = (d.tab == Tab::Settings) as usize;
     if let Some(i) = segmented(ui, tr, ui.scope_id().with("dict-tab"), &["History", "Settings"], cur) {
         d.tab = if i == 1 { Tab::Settings } else { Tab::History };
+        d.recording_key = false;
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     match d.tab {
@@ -242,7 +244,7 @@ fn history(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
         let tw = w - 24.0 - 120.0;
         // each entry is as tall as its text
         // 12 pad · meta 14 · 6 gap · text · 12 pad, then the 8 gap between cards
-        let heights: Vec<f32> = d.history.items.iter().map(|s| PAD + META_H + GAP + p.layout(s.text.clone(), font(13.0), TEXT, tw).size().y.max(18.0) + PAD + ROW_GAP).collect();
+        let heights: Vec<f32> = d.history.items.iter().map(|s| PAD + META_H + GAP + p.layout(s.text.clone(), font(13.0), TEXT(), tw).size().y.max(18.0) + PAD + ROW_GAP).collect();
         let total: f32 = heights.iter().sum::<f32>() + 40.0;
         let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), total), Sense::hover());
         let mut y = area.top() + 16.0;
@@ -251,10 +253,10 @@ fn history(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
             let rr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, heights[k] - ROW_GAP));
             let resp = ui.interact(rr, id.with(k), Sense::click());
             let h = ui.ctx().animate_bool(id.with(("h", k)), resp.hovered());
-            p.rect_filled(rr, R_CARD, lerp_color(CARD, RAISED, h * 0.5));
+            p.rect_filled(rr, R_CARD, lerp_color(CARD(), RAISED(), h * 0.5));
             let meta = format!("{} · {} · {:.0} s", ago(s.at), if s.app.is_empty() { "—" } else { &s.app }, s.secs.max(1.0));
-            p.text(Pos2::new(rr.left() + PAD, rr.top() + PAD), Align2::LEFT_TOP, meta, font(11.0), TEXT_FAINT);
-            paragraph(&p, Pos2::new(rr.left() + PAD, rr.top() + PAD + META_H + GAP), &s.text, font(13.0), TEXT, tw);
+            p.text(Pos2::new(rr.left() + PAD, rr.top() + PAD), Align2::LEFT_TOP, meta, font(11.0), TEXT_FAINT());
+            paragraph(&p, Pos2::new(rr.left() + PAD, rr.top() + PAD + META_H + GAP), &s.text, font(13.0), TEXT(), tw);
             let cr = Rect::from_min_size(Pos2::new(rr.right() - PAD - 64.0, rr.center().y - 13.0), Vec2::new(64.0, 26.0));
             let xr = Rect::from_center_size(Pos2::new(cr.left() - 20.0, cr.center().y), Vec2::splat(22.0));
             if h > 0.01 && icon_button(ui, xr, Icon::Trash, "Remove").clicked() {
@@ -291,7 +293,7 @@ fn row_y(card: Rect, k: usize) -> f32 {
 }
 
 fn label(p: &egui::Painter, card: Rect, k: usize, text: &str) {
-    p.text(Pos2::new(card.left() + 12.0, row_y(card, k)), Align2::LEFT_CENTER, text, font(13.0), TEXT);
+    p.text(Pos2::new(card.left() + 12.0, row_y(card, k)), Align2::LEFT_CENTER, text, font(13.0), TEXT());
 }
 
 fn settings_page(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
@@ -316,6 +318,7 @@ fn record_key(d: &mut Dictation, ui: &mut Ui, cx: &mut Cx) {
     if !d.recording_key {
         return;
     }
+    d.recording_seen = std::time::Instant::now();
     let mut result: Option<Option<Shortcut>> = None;
     let mut cancel = false;
     ui.input(|i| {
@@ -352,7 +355,7 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     let id = ui.scope_id().with("dict-left");
     let mut changed = false;
     let x0 = col.left();
-    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Speaking", bold(15.0), TEXT);
+    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Speaking", bold(15.0), TEXT());
     let whisper = d.settings.engine == Engine::Whisper;
     let rows = if whisper { 4 } else { 3 };
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), rows);
@@ -363,25 +366,25 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     let rec = d.recording_key;
     let cur = d.settings.shortcut.clone();
     let text = if rec { "Type a shortcut…".to_string() } else { cur.as_ref().map(|s| s.display()).unwrap_or_else(|| "Record".into()) };
-    let g = p.layout_no_wrap(text.clone(), font(12.0), TEXT);
+    let g = p.layout_no_wrap(text.clone(), font(12.0), TEXT());
     let bw = (g.size().x + 20.0).max(76.0);
     let br = Rect::from_min_max(Pos2::new(card.right() - 12.0 - bw, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0));
     let resp = ui.interact(br, id.with("key"), Sense::click());
     if rec {
-        p.rect_filled(br, 6.0, with_alpha(BLUE, 0.22));
-        p.rect_stroke(br, 6.0, Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+        p.rect_filled(br, 6.0, with_alpha(BLUE(), 0.22));
+        p.rect_stroke(br, 6.0, Stroke::new(1.0, ACCENT()), StrokeKind::Inside);
     } else if cur.is_some() {
         p.rect_filled(br, 6.0, white(if resp.hovered() { 30 } else { 20 }));
         p.rect_stroke(br, 6.0, Stroke::new(1.0, white(26)), StrokeKind::Inside);
     } else {
         dashed_rect(p, br, 6.0, white(60));
     }
-    p.text(br.center(), Align2::CENTER_CENTER, text, font(12.0), if cur.is_some() || rec { TEXT } else { TEXT_FAINT });
+    p.text(br.center(), Align2::CENTER_CENTER, text, font(12.0), if cur.is_some() || rec { TEXT() } else { TEXT_FAINT() });
     if resp.on_hover_text("Click, then press the keys. Esc cancels, ⌫ removes it.").clicked() {
         d.recording_key = !rec;
     }
     if let Some(e) = &d.key_error {
-        text_fit(p, Pos2::new(br.left() - 10.0, y), Align2::RIGHT_CENTER, e, font(11.0), AMBER, br.left() - card.left() - 110.0);
+        text_fit(p, Pos2::new(br.left() - 10.0, y), Align2::RIGHT_CENTER, e, font(11.0), AMBER(), br.left() - card.left() - 110.0);
     }
 
     // model
@@ -409,13 +412,17 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
                 d.stop_download();
             }
             let what = if unpacking { "Unpacking…".to_string() } else { format!("{}%", (frac * 100.0) as u32) };
-            let tr = p.text(Pos2::new(sr.left() - 10.0, y), Align2::RIGHT_CENTER, what, font(12.0), TEXT_DIM);
-            bar(p, Rect::from_min_max(Pos2::new(tr.left() - 120.0, y - 2.0), Pos2::new(tr.left() - 10.0, y + 2.0)), if unpacking { 1.0 } else { frac }, BLUE);
+            let tr = p.text(Pos2::new(sr.left() - 10.0, y), Align2::RIGHT_CENTER, what, font(12.0), TEXT_DIM());
+            bar(p, Rect::from_min_max(Pos2::new(tr.left() - 120.0, y - 2.0), Pos2::new(tr.left() - 10.0, y + 2.0)), if unpacking { 1.0 } else { frac }, BLUE());
         }
         _ if engine.ready() => {
             let rr = link(ui, Pos2::new(right, y), Align2::RIGHT_CENTER, "Remove", 12.0);
-            p.text(Pos2::new(rr.rect.left() - 12.0, y), Align2::RIGHT_CENTER, "Ready", font(12.0), GREEN);
-            if rr.on_hover_text(format!("Delete the model ({})", human_bytes(engine.bytes()))).clicked() {
+            p.text(Pos2::new(rr.rect.left() - 12.0, y), Align2::RIGHT_CENTER, "Ready", font(12.0), GREEN());
+            let tip = match engine {
+                Engine::Parakeet => format!("Delete the model ({})", human_bytes(engine.bytes())),
+                Engine::Whisper => format!("Delete the model ({}); Capture's transcripts use it too", human_bytes(engine.bytes())),
+            };
+            if rr.on_hover_text(tip).clicked() {
                 match engine {
                     Engine::Parakeet => crate::kit::parakeet::remove(),
                     Engine::Whisper => crate::kit::whisper::Model::Accurate.remove(),
@@ -430,7 +437,7 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
                 d.start_download(engine);
             }
             if let Some(e) = &d.download_error {
-                text_fit(p, Pos2::new(dr.left() - 10.0, y), Align2::RIGHT_CENTER, e, font(11.0), AMBER, dr.left() - card.left() - 130.0);
+                text_fit(p, Pos2::new(dr.left() - 10.0, y), Align2::RIGHT_CENTER, e, font(11.0), AMBER(), dr.left() - card.left() - 130.0);
             }
         }
     }
@@ -455,7 +462,7 @@ fn right_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     let id = ui.scope_id().with("dict-right");
     let mut changed = false;
     let x0 = col.left();
-    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "After", bold(15.0), TEXT);
+    p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "After", bold(15.0), TEXT());
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), 2);
     let rows: [(&str, &mut bool); 2] = [("Put the clipboard back", &mut d.settings.restore_clipboard), ("Keep history", &mut d.settings.keep_history)];
     for (k, (l, on)) in rows.into_iter().enumerate() {
@@ -477,15 +484,15 @@ fn right_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     }
 
     let y0 = card.bottom() + 28.0;
-    p.text(Pos2::new(x0, y0), Align2::LEFT_TOP, "Permissions", bold(15.0), TEXT);
+    p.text(Pos2::new(x0, y0), Align2::LEFT_TOP, "Permissions", bold(15.0), TEXT());
     let card = card_rows(p, x0, y0 + 28.0, col.width(), 2);
     for (k, perm) in [Perm::Microphone, Perm::Accessibility].into_iter().enumerate() {
         let y = row_y(card, k);
-        icon(p, perm.icon(), Rect::from_center_size(Pos2::new(card.left() + 21.0, y), Vec2::splat(15.0)), TEXT_DIM);
-        p.text(Pos2::new(card.left() + 38.0, y), Align2::LEFT_CENTER, perm.name(), font(13.0), TEXT);
+        icon(p, perm.icon(), Rect::from_center_size(Pos2::new(card.left() + 21.0, y), Vec2::splat(15.0)), TEXT_DIM());
+        p.text(Pos2::new(card.left() + 38.0, y), Align2::LEFT_CENTER, perm.name(), font(13.0), TEXT());
         let right = card.right() - 12.0;
         if perm.status() == Status::Allowed {
-            p.text(Pos2::new(right, y), Align2::RIGHT_CENTER, "Allowed", font(12.0), GREEN);
+            p.text(Pos2::new(right, y), Align2::RIGHT_CENTER, "Allowed", font(12.0), GREEN());
         } else {
             let label = perm.ask_label();
             let bw = button_width(p, label, BTN_PRIMARY);
