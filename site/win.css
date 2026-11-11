@@ -314,6 +314,11 @@
   .switcher .cpr .src, .switcher .cfl .fc:nth-child(n+4) { display: none; } .switcher .srch2 { width: 110px; }
   .switcher .bubbles { max-height: 360px; }
   .switcher .sr2 .chip { display: none; }
+  .switcher .sb { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 10px 12px; }
+  .switcher .sb::-webkit-scrollbar { display: none; }
+  .switcher .tl3 { flex: none; flex-basis: auto; align-self: center; padding: 0 6px 0 0; }
+  .switcher .nv { flex: none; }
+  .switcher .fb > span:first-child { white-space: nowrap; } .switcher .fb .btn2 { display: none; }
 }
 
 /* Dictation: history cards */

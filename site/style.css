@@ -88,6 +88,8 @@ h1 { font: 500 76px/80px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
   h1 { font-size: 44px; line-height: 48px; }
   .cta .btn { flex: 1 1 100%; justify-content: center; }
   .switcher h2 { font-size: 34px; line-height: 40px; margin-bottom: 28px; }
+  .desk { padding-bottom: 24px; }
+  .switcher { padding-top: 40px; padding-bottom: 56px; }
   .mk .cl { grid-template-columns: 16px 1fr 64px; }
   .mk .cl .trk { display: none; }
 }
