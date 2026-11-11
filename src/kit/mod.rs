@@ -16,5 +16,6 @@ pub mod native;
 pub mod notify;
 pub mod perms;
 pub mod plist;
+pub mod sound;
 pub mod tile;
 pub mod viewport;

@@ -575,20 +575,31 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     }
 }
 
-/// Open at login, what macOS allows the tools (live), and setup again.
+/// Open at login, sounds, what macOS allows the tools (live), and setup again.
 fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let p = ui.painter().clone();
     let w = 600.0f32.min(body.width() - 48.0);
     let x = body.center().x - w / 2.0;
     let mut y = body.top() + 24.0;
-    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 44.0));
+    let row_h = 44.0;
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, row_h * 2.0));
     glass_card(&p, card, R_CARD, 0.0, false);
-    let sw = Rect::from_min_size(Pos2::new(card.right() - 42.0, card.center().y - 9.0), Vec2::new(30.0, 18.0));
-    p.text(Pos2::new(card.left() + 16.0, card.center().y), Align2::LEFT_CENTER, "Open at login", font(13.0), TEXT);
+    let row = |k: usize| Rect::from_min_size(Pos2::new(card.left(), card.top() + k as f32 * row_h), Vec2::new(w, row_h));
+    let sw_in = |r: Rect| Rect::from_min_size(Pos2::new(r.right() - 42.0, r.center().y - 9.0), Vec2::new(30.0, 18.0));
+    let (r0, r1) = (row(0), row(1));
+    hairline(&p, Pos2::new(r1.left() + 16.0, r1.top()), Pos2::new(r1.right() - 16.0, r1.top()));
+    p.text(Pos2::new(r0.left() + 16.0, r0.center().y), Align2::LEFT_CENTER, "Open at login", font(13.0), TEXT);
     let now = ui.ctx().input(|i| i.time);
     let on = app.perm_watch.login_on(app.demo, now);
-    if switch(ui, sw, ui.scope_id().with("open-at-login"), on, true).clicked() && !app.demo {
+    if switch(ui, sw_in(r0), ui.scope_id().with("open-at-login"), on, true).clicked() && !app.demo {
         app.perm_watch.set_login(!on);
+    }
+    p.text(Pos2::new(r1.left() + 16.0, r1.center().y), Align2::LEFT_CENTER, "Sounds", font(13.0), TEXT);
+    let on = crate::kit::sound::on() || app.demo;
+    if switch(ui, sw_in(r1), ui.scope_id().with("sounds"), on, true).clicked() && !app.demo {
+        crate::kit::sound::set_on(!on);
+        // a taste of what was just turned on
+        crate::kit::sound::play(crate::kit::sound::Cue::Ready);
     }
     y = card.bottom() + 28.0;
     p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Permissions", bold(15.0), TEXT);

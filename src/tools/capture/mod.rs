@@ -525,7 +525,7 @@ impl Capture {
             }
         };
         self.forget_dropped_thumbs();
-        if self.settings.sound {
+        if self.settings.sound && crate::kit::sound::on() {
             mac::play_shutter();
         }
         let (copied, saved) = (self.settings.copy, self.settings.save);

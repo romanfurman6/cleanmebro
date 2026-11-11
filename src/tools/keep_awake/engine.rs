@@ -156,6 +156,9 @@ impl Engine {
     }
 
     pub fn set_manual(&mut self, on: bool, now: i64) {
+        if on != self.manual_since.is_some() {
+            crate::kit::sound::play(if on { crate::kit::sound::Cue::Awake } else { crate::kit::sound::Cue::Asleep });
+        }
         self.manual_since = if on { Some(self.manual_since.unwrap_or(now)) } else { None };
         self.step(now);
     }

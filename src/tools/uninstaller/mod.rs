@@ -345,6 +345,7 @@ impl Uninstaller {
                     st2.lock().unwrap().working = Some(line);
                     c2.request_repaint();
                 });
+                crate::kit::sound::play(if rep.failed.is_empty() { crate::kit::sound::Cue::Done } else { crate::kit::sound::Cue::Oops });
                 {
                     let mut g = st.lock().unwrap();
                     g.working = None;

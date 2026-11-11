@@ -357,6 +357,9 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
             g.phase = if use_ai && !stopped { Phase::Judging } else { Phase::Results };
         }
         ctx.request_repaint();
+        if !use_ai && !stopped {
+            crate::kit::sound::play(crate::kit::sound::Cue::Ready);
+        }
         if use_ai && !stopped {
             judge(&shared, &ctx);
             let mut g = shared.lock().unwrap();
@@ -365,6 +368,7 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
             }
             g.phase = Phase::Results;
             ctx.request_repaint();
+            crate::kit::sound::play(crate::kit::sound::Cue::Ready);
         }
     });
 }
@@ -892,6 +896,7 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
             record_clean(g.cleaned_bytes);
         }
         ctx.request_repaint();
+        crate::kit::sound::play(if g.failed.is_empty() { crate::kit::sound::Cue::Done } else { crate::kit::sound::Cue::Oops });
     });
 }
 
