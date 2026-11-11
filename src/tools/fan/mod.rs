@@ -234,7 +234,7 @@ fn chip_name() -> String {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Fan, color: tint::FAN }
+    Badge { icon: Icon::Fan, color: tint::FAN() }
 }
 
 impl Tool for FanControl {

@@ -331,10 +331,10 @@ impl Editor {
     pub fn ui(&mut self, ui: &mut Ui, full: Rect, lights: bool) {
         self.poll_ocr(ui.ctx());
         let p = ui.painter().clone();
-        p.rect_filled(full, 12.0, BG);
+        p.rect_filled(full, 12.0, BG());
         // title bar
         let title = Rect::from_min_size(full.min, Vec2::new(full.width(), 42.0));
-        p.rect_filled(title, egui::CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, FOOTER);
+        p.rect_filled(title, egui::CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, FOOTER());
         hairline(&p, title.left_bottom(), title.right_bottom());
         if lights {
             for (k, c) in [Color32::from_rgb(255, 95, 87), Color32::from_rgb(254, 188, 46), Color32::from_rgb(40, 200, 64)].iter().enumerate() {
@@ -342,8 +342,8 @@ impl Editor {
             }
         }
         let (w, h) = self.base.dimensions();
-        let head = p.text(title.center() - Vec2::new(30.0, 0.0), Align2::CENTER_CENTER, &self.title, bold(13.0), TEXT);
-        p.text(Pos2::new(head.right() + 6.0, title.center().y), Align2::LEFT_CENTER, format!("· {w}×{h}"), font(13.0), TEXT_FAINT);
+        let head = p.text(title.center() - Vec2::new(30.0, 0.0), Align2::CENTER_CENTER, &self.title, bold(13.0), TEXT());
+        p.text(Pos2::new(head.right() + 6.0, title.center().y), Align2::LEFT_CENTER, format!("· {w}×{h}"), font(13.0), TEXT_FAINT());
         let drag = ui.interact(Rect::from_min_max(title.min + Vec2::new(90.0, 0.0), title.max), ui.scope_id().with("drag"), Sense::click_and_drag());
         if drag.drag_started() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
@@ -360,11 +360,11 @@ impl Editor {
         let foot = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 32.0), full.max);
         hairline(&p, foot.left_top(), foot.right_top());
         let marks = self.doc.marks.len();
-        p.text(foot.left_center() + Vec2::new(14.0, 0.0), Align2::LEFT_CENTER, format!("{w}×{h} px · {marks} mark{}", if marks == 1 { "" } else { "s" }), font(12.0), TEXT_FAINT);
-        p.text(foot.right_center() - Vec2::new(14.0, 0.0), Align2::RIGHT_CENTER, "⌘C copy · ⌘S save · ⌘Z undo · Esc close", font(12.0), TEXT_FAINT);
+        p.text(foot.left_center() + Vec2::new(14.0, 0.0), Align2::LEFT_CENTER, format!("{w}×{h} px · {marks} mark{}", if marks == 1 { "" } else { "s" }), font(12.0), TEXT_FAINT());
+        p.text(foot.right_center() - Vec2::new(14.0, 0.0), Align2::RIGHT_CENTER, "⌘C copy · ⌘S save · ⌘Z undo · Esc close", font(12.0), TEXT_FAINT());
 
         let canvas = Rect::from_min_max(Pos2::new(full.left(), top), Pos2::new(full.right(), foot.top()));
-        p.rect_filled(canvas, 0.0, Color32::from_rgb(0x12, 0x12, 0x14));
+        p.rect_filled(canvas, 0.0, pick(Color32::from_rgb(0x0B, 0x12, 0x0A), Color32::from_rgb(0xD5, 0xDE, 0xCC)));
         self.canvas(ui, canvas);
         self.keys(ui);
         if self.ocr_busy {
@@ -373,11 +373,11 @@ impl Editor {
         }
         if let Some((msg, at)) = &self.status {
             if at.elapsed().as_secs_f32() < 2.5 {
-                let g = p.layout_no_wrap(msg.clone(), font(13.0), TEXT);
+                let g = p.layout_no_wrap(msg.clone(), font(13.0), TEXT());
                 let r = Rect::from_center_size(Pos2::new(canvas.center().x, canvas.bottom() - 30.0), g.size() + Vec2::new(28.0, 16.0));
-                p.rect_filled(r, r.height() / 2.0, RAISED);
+                p.rect_filled(r, r.height() / 2.0, RAISED());
                 p.rect_stroke(r, r.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
-                p.galley(r.center() - g.size() / 2.0, g, TEXT);
+                p.galley(r.center() - g.size() / 2.0, g, TEXT());
                 ui.ctx().request_repaint();
             } else {
                 self.status = None;
@@ -427,12 +427,12 @@ impl Editor {
             rx = r.left() - 8.0;
             let resp = if lay.icons_only {
                 let resp = pill_button(ui, r, "", kind, true);
-                icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(14.0)), TEXT);
+                icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(14.0)), TEXT());
                 resp
             } else if ic == Ico::Pin {
                 let resp = pill_button(ui, r, "", kind, true);
-                icons::draw(ui.painter(), ic, Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(14.0)), TEXT);
-                ui.painter().text(Pos2::new(r.left() + 28.0, y), Align2::LEFT_CENTER, label, font(12.0), TEXT);
+                icons::draw(ui.painter(), ic, Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(14.0)), TEXT());
+                ui.painter().text(Pos2::new(r.left() + 28.0, y), Align2::LEFT_CENTER, label, font(12.0), TEXT());
                 resp
             } else {
                 pill_button(ui, r, label, kind, true)
@@ -454,7 +454,7 @@ impl Editor {
     /// The sub bar: only the current tool's options, or a short hint.
     fn options(&mut self, ui: &mut Ui, strip: Rect) {
         let p = ui.painter().clone();
-        p.rect_filled(strip, 0.0, Color32::from_rgb(0x20, 0x20, 0x24));
+        p.rect_filled(strip, 0.0, FOOTER());
         let y = strip.center().y;
         let mut x = strip.left() + BAR_PAD;
         let name = match self.tool {
@@ -471,14 +471,14 @@ impl Editor {
             Tool::Picker => "Pick a color",
             Tool::Ruler => "Ruler",
         };
-        x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, name, bold(12.0), TEXT).right() + 16.0;
+        x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, name, bold(12.0), TEXT()).right() + 16.0;
         let hint: String = match self.tool {
             Tool::Arrow | Tool::Rect | Tool::Highlight | Tool::Steps | Tool::Text => {
                 for (k, (cname, c)) in COLORS.iter().enumerate() {
                     let r = Rect::from_center_size(Pos2::new(x + 9.0, y), Vec2::splat(18.0));
                     let resp = ui.interact(r.expand(3.0), ui.scope_id().with(("color", k)), Sense::click()).on_hover_text(*cname);
                     if self.color == k {
-                        crate::kit::glass::stroke_circle(&p, r.center(), 11.5, Stroke::new(2.0, BLUE));
+                        crate::kit::glass::stroke_circle(&p, r.center(), 11.5, Stroke::new(2.0, BLUE()));
                     }
                     p.circle_filled(r.center(), 9.0, Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
                     crate::kit::glass::stroke_circle(&p, r.center(), 9.0, Stroke::new(1.0, if self.color == k { Color32::WHITE } else { white(64) }));
@@ -491,7 +491,7 @@ impl Editor {
                 p.line_segment([Pos2::new(x + 4.0, y - 9.0), Pos2::new(x + 4.0, y + 9.0)], Stroke::new(1.0, white(26)));
                 x += 14.0;
                 let sized = matches!(self.tool, Tool::Text | Tool::Steps);
-                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, if sized { "Size" } else { "Width" }, font(12.0), TEXT_DIM).right() + 8.0;
+                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, if sized { "Size" } else { "Width" }, font(12.0), TEXT_DIM()).right() + 8.0;
                 let plate = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(3.0 * 30.0 + 4.0, 26.0));
                 p.rect_filled(plate, R_BUTTON, white(13));
                 for k in 0..3 {
@@ -499,10 +499,10 @@ impl Editor {
                     let tip = if sized { ["Small", "Medium", "Large"][k] } else { ["Thin", "Medium", "Thick"][k] };
                     let resp = ui.interact(r, ui.scope_id().with(("stroke", k)), Sense::click()).on_hover_text(tip);
                     if self.stroke == k {
-                        p.rect_filled(r, 6.0, Color32::from_rgb(0x48, 0x48, 0x4E));
+                        p.rect_filled(r, 6.0, pick(Color32::from_white_alpha(40), Color32::WHITE));
                     }
                     let t = [2.0, 4.0, 6.0][k];
-                    p.rect_filled(Rect::from_center_size(r.center(), Vec2::new(14.0, t)), t / 2.0, if self.stroke == k { TEXT } else { TEXT_SOFT });
+                    p.rect_filled(Rect::from_center_size(r.center(), Vec2::new(14.0, t)), t / 2.0, if self.stroke == k { TEXT() } else { TEXT_SOFT() });
                     if resp.clicked() {
                         self.stroke = k;
                     }
@@ -512,7 +512,7 @@ impl Editor {
             }
             Tool::Blur | Tool::Eraser => {
                 if self.tool == Tool::Blur {
-                    x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Style", font(12.0), TEXT_DIM).right() + 8.0;
+                    x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Style", font(12.0), TEXT_DIM()).right() + 8.0;
                     let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(200.0, 26.0));
                     let cur = match self.blur {
                         BlurStyle::Pixelate => 0,
@@ -524,7 +524,7 @@ impl Editor {
                     }
                     x = r.right() + 16.0;
                 }
-                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Cover", font(12.0), TEXT_DIM).right() + 8.0;
+                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Cover", font(12.0), TEXT_DIM()).right() + 8.0;
                 let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(170.0, 26.0));
                 if let Some(i) = segmented(ui, r, ui.scope_id().with("cover"), &["Whole box", "Only text"], (self.cover == Cover::Text) as usize) {
                     self.cover = if i == 1 { Cover::Text } else { Cover::Box };
@@ -542,7 +542,7 @@ impl Editor {
             Tool::Select => "Click a mark to select, drag to move, ⌫ deletes".into(),
         };
         if !hint.is_empty() {
-            text_fit(&p, Pos2::new(x, y), Align2::LEFT_CENTER, &hint, font(12.0), TEXT_FAINT, (strip.right() - BAR_PAD - x).max(40.0));
+            text_fit(&p, Pos2::new(x, y), Align2::LEFT_CENTER, &hint, font(12.0), TEXT_FAINT(), (strip.right() - BAR_PAD - x).max(40.0));
         }
     }
 
@@ -611,7 +611,7 @@ impl Editor {
             draw_mark(&p, m, &to_screen, scale);
             if self.selected == Some(i) {
                 let b = m.bounds();
-                p.rect_stroke(Rect::from_min_max(to_screen(b.min), to_screen(b.max)).expand(3.0), 3.0, Stroke::new(1.5, ACCENT), StrokeKind::Outside);
+                p.rect_stroke(Rect::from_min_max(to_screen(b.min), to_screen(b.max)).expand(3.0), 3.0, Stroke::new(1.5, ACCENT()), StrokeKind::Outside);
             }
         }
         if self.tool == Tool::Crop && self.drag.is_none() {
@@ -622,16 +622,16 @@ impl Editor {
                 p.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.5, Color32::WHITE), 6.0, 4.0));
                 tag(&p, cr.right_bottom() + Vec2::new(6.0, 6.0), &format!("{:.0} × {:.0}", c.width().round(), c.height().round()));
                 let hint = "Enter to crop · Esc to cancel";
-                let g = p.layout_no_wrap(hint.to_string(), font(12.0), TEXT);
+                let g = p.layout_no_wrap(hint.to_string(), font(12.0), TEXT());
                 let mut at = Pos2::new(cr.center().x - g.size().x / 2.0 - 12.0, cr.top() - g.size().y - 22.0);
                 if at.y < area.top() + 4.0 {
                     at.y = cr.bottom() + 10.0;
                 }
                 at.x = at.x.clamp(area.left() + 4.0, area.right() - g.size().x - 28.0);
                 let hr = Rect::from_min_size(at, g.size() + Vec2::new(24.0, 12.0));
-                p.rect_filled(hr, hr.height() / 2.0, RAISED);
+                p.rect_filled(hr, hr.height() / 2.0, RAISED());
                 p.rect_stroke(hr, hr.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
-                p.galley(hr.center() - g.size() / 2.0, g, TEXT);
+                p.galley(hr.center() - g.size() / 2.0, g, TEXT());
             } else if let Some(c) = self.doc.crop {
                 let cr = Rect::from_min_max(to_screen(c.min), to_screen(c.max));
                 shade_outside(&p, shown, cr);
@@ -779,8 +779,8 @@ impl Editor {
                 tag(p, sr.right_bottom() + Vec2::new(6.0, 6.0), &format!("{w:.0} × {h:.0}"));
             }
             Tool::Blur | Tool::Eraser | Tool::CopyText => {
-                p.rect_filled(sr, 3.0, with_alpha(BLUE, 0.16));
-                p.extend(egui::Shape::dashed_line(&[sr.left_top(), sr.right_top(), sr.right_bottom(), sr.left_bottom(), sr.left_top()], Stroke::new(1.5, ACCENT), 5.0, 3.0));
+                p.rect_filled(sr, 3.0, with_alpha(BLUE(), 0.16));
+                p.extend(egui::Shape::dashed_line(&[sr.left_top(), sr.right_top(), sr.right_bottom(), sr.left_bottom(), sr.left_top()], Stroke::new(1.5, ACCENT()), 5.0, 3.0));
             }
             _ => {
                 if let Some(m) = self.mark_from_drag(a, b) {
@@ -1014,10 +1014,10 @@ fn shade_outside(p: &egui::Painter, shown: Rect, keep: Rect) {
 
 /// A small yellow measurement tag.
 pub fn tag(p: &egui::Painter, pos: Pos2, label: &str) {
-    let g = p.layout_no_wrap(label.to_owned(), bold(11.0), BG);
+    let g = p.layout_no_wrap(label.to_owned(), bold(11.0), BG());
     let r = Rect::from_min_size(pos, g.size() + Vec2::new(12.0, 6.0));
     p.rect_filled(r, 5.0, Color32::from_rgb(255, 214, 10));
-    p.galley(r.min + Vec2::new(6.0, 3.0), g, BG);
+    p.galley(r.min + Vec2::new(6.0, 3.0), g, BG());
 }
 
 /// A magnified 9×9 pixel grid around `q` (image px) drawn near `at`, with the hex.
@@ -1039,11 +1039,11 @@ pub fn loupe(p: &egui::Painter, img: &RgbaImage, q: Pos2, at: Pos2, c: Rgba8) {
     p.rect_stroke(mid, 0.0, Stroke::new(2.0, Color32::WHITE), StrokeKind::Outside);
     p.rect_stroke(mid, 0.0, Stroke::new(1.0, Color32::BLACK), StrokeKind::Inside);
     let label = render::hex(c);
-    let g = p.layout_no_wrap(label, mono(12.0), TEXT);
+    let g = p.layout_no_wrap(label, mono(12.0), TEXT());
     let lr = Rect::from_min_size(Pos2::new(r.left(), r.bottom() + 8.0), Vec2::new(g.size().x + 30.0, 24.0));
-    p.rect_filled(lr, 7.0, RAISED);
+    p.rect_filled(lr, 7.0, RAISED());
     p.rect_filled(Rect::from_center_size(Pos2::new(lr.left() + 12.0, lr.center().y), Vec2::splat(12.0)), 3.0, c32([c[0], c[1], c[2], 255]));
-    p.galley(Pos2::new(lr.left() + 22.0, lr.center().y - g.size().y / 2.0), g, TEXT);
+    p.galley(Pos2::new(lr.left() + 22.0, lr.center().y - g.size().y / 2.0), g, TEXT());
 }
 
 /// A tool button that stays lit while its tool is on.
@@ -1051,11 +1051,11 @@ fn icon_toggle(ui: &mut Ui, r: Rect, ic: Ico, tip: &str, on: bool) -> egui::Resp
     let resp = ui.interact(r, ui.scope_id().with(("tool", tip)), Sense::click());
     let p = ui.painter();
     if on {
-        p.rect_filled(r, 6.0, BLUE);
+        p.rect_filled(r, 6.0, BLUE());
     } else if resp.hovered() {
         p.rect_filled(r, 6.0, white(20));
     }
-    icons::draw(p, ic, Rect::from_center_size(r.center(), Vec2::splat(16.0)), if on { Color32::WHITE } else { TEXT_SOFT });
+    icons::draw(p, ic, Rect::from_center_size(r.center(), Vec2::splat(16.0)), if on { Color32::WHITE } else { TEXT_SOFT() });
     resp.on_hover_text(tip)
 }
 
@@ -1064,7 +1064,7 @@ fn plain_icon(ui: &mut Ui, r: Rect, ic: Ico, tip: &str, enabled: bool) -> egui::
     if enabled && resp.hovered() {
         ui.painter().rect_filled(r, 6.0, white(20));
     }
-    icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(16.0)), if enabled { TEXT_SOFT } else { TEXT_MUTED });
+    icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(16.0)), if enabled { TEXT_SOFT() } else { TEXT_MUTED() });
     resp.on_hover_text(tip)
 }
 

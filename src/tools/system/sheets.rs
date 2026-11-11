@@ -35,9 +35,9 @@ pub enum Action {
 
 fn level_color(l: Level) -> Color32 {
     match l {
-        Level::Good => GREEN,
-        Level::Fair => AMBER,
-        Level::Critical => RED,
+        Level::Good => GREEN(),
+        Level::Fair => AMBER(),
+        Level::Critical => RED(),
     }
 }
 
@@ -63,11 +63,11 @@ struct Legend {
 }
 
 fn leg(color: Color32, label: &str, value: impl Into<String>) -> Legend {
-    Legend { color, label: label.into(), value: value.into(), value_col: TEXT }
+    Legend { color, label: label.into(), value: value.into(), value_col: TEXT() }
 }
 
 fn leg_dim(label: &str, value: impl Into<String>) -> Legend {
-    Legend { color: FREE, label: label.into(), value: value.into(), value_col: TEXT_DIM }
+    Legend { color: FREE, label: label.into(), value: value.into(), value_col: TEXT_DIM() }
 }
 
 /// Everything one sheet shows, filled per kind and drawn by one template.
@@ -104,12 +104,12 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
     match kind {
         Sheet::Storage => {
             let name = if s.volume_name.is_empty() { "Macintosh HD".to_string() } else { s.volume_name.clone() };
-            let mut sp = Spec::new(Icon::Disk, BLUE, name, format!("{} drive", human_bytes(s.disk_total)));
+            let mut sp = Spec::new(Icon::Disk, tint::HEALTH(), name, format!("{} drive", human_bytes(s.disk_total)));
             let total = s.disk_total.max(1) as f32;
             let used = s.disk_total.saturating_sub(s.disk_free);
             let (n, u) = split_num(&human_bytes(s.disk_free));
             sp.hero = Some((n, u, format!("free of {}", human_bytes(s.disk_total))));
-            let colors = [ACCENT, AMBER, TEAL, GREEN];
+            let colors = [tint::HEALTH(), AMBER(), tint::KEEP_AWAKE(), GREEN()];
             let cat_sum: u64 = s.categories.iter().map(|c| c.1).sum();
             let other = used.saturating_sub(cat_sum);
             for (i, (label, b)) in s.categories.iter().enumerate() {
@@ -117,38 +117,38 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 sp.segs.push((*b as f32 / total, c));
                 sp.legend.push(leg(c, label, human_bytes(*b)));
             }
-            sp.segs.push((other as f32 / total, PURPLE));
-            sp.legend.push(leg(PURPLE, "Other", human_bytes(other)));
+            sp.segs.push((other as f32 / total, PURPLE()));
+            sp.legend.push(leg(PURPLE(), "Other", human_bytes(other)));
             sp.legend.push(leg_dim("Free", human_bytes(s.disk_free)));
             let (hv, hc, hh) = if s.smart_status.is_empty() {
-                ("—".to_string(), TEXT, "macOS didn't report the drive's health.")
+                ("—".to_string(), TEXT(), "macOS didn't report the drive's health.")
             } else if s.smart_status.eq_ignore_ascii_case("Verified") {
-                ("Verified".into(), GREEN, "No problems")
+                ("Verified".into(), GREEN(), "No problems")
             } else {
-                (s.smart_status.clone(), RED, "Back up now and replace it")
+                (s.smart_status.clone(), RED(), "Back up now and replace it")
             };
             sp.facts.push(fact("Drive health", hv, hc, hh));
             match s.trash_bytes {
                 Some(b) => {
                     let hint = if s.trash_overfill() { format!("Over the {} nudge limit.", human_bytes(m::TRASH_SIZE_THRESHOLD)) } else { format!("Under the {} nudge limit.", human_bytes(m::TRASH_SIZE_THRESHOLD)) };
-                    sp.facts.push(fact("Trash", human_bytes(b), if s.trash_overfill() { AMBER } else { TEXT }, &hint));
+                    sp.facts.push(fact("Trash", human_bytes(b), if s.trash_overfill() { AMBER() } else { TEXT() }, &hint));
                 }
-                None => sp.facts.push(fact("Trash", "—", TEXT, "Needs Full Disk Access")),
+                None => sp.facts.push(fact("Trash", "—", TEXT(), "Needs Full Disk Access")),
             }
             let measure = if s.categories.is_empty() { "Measure folders" } else { "Measure again" };
             sp.buttons = vec![(measure, BTN_SECONDARY, Action::MeasureFolders), ("Disk Map", BTN_SECONDARY, Action::Open("lens")), ("Free up space", BTN_PRIMARY, Action::Open("cleanup"))];
             sp
         }
         Sheet::Memory => {
-            let mut sp = Spec::new(Icon::Memory, tint::HEALTH, "Memory", format!("{} memory", human_bytes(s.mem_total)));
+            let mut sp = Spec::new(Icon::Memory, tint::HEALTH(), "Memory", format!("{} memory", human_bytes(s.mem_total)));
             let total = s.mem_total.max(1) as f32;
             let (n, u) = split_num(&human_bytes(s.mem_available));
             sp.hero = Some((n, u, "available".into()));
-            sp.segs = vec![(s.mem_active as f32 / total, ACCENT), (s.mem_wired as f32 / total, AMBER), (s.mem_compressed as f32 / total, PURPLE)];
+            sp.segs = vec![(s.mem_active as f32 / total, tint::HEALTH()), (s.mem_wired as f32 / total, AMBER()), (s.mem_compressed as f32 / total, PURPLE())];
             sp.legend = vec![
-                leg(ACCENT, "Apps (active)", human_bytes(s.mem_active)),
-                leg(AMBER, "Wired", human_bytes(s.mem_wired)),
-                leg(PURPLE, "Compressed", human_bytes(s.mem_compressed)),
+                leg(tint::HEALTH(), "Apps (active)", human_bytes(s.mem_active)),
+                leg(AMBER(), "Wired", human_bytes(s.mem_wired)),
+                leg(PURPLE(), "Compressed", human_bytes(s.mem_compressed)),
                 leg_dim("Available", human_bytes(s.mem_available)),
             ];
             let l = s.mem_level();
@@ -159,7 +159,7 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             };
             let hint = if l == Level::Good { "" } else { "Memory is tight" };
             sp.facts.push(fact("Pressure", format!("{:.0}% · {word}", s.mem_pressure), level_color(l), hint));
-            sp.facts.push(fact("Swap used", human_bytes(s.swap_used), TEXT, ""));
+            sp.facts.push(fact("Swap used", human_bytes(s.swap_used), TEXT(), ""));
             sp
         }
         Sheet::Battery => {
@@ -175,13 +175,13 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             } else {
                 "On battery"
             };
-            let mut sp = Spec::new(Icon::Battery(b.percent), tint::HEALTH, "Battery", state);
+            let mut sp = Spec::new(Icon::Battery(b.percent), tint::HEALTH(), "Battery", state);
             if !b.present {
-                sp.facts.push(fact("Power", "Adapter", TEXT, "This Mac has no battery."));
+                sp.facts.push(fact("Power", "Adapter", TEXT(), "This Mac has no battery."));
                 return sp;
             }
             sp.hero = Some((b.percent.to_string(), "%".into(), "charge".into()));
-            sp.segs = vec![(b.percent as f32 / 100.0, if b.percent <= 20 { RED } else { GREEN })];
+            sp.segs = vec![(b.percent as f32 / 100.0, if b.percent <= 20 { RED() } else { GREEN() })];
             let hv = b.health_pct.map(|h| format!("{h:.0}%")).unwrap_or_else(|| "—".into());
             let hd = match m::battery_health_state(&b.health_text, b.permanent_failure) {
                 m::BatteryHealthState::Good => {
@@ -196,10 +196,10 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 m::BatteryHealthState::Unknown => "Not available",
             };
             sp.facts.push(fact("Health", hv, level_color(s.battery_level()), hd));
-            sp.facts.push(fact("Charge cycles", format!("{} of {}", b.cycles, if b.design_cycles > 0 { b.design_cycles } else { 1000 }), TEXT, ""));
+            sp.facts.push(fact("Charge cycles", format!("{} of {}", b.cycles, if b.design_cycles > 0 { b.design_cycles } else { 1000 }), TEXT(), ""));
             match b.temp_c {
-                Some(t) => sp.facts.push(fact("Temperature", format!("{t:.0} °C"), if t < 35.0 { TEXT } else { AMBER }, if t < 35.0 { "Within the normal range." } else { "Warmer than ideal." })),
-                None => sp.facts.push(fact("Temperature", "—", TEXT, "Not reported")),
+                Some(t) => sp.facts.push(fact("Temperature", format!("{t:.0} °C"), if t < 35.0 { TEXT() } else { AMBER() }, if t < 35.0 { "Within the normal range." } else { "Warmer than ideal." })),
+                None => sp.facts.push(fact("Temperature", "—", TEXT(), "Not reported")),
             }
             let time = if b.charging {
                 b.minutes_left.map(|m| (format!("{} until full", human_duration(m as u64 * 60)), ""))
@@ -211,29 +211,29 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 None
             };
             if let Some((v, h)) = time {
-                sp.facts.push(fact(if b.plugged && !b.charging { "Why not charging" } else { "Time" }, v, TEXT, h));
+                sp.facts.push(fact(if b.plugged && !b.charging { "Why not charging" } else { "Time" }, v, TEXT(), h));
             }
             sp
         }
         Sheet::Cpu => {
             let sub = if s.chip.is_empty() { "Processor".to_string() } else { s.chip.clone() };
-            let mut sp = Spec::new(Icon::Cpu, tint::HEALTH, "CPU", sub);
+            let mut sp = Spec::new(Icon::Cpu, tint::HEALTH(), "CPU", sub);
             sp.hero = Some((format!("{:.0}", s.cpu_load), "%".into(), "load".into()));
             sp.spark = s.cpu_history.clone();
             sp.legend = vec![
-                leg(ACCENT, "User", format!("{:.0}%", s.cpu_user)),
-                leg(AMBER, "System", format!("{:.0}%", s.cpu_system)),
+                leg(tint::HEALTH(), "User", format!("{:.0}%", s.cpu_user)),
+                leg(AMBER(), "System", format!("{:.0}%", s.cpu_system)),
                 leg_dim("Idle", format!("{:.0}%", (100.0 - s.cpu_load).max(0.0))),
             ];
             let (th, tc) = match s.thermal {
-                0 => ("No thermal slowdown.", GREEN),
-                1 => ("Warm", AMBER),
-                2 => ("Hot, slowing down", RED),
-                _ => ("Too hot", RED),
+                0 => ("No thermal slowdown.", GREEN()),
+                1 => ("Warm", AMBER()),
+                2 => ("Hot, slowing down", RED()),
+                _ => ("Too hot", RED()),
             };
             sp.facts.push(fact("Temperature", s.thermal_word(), tc, th));
             let uh = if s.uptime_warning() { "Over a week" } else { "" };
-            sp.facts.push(fact("Uptime", human_duration(s.uptime_secs), if s.uptime_warning() { AMBER } else { TEXT }, uh));
+            sp.facts.push(fact("Uptime", human_duration(s.uptime_secs), if s.uptime_warning() { AMBER() } else { TEXT() }, uh));
             sp
         }
         Sheet::Network => {
@@ -242,31 +242,31 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             if !s.wifi.phy.is_empty() {
                 sub.push_str(&format!(" · {}", s.wifi.phy));
             }
-            let mut sp = Spec::new(Icon::Wifi, BLUE, title, sub);
+            let mut sp = Spec::new(Icon::Wifi, tint::HEALTH(), title, sub);
             let up = human_rate(s.net_up);
             let (n, u) = split_num(&up);
             sp.hero = Some((n, u, format!("up · {} down", human_rate(s.net_down))));
             sp.speed = true;
             let dash = |v: &str| if v.is_empty() { "—".to_string() } else { v.to_string() };
-            sp.facts.push(fact("Security", dash(&s.wifi.security), TEXT, ""));
-            sp.facts.push(fact("Channel", dash(&s.wifi.channel), TEXT, ""));
-            sp.facts.push(fact("Signal / noise", dash(&s.wifi.signal), TEXT, ""));
+            sp.facts.push(fact("Security", dash(&s.wifi.security), TEXT(), ""));
+            sp.facts.push(fact("Channel", dash(&s.wifi.channel), TEXT(), ""));
+            sp.facts.push(fact("Signal / noise", dash(&s.wifi.signal), TEXT(), ""));
             let label = if s.speed.down_mbps.is_some() { "Test again" } else { "Test speed" };
             sp.buttons = vec![(label, BTN_PRIMARY, Action::SpeedTest)];
             sp
         }
         Sheet::Devices => {
             let devs = super::devices::lowest_first(&s.devices);
-            let mut sp = Spec::new(Icon::Bluetooth, tint::NEUTRAL, "Devices", super::devices_ui::note(&devs));
+            let mut sp = Spec::new(Icon::Bluetooth, tint::NEUTRAL(), "Devices", super::devices_ui::note(&devs));
             for d in &devs {
                 match d.battery() {
                     Some(b) => sp.legend.push(Legend { color: super::devices::color(b), label: format!("{} · {}", d.name, d.kind.label()), value: format!("{b}%"), value_col: super::devices::text_color(b) }),
-                    None => sp.legend.push(Legend { color: TEXT_FAINT, label: d.name.clone(), value: "no battery data".into(), value_col: TEXT_FAINT }),
+                    None => sp.legend.push(Legend { color: TEXT_FAINT(), label: d.name.clone(), value: "no battery data".into(), value_col: TEXT_FAINT() }),
                 }
                 if d.split() {
                     for (label, v) in d.parts() {
                         if let Some(v) = v {
-                            sp.legend.push(Legend { color: with_alpha(super::devices::color(v), 0.55), label: format!("    {label}"), value: format!("{v}%"), value_col: TEXT_DIM });
+                            sp.legend.push(Legend { color: with_alpha(super::devices::color(v), 0.55), label: format!("    {label}"), value: format!("{v}%"), value_col: TEXT_DIM() });
                         }
                     }
                 }
@@ -357,8 +357,8 @@ impl Section {
             bx -= bw + 8.0;
         }
         let tw = (bx - r.left() - 40.0 - 8.0).max(60.0);
-        text_fit(&p, r.min + Vec2::new(40.0, 0.0), Align2::LEFT_TOP, &self.sp.title, bold(15.0), TEXT, tw);
-        text_fit(&p, r.min + Vec2::new(40.0, 19.0), Align2::LEFT_TOP, &self.sp.sub, font(12.0), TEXT_DIM, tw);
+        text_fit(&p, r.min + Vec2::new(40.0, 0.0), Align2::LEFT_TOP, &self.sp.title, bold(15.0), TEXT(), tw);
+        text_fit(&p, r.min + Vec2::new(40.0, 19.0), Align2::LEFT_TOP, &self.sp.sub, font(12.0), TEXT_DIM(), tw);
         let h = body(&p, ui.ctx(), &self.sp, self.kind, s, r.left(), r.width(), r.top() + SECTION_HEAD_H);
         let sw = switches(ui, &self.sp, r.left(), r.width(), r.top() + SECTION_HEAD_H + h + 14.0);
         if sw != Action::None {
@@ -389,10 +389,10 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
             let pts: Vec<Pos2> = sp.spark.iter().enumerate().map(|(i, v)| Pos2::new(hr.left() + hr.width() * i as f32 / (n - 1) as f32, hr.bottom() - 2.0 - (hr.height() - 4.0) * (v / top_v).clamp(0.0, 1.0))).collect();
             // soft fill under the line, then the line
             let mut mesh = egui::epaint::Mesh::default();
-            let fill = with_alpha(ACCENT, 0.14);
+            let fill = with_alpha(tint::HEALTH(), 0.14);
             for (i, q) in pts.iter().enumerate() {
                 mesh.colored_vertex(*q, fill);
-                mesh.colored_vertex(Pos2::new(q.x, hr.bottom()), with_alpha(ACCENT, 0.0));
+                mesh.colored_vertex(Pos2::new(q.x, hr.bottom()), with_alpha(tint::HEALTH(), 0.0));
                 if i > 0 {
                     let k = (i as u32) * 2;
                     mesh.add_triangle(k - 2, k - 1, k);
@@ -400,7 +400,7 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
                 }
             }
             p.add(mesh);
-            p.add(egui::epaint::PathShape::line(pts, egui::epaint::PathStroke::new(1.6, ACCENT)));
+            p.add(egui::epaint::PathShape::line(pts, egui::epaint::PathStroke::new(1.6, tint::HEALTH())));
             hairline(p, hr.left_bottom(), hr.right_bottom());
             y += 48.0 + 14.0;
         } else {
@@ -427,7 +427,7 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
         }
         y += h + 14.0;
     } else if kind == Sheet::Devices {
-        y += paragraph(p, Pos2::new(x0, y), "No devices", font(13.0), TEXT_DIM, w) + 14.0;
+        y += paragraph(p, Pos2::new(x0, y), "No devices", font(13.0), TEXT_DIM(), w) + 14.0;
     }
 
     // speed test card
@@ -435,38 +435,38 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
         let sp_ = &s.speed;
         let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 120.0));
         glass_card(p, lr, R_CARD, 0.0, false);
-        p.text(lr.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "Speed test", bold(13.0), TEXT);
+        p.text(lr.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "Speed test", bold(13.0), TEXT());
         if let Some(l) = sp_.latency_ms {
-            p.text(Pos2::new(lr.right() - 12.0, lr.top() + 13.0), Align2::RIGHT_TOP, format!("Latency {l:.0} ms"), font(12.0), TEXT_FAINT);
+            p.text(Pos2::new(lr.right() - 12.0, lr.top() + 13.0), Align2::RIGHT_TOP, format!("Latency {l:.0} ms"), font(12.0), TEXT_FAINT());
         }
         for (k, (label, v)) in [("Download", sp_.down_mbps), ("Upload", sp_.up_mbps)].iter().enumerate() {
             let x = lr.left() + 12.0 + k as f32 * (w / 2.0);
-            p.text(Pos2::new(x, lr.top() + 38.0), Align2::LEFT_TOP, *label, font(12.0), TEXT_DIM);
+            p.text(Pos2::new(x, lr.top() + 38.0), Align2::LEFT_TOP, *label, font(12.0), TEXT_DIM());
             let txt = v.map(|v| format!("{v:.0}")).unwrap_or_else(|| "—".into());
-            let g = p.layout_no_wrap(txt, bold(24.0), TEXT);
+            let g = p.layout_no_wrap(txt, bold(24.0), TEXT());
             let gw = g.size().x;
-            p.galley(Pos2::new(x, lr.top() + 54.0), g, TEXT);
-            p.text(Pos2::new(x + gw + 5.0, lr.top() + 76.0), Align2::LEFT_BOTTOM, "Mbps", font(13.0), TEXT_DIM);
+            p.galley(Pos2::new(x, lr.top() + 54.0), g, TEXT());
+            p.text(Pos2::new(x + gw + 5.0, lr.top() + 76.0), Align2::LEFT_BOTTOM, "Mbps", font(13.0), TEXT_DIM());
         }
         let note_y = lr.top() + 92.0;
         if sp_.running {
-            bar(p, Rect::from_min_size(Pos2::new(lr.left() + 12.0, note_y + 4.0), Vec2::new(w - 24.0, 4.0)), sp_.progress, ACCENT);
+            bar(p, Rect::from_min_size(Pos2::new(lr.left() + 12.0, note_y + 4.0), Vec2::new(w - 24.0, 4.0)), sp_.progress, tint::HEALTH());
             ctx.request_repaint();
         } else if let Some(e) = &sp_.error {
-            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &format!("{e}. Check the connection and try again."), font(12.0), AMBER, w - 24.0);
+            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &format!("{e}. Check the connection and try again."), font(12.0), AMBER(), w - 24.0);
         } else if let Some(d) = sp_.down_mbps {
             let good = monitor::good_for(d);
             let txt = if good.is_empty() { "Very slow".to_string() } else { format!("Good for {}.", good.join(", ").to_lowercase()) };
-            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &txt, font(12.0), TEXT_DIM, w - 24.0);
+            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &txt, font(12.0), TEXT_DIM(), w - 24.0);
         } else {
-            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, "", font(12.0), TEXT_DIM, w - 24.0);
+            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, "", font(12.0), TEXT_DIM(), w - 24.0);
         }
         y += 120.0 + 14.0;
     }
 
     // facts card (measure first, then draw)
     if !sp.facts.is_empty() {
-        let measure = |f: &Fact| if f.hint.is_empty() { 32.0 } else { 27.0 + p.layout(f.hint.clone(), font(12.0), TEXT_FAINT, w - 24.0).size().y + 8.0 };
+        let measure = |f: &Fact| if f.hint.is_empty() { 32.0 } else { 27.0 + p.layout(f.hint.clone(), font(12.0), TEXT_FAINT(), w - 24.0).size().y + 8.0 };
         let h: f32 = 8.0 + sp.facts.iter().map(measure).sum::<f32>();
         let fr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h));
         glass_card(p, fr, R_CARD, 0.0, false);
@@ -505,8 +505,8 @@ fn switches(ui: &mut Ui, sp: &Spec, x0: f32, w: f32, y: f32) -> Action {
             action = *act;
         }
         let tw = sr.left() - rr.left() - 24.0;
-        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, label, font(13.0), TEXT, tw);
-        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y + 2.0), Align2::LEFT_TOP, hint, font(12.0), TEXT_FAINT, tw);
+        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, label, font(13.0), TEXT(), tw);
+        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y + 2.0), Align2::LEFT_TOP, hint, font(12.0), TEXT_FAINT(), tw);
     }
     action
 }

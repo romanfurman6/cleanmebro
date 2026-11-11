@@ -791,7 +791,7 @@ fn demo_folder() -> PathBuf {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Crop, color: tint::CAPTURE }
+    Badge { icon: Icon::Crop, color: tint::CAPTURE() }
 }
 
 impl Tool for Capture {

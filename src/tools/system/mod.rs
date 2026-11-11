@@ -50,7 +50,7 @@ impl Tool for System {
         "Disk, memory, CPU, battery, network, devices"
     }
     fn badge(&self) -> Badge {
-        Badge { icon: Icon::Pulse, color: tint::HEALTH }
+        Badge { icon: Icon::Pulse, color: tint::HEALTH() }
     }
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};

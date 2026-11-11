@@ -43,7 +43,7 @@ impl Cleanup {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Broom, color: tint::CLEANUP }
+    Badge { icon: Icon::Broom, color: tint::CLEANUP() }
 }
 
 impl Tool for Cleanup {
@@ -90,8 +90,8 @@ impl Tool for Cleanup {
             _ => (value, sub),
         };
         let id = ui.scope_id().with("w-clean");
-        let col = tint::CLEANUP;
-        let bar = frac.map(|f| (f.clamp(0.01, 1.0), ACCENT)).ok_or(sub.as_str());
+        let col = tint::CLEANUP();
+        let bar = frac.map(|f| (f.clamp(0.01, 1.0), ACCENT())).ok_or(sub.as_str());
         let resp = match size {
             Size::S12 => tile::wide(ui, rect, id, Icon::Broom, col, "Clean", &value, bar, false),
             _ => {
@@ -102,9 +102,9 @@ impl Tool for Cleanup {
                         let tot = g.total().max(1) as f32;
                         let mut groups: Vec<(engine::Group, u64)> = engine::Group::ALL.iter().map(|k| (*k, g.group_bytes(*k))).filter(|(_, b)| *b > 0).collect();
                         groups.sort_by_key(|g| std::cmp::Reverse(g.1));
-                        groups.iter().take(3).map(|(grp, b)| (grp.title().to_string(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), human_bytes(*b))).collect()
+                        groups.iter().take(3).map(|(grp, b)| (grp.title().to_string(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT())), human_bytes(*b))).collect()
                     }
-                    engine::Phase::Scanning | engine::Phase::Judging | engine::Phase::Cleaning => vec![("Progress".into(), frac.map(|f| (f.clamp(0.01, 1.0), ACCENT)), format!("{:.0}%", frac.unwrap_or(0.0) * 100.0))],
+                    engine::Phase::Scanning | engine::Phase::Judging | engine::Phase::Cleaning => vec![("Progress".into(), frac.map(|f| (f.clamp(0.01, 1.0), ACCENT())), format!("{:.0}%", frac.unwrap_or(0.0) * 100.0))],
                     engine::Phase::Intro if !hist.is_empty() => vec![
                         ("Last clean".into(), None, last.map(|l| engine::days_ago(l.0)).unwrap_or_default()),
                         ("It freed".into(), None, last.map(|l| human_bytes(l.1)).unwrap_or_default()),

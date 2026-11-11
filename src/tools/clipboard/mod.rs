@@ -24,7 +24,8 @@ use store::{Clip, Kind, Store};
 
 pub const ID: ToolId = "clipboard";
 const CARD: &str = "recent";
-pub const TINT: Color32 = crate::kit::glass::BLUE;
+#[allow(non_snake_case)]
+pub fn TINT() -> Color32 { crate::kit::glass::tint::CAPTURE() }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -352,7 +353,7 @@ fn demo_store() -> Store {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Clipboard, color: TINT }
+    Badge { icon: Icon::Clipboard, color: TINT() }
 }
 
 impl Tool for Clipboard {

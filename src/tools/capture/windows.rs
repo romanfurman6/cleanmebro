@@ -181,10 +181,10 @@ fn countdown(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         crate::kit::glass::stroke_circle(&p, c0, 44.0, Stroke::new(4.0, white(30)));
         let frac = (left / total.max(0.1)).clamp(0.0, 1.0);
         let a0 = -std::f32::consts::FRAC_PI_2;
-        p.add(egui::epaint::PathShape::line(arc_points(c0, 44.0, a0, a0 + frac * std::f32::consts::TAU, 64), egui::epaint::PathStroke::new(4.0, tint::CAPTURE)));
-        p.text(c0, Align2::CENTER_CENTER, format!("{}", left.ceil().max(1.0) as u32), bold(40.0), TEXT);
-        p.text(Pos2::new(card.center().x, card.bottom() - 40.0), Align2::CENTER_CENTER, what, font(12.0), TEXT_SOFT);
-        p.text(Pos2::new(card.center().x, card.bottom() - 22.0), Align2::CENTER_CENTER, "Click to cancel", font(11.0), TEXT_FAINT);
+        p.add(egui::epaint::PathShape::line(arc_points(c0, 44.0, a0, a0 + frac * std::f32::consts::TAU, 64), egui::epaint::PathStroke::new(4.0, tint::CAPTURE())));
+        p.text(c0, Align2::CENTER_CENTER, format!("{}", left.ceil().max(1.0) as u32), bold(40.0), TEXT());
+        p.text(Pos2::new(card.center().x, card.bottom() - 40.0), Align2::CENTER_CENTER, what, font(12.0), TEXT_SOFT());
+        p.text(Pos2::new(card.center().x, card.bottom() - 22.0), Align2::CENTER_CENTER, "Click to cancel", font(11.0), TEXT_FAINT());
         if ui.interact(card, ui.scope_id().with("cancel"), Sense::click()).clicked() {
             cancel = true;
         }
@@ -214,11 +214,11 @@ fn permission(c: &mut Capture, ctx: &egui::Context, screen: Vec2, cx: &mut Cx) {
     crate::kit::viewport::show(ctx, ViewportId::from_hash_of(title), floating(title, pos, size).with_active(true), |ui, _| {
         let r = ui.max_rect();
         let p = ui.painter().clone();
-        p.rect_filled(r, 14.0, BG);
+        p.rect_filled(r, 14.0, BG());
         p.rect_stroke(r, 14.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
-        tool_chip(&p, Rect::from_min_size(r.min + Vec2::new(18.0, 18.0), Vec2::splat(32.0)), Icon::Crop, tint::CAPTURE);
-        p.text(r.min + Vec2::new(62.0, 20.0), Align2::LEFT_TOP, &title_text, bold(15.0), TEXT);
-        paragraph(&p, r.min + Vec2::new(62.0, 44.0), &body, font(13.0), TEXT_DIM, r.width() - 80.0);
+        tool_chip(&p, Rect::from_min_size(r.min + Vec2::new(18.0, 18.0), Vec2::splat(32.0)), Icon::Crop, tint::CAPTURE());
+        p.text(r.min + Vec2::new(62.0, 20.0), Align2::LEFT_TOP, &title_text, bold(15.0), TEXT());
+        paragraph(&p, r.min + Vec2::new(62.0, 44.0), &body, font(13.0), TEXT_DIM(), r.width() - 80.0);
         let y = r.bottom() - 46.0;
         let ow = button_width(&p, action, BTN_PRIMARY);
         let or = Rect::from_min_size(Pos2::new(r.right() - 18.0 - ow, y), Vec2::new(ow, 30.0));
@@ -290,18 +290,18 @@ fn preview(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         let hovered = ui.rect_contains_pointer(r);
         // header
         let hy = r.top() + 8.0 + 13.0;
-        icons::draw(&p, Ico::Check, Rect::from_center_size(Pos2::new(r.left() + 18.0, hy), Vec2::splat(13.0)), GREEN);
-        p.text(Pos2::new(r.left() + 30.0, hy), Align2::LEFT_CENTER, &pv.note, bold(12.0), TEXT);
+        icons::draw(&p, Ico::Check, Rect::from_center_size(Pos2::new(r.left() + 18.0, hy), Vec2::splat(13.0)), GREEN());
+        p.text(Pos2::new(r.left() + 30.0, hy), Align2::LEFT_CENTER, &pv.note, bold(12.0), TEXT());
         if hovered {
             let cr = Rect::from_center_size(Pos2::new(r.right() - 18.0, hy), Vec2::splat(20.0));
             let b = ui.interact(cr, ui.scope_id().with("close"), Sense::click());
             p.circle_filled(cr.center(), 10.0, white(if b.hovered() { 40 } else { 22 }));
-            icons::draw(&p, Ico::Close, cr.shrink(5.0), TEXT_SOFT);
+            icons::draw(&p, Ico::Close, cr.shrink(5.0), TEXT_SOFT());
             if b.on_hover_text("Close").clicked() {
                 act = Some(PreviewAct::Close);
             }
         } else {
-            p.text(Pos2::new(r.right() - 12.0, hy), Align2::RIGHT_CENTER, format!("{iw}×{ih}"), font(11.0), TEXT_FAINT);
+            p.text(Pos2::new(r.right() - 12.0, hy), Align2::RIGHT_CENTER, format!("{iw}×{ih}"), font(11.0), TEXT_FAINT());
         }
         // picture: drag moves the preview, click opens the editor
         let tr = Rect::from_min_size(Pos2::new(r.left() + 8.0, r.top() + 34.0), Vec2::new(w - 16.0, th));
@@ -312,7 +312,7 @@ fn preview(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         let tex = pv.tex.as_ref().map(|t| t.id()).unwrap();
         super::ui::thumb(&p, tr, Some(tex), (iw, ih), 8.0);
         let tresp = ui.interact(tr, ui.scope_id().with("pic"), Sense::click_and_drag());
-        p.rect_stroke(tr, 8.0, Stroke::new(1.0, if tresp.hovered() { ACCENT } else { white(26) }), StrokeKind::Inside);
+        p.rect_stroke(tr, 8.0, Stroke::new(1.0, if tresp.hovered() { ACCENT() } else { white(26) }), StrokeKind::Inside);
         if tresp.drag_started() {
             vctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
@@ -327,8 +327,8 @@ fn preview(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
             let br = Rect::from_min_size(Pos2::new(r.left() + 8.0 + k as f32 * (bw + 4.0), ay), Vec2::new(bw, 40.0));
             let b = ui.interact(br, ui.scope_id().with(("act", k)), Sense::click());
             p.rect_filled(br, 8.0, white(if b.hovered() { 34 } else { 16 }));
-            icons::draw(&p, *ico, Rect::from_center_size(Pos2::new(br.center().x, br.top() + 14.0), Vec2::splat(15.0)), TEXT);
-            p.text(Pos2::new(br.center().x, br.top() + 31.0), Align2::CENTER_CENTER, *label, font(11.0), TEXT_SOFT);
+            icons::draw(&p, *ico, Rect::from_center_size(Pos2::new(br.center().x, br.top() + 14.0), Vec2::splat(15.0)), TEXT());
+            p.text(Pos2::new(br.center().x, br.top() + 31.0), Align2::CENTER_CENTER, *label, font(11.0), TEXT_SOFT());
             if b.clicked() {
                 act = Some(*a);
             }
@@ -431,7 +431,7 @@ fn pins(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
                     pin.resize = None;
                 }
             }
-            p.rect_stroke(r, 0.0, Stroke::new(1.0, if hovered { with_alpha(ACCENT, 0.8) } else { white(40) }), StrokeKind::Inside);
+            p.rect_stroke(r, 0.0, Stroke::new(1.0, if hovered { with_alpha(ACCENT(), 0.8) } else { white(40) }), StrokeKind::Inside);
             if resp.drag_started() && pin.resize.is_none() {
                 vctx.send_viewport_cmd(ViewportCommand::StartDrag);
             }
@@ -614,10 +614,10 @@ fn overlay(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
             Measure::Color => "Pick a color: click to copy its hex code · Esc to close",
             Measure::Ruler => "Ruler: snaps to edges · drag to measure a box · click copies the size · Esc to close",
         };
-        let g = p.layout_no_wrap(hint.to_string(), font(12.0), TEXT);
+        let g = p.layout_no_wrap(hint.to_string(), font(12.0), TEXT());
         let hr = Rect::from_center_size(Pos2::new(r.center().x, r.top() + 44.0), g.size() + Vec2::new(28.0, 14.0));
         p.rect_filled(hr, hr.height() / 2.0, Color32::from_rgba_unmultiplied(28, 28, 31, 235));
-        p.galley(hr.center() - g.size() / 2.0, g, TEXT);
+        p.galley(hr.center() - g.size() / 2.0, g, TEXT());
         let hover = resp.hover_pos();
         match ov.mode {
             Measure::Color => {
@@ -710,7 +710,7 @@ fn hud(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         let p = ui.painter();
         p.rect_filled(r, r.height() / 2.0, Color32::from_rgba_unmultiplied(28, 28, 31, 240));
         p.rect_stroke(r, r.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
-        text_fit(p, r.center(), Align2::CENTER_CENTER, &msg, font(13.0), TEXT, r.width() - 24.0);
+        text_fit(p, r.center(), Align2::CENTER_CENTER, &msg, font(13.0), TEXT(), r.width() - 24.0);
     });
 }
 

@@ -26,7 +26,7 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &UsageInfo, sel: bool) -> eg
         Size::S12 => {
             let st = status(cl);
             let bar_or = if session.is_some() { Ok(((pct / 100.0).max(0.01), col)) } else { Err(st.as_str()) };
-            tile::wide(ui, r, id, Icon::Gauge, tint::CLAUDE, &format!("{} · session", cl.provider), &value, bar_or, sel)
+            tile::wide(ui, r, id, Icon::Gauge, tint::CLAUDE(), &format!("{} · session", cl.provider), &value, bar_or, sel)
         }
         Size::S14 => {
             let resp = tile::card(ui, r, id, sel);
@@ -36,14 +36,14 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &UsageInfo, sel: bool) -> eg
         _ => {
             let resp = tile::card(ui, r, id, sel);
             let p = ui.painter();
-            let body = tile::head(p, r, Icon::Gauge, tint::CLAUDE, &cl.plan_title(), &status(cl));
+            let body = tile::head(p, r, Icon::Gauge, tint::CLAUDE(), &cl.plan_title(), &status(cl));
             for (k, (label, l)) in [("Session", cl.session()), ("Week", cl.weekly())].into_iter().enumerate() {
                 let lr = Rect::from_min_size(Pos2::new(body.left(), body.top() + k as f32 * 22.0), Vec2::new(body.width(), 22.0));
                 let v = l.map(|l| format!("{:.0}% · {}", l.pct, short_reset(&l.resets).trim_start_matches("resets "))).unwrap_or_default();
                 tile::bar_line(p, lr, label, l.map(|l| ((l.pct / 100.0).max(0.01), super::page::usage_color(l.pct))), &v);
             }
             let lr = Rect::from_min_max(Pos2::new(body.left(), body.top() + 52.0), body.max);
-            p.text(lr.left_top(), Align2::LEFT_TOP, "Tokens · 7 days", font(11.0), TEXT_FAINT);
+            p.text(lr.left_top(), Align2::LEFT_TOP, "Tokens · 7 days", font(11.0), TEXT_FAINT());
             super::page::day_bars(p, Rect::from_min_max(lr.left_top() + Vec2::new(0.0, 17.0), lr.max), &cl.local.daily, 5.0);
             resp
         }
@@ -71,22 +71,22 @@ pub fn card(p: &egui::Painter, r: Rect, cl: &UsageInfo, t: f64) {
     let hy = r.top() + 17.0;
     let status = status(cl);
     let sw = text_fit(p, Pos2::new(x1, hy), Align2::RIGHT_CENTER, &status, ty::label(), white(166), 170.0).width();
-    text_fit(p, Pos2::new(x0, hy), Align2::LEFT_CENTER, &cl.plan_title(), ty::title(), TEXT, (x1 - sw - 12.0) - x0);
+    text_fit(p, Pos2::new(x0, hy), Align2::LEFT_CENTER, &cl.plan_title(), ty::title(), TEXT(), (x1 - sw - 12.0) - x0);
     if cl.limits.is_empty() && cl.loading {
-        spinner(p, Pos2::new(x1 - 8.0, r.top() + 56.0), 7.0, t, TEXT_DIM);
+        spinner(p, Pos2::new(x1 - 8.0, r.top() + 56.0), 7.0, t, TEXT_DIM());
     }
     let rows = [("Session", cl.session().cloned()), ("Week", cl.weekly().cloned())];
     for (k, (label, l)) in rows.iter().enumerate() {
         let yy = r.top() + 42.0 + k as f32 * 22.0;
-        p.text(Pos2::new(x0, yy), Align2::LEFT_CENTER, *label, font(12.0), TEXT_DIM);
+        p.text(Pos2::new(x0, yy), Align2::LEFT_CENTER, *label, font(12.0), TEXT_DIM());
         let bar_r = Rect::from_min_max(Pos2::new(x0 + 64.0, yy - 2.0), Pos2::new(x1 - 92.0 - 36.0 - 16.0, yy + 2.0));
         match l {
             Some(l) => {
                 bar(p, bar_r, (l.pct / 100.0).max(0.01), super::page::usage_color(l.pct));
-                p.text(Pos2::new(x1 - 92.0 - 8.0, yy), Align2::RIGHT_CENTER, format!("{:.0}%", l.pct), font(12.0), TEXT);
-                text_fit(p, Pos2::new(x1, yy), Align2::RIGHT_CENTER, short_reset(&l.resets).trim_start_matches("resets "), font(12.0), TEXT_FAINT, 92.0);
+                p.text(Pos2::new(x1 - 92.0 - 8.0, yy), Align2::RIGHT_CENTER, format!("{:.0}%", l.pct), font(12.0), TEXT());
+                text_fit(p, Pos2::new(x1, yy), Align2::RIGHT_CENTER, short_reset(&l.resets).trim_start_matches("resets "), font(12.0), TEXT_FAINT(), 92.0);
             }
-            None => bar(p, bar_r, 0.0, TEXT_DIM),
+            None => bar(p, bar_r, 0.0, TEXT_DIM()),
         }
     }
 }
@@ -111,12 +111,12 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         (Some(f), _) => format!("Limits updated {}", f.format("%H:%M")),
         _ => String::new(),
     };
-    if sheet_header(ui, rect, Icon::Gauge, tint::CLAUDE, &cl.plan_title(), &sub) {
+    if sheet_header(ui, rect, Icon::Gauge, tint::CLAUDE(), &cl.plan_title(), &sub) {
         cx.close_detail();
     }
     let rb = Rect::from_center_size(Pos2::new(rect.right() - 27.0 - 34.0, rect.top() + 29.0), Vec2::splat(26.0));
     if cl.loading {
-        spinner(&p, rb.center(), 6.0, t, TEXT_DIM);
+        spinner(&p, rb.center(), 6.0, t, TEXT_DIM());
         crate::kit::glass::animate(&ctx);
     } else if round_button(ui, rb, Icon::Refresh, "Refresh limits").clicked() {
         backend::request_refresh();
@@ -133,15 +133,15 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     glass_card(&p, lr, R_CARD, 0.0, false);
     if n == 0 {
         let msg = cl.error.clone().unwrap_or_else(|| format!("Asking {} for your limits…", cl.provider));
-        paragraph(&p, lr.min + Vec2::new(12.0, 12.0), &msg, font(13.0), TEXT_DIM, w - 24.0);
+        paragraph(&p, lr.min + Vec2::new(12.0, 12.0), &msg, font(13.0), TEXT_DIM(), w - 24.0);
     }
     for (i, l) in cl.limits.iter().enumerate() {
         let yy = lr.top() + 12.0 + i as f32 * 58.0;
-        p.text(Pos2::new(lr.left() + 12.0, yy), Align2::LEFT_TOP, backend::short_label(&l.label), font(13.0), TEXT);
-        p.text(Pos2::new(lr.right() - 12.0, yy), Align2::RIGHT_TOP, format!("{:.0}%", l.pct), bold(13.0), TEXT);
+        p.text(Pos2::new(lr.left() + 12.0, yy), Align2::LEFT_TOP, backend::short_label(&l.label), font(13.0), TEXT());
+        p.text(Pos2::new(lr.right() - 12.0, yy), Align2::RIGHT_TOP, format!("{:.0}%", l.pct), bold(13.0), TEXT());
         bar(&p, Rect::from_min_size(Pos2::new(lr.left() + 12.0, yy + 20.0), Vec2::new(w - 24.0, 6.0)), (l.pct / 100.0).max(0.01), super::page::usage_color(l.pct));
         if !l.resets.is_empty() {
-            text_fit(&p, Pos2::new(lr.left() + 12.0, yy + 32.0), Align2::LEFT_TOP, &format!("Resets {}", l.resets), font(12.0), TEXT_FAINT, w - 24.0);
+            text_fit(&p, Pos2::new(lr.left() + 12.0, yy + 32.0), Align2::LEFT_TOP, &format!("Resets {}", l.resets), font(12.0), TEXT_FAINT(), w - 24.0);
         }
     }
     y = lr.bottom() + GAP;
@@ -149,16 +149,16 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     // on this Mac
     let ar = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 150.0));
     glass_card(&p, ar, R_CARD, 0.0, false);
-    p.text(ar.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "On this Mac", bold(13.0), TEXT);
+    p.text(ar.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "On this Mac", bold(13.0), TEXT());
     let stats = [("last 5 hours", cl.local.tokens_5h), ("today", cl.local.tokens_today), ("7 days", cl.local.tokens_7d)];
     for (i, (k, v)) in stats.iter().enumerate() {
         let x = ar.left() + 12.0 + i as f32 * ((w - 24.0) / 3.0);
-        p.text(Pos2::new(x, ar.top() + 36.0), Align2::LEFT_TOP, backend::human_tokens(*v), bold(18.0), TEXT);
-        p.text(Pos2::new(x, ar.top() + 60.0), Align2::LEFT_TOP, *k, font(11.0), TEXT_FAINT);
+        p.text(Pos2::new(x, ar.top() + 36.0), Align2::LEFT_TOP, backend::human_tokens(*v), bold(18.0), TEXT());
+        p.text(Pos2::new(x, ar.top() + 60.0), Align2::LEFT_TOP, *k, font(11.0), TEXT_FAINT());
     }
     super::page::day_bars(&p, Rect::from_min_size(Pos2::new(ar.left() + 12.0, ar.top() + 82.0), Vec2::new(w - 24.0, 40.0)), &cl.local.daily, 6.0);
-    p.text(Pos2::new(ar.left() + 12.0, ar.bottom() - 10.0), Align2::LEFT_BOTTOM, "7 days ago", font(11.0), TEXT_FAINT);
-    p.text(Pos2::new(ar.right() - 12.0, ar.bottom() - 10.0), Align2::RIGHT_BOTTOM, "Today", font(11.0), TEXT_FAINT);
+    p.text(Pos2::new(ar.left() + 12.0, ar.bottom() - 10.0), Align2::LEFT_BOTTOM, "7 days ago", font(11.0), TEXT_FAINT());
+    p.text(Pos2::new(ar.right() - 12.0, ar.bottom() - 10.0), Align2::RIGHT_BOTTOM, "Today", font(11.0), TEXT_FAINT());
     y = ar.bottom() + GAP;
 
     // what uses your limits
@@ -167,13 +167,13 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let mut lines: Vec<(String, Color32, f32)> = Vec::new();
     match cl.contrib.first() {
         Some(c) => {
-            lines.push((c.title.clone(), TEXT_FAINT, 12.0));
+            lines.push((c.title.clone(), TEXT_FAINT(), 12.0));
             for l in &c.lines {
-                lines.push((l.clone(), TEXT_SOFT, 13.0));
+                lines.push((l.clone(), TEXT_SOFT(), 13.0));
             }
         }
-        None if !cl.note.is_empty() && cl.provider != crate::kit::ai::claude::NAME => lines.push((cl.note.clone(), TEXT_DIM, 13.0)),
-        None => lines.push((format!("{} reports this once you've used it on this Mac.", cl.provider), TEXT_DIM, 13.0)),
+        None if !cl.note.is_empty() && cl.provider != crate::kit::ai::claude::NAME => lines.push((cl.note.clone(), TEXT_DIM(), 13.0)),
+        None => lines.push((format!("{} reports this once you've used it on this Mac.", cl.provider), TEXT_DIM(), 13.0)),
     }
     let heights: Vec<f32> = lines.iter().map(|(l, c, s)| p.layout(l.clone(), font(*s), *c, w - 24.0).size().y).collect();
     let mut h = 12.0 + 18.0 + 6.0;
@@ -187,7 +187,7 @@ pub fn detail(info: &backend::Shared, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     }
     let ur = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h + 6.0));
     glass_card(&p, ur, R_CARD, 0.0, false);
-    p.text(ur.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, if cl.contrib.is_empty() && cl.provider != crate::kit::ai::claude::NAME { "About these limits" } else { "What uses your limits" }, bold(13.0), TEXT);
+    p.text(ur.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, if cl.contrib.is_empty() && cl.provider != crate::kit::ai::claude::NAME { "About these limits" } else { "What uses your limits" }, bold(13.0), TEXT());
     let mut ly = ur.top() + 36.0;
     for ((l, c, s), hh) in lines.iter().zip(&heights).take(shown) {
         paragraph(&p, Pos2::new(ur.left() + 12.0, ly), l, font(*s), *c, w - 24.0);

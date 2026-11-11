@@ -88,7 +88,7 @@ fn watch(engine: Shared, ctx: egui::Context) {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Cup, color: tint::KEEP_AWAKE }
+    Badge { icon: Icon::Cup, color: tint::KEEP_AWAKE() }
 }
 
 /// Sample data for screenshots, showing `state`.

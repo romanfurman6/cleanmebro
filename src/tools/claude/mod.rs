@@ -27,7 +27,7 @@ impl Claude {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Gauge, color: tint::CLAUDE }
+    Badge { icon: Icon::Gauge, color: tint::CLAUDE() }
 }
 
 impl Tool for Claude {

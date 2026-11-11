@@ -12,9 +12,9 @@ use egui::{Align2, Color32, Pos2, Rect, Ui};
 
 fn level_color(l: Level) -> Color32 {
     match l {
-        Level::Good => BLUE,
-        Level::Fair => AMBER,
-        Level::Critical => RED,
+        Level::Good => tint::HEALTH(),
+        Level::Fair => AMBER(),
+        Level::Critical => RED(),
     }
 }
 
@@ -22,7 +22,7 @@ fn level_color(l: Level) -> Color32 {
 pub fn header(s: &Snapshot) -> PanelHeader {
     let title = if s.model.is_empty() { "Mac".to_string() } else { s.model.clone() };
     if !s.ready {
-        return PanelHeader { title, status: String::new(), dot: TEXT_FAINT };
+        return PanelHeader { title, status: String::new(), dot: TEXT_FAINT() };
     }
     let health = s.health();
     let status = match health {
@@ -30,7 +30,7 @@ pub fn header(s: &Snapshot) -> PanelHeader {
         Level::Fair => "Needs a look",
         Level::Critical => "Needs attention",
     };
-    PanelHeader { title, status: status.into(), dot: if health == Level::Good { GREEN } else { level_color(health) } }
+    PanelHeader { title, status: status.into(), dot: if health == Level::Good { GREEN() } else { level_color(health) } }
 }
 
 /// "1.44 TB" -> ("1.44", "TB")
@@ -62,7 +62,7 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
     let (glyph, label, (big, unit), caption, bar_) = match id {
         "storage" => {
             let used = if s.disk_total > 0 { 1.0 - s.disk_free as f32 / s.disk_total as f32 } else { 0.0 };
-            let c = if s.disk_level() == Level::Good { TEAL } else { level_color(s.disk_level()) };
+            let c = if s.disk_level() == Level::Good { TEAL() } else { level_color(s.disk_level()) };
             (Icon::Disk, s.volume_name_or(), split_num(&human_bytes(s.disk_free)), "free".to_string(), Some((used.clamp(0.01, 1.0), c)))
         }
         "memory" => {
@@ -75,15 +75,15 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
         }
         "cpu" => {
             let c = match s.thermal {
-                0 => BLUE,
-                1 => AMBER,
-                _ => RED,
+                0 => tint::HEALTH(),
+                1 => AMBER(),
+                _ => RED(),
             };
             (Icon::Cpu, "CPU".into(), (format!("{:.0}", s.cpu_load), "%".into()), s.thermal_word().to_lowercase(), Some((pct(s.cpu_load), c)))
         }
         "battery" => {
             if s.battery.present {
-                let c = if s.battery.percent <= 20 { RED } else { GREEN };
+                let c = if s.battery.percent <= 20 { RED() } else { GREEN() };
                 let frac = (s.battery.percent as f32 / 100.0).clamp(0.01, 1.0);
                 (Icon::Battery(s.battery.percent), "Battery".into(), (s.battery.percent.to_string(), "%".into()), battery_status(s).to_lowercase(), Some((frac, c)))
             } else {
@@ -122,7 +122,7 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
         return;
     }
     let Some(mt) = metric(&s, id) else { return };
-    let col = tint::HEALTH;
+    let col = tint::HEALTH();
     let resp = match size {
         Size::S11 => match mt.bar {
             Some((f, c)) => {
@@ -162,22 +162,22 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
             let tot = s.disk_total.max(1) as f32;
             let used = s.disk_total.saturating_sub(s.disk_free);
             let mut v: Vec<Line> = vec![("Used".into(), mt.bar, human_bytes(used))];
-            v.extend(s.categories.iter().take(2).map(|(n, b)| (n.clone(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), human_bytes(*b))));
+            v.extend(s.categories.iter().take(2).map(|(n, b)| (n.clone(), Some(((*b as f32 / tot).clamp(0.01, 1.0), tint::HEALTH())), human_bytes(*b))));
             v
         }
         "memory" => {
             let top = s.mem_active.max(s.mem_wired).max(s.mem_compressed).max(1) as f32;
-            [("App", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / top).clamp(0.01, 1.0), BLUE)), human_bytes(b))).collect()
+            [("App", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / top).clamp(0.01, 1.0), tint::HEALTH())), human_bytes(b))).collect()
         }
         "cpu" => {
-            tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(BLUE), None);
+            tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(tint::HEALTH()), None);
             return;
         }
         "battery" => {
             let b = &s.battery;
             let mut v: Vec<Line> = vec![("Charge".into(), mt.bar, format!("{}%", b.percent))];
             if let Some(h) = b.health_pct {
-                v.push(("Health".into(), Some(((h / 100.0).clamp(0.01, 1.0), if h < 80.0 { AMBER } else { GREEN })), format!("{h:.0}%")));
+                v.push(("Health".into(), Some(((h / 100.0).clamp(0.01, 1.0), if h < 80.0 { AMBER() } else { GREEN() })), format!("{h:.0}%")));
             }
             if b.cycles > 0 {
                 v.push(("Cycles".into(), None, b.cycles.to_string()));
@@ -190,7 +190,7 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
         "network" => {
             // the left half has both speeds; here, how they moved
             if s.net_history.len() > 1 {
-                tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.net_history, ACCENT, None);
+                tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.net_history, tint::HEALTH(), None);
                 return;
             }
             vec![("Today".into(), None, human_bytes(s.net_recv_total))]
@@ -205,14 +205,14 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
 /// a graph or bar that uses the width, then the breakdown. Bars in a list
 /// are scaled to the list's largest item so they read as a comparison.
 fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rect) {
-    let big = p.text(body.left_top(), Align2::LEFT_TOP, &mt.big, bold(26.0), TEXT);
-    let unit = p.text(Pos2::new(big.right() + 4.0, big.bottom() - 5.0), Align2::LEFT_BOTTOM, &mt.unit, font(13.0), TEXT_DIM);
+    let big = p.text(body.left_top(), Align2::LEFT_TOP, &mt.big, bold(26.0), TEXT());
+    let unit = p.text(Pos2::new(big.right() + 4.0, big.bottom() - 5.0), Align2::LEFT_BOTTOM, &mt.unit, font(13.0), TEXT_DIM());
     // right of the number: a live graph where there is history
     let beside = Rect::from_min_max(Pos2::new(unit.right() + 16.0, big.top() + 4.0), Pos2::new(body.right(), big.bottom() - 2.0));
     let mut y = big.bottom() + 8.0;
     let rel = |items: &[(String, u64)]| -> Vec<Line> {
         let hi = items.iter().map(|(_, b)| *b).max().unwrap_or(1).max(1) as f32;
-        items.iter().map(|(n, b)| (n.clone(), Some(((*b as f32 / hi).clamp(0.02, 1.0), ACCENT)), human_bytes(*b))).collect()
+        items.iter().map(|(n, b)| (n.clone(), Some(((*b as f32 / hi).clamp(0.02, 1.0), tint::HEALTH())), human_bytes(*b))).collect()
     };
     let lines: Vec<Line> = match id {
         "storage" => {
@@ -220,8 +220,8 @@ fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rec
             if s.disk_total > 0 {
                 let used = 1.0 - s.disk_free as f32 / s.disk_total as f32;
                 let br = Rect::from_min_size(Pos2::new(body.left(), y), egui::Vec2::new(body.width(), 6.0));
-                bar(p, br, used, mt.bar.map(|b| b.1).unwrap_or(ACCENT));
-                text_fit(p, Pos2::new(body.right(), big.center().y), Align2::RIGHT_CENTER, &format!("of {}", human_bytes(s.disk_total)), font(12.0), TEXT_DIM, beside.width());
+                bar(p, br, used, mt.bar.map(|b| b.1).unwrap_or(tint::HEALTH()));
+                text_fit(p, Pos2::new(body.right(), big.center().y), Align2::RIGHT_CENTER, &format!("of {}", human_bytes(s.disk_total)), font(12.0), TEXT_DIM(), beside.width());
                 y += 6.0 + 10.0;
             }
             let items: Vec<(String, u64)> = s.categories.iter().take(3).cloned().collect();
@@ -229,20 +229,20 @@ fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rec
         }
         "memory" => {
             if s.mem_history.len() > 1 {
-                tile::spark_to(p, beside, &s.mem_history, mt.bar.map(|b| b.1).unwrap_or(BLUE), (s.mem_history.iter().copied().fold(0.0f32, f32::max) * 1.5).max(30.0));
+                tile::spark_to(p, beside, &s.mem_history, mt.bar.map(|b| b.1).unwrap_or(tint::HEALTH()), (s.mem_history.iter().copied().fold(0.0f32, f32::max) * 1.5).max(30.0));
             }
             let items = vec![("App memory".to_string(), s.mem_active), ("Wired".to_string(), s.mem_wired), ("Compressed".to_string(), s.mem_compressed)];
             rel(&items)
         }
         "cpu" => {
             let list = Rect::from_min_max(Pos2::new(body.left(), y), body.max);
-            tile::spark(p, list.shrink2(egui::Vec2::new(0.0, 2.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(BLUE), None);
+            tile::spark(p, list.shrink2(egui::Vec2::new(0.0, 2.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(tint::HEALTH()), None);
             Vec::new()
         }
         "network" => {
             let list = Rect::from_min_max(Pos2::new(body.left(), y), Pos2::new(body.right(), body.bottom() - 2.0 * 22.0 - 4.0));
             if s.net_history.len() > 1 && list.height() > 16.0 {
-                tile::spark(p, list, &s.net_history, ACCENT, None);
+                tile::spark(p, list, &s.net_history, tint::HEALTH(), None);
                 y = list.bottom() + 4.0;
             }
             vec![("Upload".into(), None, human_rate(s.net_up)), ("Today".into(), None, format!("{} in · {} out", human_bytes(s.net_recv_total), human_bytes(s.net_sent_total)))]

@@ -422,7 +422,7 @@ pub fn demo(g: &mut State, done: bool) {
 }
 
 fn badge() -> Badge {
-    Badge { icon: Icon::Power, color: tint::STARTUP }
+    Badge { icon: Icon::Power, color: tint::STARTUP() }
 }
 
 impl Tool for Startup {
