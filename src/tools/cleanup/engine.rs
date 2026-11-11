@@ -139,6 +139,23 @@ pub struct State {
     pub stop: bool,
     /// Found, but hidden: the person chose to keep them before.
     pub hidden_kept: usize,
+    /// While scanning: per group (in [`Group::ALL`] order) what has been
+    /// measured so far, so the totals grow live.
+    pub live: [GroupLive; 5],
+    /// While scanning: every place to look at has been listed (only measuring is left).
+    pub listed: bool,
+}
+
+/// One group's live progress while scanning.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GroupLive {
+    /// Bytes found so far (items big enough to show, not kept).
+    pub bytes: u64,
+    /// Items found so far.
+    pub items: usize,
+    /// Places to measure, and how many are measured.
+    pub total: usize,
+    pub done: usize,
 }
 
 impl State {
@@ -259,6 +276,16 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
     let next = std::sync::atomic::AtomicUsize::new(0);
     let done = std::sync::atomic::AtomicUsize::new(0);
     let sizes: Vec<std::sync::atomic::AtomicU64> = (0..n).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
+    let gi = |g: Group| Group::ALL.iter().position(|x| *x == g).unwrap_or(0);
+    {
+        let mut g = shared.lock_ok();
+        g.live = Default::default();
+        for it in items.iter() {
+            g.live[gi(it.group)].total += 1;
+        }
+        g.listed = true;
+    }
+    ctx.request_repaint();
     let workers = std::thread::available_parallelism().map(|c| c.get()).unwrap_or(4).saturating_sub(1).clamp(1, 8);
     std::thread::scope(|s| {
         for _ in 0..workers.min(n.max(1)) {
@@ -269,9 +296,16 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
                     if k >= n || shared.lock_ok().stop {
                         break;
                     }
-                    sizes[k].store(dir_size(&items[k].path), std::sync::atomic::Ordering::Relaxed);
+                    let size = dir_size(&items[k].path);
+                    sizes[k].store(size, std::sync::atomic::Ordering::Relaxed);
                     let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     let mut g = shared.lock_ok();
+                    let l = &mut g.live[gi(items[k].group)];
+                    l.done += 1;
+                    if size >= m::MIN_ITEM_BYTES && items[k].verdict != Verdict::Keep {
+                        l.bytes += size;
+                        l.items += 1;
+                    }
                     g.current = items[k].path.display().to_string();
                     g.progress = from + (1.0 - from) * d as f32 / n as f32;
                     drop(g);

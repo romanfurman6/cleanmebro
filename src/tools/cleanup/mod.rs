@@ -196,6 +196,19 @@ impl Tool for Cleanup {
                 *self.clean.lock_ok() = page::demo_results();
                 Some(View::Page)
             }
+            "cleanup-scanning" => {
+                // mid-scan: some groups measured, some still going
+                let mut st = engine::State { phase: engine::Phase::Scanning, with_ai: true, listed: true, progress: 0.46, current: "/Users/me/Library/Caches/com.spotify.client".into(), ..Default::default() };
+                st.live = [
+                    engine::GroupLive { bytes: 4_200_000_000, items: 9, total: 14, done: 14 },
+                    engine::GroupLive { bytes: 1_900_000_000, items: 22, total: 61, done: 30 },
+                    engine::GroupLive { bytes: 2_600_000_000, items: 3, total: 8, done: 5 },
+                    engine::GroupLive { bytes: 0, items: 0, total: 3, done: 3 },
+                    engine::GroupLive { bytes: 0, items: 0, total: 1, done: 0 },
+                ];
+                *self.clean.lock_ok() = st;
+                Some(View::Page)
+            }
             "cleanup-done" => {
                 *self.clean.lock_ok() = page::demo_done();
                 Some(View::Page)
