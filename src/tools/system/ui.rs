@@ -125,7 +125,11 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
     let col = tint::HEALTH;
     let resp = match size {
         Size::S11 => match mt.bar {
-            Some((f, c)) => tile::small_ring(ui, r, wid, mt.glyph, f, c, &mt.value(), sel),
+            Some((f, c)) => {
+                // a name with the number: "CPU 16%", "1.44 TB free"
+                let cap = if id == "storage" { format!("{} free", mt.value()) } else { format!("{} {}", short_label(id), mt.value()) };
+                tile::small_ring(ui, r, wid, mt.glyph, f, c, &cap, sel)
+            }
             None => tile::small(ui, r, wid, mt.glyph, col, &mt.value().replace("/sec", "/s"), &mt.label, sel),
         },
         Size::S12 => tile::wide(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), mt.bar.ok_or(mt.caption.as_str()), sel),
@@ -162,8 +166,8 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
             v
         }
         "memory" => {
-            let tot = s.mem_total.max(1) as f32;
-            [("App", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / tot).clamp(0.01, 1.0), PURPLE)), human_bytes(b))).collect()
+            let top = s.mem_active.max(s.mem_wired).max(s.mem_compressed).max(1) as f32;
+            [("App", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / top).clamp(0.01, 1.0), BLUE)), human_bytes(b))).collect()
         }
         "cpu" => {
             tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(BLUE), None);
@@ -183,7 +187,14 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
             }
             v
         }
-        "network" => vec![("Download".into(), None, human_rate(s.net_down)), ("Upload".into(), None, human_rate(s.net_up)), ("Today".into(), None, human_bytes(s.net_recv_total))],
+        "network" => {
+            // the left half has both speeds; here, how they moved
+            if s.net_history.len() > 1 {
+                tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.net_history, ACCENT, None);
+                return;
+            }
+            vec![("Today".into(), None, human_bytes(s.net_recv_total))]
+        }
         _ => Vec::new(),
     };
     let empty = "On power adapter";
@@ -304,5 +315,16 @@ pub fn detail(mon: &monitor::Shared, d: &str, ui: &mut Ui, rect: Rect, cx: &mut 
         Action::ToggleMenuBar => monitor::change_bt_prefs(mon, |p| p.menu_bar = !p.menu_bar),
         Action::OpenBluetooth => devices::open_bluetooth_settings(),
         Action::None => {}
+    }
+}
+
+/// The one-word name a 1:1 tile has room for.
+fn short_label(id: &str) -> &'static str {
+    match id {
+        "cpu" => "CPU",
+        "memory" => "Mem",
+        "battery" => "Battery",
+        "network" => "Wi-Fi",
+        _ => "",
     }
 }

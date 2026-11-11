@@ -278,9 +278,13 @@ pub fn widget(k: &mut KeepAwake, size: Size, ui: &mut Ui, rect: Rect, cx: &mut c
         (st, ring_frac(&e, st, now), hero_text(&e, st, now), e.manual_since.is_some())
     };
     let lk = look(st);
-    let resp = if st.awake() { tile::glow_card(ui, rect, id, lk.ring, false) } else { tile::card(ui, rect, id, false) };
+    // the ring carries the state; the card stays the same as every other one
+    let resp = tile::card(ui, rect, id, false);
+    // the switch shows whether the Mac stays awake. While Claude keeps it up
+    // the switch is on but locked: turning it off wouldn't change anything
+    let (sw_on, sw_enabled) = (st.awake(), manual || !st.awake());
     let p = ui.painter().clone();
-    let tip = if manual { "Let the Mac sleep" } else { "Keep the Mac awake" };
+    let tip = if manual { "Let the Mac sleep" } else if st.awake() { "Claude is working" } else { "Keep the Mac awake" };
     match size {
         Size::S11 => {
             let sr = Rect::from_center_size(Pos2::new(rect.center().x, rect.top() + 32.0), Vec2::splat(50.0));
@@ -289,14 +293,18 @@ pub fn widget(k: &mut KeepAwake, size: Size, ui: &mut Ui, rect: Rect, cx: &mut c
         }
         Size::S24 => {
             let mut e = k.engine.lock().unwrap();
-            let hr = rect.shrink(1.0);
+            // the state on top, today's awake time along the bottom
+            let strip_h = 14.0;
+            let hr = Rect::from_min_max(rect.min + Vec2::splat(1.0), Pos2::new(rect.right() - 1.0, rect.bottom() - strip_h - 22.0));
+            let sr = Rect::from_min_max(Pos2::new(rect.left() + 14.0, rect.bottom() - strip_h - 12.0), Pos2::new(rect.right() - 14.0, rect.bottom() - 12.0));
+            today_strip(&p, sr, &e.today(now), now);
             if let Some(br) = hero(&p, hr, &e, st, now, t, false) {
                 if pill_button(ui, br, "Keep awake", BTN_SECONDARY, true).clicked() {
                     e.set_manual(true, now);
                 }
             }
             let sw = Rect::from_min_size(Pos2::new(rect.right() - 12.0 - 38.0, rect.top() + 12.0), Vec2::new(38.0, 22.0));
-            if switch(ui, sw, id.with("sw"), manual, true).on_hover_text(tip).clicked() {
+            if switch(ui, sw, id.with("sw"), sw_on, true).on_hover_text(tip).clicked() && sw_enabled {
                 e.set_manual(!manual, now);
             }
             return;
@@ -319,7 +327,7 @@ pub fn widget(k: &mut KeepAwake, size: Size, ui: &mut Ui, rect: Rect, cx: &mut c
             text_fit(&p, Pos2::new(x, rect.center().y + 11.0), Align2::LEFT_CENTER, &reason, font(11.0), lk.soft, right - x);
             if size == Size::S14 {
                 let sw = Rect::from_min_size(Pos2::new(rect.right() - 12.0 - 38.0, rect.center().y - 11.0), Vec2::new(38.0, 22.0));
-                if switch(ui, sw, id.with("sw"), manual, true).on_hover_text(tip).clicked() {
+                if switch(ui, sw, id.with("sw"), sw_on, true).on_hover_text(tip).clicked() && sw_enabled {
                     k.toggle();
                 }
                 return;
@@ -481,7 +489,7 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
 }
 
 fn today_strip(p: &Painter, r: Rect, spans: &[Span], now: i64) {
-    p.rect_filled(r, 8.0, CARD);
+    p.rect_filled(r, 8.0, white(12));
     let day = super::engine::today_start(now);
     let x_of = |t: i64| r.left() + r.width() * ((t - day) as f32 / 86_400.0).clamp(0.0, 1.0);
     for s in spans {
