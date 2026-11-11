@@ -7,7 +7,7 @@ mod mac {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{
         NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSApplicationActivationPolicy,
-        NSAutoresizingMaskOptions, NSColor, NSGlassEffectView, NSGlassEffectViewStyle, NSView, NSVisualEffectBlendingMode,
+        NSAutoresizingMaskOptions, NSColor, NSView, NSVisualEffectBlendingMode,
         NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode, NSWorkspace,
     };
     use objc2_foundation::NSProcessInfo;
@@ -44,13 +44,8 @@ mod mac {
         }
     }
 
-    fn has_liquid_glass() -> bool {
-        objc2::runtime::AnyClass::get(c"NSGlassEffectView").is_some()
-    }
-
-    /// Put the system's own glass behind every egui window: Liquid Glass
-    /// (NSGlassEffectView, macOS 26+) with its own rounded corners, or the
-    /// older frosted NSVisualEffectView. Our drawing stays on top, mostly clear.
+    /// Put the system's frosted blur (NSVisualEffectView) behind every egui
+    /// window, with rounded corners. Our backdrop sits on top, partly clear.
     pub fn apply_glass(corner_radius: f64) {
         let Some(mtm) = MainThreadMarker::new() else { return };
         let app = NSApplication::sharedApplication(mtm);
@@ -74,23 +69,62 @@ mod mac {
                 w.setAppearance(Some(&ap));
             }
             let frame = content.frame();
-            let view: Retained<NSView> = if has_liquid_glass() {
-                let g = NSGlassEffectView::initWithFrame(mtm.alloc::<NSGlassEffectView>(), frame);
-                g.setStyle(NSGlassEffectViewStyle::Regular);
-                g.setCornerRadius(corner_radius);
-                Retained::into_super(g)
-            } else {
-                let e = NSVisualEffectView::initWithFrame(mtm.alloc::<NSVisualEffectView>(), frame);
-                e.setMaterial(NSVisualEffectMaterial::HUDWindow);
-                e.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-                e.setState(NSVisualEffectState::Active);
-                Retained::into_super(e)
+            // a real frosted blur, clipped to the window's rounded corners
+            // (Liquid Glass refracts what's behind instead of blurring it,
+            // which reads as a stretched picture under the panel)
+            let e = NSVisualEffectView::initWithFrame(mtm.alloc::<NSVisualEffectView>(), frame);
+            // CMDMEOW_BLUR_MATERIAL picks another material when tuning
+            let material = match std::env::var("CMDMEOW_BLUR_MATERIAL").as_deref() {
+                Ok("popover") => NSVisualEffectMaterial::Popover,
+                Ok("hud") => NSVisualEffectMaterial::HUDWindow,
+                Ok("sidebar") => NSVisualEffectMaterial::Sidebar,
+                Ok("under") => NSVisualEffectMaterial::UnderWindowBackground,
+                _ => NSVisualEffectMaterial::Menu,
             };
+            e.setMaterial(material);
+            e.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+            e.setState(NSVisualEffectState::Active);
+            // rounded through a stretchable mask image: rounding the view's
+            // own layer turns the blur off
+            if let Some(mask) = rounded_mask(corner_radius) {
+                e.setMaskImage(Some(&mask));
+            }
+            let view: Retained<NSView> = Retained::into_super(e);
             view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
             superview.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Below, Some(&content));
             w.invalidateShadow();
             GLASS.with(|g| g.borrow_mut().push((num, view)));
         }
+    }
+
+    /// A white rounded square, 2x, that stretches between its corners: the
+    /// mask that gives the blur the window's rounded corners.
+    fn rounded_mask(radius: f64) -> Option<Retained<objc2_app_kit::NSImage>> {
+        use objc2::AllocAnyThread;
+        use objc2_app_kit::{NSImage, NSImageResizingMode};
+        use objc2_foundation::{NSData, NSEdgeInsets, NSSize};
+        let r = radius.max(1.0);
+        let side_pt = (r * 2.0 + 2.0).ceil();
+        let px = (side_pt * 2.0) as u32;
+        let rp = r * 2.0;
+        let mut img = image::RgbaImage::new(px, px);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            // distance outside the rounded rect, in pixels (antialiased edge)
+            let (fx, fy) = (x as f64 + 0.5, y as f64 + 0.5);
+            let cx = fx.clamp(rp, px as f64 - rp);
+            let cy = fy.clamp(rp, px as f64 - rp);
+            let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt() - rp;
+            let a = (0.5 - d).clamp(0.0, 1.0);
+            *p = image::Rgba([255, 255, 255, (a * 255.0).round() as u8]);
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+        let data = NSData::with_bytes(&png);
+        let ns = NSImage::initWithData(NSImage::alloc(), &data)?;
+        ns.setSize(NSSize::new(side_pt, side_pt));
+        ns.setCapInsets(NSEdgeInsets { top: r, left: r, bottom: r, right: r });
+        ns.setResizingMode(NSImageResizingMode::Stretch);
+        Some(ns)
     }
 
     /// Diagnostic: describe our windows (frames, view classes, glass layers).
@@ -100,7 +134,8 @@ mod mac {
         let mut out = String::new();
         for w in app.windows().iter() {
             let f = w.frame();
-            out.push_str(&format!("win #{} frame {:?} opaque {} visible {}\n", w.windowNumber(), (f.origin.x, f.origin.y, f.size.width, f.size.height), w.isOpaque(), w.isVisible()));
+            let screen = w.screen().map(|s| { let sf = s.frame(); (sf.size.width, sf.size.height, s.backingScaleFactor()) });
+            out.push_str(&format!("win #{} frame {:?} opaque {} visible {} scale {} screen {:?}\n", w.windowNumber(), (f.origin.x, f.origin.y, f.size.width, f.size.height), w.isOpaque(), w.isVisible(), w.backingScaleFactor(), screen));
             if let Some(c) = w.contentView() {
                 let cf = c.frame();
                 out.push_str(&format!("  content {} {:?}\n", c.class().name().to_string_lossy(), (cf.size.width, cf.size.height)));
