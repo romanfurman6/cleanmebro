@@ -88,7 +88,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(dir: Option<PathBuf>) -> Self {
         let (settings, log) = match &dir {
-            Some(d) => (load_settings(d), load_log(d, today_start(now()))),
+            Some(d) => (load_settings(d), load_log(d, today_start(now()) - 6 * 86_400)),
             None => (Settings::default(), Vec::new()),
         };
         Engine { settings, manual_since: None, sessions: Vec::new(), awake_since: None, log, open: None, claude_last: None, enabled: true, power: Power::default(), dir }
@@ -190,12 +190,34 @@ impl Engine {
         v
     }
 
+    /// The last 7 days, oldest first: (day start, seconds for Claude, by hand).
+    pub fn week(&self, now: i64) -> Vec<(i64, i64, i64)> {
+        let today = today_start(now);
+        let mut spans = self.log.clone();
+        if let Some((start, claude)) = self.open {
+            spans.push(Span { start, end: now, claude });
+        }
+        (0..7)
+            .map(|k| {
+                let d0 = today_start(today - (6 - k) * 86_400 + 3600);
+                let d1 = if k == 6 { now } else { today_start(d0 + 86_400 + 3600) };
+                let (mut c, mut h) = (0, 0);
+                for s in &spans {
+                    let len = (s.end.min(d1) - s.start.max(d0)).max(0);
+                    if s.claude { c += len } else { h += len }
+                }
+                (d0, c, h)
+            })
+            .collect()
+    }
+
     fn close_span(&mut self, now: i64) {
         let Some((start, claude)) = self.open.take() else { return };
         if now - start < 30 {
             return;
         }
-        let day = today_start(now);
+        // a week is kept, for the page's last 7 days
+        let day = today_start(now) - 6 * 86_400;
         self.log.retain(|s| s.end > day);
         self.log.push(Span { start, end: now, claude });
         if let Some(d) = &self.dir {

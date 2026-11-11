@@ -147,13 +147,9 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     // the newest images in the screenshot folder; history when it has none
     c.refresh_files();
     let items: Vec<Item> = if c.files.is_empty() { c.store.shots.iter().take(4).map(Item::from_shot).collect() } else { c.files.iter().take(4).map(|f| Item::from_file(c, f)).collect() };
-    let label = if c.files.is_empty() { "Recent".to_string() } else { format!("Recent in {}", c.folder_name()) };
-    let ch = link(ui, Pos2::new(x1, y + 6.0), Align2::RIGHT_CENTER, "Change folder…", 11.0);
-    let ch_left = ch.rect.left();
-    if ch.on_hover_text(format!("Screenshots go to {}", c.shown_folder())).clicked() {
-        c.choose_folder();
-    }
-    let lr = ui.interact(Rect::from_min_size(Pos2::new(x0, y), Vec2::new(ch_left - x0 - 8.0, 13.0)), id.with("recent-label"), Sense::click());
+    // the folder is chosen in Capture's settings; here it's only a label
+    let label = "Recent".to_string();
+    let lr = ui.interact(Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, 13.0)), id.with("recent-label"), Sense::click());
     text_fit(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &label, bold(11.0), if lr.hovered() { TEXT_SOFT } else { TEXT_FAINT }, lr.rect.width());
     if lr.on_hover_text("Open the folder view").clicked() {
         c.tab = if c.files.is_empty() { Tab::History } else { Tab::Folder };

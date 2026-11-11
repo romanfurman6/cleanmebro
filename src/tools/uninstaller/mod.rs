@@ -282,7 +282,7 @@ impl Uninstaller {
             tab: Tab::Apps,
             search: String::new(),
             filter: Filter::All,
-            sort: Sort::Size,
+            sort: Sort::Name,
             selected: None,
             checked: Vec::new(),
             review: None,
@@ -798,6 +798,9 @@ mod tests {
     fn filters_and_sorting() {
         let env = ToolEnv { ctx: egui::Context::default(), demo: true };
         let mut u = Uninstaller::new(&env);
+        // opens by name, so rows don't jump while sizes come in
+        assert!(matches!(u.sort, Sort::Name));
+        u.sort = Sort::Size;
         let all = u.visible();
         assert!(all.len() > 5);
         {

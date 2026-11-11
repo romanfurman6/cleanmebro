@@ -71,7 +71,7 @@ impl Tool for Lens {
         "Disk Map"
     }
     fn about(&self) -> &'static str {
-        "Find what takes space, remove by hand"
+        "Find what takes space"
     }
     fn badge(&self) -> Badge {
         Badge { icon: Icon::Map, color: tint::DISK_MAP }
@@ -104,6 +104,11 @@ impl Tool for Lens {
             if view == "sizes" {
                 return None;
             }
+            Some(View::Page)
+        } else if view == "lens-none" {
+            page::demo_tree(self);
+            self.lens_selected.clear();
+            self.lens_focus = None;
             Some(View::Page)
         } else if view == "lens-live" {
             page::demo_live(self);

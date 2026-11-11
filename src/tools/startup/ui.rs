@@ -6,7 +6,7 @@ use super::{plural, Filter, Startup};
 use crate::core::tool::{Cx, Size};
 use crate::kit::glass::*;
 use crate::kit::{macos, tile};
-use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
+use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
 use std::path::{Path, PathBuf};
 
 const ROW_H: f32 = 44.0;
@@ -18,7 +18,7 @@ const ICONS_PER_FRAME: usize = 4;
 fn red_wash(a: f32) -> Color32 {
     with_alpha(tint::STARTUP, a)
 }
-const SUGGEST_TEXT: Color32 = Color32::from_rgb(0xFF, 0x8A, 0x80);
+const SUGGEST_TEXT: Color32 = Color32::from_rgb(0xFF, 0xC2, 0x66);
 const ORPHAN_TEXT: Color32 = Color32::from_rgb(0xF2, 0xC4, 0x6B);
 
 fn letter_color(name: &str) -> Color32 {
@@ -60,7 +60,7 @@ fn app_icon(s: &mut Startup, ctx: &egui::Context, p: &egui::Painter, r: Rect, pa
 fn outline_chip(p: &egui::Painter, pos: Pos2, align: Align2, label: &str, col: Color32) -> Rect {
     let g = p.layout_no_wrap(label.to_string(), font(10.0), col);
     let r = align.anchor_size(pos, g.size() + Vec2::new(10.0, 2.0));
-    p.rect_stroke(r, 4.0, Stroke::new(1.0, with_alpha(col, 0.45)), StrokeKind::Inside);
+    // quiet text, no box: a tag is meta, not a button
     p.galley(r.center() - g.size() / 2.0, g, col);
     r
 }
@@ -341,7 +341,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                             ui.ctx().copy_text(j.label.clone());
                         }
                         ui.separator();
-                        if ui.add_enabled(busy.is_none(), egui::Button::new(egui::RichText::new("Move file to Trash…").color(SUGGEST_TEXT))).clicked() {
+                        if ui.add_enabled(busy.is_none(), egui::Button::new(egui::RichText::new("Move file to Trash…").color(RED))).clicked() {
                             trash = Some(j.clone());
                         }
                     });
@@ -492,7 +492,7 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
                     s.undo();
                 }
             } else if n > 0 {
-                p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, format!("{n} can go"), font(12.0), SUGGEST_TEXT);
+                p.text(Pos2::new(x0, cy), Align2::LEFT_CENTER, format!("{n} can go"), font(12.0), TEXT_SOFT);
                 let br = Rect::from_min_max(Pos2::new(x1 - 64.0, cy - 12.0), Pos2::new(x1, cy + 12.0));
                 if pill_button(ui, br, "Turn off", BTN_PRIMARY, !busy).clicked() {
                     s.turn_off_suggested();

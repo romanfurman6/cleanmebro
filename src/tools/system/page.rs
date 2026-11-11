@@ -161,7 +161,7 @@ fn legend(p: &egui::Painter, r: Rect, rows: &[(Option<Color32>, String, String)]
 
 fn cpu_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
     let load = format!("{:.0}", s.cpu_load);
-    let y = card_title(p, r, "CPU", &format!("{} · orange = busy spike", s.thermal_word()), Some((&load, "%")));
+    let y = card_title(p, r, "CPU", &s.thermal_word(), Some((&load, "%")));
     let foot = r.bottom() - 18.0;
     let gr = Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), foot - sp::M));
     let peak = s.cpu_history.iter().copied().fold(0.0f32, f32::max);
@@ -221,22 +221,21 @@ fn memory_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
     let y = card_title(p, r, "Memory", &format!("{} · {word}", human_bytes(s.mem_total)), Some((&pct, "%")));
     // one stacked bar of what holds the memory
     let tot = s.mem_total.max(1) as f32;
-    let parts = [(s.mem_active, BLUE), (s.mem_wired, INDIGO), (s.mem_compressed, CLAUDE)];
+    let parts = [(s.mem_active, BLUE), (s.mem_wired, INDIGO), (s.mem_compressed, PURPLE)];
     let segs: Vec<(f32, Color32)> = parts.iter().map(|(b, c)| (*b as f32 / tot, *c)).collect();
     let rows = vec![
         (Some(BLUE), "App memory".to_string(), human_bytes(s.mem_active)),
         (Some(INDIGO), "Wired".to_string(), human_bytes(s.mem_wired)),
-        (Some(CLAUDE), "Compressed".to_string(), human_bytes(s.mem_compressed)),
+        (Some(PURPLE), "Compressed".to_string(), human_bytes(s.mem_compressed)),
         (None, "Swap used".to_string(), human_bytes(s.swap_used)),
     ];
     let lt = legend(p, r, &rows);
     // pressure over the last minutes, then what holds the memory
     let bar_y = lt - sp::M - 10.0;
     stacked_bar(p, Rect::from_min_size(Pos2::new(r.left(), bar_y), Vec2::new(r.width(), 10.0)), &segs);
-    let cap_y = bar_y - sp::M - 14.0;
-    p.text(Pos2::new(r.left(), cap_y), Align2::LEFT_TOP, "Pressure, last minutes", ty::caption(), ty::caption_color());
-    if cap_y - sp::XS - y > 24.0 {
-        tile::spark_to(p, Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), cap_y - sp::XS)), &s.mem_history, level_color(s.mem_level()), (s.mem_history.iter().copied().fold(0.0f32, f32::max) * 1.5).max(30.0));
+    let cap_y = bar_y - sp::M;
+    if cap_y - y > 24.0 {
+        tile::spark_to(p, Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), cap_y)), &s.mem_history, level_color(s.mem_level()), (s.mem_history.iter().copied().fold(0.0f32, f32::max) * 1.5).max(30.0));
     }
 }
 

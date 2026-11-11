@@ -38,16 +38,17 @@ pub const GREEN: Color32 = Color32::from_rgb(0x30, 0xD1, 0x58);
 /// Orange: attention (busy spikes, "suggested", warnings).
 pub const AMBER: Color32 = Color32::from_rgb(0xFF, 0x9F, 0x0A);
 pub const RED: Color32 = Color32::from_rgb(0xFF, 0x45, 0x3A);
-/// Claude's tint (limit bars and rings).
-pub const CLAUDE: Color32 = Color32::from_rgb(0xBF, 0x5A, 0xF2);
-/// Second blue for charts (wired memory, second series).
-pub const INDIGO: Color32 = Color32::from_rgb(0x5E, 0x5C, 0xE6);
+/// Claude's limit bars and rings: system blue like every other tool (no
+/// AI purple).
+pub const CLAUDE: Color32 = BLUE;
+/// Second series in charts: a lighter step of the accent.
+pub const INDIGO: Color32 = Color32::from_rgb(0x64, 0xB5, 0xFF);
 pub const TEAL: Color32 = Color32::from_rgb(0x64, 0xD2, 0xFF);
-pub const PURPLE: Color32 = Color32::from_rgb(0xBF, 0x8C, 0xFF);
+/// Third series / "other": a neutral step, not a hue.
+pub const PURPLE: Color32 = Color32::from_rgb(0x63, 0x63, 0x66);
 pub const GRAY: Color32 = Color32::from_rgb(152, 152, 157);
 
-/// Tool tints. D6 drops the rainbow: every tool uses system blue, and only
-/// Claude keeps its own colour because its data is Claude's.
+/// Tool tints. D6 drops the rainbow: every tool uses system blue.
 pub mod tint {
     use egui::Color32;
     pub const CLEANUP: Color32 = super::BLUE;
@@ -695,6 +696,8 @@ pub enum Icon {
     Gauge,
     /// An app with a cross: the Uninstaller.
     AppRemove,
+    /// A file.
+    Doc,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -715,10 +718,11 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Headphones => "headphones",
         Icon::Shield => "checkmark.shield",
         Icon::Sparkle => "sparkle",
-        Icon::Broom => "bubbles.and.sparkles",
+        Icon::Broom => "wind",
         Icon::Gear => "gearshape",
         Icon::Trash => "trash",
         Icon::Folder => "folder",
+        Icon::Doc => "doc",
         Icon::Lens => "magnifyingglass",
         Icon::Laptop => "laptopcomputer",
         Icon::Heart => "heart",
@@ -882,8 +886,8 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             closed(&[(9.0, 8.0), (16.0, 15.0), (13.0, 21.0), (3.0, 11.0)]);
         }
         Icon::Gear => {
-            p.circle_stroke(pt(12.0, 12.0), 3.0 * u, st);
-            p.circle_stroke(pt(12.0, 12.0), 7.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 3.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 7.0 * u, st);
             for i in 0..8 {
                 let a = i as f32 / 8.0 * TAU;
                 let d = Vec2::new(a.cos(), a.sin());
@@ -896,8 +900,9 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             open(&[(6.0, 6.0), (7.0, 20.5), (17.0, 20.5), (18.0, 6.0)]);
         }
         Icon::Folder => closed(&[(3.0, 6.0), (9.5, 6.0), (11.5, 8.0), (21.0, 8.0), (21.0, 19.0), (3.0, 19.0)]),
+        Icon::Doc => closed(&[(6.0, 3.0), (14.0, 3.0), (19.0, 8.0), (19.0, 21.0), (6.0, 21.0)]),
         Icon::Lens | Icon::Search => {
-            p.circle_stroke(pt(11.0, 11.0), 7.0 * u, st);
+            stroke_circle(&p, pt(11.0, 11.0), 7.0 * u, st);
             open(&[(16.0, 16.0), (21.0, 21.0)]);
         }
         Icon::Laptop => {
@@ -916,11 +921,11 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         }
         Icon::Thermo => {
             boxr(10.0, 3.0, 14.0, 15.0, 2.0);
-            p.circle_stroke(pt(12.0, 18.0), 3.0 * u, st);
+            stroke_circle(&p, pt(12.0, 18.0), 3.0 * u, st);
             open(&[(12.0, 8.0), (12.0, 16.0)]);
         }
         Icon::Clock => {
-            p.circle_stroke(pt(12.0, 12.0), 9.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 9.0 * u, st);
             open(&[(12.0, 7.0), (12.0, 12.0), (15.5, 14.0)]);
         }
         Icon::Up => {
@@ -934,7 +939,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         Icon::Back => open(&[(15.0, 6.0), (9.0, 12.0), (15.0, 18.0)]),
         Icon::Forward => open(&[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)]),
         Icon::Info => {
-            p.circle_stroke(pt(12.0, 12.0), 9.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 9.0 * u, st);
             dot(12.0, 7.8, 1.2);
             open(&[(12.0, 11.0), (12.0, 16.5)]);
         }
@@ -981,7 +986,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         }
         Icon::Fan => {
             // six curved blades around a hub (four straight arms read wrong)
-            p.circle_stroke(pt(12.0, 12.0), 1.8 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 1.8 * u, st);
             for k in 0..6 {
                 let a0 = k as f32 * TAU / 6.0;
                 let pts: Vec<Pos2> = (0..=6)
@@ -1180,4 +1185,11 @@ pub fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, focus: 
         resp.request_focus();
     }
     resp
+}
+
+/// A circle outline centred on `r`. egui 0.37 paints circle strokes outside
+/// the radius, which put ring tracks a half-stroke off the arcs drawn on them.
+pub fn stroke_circle(p: &Painter, c: Pos2, r: f32, stroke: impl Into<Stroke>) {
+    let s: Stroke = stroke.into();
+    p.circle_stroke(c, (r - s.width / 2.0).max(0.0), s);
 }

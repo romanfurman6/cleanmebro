@@ -31,7 +31,7 @@ pub fn day_bars(p: &egui::Painter, r: Rect, daily: &[u64], gap: f32) {
         let x = r.left() + i as f32 * (bw + gap);
         let br = Rect::from_min_max(Pos2::new(x, r.bottom() - h), Pos2::new(x + bw, r.bottom()));
         let last = i + 1 == daily.len();
-        p.rect_filled(br, 2.0, if last { CLAUDE } else { with_alpha(CLAUDE, 0.45) });
+        p.rect_filled(br, 2.0, if last { CLAUDE } else { white(46) });
     }
 }
 
@@ -163,7 +163,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         text_fit(&p, inner.left_top(), Align2::LEFT_TOP, &claude::short_label(&l.label), ty::title(), TEXT, inner.width());
         let rr = 36.0;
         let c = Pos2::new(inner.left() + rr + 5.0, inner.bottom() - rr - 5.0);
-        crate::kit::tile::ring(&p, c, rr, 9.0, (l.pct / 100.0).max(0.01), usage_color(l.pct));
+        crate::kit::tile::ring(&p, c, rr, 9.0, l.pct / 100.0, usage_color(l.pct));
         p.text(c, Align2::CENTER_CENTER, format!("{:.0}%", l.pct), ty::lead(), TEXT);
         let tx = c.x + rr + sp::L;
         if !l.resets.is_empty() {
@@ -176,9 +176,8 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     let tr = Rect::from_min_max(Pos2::new(x0 + col as f32 * (cw + gap), y), Pos2::new(x1, y + ch));
     glass_card(&p, tr, R_CARD, 0.0, false);
     let ti = tr.shrink(sp::L);
-    p.text(ti.left_top(), Align2::LEFT_TOP, "Today", ty::title(), TEXT);
-    p.text(ti.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, "Tokens on this Mac", ty::caption(), ty::caption_color());
-    p.text(Pos2::new(ti.left(), ti.top() + 34.0 + sp::M), Align2::LEFT_TOP, claude::human_tokens(cl.local.tokens_today), ty::hero(), TEXT);
+    p.text(ti.left_top(), Align2::LEFT_TOP, "Tokens today", ty::title(), TEXT);
+    p.text(Pos2::new(ti.left(), ti.top() + 16.0 + sp::M), Align2::LEFT_TOP, claude::human_tokens(cl.local.tokens_today), ty::hero(), TEXT);
     let req = if cl.local.requests_today > 0 { format!("{} requests", cl.local.requests_today) } else { String::new() };
     text_fit(&p, Pos2::new(ti.left(), ti.bottom()), Align2::LEFT_BOTTOM, &format!("{} in 7 days{}", claude::human_tokens(cl.local.tokens_7d), if req.is_empty() { String::new() } else { format!(" · {req}") }), ty::label(), white(166), ti.width());
 
@@ -195,9 +194,8 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     let pr = Rect::from_min_max(Pos2::new(wr.right() + gap, y2), Pos2::new(x1, if split { y2 + want } else { bottom }));
     glass_card(&p, wr, R_CARD, 0.0, false);
     let wi = wr.shrink(sp::L);
-    p.text(wi.left_top(), Align2::LEFT_TOP, "Last 7 days", ty::title(), TEXT);
-    p.text(wi.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, "Tokens per day", ty::caption(), ty::caption_color());
-    let br = Rect::from_min_max(Pos2::new(wi.left(), wi.top() + 34.0 + sp::M), Pos2::new(wi.right(), wi.bottom() - 18.0));
+    p.text(wi.left_top(), Align2::LEFT_TOP, "Tokens, last 7 days", ty::title(), TEXT);
+    let br = Rect::from_min_max(Pos2::new(wi.left(), wi.top() + 16.0 + sp::M), Pos2::new(wi.right(), wi.bottom() - 18.0));
     day_bars(&p, br, &cl.local.daily, 6.0);
     p.text(Pos2::new(wi.left(), wi.bottom()), Align2::LEFT_BOTTOM, "7 days ago", ty::caption(), ty::caption_color());
     p.text(Pos2::new(wi.right(), wi.bottom()), Align2::RIGHT_BOTTOM, "today", ty::caption(), ty::caption_color());
@@ -225,7 +223,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     } else {
     p.text(pi.left_top(), Align2::LEFT_TOP, "Claude Code projects", ty::title(), TEXT);
     let used = cl.projects.iter().filter(|p| p.in_use()).count();
-    p.text(pi.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} on this Mac · {} in use, kept by Cleanup", cl.projects.len(), used), ty::caption(), ty::caption_color());
+    p.text(pi.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} on this Mac · {} in use", cl.projects.len(), used), ty::caption(), ty::caption_color());
     let list = Rect::from_min_max(Pos2::new(pr.left(), pi.top() + 34.0 + sp::S), Pos2::new(pr.right(), pr.bottom() - sp::S));
     let mut child = ui.new_child(UiBuilder::new().max_rect(list).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(list);
@@ -286,7 +284,6 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     // footer
     let f = page_footer(&p, r, 12.0);
     if !is_claude {
-        text_fit(&p, Pos2::new(f.left() + 24.0, f.center().y), Align2::LEFT_CENTER, &format!("{} limits update with each request you make in it.", cl.provider), font(13.0), TEXT_DIM, f.width() - 48.0);
         return;
     }
     let bl = "Review in Cleanup";

@@ -122,6 +122,10 @@ pub fn title_line(app: &App, p: &egui::Painter, x0: f32, top: f32, width: f32) {
             let cy = top + 31.0;
             let t = text_fit(p, Pos2::new(x0, cy), Align2::LEFT_CENTER, &h.title, ty::lead(), TEXT, width * 0.65);
             let dx = t.right() + 10.0;
+            // a healthy Mac shows just its name; a dot and word only when something needs a look
+            if h.status.is_empty() {
+                return;
+            }
             p.circle_filled(Pos2::new(dx + 3.0, cy + 1.0), 3.0, h.dot);
             text_fit(p, Pos2::new(dx + 11.0, cy + 1.0), Align2::LEFT_CENTER, &h.status, ty::label(), ty::caption_color(), x0 + width - dx - 11.0);
         }

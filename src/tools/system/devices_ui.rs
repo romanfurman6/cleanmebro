@@ -7,7 +7,6 @@ use super::devices::{self, Device};
 use super::monitor::Snapshot;
 use crate::core::tool::Size;
 use crate::kit::glass::*;
-use crate::kit::mechanics as m;
 use crate::kit::tile;
 use egui::{Align2, Pos2, Rect, Response, Ui, Vec2};
 
@@ -142,7 +141,7 @@ fn device_line(p: &egui::Painter, lr: Rect, d: &Device) {
 }
 
 /// 4:4: earbuds get a card with three rings, other devices a line each.
-fn large(s: &Snapshot, devs: &[Device], p: &egui::Painter, r: Rect) {
+fn large(_s: &Snapshot, devs: &[Device], p: &egui::Painter, r: Rect) {
     let body = tile::head(p, r, Icon::Bluetooth, tint::HEALTH, &format!("Devices · {} connected", devs.len()), "");
     if devs.is_empty() {
         tile::empty_note(p, body, "No Bluetooth devices connected");
@@ -177,11 +176,4 @@ fn large(s: &Snapshot, devs: &[Device], p: &egui::Painter, r: Rect) {
         device_line(p, lr.shrink2(Vec2::new(10.0, 0.0)), d);
         y += lh + 6.0;
     }
-    let low = devs.iter().find(|d| devices::is_low(d));
-    let alerts = if s.bt_prefs.alerts { format!("Alerts below {}% and {}%.", m::BT_LOW_BATTERY_MAX_PCT + 1, m::BT_CRITICAL_BATTERY_MAX_PCT + 1) } else { "Low battery alerts are off.".into() };
-    let line = match low {
-        Some(d) => format!("{} is low. {alerts}", d.name),
-        None => alerts,
-    };
-    text_fit(p, Pos2::new(body.left(), body.bottom()), Align2::LEFT_BOTTOM, &line, font(11.0), TEXT_DIM, body.width());
 }
