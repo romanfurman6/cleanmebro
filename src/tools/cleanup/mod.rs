@@ -34,7 +34,7 @@ impl Cleanup {
             demo: env.demo,
             use_ai: true,
             delete_now: false,
-            clean_group: Some(Group::AiTools),
+            clean_group: None,
             clean_confirm: false,
             clean_log: false,
             demo_claude: None,
@@ -148,7 +148,7 @@ impl Tool for Cleanup {
     }
     fn open_page(&mut self, route: &str) {
         if route == "claude" {
-            self.clean_group = Some(Group::AiTools);
+            self.clean_group = None;
         }
     }
     fn sidebar_meta(&self) -> String {

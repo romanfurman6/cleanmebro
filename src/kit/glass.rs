@@ -186,11 +186,7 @@ pub mod ty {
 
 /// Status chip colours: (background, text).
 #[allow(non_snake_case)]
-pub fn CHIP_SAFE() -> (Color32, Color32) { (with_alpha(GREEN(), 0.16), GREEN()) }
-#[allow(non_snake_case)]
 pub fn CHIP_ASK() -> (Color32, Color32) { (with_alpha(AMBER(), 0.16), AMBER()) }
-#[allow(non_snake_case)]
-pub fn CHIP_KEPT() -> (Color32, Color32) { (white(20), TEXT_DIM()) }
 #[allow(non_snake_case)]
 pub fn CHIP_RISK() -> (Color32, Color32) { (with_alpha(RED(), 0.16), RED()) }
 

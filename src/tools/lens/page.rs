@@ -5,7 +5,7 @@ use super::scan::{self, Node};
 use super::Lens as App;
 use crate::core::tool::Cx;
 use crate::kit::glass::*;
-use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
@@ -222,7 +222,7 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     let nb = button_width(&p, "Stop", BTN_SECONDARY);
     let stop_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
     let done = rows.iter().filter(|x| x.done).count();
-    let hint_text = format!("Mapping · {} of {} folders done · {} files", done, rows.len(), group_digits(app.lens.files.load(Ordering::Relaxed)));
+    let hint_text = format!("{} / {} · {} files", done, rows.len(), group_digits(app.lens.files.load(Ordering::Relaxed)));
     let hint = p.text(Pos2::new(stop_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, hint_text, font(12.0), TEXT_DIM());
     let t = now as f32;
     let c = Pos2::new(hint.left() - 12.0, hr.center().y);
@@ -243,61 +243,76 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
             app.lens_order.push(row.path.clone());
         }
     }
-    if now - app.lens_order_at > 1.0 {
+    if now - app.lens_order_at > 1.5 {
         let size = |pa: &PathBuf| rows.iter().find(|x| &x.path == pa).map(|x| x.bytes).unwrap_or(0);
         app.lens_order.sort_by_key(|pa| std::cmp::Reverse(size(pa)));
         app.lens_order_at = now;
     }
 
-    // the list
-    // full width: nothing can be picked while mapping, so no side column
+    // the live treemap: folders keep their order (re-sorted at most every
+    // 1.5 s), the layout is redone at most once a second, and every tile
+    // glides to its new place, so nothing jumps while sizes grow
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, r.bottom() - 16.0));
     let fr = Rect::from_min_max(Pos2::new(body.left(), body.bottom() - INFO_H), body.max);
     let area = Rect::from_min_max(body.min, Pos2::new(body.right(), fr.top() - 8.0));
-    const ROW_H: f32 = 44.0;
-    const GAP: f32 = 4.0;
-    let fit = (((area.height() + GAP) / (ROW_H + GAP)).floor() as usize).max(1);
-    let max_bytes = rows.iter().map(|x| x.bytes).max().unwrap_or(1).max(1);
+    const MAX_TILES: usize = 12;
     let ordered: Vec<&scan::LiveRow> = app.lens_order.iter().filter_map(|pa| rows.iter().find(|x| &x.path == pa)).collect();
-    let (shown_rows, rest) = if ordered.len() > fit { (&ordered[..fit - 1], &ordered[fit - 1..]) } else { (&ordered[..], &ordered[..0]) };
+    let (shown_rows, rest) = if ordered.len() > MAX_TILES { (&ordered[..MAX_TILES - 1], &ordered[MAX_TILES - 1..]) } else { (&ordered[..], &ordered[..0]) };
+    let more = PathBuf::from("\0more");
+    let total: u64 = rows.iter().map(|x| x.bytes).sum::<u64>().max(1);
+    let floor = total as f32 * 0.012;
+    let mut keys: Vec<PathBuf> = shown_rows.iter().map(|x| x.path.clone()).collect();
+    let mut weights: Vec<f32> = shown_rows.iter().map(|x| (x.bytes as f32).max(floor)).collect();
+    if !rest.is_empty() {
+        keys.push(more.clone());
+        weights.push((rest.iter().map(|x| x.bytes).sum::<u64>() as f32).max(floor));
+    }
+    let targets = LIVE_LAYOUT.with(|c| {
+        let mut c = c.borrow_mut();
+        let stale = match c.as_ref() {
+            Some((at, a, k, _)) => now - at > 1.0 || *a != area || *k != keys,
+            None => true,
+        };
+        if stale {
+            let rects = squarify(&weights, area);
+            *c = Some((now, area, keys.clone(), rects));
+        }
+        c.as_ref().map(|x| x.3.clone()).unwrap_or_default()
+    });
     let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.1);
-    let k = 1.0 - (-dt * 8.0).exp();
+    let k = 1.0 - (-dt * 6.0).exp();
     let mut drawn = std::collections::HashMap::new();
-    let lp = p.with_clip_rect(area.expand(2.0));
-    let name_w = (area.width() * 0.32).clamp(140.0, 240.0);
-    let size_w = 90.0;
     let pointer = ctx.pointer_hover_pos();
     let mut hovered: Option<(&scan::LiveRow, Color32)> = None;
-    for (i, row) in shown_rows.iter().enumerate() {
-        let target = Rect::from_min_size(Pos2::new(area.left(), area.top() + i as f32 * (ROW_H + GAP)), Vec2::new(area.width(), ROW_H));
-        let frac = row.bytes as f32 / max_bytes as f32;
-        // glide from last frame; a new row slides in from just below with an empty bar
-        let (prev, pf) = app.lens_rows.get(&row.path).copied().unwrap_or((target.translate(Vec2::new(0.0, 12.0)), 0.0));
+    for (n, key) in keys.iter().enumerate() {
+        let Some(&target) = targets.get(n) else { continue };
+        // glide from last frame; a new tile grows from its centre
+        let prev = app.lens_rows.get(key).map(|x| x.0).unwrap_or(Rect::from_center_size(target.center(), Vec2::ZERO));
         let rr = lerp_rect(prev, target, k);
-        let fr_ = pf + (frac - pf) * k;
-        drawn.insert(row.path.clone(), (rr, fr_));
+        drawn.insert(key.clone(), (rr, 0.0));
+        let tile = rr.shrink(3.0);
+        if tile.width() < 2.0 || tile.height() < 2.0 {
+            continue;
+        }
+        if *key == more {
+            let bytes: u64 = rest.iter().map(|x| x.bytes).sum();
+            let busy = rest.iter().any(|x| !x.done);
+            live_tile(&p, tile, &format!("{} more", rest.len()), bytes, GRAY(), busy, false, now);
+            continue;
+        }
+        let row = shown_rows[n];
         let hue = hue_of(app, root, &row.path);
-        let hov = pointer.is_some_and(|q| rr.contains(q));
-        p_row(&lp, rr, row, hue, fr_, hov, name_w, size_w, now, i);
+        let hov = pointer.is_some_and(|q| tile.contains(q));
+        live_tile(&p, tile, &row.name, row.bytes, hue, !row.done, hov, now);
         if hov {
             hovered = Some((row, hue));
         }
     }
-    if !rest.is_empty() {
-        let i = shown_rows.len();
-        let rr = Rect::from_min_size(Pos2::new(area.left(), area.top() + i as f32 * (ROW_H + GAP)), Vec2::new(area.width(), ROW_H));
-        let bytes: u64 = rest.iter().map(|x| x.bytes).sum();
-        lp.rect_filled(rr, R_SMALL, white(8));
-        lp.text(Pos2::new(rr.left() + 30.0, rr.center().y), Align2::LEFT_CENTER, format!("{} more folders", rest.len()), font(13.0), TEXT_DIM());
-        lp.text(Pos2::new(rr.right() - 14.0, rr.center().y), Align2::RIGHT_CENTER, human_bytes(bytes), font(13.0), TEXT_FAINT());
-    }
     if rows.is_empty() {
-        lp.text(area.center(), Align2::CENTER_CENTER, "Looking inside…", font(13.0), TEXT_FAINT());
+        p.text(area.center(), Align2::CENTER_CENTER, "Looking inside…", font(13.0), TEXT_FAINT());
     }
     // keep animating only while something is still gliding
-    let moving = drawn.iter().any(|(pa, (rr, f))| {
-        app.lens_rows.get(pa).is_none_or(|(a, b)| (a.min - rr.min).length() > 0.3 || (b - f).abs() > 0.001)
-    });
+    let moving = drawn.iter().any(|(pa, (rr, _))| app.lens_rows.get(pa).is_none_or(|(a, _)| (a.min - rr.min).length() > 0.3 || (a.max - rr.max).length() > 0.3));
     app.lens_rows = drawn;
     if moving {
         ctx.request_repaint();
@@ -321,31 +336,94 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     act
 }
 
-/// One folder row of the live list: colour, name and state, a size bar, the size.
-#[allow(clippy::too_many_arguments)]
-fn p_row(p: &egui::Painter, rr: Rect, row: &scan::LiveRow, hue: Color32, frac: f32, hov: bool, name_w: f32, size_w: f32, now: f64, i: usize) {
-    p.rect_filled(rr, R_SMALL, white(if hov { 18 } else { 10 }));
-    p.rect_filled(Rect::from_center_size(Pos2::new(rr.left() + 16.0, rr.center().y), Vec2::splat(10.0)), 3.0, hue);
-    let nx = rr.left() + 32.0;
-    text_fit(p, Pos2::new(nx, rr.top() + 6.0), Align2::LEFT_TOP, &row.name, bold(13.0), TEXT(), name_w - 40.0);
-    let (state, sc) = if row.done { ("done", TEXT_FAINT()) } else { ("measuring…", TEXT_MUTED()) };
-    p.text(Pos2::new(nx, rr.top() + 24.0), Align2::LEFT_TOP, state, font(11.0), sc);
-    let track = Rect::from_min_max(Pos2::new(rr.left() + name_w, rr.center().y - 4.0), Pos2::new(rr.right() - size_w - 14.0, rr.center().y + 4.0));
-    if track.width() > 20.0 {
-        p.rect_filled(track, 4.0, white(14));
-        let fill = Rect::from_min_size(track.min, Vec2::new((track.width() * frac.clamp(0.0, 1.0)).max(4.0), track.height()));
-        let col = if row.done { lerp_color(BG(), hue, 0.9) } else { lerp_color(BG(), hue, 0.55) };
-        p.rect_filled(fill, 4.0, col);
-        if !row.done {
-            // a slow, faint shimmer along bars still growing
-            let w = 60.0;
-            let f = ((now * 0.45 + i as f64 * 0.17).fract() as f32) * (fill.width() + w) - w;
-            let sheen = Rect::from_min_size(Pos2::new(fill.left() + f, fill.top()), Vec2::new(w, fill.height()));
-            p.with_clip_rect(fill.intersect(p.clip_rect())).rect_filled(sheen, 0.0, white(22));
-        }
+thread_local! {
+    /// The live treemap's last layout: when, the area, which tiles, their rects.
+    static LIVE_LAYOUT: std::cell::RefCell<Option<(f64, Rect, Vec<PathBuf>, Vec<Rect>)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Squarified treemap: `weights` (any order) laid out in `r`, one rect each.
+fn squarify(weights: &[f32], r: Rect) -> Vec<Rect> {
+    let total: f32 = weights.iter().sum();
+    if weights.is_empty() || total <= 0.0 || !r.is_positive() {
+        return vec![Rect::from_center_size(r.center(), Vec2::ZERO); weights.len()];
     }
-    let size = human_bytes(row.bytes);
-    p.text(Pos2::new(rr.right() - 14.0, rr.center().y), Align2::RIGHT_CENTER, size, font(13.0), if row.done { TEXT_SOFT() } else { TEXT_DIM() });
+    let scale = r.area() / total;
+    let areas: Vec<f32> = weights.iter().map(|w| w * scale).collect();
+    let mut out = vec![Rect::NOTHING; areas.len()];
+    let mut free = r;
+    let mut i = 0;
+    while i < areas.len() {
+        let side = free.width().min(free.height()).max(1.0);
+        let worst = |row: &[f32]| -> f32 {
+            let s: f32 = row.iter().sum();
+            let (mx, mn) = row.iter().fold((0.0f32, f32::MAX), |(a, b), &x| (a.max(x), b.min(x)));
+            ((side * side * mx) / (s * s)).max((s * s) / (side * side * mn.max(1e-3)))
+        };
+        let mut j = i + 1;
+        while j < areas.len() && worst(&areas[i..=j]) <= worst(&areas[i..j]) {
+            j += 1;
+        }
+        let row = &areas[i..j];
+        let s: f32 = row.iter().sum();
+        if free.width() >= free.height() {
+            // a column on the left
+            let w = (s / free.height()).min(free.width());
+            let mut y = free.top();
+            for (n, a) in row.iter().enumerate() {
+                let h = if j == areas.len() && n == row.len() - 1 { free.bottom() - y } else { a / w };
+                out[i + n] = Rect::from_min_size(Pos2::new(free.left(), y), Vec2::new(w, h));
+                y += h;
+            }
+            free.min.x += w;
+        } else {
+            // a row on top
+            let h = (s / free.width()).min(free.height());
+            let mut x = free.left();
+            for (n, a) in row.iter().enumerate() {
+                let w = if j == areas.len() && n == row.len() - 1 { free.right() - x } else { a / h };
+                out[i + n] = Rect::from_min_size(Pos2::new(x, free.top()), Vec2::new(w, h));
+                x += w;
+            }
+            free.min.y += h;
+        }
+        i = j;
+    }
+    out
+}
+
+/// One tile of the live treemap: solid when measured, striped while still
+/// growing (with a spinner); the name on top, the size at the bottom.
+#[allow(clippy::too_many_arguments)]
+fn live_tile(p: &egui::Painter, t: Rect, name: &str, bytes: u64, hue: Color32, busy: bool, hov: bool, now: f64) {
+    let rad = 10.0f32.min(t.width() / 3.0).min(t.height() / 3.0);
+    let fg = if busy { TEXT() } else { on_color(hue) };
+    if busy {
+        p.rect_filled(t, rad, with_alpha(hue, if hov { 0.26 } else { 0.18 }));
+        let cp = p.with_clip_rect(t.shrink(1.0).intersect(p.clip_rect()));
+        let step = 14.0;
+        let mut x = t.left() - t.height();
+        while x < t.right() {
+            cp.line_segment([Pos2::new(x, t.bottom()), Pos2::new(x + t.height(), t.top())], Stroke::new(5.0, with_alpha(hue, 0.10)));
+            x += step;
+        }
+        p.rect_stroke(t, rad, Stroke::new(1.0, with_alpha(hue, 0.45)), StrokeKind::Inside);
+    } else {
+        p.rect_filled(t, rad, if hov { lerp_color(hue, Color32::WHITE, 0.12) } else { hue });
+    }
+    if t.width() < 44.0 || t.height() < 34.0 {
+        return;
+    }
+    let tp = p.with_clip_rect(t.intersect(p.clip_rect()));
+    let pad = if t.width() > 120.0 && t.height() > 80.0 { 14.0 } else { 8.0 };
+    let spin_w = if busy { 18.0 } else { 0.0 };
+    text_fit(&tp, Pos2::new(t.left() + pad, t.top() + pad), Align2::LEFT_TOP, name, bold(13.0), fg, t.width() - pad * 2.0 - spin_w);
+    if busy {
+        spinner(&tp, Pos2::new(t.right() - pad - 6.0, t.top() + pad + 8.0), 5.0, now, hue);
+    }
+    if t.height() >= 56.0 {
+        let size = (t.width().min(t.height() * 1.6) / 9.0).clamp(13.0, 34.0);
+        text_fit(&tp, Pos2::new(t.left() + pad, t.bottom() - pad), Align2::LEFT_BOTTOM, &human_bytes(bytes), FontId::new(size, egui::FontFamily::Name("hero".into())), fg, t.width() - pad * 2.0);
+    }
 }
 
 /// The treemap screen. `pending` is set while mapping: those folders are
