@@ -188,9 +188,10 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
 
     // row 2: the week as bars, and the projects
     let y2 = y + ch + gap;
-    let bottom = r.bottom() - PAGE_FOOTER_H - sp::L;
+    let bottom = r.bottom() - if is_claude { PAGE_FOOTER_H } else { 0.0 } - sp::L;
     let unit = (x1 - x0 - gap) / 2.6;
-    let wr = Rect::from_min_max(Pos2::new(x0, y2), Pos2::new(x0 + unit * 1.0, bottom));
+    // other assistants have no project list: the week takes the whole row
+    let wr = Rect::from_min_max(Pos2::new(x0, y2), Pos2::new(if is_claude { x0 + unit * 1.0 } else { x1 }, bottom));
     // projects take what their rows need; what's left explains the limits
     let rows_h = if cl.projects.is_empty() { 64.0 } else { cl.projects.len() as f32 * sp::ROW_H };
     let want = sp::L + 34.0 + sp::S + rows_h + sp::S;
@@ -205,27 +206,9 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     p.text(Pos2::new(wi.left(), wi.bottom()), Align2::LEFT_BOTTOM, "7 days ago", ty::caption(), ty::caption_color());
     p.text(Pos2::new(wi.right(), wi.bottom()), Align2::RIGHT_BOTTOM, "today", ty::caption(), ty::caption_color());
 
+    if is_claude {
     glass_card(&p, pr, R_CARD, 0.0, false);
     let pi = pr.shrink(sp::L);
-    if !is_claude {
-        // no project list for other assistants (yet): say where the numbers come from
-        p.text(pi.left_top(), Align2::LEFT_TOP, "About these numbers", ty::title(), TEXT());
-        let lines = [
-            cl.note.clone(),
-            format!("Tokens are counted from the {} session logs on this Mac: fresh input plus output, without cached input.", cl.provider),
-            "Projects and Cleanup work with Claude Code only.".to_string(),
-        ];
-        let mut ly = pi.top() + 16.0 + sp::M;
-        for l in lines.iter().filter(|l| !l.is_empty()) {
-            let g = p.layout(l.clone(), ty::body(), TEXT_SOFT(), pi.width());
-            let h = g.size().y;
-            if ly + h > pi.bottom() {
-                break;
-            }
-            p.galley(Pos2::new(pi.left(), ly), g, TEXT_SOFT());
-            ly += h + sp::S;
-        }
-    } else {
     p.text(pi.left_top(), Align2::LEFT_TOP, "Claude Code projects", ty::title(), TEXT());
     let used = cl.projects.iter().filter(|p| p.in_use()).count();
     p.text(pi.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} on this Mac · {} in use", cl.projects.len(), used), ty::caption(), ty::caption_color());
@@ -303,10 +286,10 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     }
 
     // footer
-    let f = page_footer(&p, r, 12.0);
     if !is_claude {
         return;
     }
+    let f = page_footer(&p, r, 12.0);
     let bl = "Review in Cleanup";
     let bw = button_width(&p, bl, BTN_PRIMARY);
     let br = Rect::from_min_size(Pos2::new(f.right() - 24.0 - bw, f.center().y - 16.0), Vec2::new(bw, 32.0));
