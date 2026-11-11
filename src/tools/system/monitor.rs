@@ -60,14 +60,36 @@ pub struct Wifi {
     pub wired: bool,
 }
 
+/// Where a speed test is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpeedPhase {
+    #[default]
+    Idle,
+    Ping,
+    Download,
+    Upload,
+    Done,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SpeedTest {
     pub running: bool,
+    pub phase: SpeedPhase,
+    /// The rate of the transfer under way, in Mbps (for the gauge).
+    pub live_mbps: f64,
     pub progress: f32,
     pub down_mbps: Option<f64>,
     pub up_mbps: Option<f64>,
     pub latency_ms: Option<f64>,
     pub error: Option<String>,
+    /// Set by [`SpeedTest::stop`]; the test thread checks it between reads.
+    pub cancel: Arc<AtomicBool>,
+}
+
+impl SpeedTest {
+    pub fn stop(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -700,46 +722,81 @@ pub fn start_speed_test(shared: Shared, ctx: egui::Context) {
         if s.speed.running {
             return;
         }
-        s.speed = SpeedTest { running: true, ..Default::default() };
+        s.speed = SpeedTest { running: true, phase: SpeedPhase::Ping, ..Default::default() };
     }
+    let cancel = shared.lock().unwrap().speed.cancel.clone();
+    let stopped = move || cancel.load(Ordering::Relaxed);
     std::thread::spawn(move || {
         let set = |f: &dyn Fn(&mut SpeedTest)| {
             let mut s = shared.lock().unwrap();
             f(&mut s.speed);
             ctx.request_repaint();
         };
+        // a stop ends the test quietly with what it has so far
+        let fail = |msg: String| {
+            let quiet = stopped();
+            set(&|s| {
+                s.running = false;
+                s.phase = SpeedPhase::Done;
+                s.live_mbps = 0.0;
+                s.error = if quiet { None } else { Some(msg.clone()) };
+            })
+        };
         let agent = ureq::Agent::new_with_config(
             ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build(),
         );
-        // latency
-        let t0 = Instant::now();
-        let ping = agent.get(&format!("{}?bytes=0", m::SPEED_TEST_DOWN_URL)).call();
-        if let Err(e) = ping {
-            set(&|s| {
-                s.running = false;
-                s.error = Some(format!("No internet connection ({e})"));
-            });
+        // latency: the first call opens the connection, the median of the
+        // next few is the round trip
+        let ping_url = format!("{}?bytes=0", m::SPEED_TEST_DOWN_URL);
+        if let Err(e) = agent.get(&ping_url).call() {
+            fail(format!("No internet connection ({e})"));
             return;
         }
-        let latency = t0.elapsed().as_secs_f64() * 1000.0;
+        let mut rtts = Vec::new();
+        for _ in 0..5 {
+            if stopped() {
+                fail(String::new());
+                return;
+            }
+            let t0 = Instant::now();
+            if agent.get(&ping_url).call().is_ok() {
+                rtts.push(t0.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
+        rtts.sort_by(|a, b| a.total_cmp(b));
+        let latency = rtts.get(rtts.len() / 2).copied().unwrap_or(0.0);
         set(&|s| {
             s.latency_ms = Some(latency);
             s.progress = 0.1;
+            s.phase = SpeedPhase::Download;
         });
-        // download
+        // download, reporting the rate as it goes
         let t0 = Instant::now();
         let url = format!("{}?bytes={}", m::SPEED_TEST_DOWN_URL, m::SPEED_TEST_BYTES);
         let down = agent.get(&url).call().and_then(|r| {
             let mut reader = r.into_body().into_reader();
             let mut buf = vec![0u8; 64 * 1024];
             let mut got = 0u64;
+            let mut last = Instant::now();
             loop {
                 use std::io::Read;
+                if stopped() {
+                    return Err(ureq::Error::Io(std::io::Error::other("stopped")));
+                }
                 let n = reader.read(&mut buf).map_err(ureq::Error::Io)?;
                 if n == 0 {
                     break;
                 }
                 got += n as u64;
+                if last.elapsed() >= Duration::from_millis(80) {
+                    last = Instant::now();
+                    let mbps = got as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6;
+                    let frac = got as f32 / m::SPEED_TEST_BYTES as f32;
+                    set(&|s| {
+                        s.live_mbps = mbps;
+                        s.progress = 0.1 + 0.5 * frac.min(1.0);
+                    });
+                }
             }
             Ok(got)
         });
@@ -748,31 +805,75 @@ pub fn start_speed_test(shared: Shared, ctx: egui::Context) {
                 let mbps = bytes as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6;
                 set(&|s| {
                     s.down_mbps = Some(mbps);
+                    s.live_mbps = 0.0;
                     s.progress = 0.6;
+                    s.phase = SpeedPhase::Upload;
                 });
             }
             Err(e) => {
-                set(&|s| {
-                    s.running = false;
-                    s.error = Some(format!("Network error: {e}"));
-                });
+                fail(format!("Network error: {e}"));
                 return;
             }
         }
-        // upload
-        let payload = vec![0u8; m::SPEED_TEST_UPLOAD_BYTES as usize];
+        // upload, streamed from a counting reader so the gauge can follow
+        let total = m::SPEED_TEST_UPLOAD_BYTES;
         let t0 = Instant::now();
-        let up = agent.post(m::SPEED_TEST_UP_URL).send(&payload[..]);
+        let report = |sent: u64| {
+            let secs = t0.elapsed().as_secs_f64().max(1e-3);
+            let mbps = sent as f64 * 8.0 / secs / 1e6;
+            let frac = sent as f32 / total as f32;
+            set(&|s| {
+                s.live_mbps = mbps;
+                s.progress = 0.6 + 0.4 * frac.min(1.0);
+            });
+        };
+        let mut reader = Zeros { left: total, sent: 0, last: Instant::now(), report: &report, stopped: &stopped };
+        let up = agent
+            .post(m::SPEED_TEST_UP_URL)
+            .header("Content-Type", "application/octet-stream")
+            .header("Content-Length", &total.to_string())
+            .send(ureq::SendBody::from_reader(&mut reader));
         let secs = t0.elapsed().as_secs_f64();
+        let quiet = stopped();
         set(&|s| {
             match &up {
-                Ok(_) => s.up_mbps = Some(payload.len() as f64 * 8.0 / secs / 1e6),
+                Ok(_) => s.up_mbps = Some(total as f64 * 8.0 / secs / 1e6),
+                Err(_) if quiet => {}
                 Err(e) => s.error = Some(format!("Upload test failed: {e}")),
             }
             s.progress = 1.0;
+            s.live_mbps = 0.0;
+            s.phase = SpeedPhase::Done;
             s.running = false;
         });
     });
+}
+
+/// `left` zero bytes for an upload body; calls `report` with the bytes
+/// handed out so far every ~80 ms.
+struct Zeros<'a> {
+    left: u64,
+    sent: u64,
+    last: Instant,
+    report: &'a dyn Fn(u64),
+    stopped: &'a dyn Fn() -> bool,
+}
+
+impl std::io::Read for Zeros<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if (self.stopped)() {
+            return Err(std::io::Error::other("stopped"));
+        }
+        let n = (buf.len() as u64).min(self.left).min(64 * 1024) as usize;
+        buf[..n].fill(0);
+        self.left -= n as u64;
+        self.sent += n as u64;
+        if self.last.elapsed() >= Duration::from_millis(80) {
+            self.last = Instant::now();
+            (self.report)(self.sent);
+        }
+        Ok(n)
+    }
 }
 
 /// "Good for" activities, by download speed in Mbps.

@@ -6,6 +6,7 @@ mod devices_ui;
 pub mod monitor;
 mod page;
 mod sheets;
+mod speed;
 mod ui;
 
 use crate::core::tool::{Action, Badge, Cx, PanelHeader, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};

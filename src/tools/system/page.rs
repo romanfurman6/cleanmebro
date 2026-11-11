@@ -120,12 +120,19 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     }
     match action {
         SheetAction::Open(tool) => cx.open_page(tool, ""),
-        SheetAction::SpeedTest => monitor::start_speed_test(mon.clone(), ui.ctx().clone()),
+        SheetAction::SpeedTest => {
+            // a test already under way just shows again
+            monitor::start_speed_test(mon.clone(), ui.ctx().clone());
+            super::speed::open(ui.ctx());
+        }
         SheetAction::MeasureFolders => monitor::measure_folders(mon.clone(), ui.ctx().clone()),
         SheetAction::ToggleAlerts => monitor::change_bt_prefs(mon, |p| crate::kit::notify::flip(&mut p.alerts)),
         SheetAction::ToggleMenuBar => monitor::change_bt_prefs(mon, |p| p.menu_bar = !p.menu_bar),
         SheetAction::OpenBluetooth => super::devices::open_bluetooth_settings(),
         SheetAction::None | SheetAction::Close => {}
+    }
+    if super::speed::modal(ui, &s.speed) {
+        monitor::start_speed_test(mon.clone(), ui.ctx().clone());
     }
 }
 
@@ -331,7 +338,7 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
     let label = "Test speed";
     let bw = button_width(p, label, BTN_SECONDARY);
     let br = Rect::from_min_size(Pos2::new(r.left(), r.bottom() - 26.0), Vec2::new(bw, 26.0));
-    if pill_button(ui, br, label, BTN_SECONDARY, !sp_.running).clicked() {
+    if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
         out = Some(SheetAction::SpeedTest);
     }
     out
