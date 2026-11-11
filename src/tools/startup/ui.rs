@@ -367,9 +367,12 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                         if ui.button("Copy label").clicked() {
                             ui.ctx().copy_text(j.label.clone());
                         }
-                        ui.separator();
-                        if ui.add_enabled(busy.is_none(), egui::Button::new(egui::RichText::new("Move file to Trash…").color(RED()))).clicked() {
-                            trash = Some(j.clone());
+                        // a bundled job's file is part of its app
+                        if !j.bundled {
+                            ui.separator();
+                            if ui.add_enabled(busy.is_none(), egui::Button::new(egui::RichText::new("Move file to Trash…").color(RED()))).clicked() {
+                                trash = Some(j.clone());
+                            }
                         }
                     });
                     if switch(ui, sw, ui.scope_id().with(("su-job", &j.label, j.scope as u8)), j.on, busy.is_none()).on_hover_text(if j.on { "Turn off" } else { "Turn on" }).clicked() {

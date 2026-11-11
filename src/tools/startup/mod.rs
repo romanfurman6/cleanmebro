@@ -342,6 +342,9 @@ impl Startup {
 
     /// Stop a job and move its file to the Trash.
     pub fn trash(&self, j: &Job) {
+        if j.bundled {
+            return;
+        }
         let j = j.clone();
         let demo = self.demo;
         self.work(
@@ -424,7 +427,7 @@ pub fn demo(g: &mut State, done: bool) {
             Scope::AllUsers => "/Library/LaunchAgents",
             Scope::System => "/Library/LaunchDaemons",
         };
-        Job { label: label.into(), plist: PathBuf::from(format!("{dir}/{label}.plist")), program, scope, on, when, pid, orphan, owner, name: name.into() }
+        Job { label: label.into(), plist: PathBuf::from(format!("{dir}/{label}.plist")), program, scope, on, when, pid, orphan, owner, name: name.into(), bundled: false }
     };
     g.jobs = vec![
         job("com.docker.helper", "Docker", "/Applications/Docker.app/Contents/Library/LaunchServices/com.docker.helper", Scope::User, When::KeepsRunning, true, Some(812), false),
