@@ -96,31 +96,45 @@ pub fn install() -> Result<(), String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let plist_tmp = dir.join("helper.plist");
     std::fs::write(&plist_tmp, plist).map_err(|e| e.to_string())?;
-    let script = format!(
-        "set -e\n\
-         launchctl bootout system/{LABEL} 2>/dev/null || true\n\
-         mkdir -p /Library/PrivilegedHelperTools\n\
-         cp -f {exe} {BIN}\n\
-         chown root:wheel {BIN}\n\
-         chmod 755 {BIN}\n\
-         cp -f {plist} {PLIST}\n\
-         chown root:wheel {PLIST}\n\
-         chmod 644 {PLIST}\n\
-         launchctl bootstrap system {PLIST}\n",
-        exe = sh_quote(&exe),
-        plist = sh_quote(&plist_tmp),
-    );
+    let script = install_script(&sh_quote(&exe), &sh_quote(&plist_tmp));
     let r = run_admin(&dir, &script, "Cmd+Meow wants to add its fan helper so it can change fan speed.");
     let _ = std::fs::remove_dir_all(&dir);
     r?;
     // give launchd a moment to start it
-    for _ in 0..20 {
+    for _ in 0..40 {
         if ask(&Request::Hello).is_some() {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(250));
     }
     Err("The helper was installed but didn't start.".into())
+}
+
+/// The root script that (re)installs the helper. An update has to:
+/// - wait until launchd has really let go of the old helper: `bootout`
+///   returns before it's gone, and `bootstrap` right after fails with
+///   "Bootstrap failed: 5: Input/output error";
+/// - put the new binary at a new inode (copy, then rename): copying over
+///   the old file in place keeps the kernel's cached code signature of the
+///   old one, so the new helper is killed at launch and never answers;
+/// - re-enable the service, in case it was turned off.
+fn install_script(exe: &str, plist: &str) -> String {
+    format!(
+        "set -e\n\
+         launchctl bootout system/{LABEL} 2>/dev/null || true\n\
+         i=0; while launchctl print system/{LABEL} >/dev/null 2>&1 && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done\n\
+         mkdir -p /Library/PrivilegedHelperTools\n\
+         rm -f {BIN}.new\n\
+         cp {exe} {BIN}.new\n\
+         chown root:wheel {BIN}.new\n\
+         chmod 755 {BIN}.new\n\
+         mv -f {BIN}.new {BIN}\n\
+         cp -f {plist} {PLIST}\n\
+         chown root:wheel {PLIST}\n\
+         chmod 644 {PLIST}\n\
+         launchctl enable system/{LABEL} 2>/dev/null || true\n\
+         launchctl bootstrap system {PLIST} 2>/dev/null || {{ sleep 1; launchctl bootstrap system {PLIST}; }}\n"
+    )
 }
 
 /// Stop and remove the helper (fans go back to Auto as it stops).
@@ -311,5 +325,17 @@ mod tests {
     fn quotes_paths_for_sh() {
         assert_eq!(sh_quote(Path::new("/Applications/CmdMeow Dev.app/x")), "'/Applications/CmdMeow Dev.app/x'");
         assert_eq!(sh_quote(Path::new("/a'b")), r"'/a'\''b'");
+    }
+
+    #[test]
+    fn install_replaces_the_binary_by_rename() {
+        let s = install_script("'/x/cmdmeow'", "'/t/helper.plist'");
+        // never copy over the running binary in place
+        assert!(!s.contains(&format!("cp -f '/x/cmdmeow' {BIN}\n")));
+        assert!(s.contains(&format!("mv -f {BIN}.new {BIN}")));
+        // waits for the old helper before bootstrapping the new one
+        let wait = s.find("while launchctl print").unwrap();
+        assert!(wait < s.find("launchctl bootstrap").unwrap());
+        assert!(s.find("launchctl bootout").unwrap() < wait);
     }
 }
