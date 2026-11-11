@@ -81,11 +81,20 @@ jobs:
           security set-keychain-settings -lut 21600 "$KC"
           security unlock-keychain -p "$KC_PW" "$KC"
           security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          # The Developer ID G2 intermediate isn't built into macOS; without it
+          # the identity isn't valid and `find-identity -v` drops it.
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/g2.cer"
+          security import "$RUNNER_TEMP/g2.cer" -k "$KC" || true
+          rm -f "$RUNNER_TEMP/g2.cer"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PW" "$KC" >/dev/null
           security list-keychains -d user -s "$KC" $(cat "$RUNNER_TEMP/keychains.orig")
           rm "$RUNNER_TEMP/cert.p12"
           LINE="$(security find-identity -v -p codesigning "$KC" | grep 'Developer ID Application:' | head -1)"
-          [[ -n "$LINE" ]] || { echo "::error::No 'Developer ID Application' identity in MACOS_CERT_P12"; exit 1; }
+          if [[ -z "$LINE" ]]; then
+            security find-identity -p codesigning "$KC" # names and why each is invalid
+            echo "::error::No valid 'Developer ID Application' identity in MACOS_CERT_P12"
+            exit 1
+          fi
           echo "Signing as: ${LINE#*) }"
           # SHA-1 hash, not the name: the same cert may also be in the login keychain.
           ID="$(echo "$LINE" | awk '{print $2}')"
