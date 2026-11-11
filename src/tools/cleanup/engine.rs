@@ -967,7 +967,7 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
             }
             let to_trash = !delete_now && !it.rebuilds();
             let res = if it.group == Group::Trash {
-                empty_folder(&it.path)
+                empty_trash(&it.path)
             } else if to_trash {
                 move_to_trash(&it.path)
             } else {
@@ -1067,6 +1067,17 @@ pub fn days_ago(when: i64) -> String {
 }
 
 fn remove(p: &Path) -> Result<(), String> {
+    let first = remove_once(p);
+    if first.is_ok() || !p.exists() {
+        return Ok(());
+    }
+    // read-only folders (Go's module cache, npm tarballs) and locked files
+    // can't be emptied as they are: make what's ours writable, then retry
+    unlock_tree(p);
+    remove_once(p)
+}
+
+fn remove_once(p: &Path) -> Result<(), String> {
     let md = p.symlink_metadata().map_err(|e| e.to_string())?;
     if md.is_dir() {
         std::fs::remove_dir_all(p).map_err(|e| e.to_string())
@@ -1075,19 +1086,93 @@ fn remove(p: &Path) -> Result<(), String> {
     }
 }
 
-fn empty_folder(p: &Path) -> Result<(), String> {
-    let mut err = None;
-    for c in children(p) {
-        if let Err(e) = remove(&c) {
-            err = Some(e);
+/// Owner write/exec on every folder and no "locked" flag on anything below
+/// `p`, so the tree can be removed. Never follows symlinks.
+fn unlock_tree(p: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(md) = p.symlink_metadata() else { return };
+    clear_flags(p);
+    if md.file_type().is_symlink() {
+        return;
+    }
+    if md.is_dir() {
+        let mode = md.permissions().mode();
+        if mode & 0o700 != 0o700 {
+            let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode | 0o700));
+        }
+        if let Ok(rd) = std::fs::read_dir(p) {
+            for e in rd.flatten() {
+                unlock_tree(&e.path());
+            }
         }
     }
-    err.map_or(Ok(()), Err)
+}
+
+#[cfg(target_os = "macos")]
+fn clear_flags(p: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+    if let Ok(c) = std::ffi::CString::new(p.as_os_str().as_bytes()) {
+        // drop user-settable flags (uchg = Finder's "Locked"); system flags need root
+        unsafe {
+            let mut st: libc::stat = std::mem::zeroed();
+            if libc::lstat(c.as_ptr(), &mut st) == 0 && st.st_flags & libc::UF_SETTABLE != 0 {
+                libc::lchflags(c.as_ptr(), st.st_flags & !libc::UF_SETTABLE);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clear_flags(_: &Path) {}
+
+/// Empty a folder's contents but keep the folder itself (the Trash belongs
+/// to macOS and can't be removed). Names what couldn't go, if anything.
+fn empty_folder(p: &Path) -> Result<(), String> {
+    let mut failed: Vec<(String, String)> = Vec::new();
+    for c in children(p) {
+        if let Err(e) = remove(&c) {
+            failed.push((fname(&c), e));
+        }
+    }
+    match failed.len() {
+        0 => Ok(()),
+        1 => Err(format!("{}: {}", failed[0].0, failed[0].1)),
+        n => Err(format!("{n} items, e.g. {}: {}", failed[0].0, failed[0].1)),
+    }
+}
+
+/// Empty the Trash: directly first; what's left (owned by another user,
+/// system-locked) goes through Finder, which asks for the password itself.
+fn empty_trash(p: &Path) -> Result<(), String> {
+    let direct = empty_folder(p);
+    if direct.is_ok() {
+        return direct;
+    }
+    #[cfg(target_os = "macos")]
+    if crate::kit::macos::osascript("tell application \"Finder\" to empty trash").is_ok() && children(p).iter().all(|c| fname(c) == ".DS_Store") {
+        return Ok(());
+    }
+    direct
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_only_folders_in_the_trash_are_emptied() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("cmdmeow-trash-{}", std::process::id()));
+        let ro = base.join("go-mod/cache@v1");
+        std::fs::create_dir_all(&ro).unwrap();
+        std::fs::write(ro.join("a.go"), "x").unwrap();
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+        std::fs::set_permissions(base.join("go-mod"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        std::fs::write(base.join("note.txt"), "x").unwrap();
+        assert_eq!(empty_folder(&base), Ok(()));
+        assert!(base.exists() && children(&base).is_empty());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 
     #[test]
     fn short_id_is_utf8_safe() {

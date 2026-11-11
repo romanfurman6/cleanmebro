@@ -375,7 +375,7 @@ impl Editor {
             if at.elapsed().as_secs_f32() < 2.5 {
                 let g = p.layout_no_wrap(msg.clone(), font(13.0), TEXT());
                 let r = Rect::from_center_size(Pos2::new(canvas.center().x, canvas.bottom() - 30.0), g.size() + Vec2::new(28.0, 16.0));
-                p.rect_filled(r, r.height() / 2.0, RAISED());
+                p.rect_filled(r, r.height() / 2.0, POPOVER());
                 p.rect_stroke(r, r.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
                 p.galley(r.center() - g.size() / 2.0, g, TEXT());
                 ui.ctx().request_repaint();
@@ -629,7 +629,7 @@ impl Editor {
                 }
                 at.x = at.x.clamp(area.left() + 4.0, area.right() - g.size().x - 28.0);
                 let hr = Rect::from_min_size(at, g.size() + Vec2::new(24.0, 12.0));
-                p.rect_filled(hr, hr.height() / 2.0, RAISED());
+                p.rect_filled(hr, hr.height() / 2.0, POPOVER());
                 p.rect_stroke(hr, hr.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
                 p.galley(hr.center() - g.size() / 2.0, g, TEXT());
             } else if let Some(c) = self.doc.crop {
@@ -1042,7 +1042,7 @@ pub fn loupe(p: &egui::Painter, img: &RgbaImage, q: Pos2, at: Pos2, c: Rgba8) {
     let label = render::hex(c);
     let g = p.layout_no_wrap(label, mono(12.0), TEXT());
     let lr = Rect::from_min_size(Pos2::new(r.left(), r.bottom() + 8.0), Vec2::new(g.size().x + 30.0, 24.0));
-    p.rect_filled(lr, 7.0, RAISED());
+    p.rect_filled(lr, 7.0, POPOVER());
     p.rect_filled(Rect::from_center_size(Pos2::new(lr.left() + 12.0, lr.center().y), Vec2::splat(12.0)), 3.0, c32([c[0], c[1], c[2], 255]));
     p.galley(Pos2::new(lr.left() + 22.0, lr.center().y - g.size().y / 2.0), g, TEXT());
 }

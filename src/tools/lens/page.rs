@@ -699,7 +699,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
         if tr.bottom() > pa.bottom() {
             tr = tr.translate(Vec2::new(0.0, -78.0));
         }
-        p.rect_filled(tr, 10.0, RAISED());
+        p.rect_filled(tr, 10.0, POPOVER());
         p.rect_stroke(tr, 10.0, Stroke::new(1.0, white(31)), StrokeKind::Inside);
         p.text(tr.min + Vec2::new(12.0, 9.0), Align2::LEFT_TOP, name, bold(13.0), TEXT());
         p.text(tr.min + Vec2::new(12.0, 28.0), Align2::LEFT_TOP, info, font(12.0), TEXT_DIM());
@@ -752,7 +752,7 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let h = 22.0 + 46.0 + 14.0 + rows as f32 * 34.0 + 8.0 + 18.0 + 30.0 + 22.0;
     let m = Rect::from_center_size(r.center(), Vec2::new(520.0, h));
     p.rect_filled(m.translate(Vec2::new(0.0, 10.0)).expand(6.0), 18.0, Color32::from_black_alpha(70));
-    p.rect_filled(m, 14.0, RAISED());
+    p.rect_filled(m, 14.0, POPOVER());
     p.rect_stroke(m, 14.0, Stroke::new(1.0, white(31)), StrokeKind::Inside);
     let total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     let title = format!("Move {} item{} ({}) to the Trash?", n, if n == 1 { "" } else { "s" }, human_bytes(total));

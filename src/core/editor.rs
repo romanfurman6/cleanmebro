@@ -284,7 +284,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
             let size = Vec2::new(d.size.x.min(240.0), 44.0);
             let gr = Rect::from_min_size(q - Vec2::new(d.grab.x.min(size.x - 12.0), 22.0), size);
             gp.rect_filled(gr.translate(Vec2::new(0.0, 8.0)).expand(2.0), R_CARD + 2.0, Color32::from_black_alpha(80));
-            gp.rect_filled(gr, R_CARD, with_alpha(RAISED(), 0.92));
+            gp.rect_filled(gr, R_CARD, POPOVER());
             gp.rect_stroke(gr, R_CARD, Stroke::new(1.0, if target == Target::Hide { RED() } else { white(40) }), StrokeKind::Inside);
             text_fit(&gp, Pos2::new(gr.left() + 12.0, gr.center().y), Align2::LEFT_CENTER, &d.label, bold(13.0), TEXT(), gr.width() - 24.0);
         }
