@@ -114,7 +114,7 @@ fn intro(ui: &mut Ui, r: Rect) -> bool {
     let pr = Rect::from_center_size(Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + 28.0 + 70.0), Vec2::new(w, 140.0));
     glass_card(&p, pr, R_CARD, 0.0, false);
     p.text(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), Align2::LEFT_TOP, "Map Macintosh HD", bold(15.0), TEXT);
-    paragraph(&p, Pos2::new(pr.left() + 16.0, pr.top() + 40.0), "Measures every folder on the disk, so it takes a few minutes and keeps the Mac busy. Nothing is removed.", font(13.0), TEXT_DIM, pr.width() - 32.0);
+    paragraph(&p, Pos2::new(pr.left() + 16.0, pr.top() + 40.0), "Takes a few minutes. Nothing is removed", font(13.0), TEXT_DIM, pr.width() - 32.0);
     let bw = button_width(&p, "Map disk", BTN_PRIMARY) + 28.0;
     pill_button(ui, Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 48.0), Vec2::new(bw, 32.0)), "Map disk", BTN_PRIMARY, true).clicked()
 }
@@ -148,7 +148,7 @@ fn start(app: &mut App, ui: &mut Ui, r: Rect) {
     if pill_button(ui, Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 44.0), Vec2::new(sw, 28.0)), "Stop", BTN_SECONDARY, true).clicked() {
         app.lens.stop.store(true, Ordering::SeqCst);
     }
-    paragraph(&p, Pos2::new(pr.left(), pr.bottom() + 14.0), "Mapping the whole disk takes a few minutes. Give Cmd+Meow Full Disk Access in System Settings for complete results.", font(12.0), TEXT_FAINT, pr.width());
+    paragraph(&p, Pos2::new(pr.left(), pr.bottom() + 14.0), "Allow Full Disk Access for complete results", font(12.0), TEXT_FAINT, pr.width());
     crate::kit::glass::animate(&ctx);
 }
 
@@ -322,8 +322,8 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
 
     // aside
     let ar = Rect::from_min_max(Pos2::new(area.right() + 16.0, body.top()), body.max);
-    section_header(&p, ar.min, Align2::LEFT_TOP, "TO REMOVE");
-    paragraph(&p, Pos2::new(ar.left(), ar.top() + 24.0), "The map opens when mapping finishes. Then click a folder to zoom in and tick a corner to pick it for removal.", font(12.0), TEXT_FAINT, ar.width());
+    section_header(&p, ar.min, Align2::LEFT_TOP, "To remove");
+    paragraph(&p, Pos2::new(ar.left(), ar.top() + 24.0), "Available when mapping finishes", font(12.0), TEXT_FAINT, ar.width());
     let rb = Rect::from_min_max(Pos2::new(ar.left(), ar.bottom() - 34.0), ar.max);
     pill_button(ui, rb, "Review and remove", BTN_PRIMARY, false);
 
@@ -597,7 +597,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             let opens = s.kids > 0 && !measuring;
             ctx.set_cursor_icon(if opens { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Default });
             if measuring {
-                interact.clone().on_hover_text("Still measuring this folder.");
+                interact.clone().on_hover_text("Still measuring");
             }
             if interact.double_clicked() && opens {
                 match &s.path {
@@ -702,7 +702,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
                     toggle = Some((subject.path.clone(), subject.bytes));
                 }
             } else {
-                let why = if live { "You can pick what to remove when mapping finishes." } else { "Your Mac needs this folder, so it can't be removed." };
+                let why = if live { "Available when mapping finishes" } else { "Needed by macOS" };
                 text_fit(&p, Pos2::new(x, br.center().y), Align2::LEFT_CENTER, why, ty::caption(), ty::caption_color(), w);
             }
         }
@@ -731,14 +731,14 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
 
     // aside: the list to remove
     let ar = Rect::from_min_max(Pos2::new(area.right() + 16.0, body.top()), body.max);
-    section_header(&p, ar.min, Align2::LEFT_TOP, "TO REMOVE");
+    section_header(&p, ar.min, Align2::LEFT_TOP, "To remove");
     let total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     let list_top = ar.top() + 24.0;
     let list_bottom = ar.bottom() - 34.0 - 12.0 - 34.0;
     if live {
-        paragraph(&p, Pos2::new(ar.left(), list_top), "You can pick what to remove when mapping finishes. Finished folders open already.", font(12.0), TEXT_FAINT, ar.width());
+        paragraph(&p, Pos2::new(ar.left(), list_top), "Available when mapping finishes", font(12.0), TEXT_FAINT, ar.width());
     } else if app.lens_selected.is_empty() {
-        paragraph(&p, Pos2::new(ar.left(), list_top), "Nothing yet. Click a folder, then Add to the list.", font(12.0), TEXT_FAINT, ar.width());
+        paragraph(&p, Pos2::new(ar.left(), list_top), "Nothing picked", font(12.0), TEXT_FAINT, ar.width());
     }
     let mut drop: Option<usize> = None;
     let rel = |pa: &Path| -> String {
@@ -797,7 +797,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             text_fit(&p, Pos2::new(fr.left() + 92.0, fr.center().y), Align2::LEFT_CENTER, &tilde(Path::new(&cur)), mono(12.0), TEXT_SOFT, fr.width() - 112.0);
         }
         None => {
-            p.text(Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, "Point at a ring to see details", mono(12.0), TEXT_FAINT);
+            p.text(Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, "Point at a ring to see details", font(12.0), TEXT_FAINT);
         }
     }
     act
@@ -818,7 +818,7 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     let title = format!("Move {} item{} ({}) to the Trash?", n, if n == 1 { "" } else { "s" }, human_bytes(total));
     text_fit(&p, m.min + Vec2::new(22.0, 22.0), Align2::LEFT_TOP, &title, bold(17.0), TEXT, m.width() - 44.0);
-    text_fit(&p, m.min + Vec2::new(22.0, 48.0), Align2::LEFT_TOP, "You can put them back from the Trash. System folders and code projects are skipped.", font(13.0), TEXT_DIM, m.width() - 44.0);
+    text_fit(&p, m.min + Vec2::new(22.0, 48.0), Align2::LEFT_TOP, "System folders and code projects are skipped", font(13.0), TEXT_DIM, m.width() - 44.0);
     let list = Rect::from_min_size(m.min + Vec2::new(22.0, 82.0), Vec2::new(m.width() - 44.0, rows as f32 * 34.0 + 8.0));
     p.rect_filled(list, 10.0, Color32::from_black_alpha(46));
     let mut drop: Option<usize> = None;

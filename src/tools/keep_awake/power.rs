@@ -20,6 +20,7 @@ pub struct Power {
 }
 
 impl Power {
+    #[cfg(test)]
     pub fn held(&self) -> Want {
         self.held
     }

@@ -439,20 +439,11 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
             e.set_manual(true, now);
         }
     } else {
-        // status dots under the reason line
-        let x = hr.left() + 28.0 + 150.0 + 28.0;
-        let mut cx = x;
-        let cy = hr.center().y + (34.0 + 6.0 + 15.0 + 6.0 + 16.0) / 2.0 - 8.0;
-        let held = e.held();
-        let dot = |label: &str, on: bool, cx: &mut f32| {
-            p.circle_filled(Pos2::new(*cx + 3.5, cy), 3.5, if on { GREEN } else { TEXT_FAINT });
-            let tr = p.text(Pos2::new(*cx + 13.0, cy), Align2::LEFT_CENTER, label, font(12.0), TEXT_DIM);
-            *cx = tr.right() + 18.0;
-        };
-        dot(if held.system { "Mac won't sleep" } else { "Mac can sleep" }, held.system, &mut cx);
-        dot(if held.display { "Screen stays on" } else { "Screen can sleep" }, held.display, &mut cx);
-        if let Some(s) = e.awake_since {
-            p.text(Pos2::new(cx, cy), Align2::LEFT_CENTER, format!("since {} · {}", time_of_day(s), span_text(now - s)), font(12.0), TEXT_DIM);
+        // how long it has been up
+        if let Some(since) = e.awake_since {
+            let x = hr.left() + 28.0 + 150.0 + 28.0;
+            let y = hr.center().y + (34.0 + 6.0 + 15.0 + 6.0 + 16.0) / 2.0 - 16.0;
+            p.text(Pos2::new(x, y), Align2::LEFT_TOP, format!("since {} · {}", time_of_day(since), span_text(now - since)), font(12.0), TEXT_DIM);
         }
     }
     let manual = e.manual_since.is_some();
@@ -460,7 +451,6 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     if switch(ui, sw, id.with("manual"), manual, true).on_hover_text("Keep the Mac awake until you turn this off").clicked() {
         e.set_manual(!manual, now);
     }
-    p.text(Pos2::new(sw.center().x, sw.bottom() + 10.0), Align2::CENTER_TOP, "By hand", font(11.0), TEXT_DIM);
     y = hr.bottom() + 18.0;
 
     // today
@@ -468,7 +458,7 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     let total: i64 = spans.iter().map(|s| s.end - s.start).sum();
     let claude: i64 = spans.iter().filter(|s| s.claude).map(|s| s.end - s.start).sum();
     p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Today", bold(15.0), TEXT);
-    let summary = if total == 0 { "Not kept awake yet".to_string() } else { format!("Awake {} · {} of it for Claude", span_text(total), span_text(claude)) };
+    let summary = if total == 0 { "Not kept awake yet".to_string() } else { format!("{} awake · {} for Claude", span_text(total), span_text(claude)) };
     p.text(Pos2::new(x1, y + 2.0), Align2::RIGHT_TOP, summary, font(12.0), TEXT_DIM);
     y += 26.0;
     let strip = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 28.0));
@@ -485,20 +475,20 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     }
     y += 20.0;
     let mut lx = x0;
-    for (label, c) in [("By hand", HAND), ("Claude working", CLAUDE_ORANGE)] {
+    for (label, c) in [("You", HAND), ("Claude", CLAUDE_ORANGE)] {
         p.rect_filled(Rect::from_min_size(Pos2::new(lx, y + 1.0), Vec2::splat(10.0)), 3.0, c);
         let tr = p.text(Pos2::new(lx + 16.0, y + 6.0), Align2::LEFT_CENTER, label, font(12.0), TEXT_DIM);
         lx = tr.right() + 16.0;
     }
     y += 30.0;
 
-    // two columns: Claude Code, Screen
+    // two columns: options, Claude Code sessions
     let gap = 20.0;
-    let lw = (x1 - x0 - gap) * 0.55;
+    let lw = (x1 - x0 - gap) * 0.5;
     let left = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x0 + lw, r.bottom() - 20.0));
     let right = Rect::from_min_max(Pos2::new(left.right() + gap, y), Pos2::new(x1, r.bottom() - 20.0));
-    claude_section(ui, &p, left, &mut e, now, id);
-    screen_section(ui, &p, right, &mut e, now, id);
+    options(ui, &p, left, &mut e, now, id);
+    sessions(&p, right, &e, now);
 }
 
 fn today_strip(p: &Painter, r: Rect, spans: &[Span], now: i64) {
@@ -518,108 +508,66 @@ fn section_card(p: &Painter, r: Rect) {
     glass_card(p, r, R_CARD, 0.0, false);
 }
 
-/// A switch row with a hint under the label. Returns true when clicked.
-fn switch_row(ui: &mut Ui, p: &Painter, r: Rect, id: egui::Id, label: &str, hint: &str, on: bool) -> bool {
-    p.text(Pos2::new(r.left() + 12.0, r.center().y - 8.0), Align2::LEFT_CENTER, label, font(13.0), TEXT);
-    text_fit(p, Pos2::new(r.left() + 12.0, r.center().y + 9.0), Align2::LEFT_CENTER, hint, font(11.0), TEXT_FAINT, r.width() - 70.0);
+/// A row with a label and a switch. Returns true when clicked.
+fn switch_row(ui: &mut Ui, p: &Painter, r: Rect, id: egui::Id, label: &str, on: bool) -> bool {
+    text_fit(p, Pos2::new(r.left() + 12.0, r.center().y), Align2::LEFT_CENTER, label, font(13.0), TEXT, r.width() - 70.0);
     switch(ui, Rect::from_min_size(Pos2::new(r.right() - 42.0, r.center().y - 9.0), Vec2::new(30.0, 18.0)), id, on, true).clicked()
 }
 
-fn claude_section(ui: &mut Ui, p: &Painter, r: Rect, e: &mut Engine, now: i64, id: egui::Id) {
-    p.text(r.min, Align2::LEFT_TOP, "Claude Code", bold(15.0), TEXT);
-    let shown: Vec<_> = e.sessions.iter().take(4).cloned().collect();
-    let rows = shown.len().max(1) as f32;
-    let card = Rect::from_min_size(r.min + Vec2::new(0.0, 26.0), Vec2::new(r.width(), 44.0 + 36.0 + 28.0 + rows * 26.0 + 8.0));
+const ROW: f32 = 44.0;
+
+fn options(ui: &mut Ui, p: &Painter, r: Rect, e: &mut Engine, now: i64, id: egui::Id) {
+    p.text(r.min, Align2::LEFT_TOP, "Options", bold(15.0), TEXT);
+    let card = Rect::from_min_size(r.min + Vec2::new(0.0, 26.0), Vec2::new(r.width(), ROW * 4.0));
     section_card(p, card);
-    let mut y = card.top() + 2.0;
+    let row = |i: usize| Rect::from_min_size(Pos2::new(card.left(), card.top() + ROW * i as f32), Vec2::new(card.width(), ROW));
+    let line = |i: usize| {
+        let y = card.top() + ROW * i as f32;
+        hairline(p, Pos2::new(card.left() + 12.0, y), Pos2::new(card.right(), y));
+    };
     let claude = e.settings.claude;
-    let row = Rect::from_min_max(Pos2::new(card.left(), y), Pos2::new(card.right(), y + 44.0));
-    let hint = format!("Working = a session wrote to its log in the last {} min", WORKING_SECS / 60);
-    if switch_row(ui, p, row, id.with("claude"), "Stay awake while Claude works", &hint, claude) {
+    if switch_row(ui, p, row(0), id.with("claude"), "Stay awake while Claude works", claude) {
         e.change(now, |s| s.claude = !claude);
     }
-    y += 44.0;
-    hairline(p, Pos2::new(card.left() + 12.0, y), Pos2::new(card.right(), y));
-    p.text(Pos2::new(card.left() + 12.0, y + 18.0), Align2::LEFT_CENTER, "Wait before sleeping", font(13.0), TEXT);
+    line(1);
+    let r1 = row(1);
+    p.text(Pos2::new(r1.left() + 12.0, r1.center().y), Align2::LEFT_CENTER, "Sleep after Claude stops", font(13.0), TEXT);
     let labels: Vec<String> = GRACE_CHOICES.iter().map(|m| format!("{m} min")).collect();
     let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
     let sel = GRACE_CHOICES.iter().position(|m| *m == e.settings.grace_min).unwrap_or(1);
-    let seg = Rect::from_min_size(Pos2::new(card.right() - 12.0 - 168.0, y + 6.0), Vec2::new(168.0, 24.0));
+    let seg = Rect::from_min_size(Pos2::new(r1.right() - 12.0 - 168.0, r1.center().y - 12.0), Vec2::new(168.0, 24.0));
     if let Some(i) = segmented(ui, seg, id.with("grace"), &refs, sel) {
         e.change(now, |s| s.grace_min = GRACE_CHOICES[i]);
     }
-    y += 36.0;
-    hairline(p, Pos2::new(card.left() + 12.0, y), Pos2::new(card.right(), y));
-    section_header(p, Pos2::new(card.left() + 12.0, y + 10.0), Align2::LEFT_TOP, "SESSIONS");
-    y += 28.0;
-    if shown.is_empty() {
-        p.text(Pos2::new(card.left() + 12.0, y + 13.0), Align2::LEFT_CENTER, "No Claude Code session in the last day", font(12.0), TEXT_FAINT);
-    }
-    for s in &shown {
-        let cy = y + 13.0;
-        let working = now - s.last_write <= WORKING_SECS;
-        p.circle_filled(Pos2::new(card.left() + 15.0, cy), 3.0, if working { GREEN } else { Color32::from_rgb(0x63, 0x63, 0x66) });
-        text_fit(p, Pos2::new(card.left() + 26.0, cy), Align2::LEFT_CENTER, &s.project, mono(11.5), TEXT_SOFT, card.width() - 180.0);
-        let when = if working { format!("working · {}", ago(now - s.last_write)) } else { format!("idle · {}", ago(now - s.last_write).trim_end_matches(" ago")) };
-        p.text(Pos2::new(card.right() - 12.0, cy), Align2::RIGHT_CENTER, when, font(12.0), TEXT_FAINT);
-        y += 26.0;
-    }
-}
-
-fn screen_section(ui: &mut Ui, p: &Painter, r: Rect, e: &mut Engine, now: i64, id: egui::Id) {
-    p.text(r.min, Align2::LEFT_TOP, "Screen", bold(15.0), TEXT);
-    let card = Rect::from_min_size(r.min + Vec2::new(0.0, 26.0), Vec2::new(r.width(), 2.0 * 44.0 + 4.0));
-    section_card(p, card);
-    let y = card.top() + 2.0;
+    line(2);
     let (m, c) = (e.settings.manual_screen, e.settings.claude_screen);
-    let row1 = Rect::from_min_max(Pos2::new(card.left(), y), Pos2::new(card.right(), y + 44.0));
-    if switch_row(ui, p, row1, id.with("mscreen"), "Keep screen on when on by hand", "Like a presentation or a long read", m) {
+    if switch_row(ui, p, row(2), id.with("mscreen"), "Keep the screen on", m) {
         e.change(now, |s| s.manual_screen = !m);
     }
-    hairline(p, Pos2::new(card.left() + 12.0, y + 44.0), Pos2::new(card.right(), y + 44.0));
-    let row2 = Rect::from_min_max(Pos2::new(card.left(), y + 44.0), Pos2::new(card.right(), y + 88.0));
-    if switch_row(ui, p, row2, id.with("cscreen"), "Keep screen on while Claude works", "Off: the Mac works, the screen rests", c) {
+    line(3);
+    if switch_row(ui, p, row(3), id.with("cscreen"), "Keep the screen on for Claude", c) {
         e.change(now, |s| s.claude_screen = !c);
     }
-    paragraph(
-        p,
-        Pos2::new(card.left() + 2.0, card.bottom() + 10.0),
-        "Closing the lid still puts the Mac to sleep unless it's on power with an external display. That's a macOS rule.",
-        font(11.0),
-        TEXT_FAINT,
-        card.width() - 4.0,
-    );
-    states_card(p, Rect::from_min_max(Pos2::new(r.left(), card.bottom() + 48.0), r.max), ui.ctx().input(|i| i.time));
 }
 
-/// What each look of the cup means, when there is room for it.
-fn states_card(p: &Painter, r: Rect, t: f64) {
-    let pad = sp::L;
-    let cup = 64.0;
-    let h = pad + 16.0 + sp::XS + 14.0 + sp::L + cup + sp::S + 16.0 + sp::XS + 14.0 + pad;
-    if r.height() < h {
-        return;
+fn sessions(p: &Painter, r: Rect, e: &Engine, now: i64) {
+    p.text(r.min, Align2::LEFT_TOP, "Claude Code sessions", bold(15.0), TEXT);
+    let shown: Vec<_> = e.sessions.iter().take(6).cloned().collect();
+    let rows = shown.len().max(1) as f32;
+    let h = (rows * 32.0 + 12.0).max(ROW * 4.0);
+    let card = Rect::from_min_size(r.min + Vec2::new(0.0, 26.0), Vec2::new(r.width(), h));
+    section_card(p, card);
+    let mut y = card.top() + 6.0;
+    if shown.is_empty() {
+        p.text(card.center(), Align2::CENTER_CENTER, if e.settings.claude { "None today" } else { "Monitoring off" }, font(12.0), TEXT_FAINT);
     }
-    let cr = Rect::from_min_size(r.min, Vec2::new(r.width(), h));
-    section_card(p, cr);
-    let x = cr.left() + pad;
-    let mut y = cr.top() + pad;
-    p.text(Pos2::new(x, y), Align2::LEFT_TOP, "States", ty::title(), TEXT);
-    y += 16.0 + sp::XS;
-    p.text(Pos2::new(x, y), Align2::LEFT_TOP, "The cup tells you why the Mac is up", ty::caption(), ty::caption_color());
-    y += 14.0 + sp::L;
-    let col = (cr.width() - pad * 2.0) / 4.0;
-    let states = [
-        (State::Off, 0.0, "Off", "sleeps as usual"),
-        (State::Manual, 1.0, "By hand", "switch is on"),
-        (State::Claude, 0.7, "Claude", "a session writes"),
-        (State::WindDown { left: 180 }, 0.6, "Wind-down", "3 min left"),
-    ];
-    for (i, (st, frac, name, note)) in states.into_iter().enumerate() {
-        let cx = x + col * (i as f32 + 0.5);
-        scene(p, Rect::from_center_size(Pos2::new(cx, y + cup / 2.0), Vec2::splat(cup)), st, frac, t);
-        let ny = y + cup + sp::S;
-        text_fit(p, Pos2::new(cx, ny), Align2::CENTER_TOP, name, bold(12.0), TEXT, col - 4.0);
-        text_fit(p, Pos2::new(cx, ny + 16.0 + sp::XS), Align2::CENTER_TOP, note, ty::caption(), ty::caption_color(), col - 4.0);
+    for s in &shown {
+        let cy = y + 16.0;
+        let working = now - s.last_write <= WORKING_SECS;
+        p.circle_filled(Pos2::new(card.left() + 16.0, cy), 3.0, if working { GREEN } else { Color32::from_rgb(0x63, 0x63, 0x66) });
+        text_fit(p, Pos2::new(card.left() + 28.0, cy), Align2::LEFT_CENTER, &s.project, mono(11.5), TEXT_SOFT, card.width() - 140.0);
+        let when = if working { "working".to_string() } else { ago(now - s.last_write) };
+        p.text(Pos2::new(card.right() - 12.0, cy), Align2::RIGHT_CENTER, when, font(12.0), TEXT_FAINT);
+        y += 32.0;
     }
 }

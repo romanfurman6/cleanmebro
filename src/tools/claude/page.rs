@@ -62,10 +62,11 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
     let title = if a == Availability::SignedOut { format!("{} isn't signed in", m.name) } else { format!("{} isn't installed", m.name) };
     p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, title, bold(20.0), TEXT);
     y += 32.0;
+    let verb = if a == Availability::SignedOut { "Sign in" } else { "Install it" };
     let intro = if m.id == "claude" {
-        "Set it up to see your plan limits, token use and Claude Code projects here, and to let Cleanup ask Claude about each path.".to_string()
+        format!("{verb} to see plan limits, token use and projects here")
     } else {
-        format!("Set it up to see your {} plan limits and token use here. Or switch back to the assistant you use above.", m.name)
+        format!("{verb} to see {} limits and token use here", m.name)
     };
     let g = p.layout(intro, font(13.0), TEXT_DIM, colw);
     let gh = g.size().y;
@@ -105,7 +106,7 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
         cx.toast(format!("Looking for {}…", m.name));
     }
     y += 32.0 + 18.0;
-    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, "Cleanup and the rest of the app work without it.", font(12.0), TEXT_FAINT);
+    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, "", font(12.0), TEXT_FAINT);
 }
 
 pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
@@ -236,7 +237,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
             let pp = ui.painter();
             let msg = if demo { "No Claude Code projects on this Mac yet." } else { "Looking for Claude Code projects…" };
             pp.text(Pos2::new(row.left() + sp::L, row.top() + sp::M), Align2::LEFT_TOP, msg, ty::body(), TEXT_SOFT);
-            text_fit(pp, Pos2::new(row.left() + sp::L, row.top() + sp::M + 20.0), Align2::LEFT_TOP, "Each folder where you run Claude Code shows up here with its size and last use.", ty::label(), ty::caption_color(), row.width() - 2.0 * sp::L);
+            text_fit(pp, Pos2::new(row.left() + sp::L, row.top() + sp::M + 20.0), Align2::LEFT_TOP, "", ty::label(), ty::caption_color(), row.width() - 2.0 * sp::L);
         }
         for (k, pj) in cl.projects.iter().enumerate() {
             let (row, _) = ui.allocate_exact_size(Vec2::new(list.width(), sp::ROW_H), Sense::hover());
@@ -291,7 +292,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
     let bl = "Review in Cleanup";
     let bw = button_width(&p, bl, BTN_PRIMARY);
     let br = Rect::from_min_size(Pos2::new(f.right() - 24.0 - bw, f.center().y - 16.0), Vec2::new(bw, 32.0));
-    text_fit(&p, Pos2::new(f.left() + 24.0, f.center().y), Align2::LEFT_CENTER, "Cleanup finds old Claude sessions, caches and logs and never touches projects in use.", font(13.0), TEXT_DIM, br.left() - f.left() - 40.0);
+    text_fit(&p, Pos2::new(f.left() + 24.0, f.center().y), Align2::LEFT_CENTER, "", font(13.0), TEXT_DIM, br.left() - f.left() - 40.0);
     if pill_button(ui, br, bl, BTN_PRIMARY, true).clicked() {
         cx.open_page(CLEANUP, "claude");
     }

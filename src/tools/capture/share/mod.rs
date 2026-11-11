@@ -75,7 +75,9 @@ pub mod secret {
 
     #[cfg(target_os = "macos")]
     mod keychain {
-        const SERVICE: &str = "Cmd+Meow sharing";
+        fn service() -> &'static str {
+            if crate::kit::fs::is_dev() { "Cmd+Meow Dev sharing" } else { "Cmd+Meow sharing" }
+        }
         /// Where the key lived under the app's first name; moved over on first read.
         const OLD_SERVICE: &str = "CleanMeBro sharing";
         const ACCOUNT: &str = "secret-key";
@@ -84,7 +86,10 @@ pub mod secret {
             security_framework::passwords::get_generic_password(service, ACCOUNT).ok().and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty())
         }
         pub fn get() -> Option<String> {
-            read(SERVICE).or_else(|| {
+            read(service()).or_else(|| {
+                if crate::kit::fs::is_dev() {
+                    return None;
+                }
                 let v = read(OLD_SERVICE)?;
                 if set(&v).is_ok() {
                     let _ = security_framework::passwords::delete_generic_password(OLD_SERVICE, ACCOUNT);
@@ -94,10 +99,10 @@ pub mod secret {
         }
         pub fn set(v: &str) -> Result<(), String> {
             if v.is_empty() {
-                let _ = security_framework::passwords::delete_generic_password(SERVICE, ACCOUNT);
+                let _ = security_framework::passwords::delete_generic_password(service(), ACCOUNT);
                 return Ok(());
             }
-            security_framework::passwords::set_generic_password(SERVICE, ACCOUNT, v.as_bytes()).map_err(|e| e.to_string())
+            security_framework::passwords::set_generic_password(service(), ACCOUNT, v.as_bytes()).map_err(|e| e.to_string())
         }
     }
 

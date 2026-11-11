@@ -297,7 +297,7 @@ pub fn page(c: &mut Clipboard, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     let n = c.store.entries.len();
     let pinned = c.store.entries.iter().filter(|e| e.pinned).count();
     let (sub, sub_col) = match (c.tab, c.pause_label()) {
-        (Tab::Settings, _) => ("History stays on this Mac. Nothing is sent anywhere.".to_string(), TEXT_DIM),
+        (Tab::Settings, _) => ("Stays on this Mac".to_string(), TEXT_DIM),
         (_, Some(l)) => (format!("{l} · {n} items"), AMBER),
         _ => (format!("Recording · {n} item{} · {pinned} pinned · {}", if n == 1 { "" } else { "s" }, human_bytes(c.store.bytes_on_disk())), TEXT_DIM),
     };
@@ -362,11 +362,11 @@ pub fn chips(ui: &mut Ui, p: &egui::Painter, x: f32, y: f32, cur: &mut Filter, s
 fn day_label(d: chrono::NaiveDate) -> String {
     let today = chrono::Local::now().date_naive();
     if d == today {
-        "TODAY".into()
+        "Today".into()
     } else if Some(d) == today.pred_opt() {
-        "YESTERDAY".into()
+        "Yesterday".into()
     } else {
-        d.format("%A, %b %-d").to_string().to_uppercase()
+        d.format("%A, %b %-d").to_string()
     }
 }
 
@@ -415,7 +415,7 @@ fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     if ids.is_empty() {
         let msg = if c.store.entries.is_empty() { "Nothing copied yet" } else { "Nothing matches" };
         p.text(list.center() - Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT);
-        let hint = if c.store.entries.is_empty() { "Copy anything in any app. It lands here." } else { "Try another filter or search." };
+        let hint = if c.store.entries.is_empty() { "Nothing copied yet" } else { "No matches" };
         p.text(list.center() + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM);
     } else {
         list_rows(c, ui, list, &ids);
@@ -449,7 +449,7 @@ fn grouped_rows(c: &Clipboard, ids: &[u64]) -> std::sync::Arc<Vec<Row>> {
     let mut last: Option<String> = None;
     for id in ids {
         let Some(e) = by_id.get(id) else { continue };
-        let head = if e.pinned { "PINNED".to_string() } else { day_label(e.time().date_naive()) };
+        let head = if e.pinned { "Pinned".to_string() } else { day_label(e.time().date_naive()) };
         if last.as_ref() != Some(&head) {
             rows.push(Row::Head(head.clone()));
             last = Some(head);
@@ -799,7 +799,7 @@ fn right_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     glass_card(p, card, R_CARD, 0.0, false);
     let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, card.top() + 30.0), Vec2::new(30.0, 18.0));
     p.text(Pos2::new(card.left() + 12.0, card.top() + 20.0), Align2::LEFT_CENTER, "Record passwords and hidden items", font(13.0), TEXT);
-    paragraph(p, Pos2::new(card.left() + 12.0, card.top() + 31.0), "Off: skips password managers and anything apps mark as concealed or temporary.", font(11.0), TEXT_FAINT, sw.left() - card.left() - 24.0);
+    paragraph(p, Pos2::new(card.left() + 12.0, card.top() + 31.0), "", font(11.0), TEXT_FAINT, sw.left() - card.left() - 24.0);
     if switch(ui, sw, id.with("concealed"), c.settings.record_concealed, true).clicked() {
         c.settings.record_concealed = !c.settings.record_concealed;
         changed = true;
