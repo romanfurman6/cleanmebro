@@ -1,158 +1,14 @@
-//! Speech to text on this Mac with whisper.cpp: the models (downloaded on
-//! request, resumable), turning a recording's voice into timed lines, and
-//! those lines as captions (.srt) or plain text. Nothing leaves the Mac
-//! except the one-time model download.
+//! Speech to text for recordings: a video's voice as timed lines, and those
+//! lines as captions (.srt) or plain text. The models and whisper.cpp itself
+//! live in `kit::whisper` (Dictation uses them too).
 
 use super::edit::Edl;
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::Ordering;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Model {
-    /// Whisper large-v3-turbo, quantized: close to the best, still quick on
-    /// Apple silicon.
-    #[default]
-    Accurate,
-    /// Whisper small: a third of the size, rougher.
-    Fast,
-}
-
-impl Model {
-    pub const ALL: [Model; 2] = [Model::Accurate, Model::Fast];
-
-    pub fn file(self) -> &'static str {
-        match self {
-            Model::Accurate => "ggml-large-v3-turbo-q5_0.bin",
-            Model::Fast => "ggml-small-q5_1.bin",
-        }
-    }
-
-    pub fn url(self) -> String {
-        format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}", self.file())
-    }
-
-    /// About how big the download is.
-    pub fn bytes(self) -> u64 {
-        match self {
-            Model::Accurate => 574_041_195,
-            Model::Fast => 190_085_487,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Model::Accurate => "Accurate",
-            Model::Fast => "Fast",
-        }
-    }
-
-    pub fn about(self) -> &'static str {
-        match self {
-            Model::Accurate => "Whisper large-v3 turbo · best for most voices and languages",
-            Model::Fast => "Whisper small · quicker, rougher",
-        }
-    }
-
-    pub fn path(self) -> PathBuf {
-        models_dir().join(self.file())
-    }
-
-    pub fn ready(self) -> bool {
-        self.path().is_file()
-    }
-
-    /// Delete the downloaded model.
-    pub fn remove(self) {
-        let _ = std::fs::remove_file(self.path());
-        let _ = std::fs::remove_file(part_path(self));
-    }
-}
-
-pub fn models_dir() -> PathBuf {
-    crate::kit::fs::data_path("models")
-}
-
-fn part_path(m: Model) -> PathBuf {
-    models_dir().join(format!("{}.part", m.file()))
-}
-
-/// Shared between a job's thread and the window: how far, and a way to stop.
-#[derive(Default)]
-pub struct Progress {
-    pub done: AtomicU64,
-    pub total: AtomicU64,
-    pub cancel: AtomicBool,
-}
-
-impl Progress {
-    pub fn fraction(&self) -> f32 {
-        let t = self.total.load(Ordering::Relaxed);
-        if t == 0 {
-            0.0
-        } else {
-            (self.done.load(Ordering::Relaxed) as f64 / t as f64).clamp(0.0, 1.0) as f32
-        }
-    }
-
-    pub fn cancelled(&self) -> bool {
-        self.cancel.load(Ordering::Relaxed)
-    }
-}
-
-/// Fetch `m`, picking up a download that stopped part way. Blocks.
-pub fn download(m: Model, p: &Progress) -> Result<(), String> {
-    std::fs::create_dir_all(models_dir()).map_err(|e| e.to_string())?;
-    let part = part_path(m);
-    let have = std::fs::metadata(&part).map(|x| x.len()).unwrap_or(0);
-    let agent = ureq::Agent::new_with_config(ureq::Agent::config_builder().timeout_connect(Some(std::time::Duration::from_secs(20))).http_status_as_error(false).build());
-    let mut req = agent.get(&m.url()).header("User-Agent", "Cmd+Meow");
-    if have > 0 {
-        req = req.header("Range", format!("bytes={have}-"));
-    }
-    let resp = req.call().map_err(|e| format!("Couldn't reach the download: {e}"))?;
-    let status = resp.status().as_u16();
-    let resumed = status == 206;
-    if status != 200 && !resumed {
-        return Err(format!("The download answered {status}"));
-    }
-    let len = resp.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
-    let start = if resumed { have } else { 0 };
-    let total = len.map(|l| l + start).unwrap_or(m.bytes());
-    p.total.store(total, Ordering::Relaxed);
-    p.done.store(start, Ordering::Relaxed);
-    let mut file = std::fs::OpenOptions::new().create(true).append(resumed).write(true).truncate(!resumed).open(&part).map_err(|e| e.to_string())?;
-    let mut body = resp.into_body();
-    let mut reader = body.as_reader();
-    let mut buf = vec![0u8; 1 << 16];
-    let mut done = start;
-    loop {
-        if p.cancelled() {
-            return Err("Stopped".into());
-        }
-        let n = reader.read(&mut buf).map_err(|e| format!("The download broke off: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-        done += n as u64;
-        p.done.store(done, Ordering::Relaxed);
-    }
-    file.flush().map_err(|e| e.to_string())?;
-    drop(file);
-    if len.is_some_and(|l| done < l + start) {
-        return Err("The download ended early; try again to pick it up".into());
-    }
-    // a whisper.cpp model starts with "lmgg"
-    let mut magic = [0u8; 4];
-    std::fs::File::open(&part).and_then(|mut f| f.read_exact(&mut magic)).map_err(|e| e.to_string())?;
-    if &magic != b"lmgg" {
-        let _ = std::fs::remove_file(&part);
-        return Err("That wasn't a speech model; try again".into());
-    }
-    std::fs::rename(&part, m.path()).map_err(|e| e.to_string())
-}
+pub use crate::kit::whisper::{download, Model, Progress};
 
 /// One timed line of speech, source seconds.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -255,7 +111,6 @@ pub fn tidy(raw: Vec<(f64, f64, String)>) -> Vec<Line> {
 /// percent (`total` 100).
 #[cfg(target_os = "macos")]
 pub fn transcribe(video: &Path, m: Model, p: &std::sync::Arc<Progress>) -> Result<Vec<Line>, String> {
-    use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
     p.total.store(100, Ordering::Relaxed);
     p.done.store(0, Ordering::Relaxed);
     // the mix: everyone in a call, not only this Mac's microphone
@@ -266,32 +121,7 @@ pub fn transcribe(video: &Path, m: Model, p: &std::sync::Arc<Progress>) -> Resul
     if p.cancelled() {
         return Err("Stopped".into());
     }
-    let ctx = WhisperContext::new_with_params(m.path(), WhisperContextParameters::default()).map_err(|e| format!("The speech model didn't load: {e}"))?;
-    let mut state = ctx.create_state().map_err(|e| e.to_string())?;
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some("auto"));
-    params.set_n_threads(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8) as i32);
-    params.set_print_progress(false);
-    params.set_print_realtime(false);
-    params.set_print_special(false);
-    params.set_print_timestamps(false);
-    let pa = p.clone();
-    params.set_progress_callback_safe(move |pct: i32| pa.done.store(pct.clamp(0, 100) as u64, Ordering::Relaxed));
-    // whisper-rs 0.16's safe abort callback reads its closure wrongly (and
-    // aborts every encode), so the raw one, on the cancel flag itself
-    unsafe extern "C" fn stop(flag: *mut std::ffi::c_void) -> bool {
-        unsafe { (*(flag as *const AtomicBool)).load(Ordering::Relaxed) }
-    }
-    // `p` outlives `full` below, so the flag stays where it is
-    unsafe {
-        params.set_abort_callback(Some(stop));
-        params.set_abort_callback_user_data(&p.cancel as *const AtomicBool as *mut std::ffi::c_void);
-    }
-    state.full(params, &pcm).map_err(|e| if p.cancelled() { "Stopped".to_string() } else { format!("Transcribing failed: {e}") })?;
-    let raw = (0..state.full_n_segments())
-        .filter_map(|i| state.get_segment(i))
-        .map(|s| (s.start_timestamp() as f64 / 100.0, s.end_timestamp() as f64 / 100.0, s.to_str_lossy().map(|t| t.to_string()).unwrap_or_default()))
-        .collect();
+    let raw = crate::kit::whisper::Loaded::load(m)?.run(&pcm, None, Some(p))?;
     p.done.store(100, Ordering::Relaxed);
     Ok(tidy(raw))
 }

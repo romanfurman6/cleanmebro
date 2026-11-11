@@ -97,7 +97,10 @@ pub fn key_code(key: &str) -> Option<String> {
 
 /// The library's hotkey for one of our shortcuts.
 pub fn to_hotkey(s: &Shortcut) -> Option<HotKey> {
-    let code = Code::from_str(&key_code(&s.key)?).ok()?;
+    // Esc is never offered to the recorder, but a tool may bind it while
+    // something of its own is on screen (Dictation's cancel)
+    let name = if s.key == "Escape" { "Escape".to_string() } else { key_code(&s.key)? };
+    let code = Code::from_str(&name).ok()?;
     let mut m = Modifiers::empty();
     if s.cmd {
         m |= Modifiers::SUPER;
@@ -120,7 +123,13 @@ struct Hub {
     rx: Receiver<GlobalHotKeyEvent>,
     /// Ids of pressed hotkeys, oldest first.
     pressed: Vec<u32>,
+    /// Ids of released hotkeys, oldest first (only push-to-talk reads
+    /// these, so the list is kept short).
+    released: Vec<u32>,
 }
+
+/// Most releases kept for owners that never read them.
+const RELEASES_KEPT: usize = 32;
 
 /// Contexts woken on a press (one per tool that made a [`Keys`]).
 static WAKE: Mutex<Vec<egui::Context>> = Mutex::new(Vec::new());
@@ -144,13 +153,18 @@ fn with_hub<T>(f: impl FnOnce(&mut Hub) -> T) -> Option<T> {
                     }
                 }
             }));
-            *h = Some(Hub { mgr, rx, pressed: Vec::new() });
+            *h = Some(Hub { mgr, rx, pressed: Vec::new(), released: Vec::new() });
         }
         let hub = h.as_mut()?;
         while let Ok(e) = hub.rx.try_recv() {
-            if e.state == HotKeyState::Pressed {
-                hub.pressed.push(e.id);
+            match e.state {
+                HotKeyState::Pressed => hub.pressed.push(e.id),
+                HotKeyState::Released => hub.released.push(e.id),
             }
+        }
+        if hub.released.len() > RELEASES_KEPT {
+            let extra = hub.released.len() - RELEASES_KEPT;
+            hub.released.drain(..extra);
         }
         Some(f(hub))
     })
@@ -195,6 +209,7 @@ impl<C: Copy> Keys<C> {
             with_hub(|h| {
                 let _ = h.mgr.unregister(hk);
                 h.pressed.retain(|id| *id != hk.id());
+                h.released.retain(|id| *id != hk.id());
             });
         }
     }
@@ -205,6 +220,23 @@ impl<C: Copy> Keys<C> {
         with_hub(|h| {
             let mut out = Vec::new();
             h.pressed.retain(|id| match self.bound.iter().find(|(hk, _)| hk.id() == *id) {
+                Some((_, c)) => {
+                    out.push(*c);
+                    false
+                }
+                None => true,
+            });
+            out
+        })
+        .unwrap_or_default()
+    }
+
+    /// This tool's commands whose keys were let go since the last call
+    /// (push-to-talk).
+    pub fn poll_released(&self) -> Vec<C> {
+        with_hub(|h| {
+            let mut out = Vec::new();
+            h.released.retain(|id| match self.bound.iter().find(|(hk, _)| hk.id() == *id) {
                 Some((_, c)) => {
                     out.push(*c);
                     false

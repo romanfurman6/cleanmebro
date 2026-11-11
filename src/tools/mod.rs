@@ -6,6 +6,7 @@
 pub mod capture;
 pub mod claude;
 pub mod clipboard;
+pub mod dictation;
 pub mod cleanup;
 pub mod keep_awake;
 pub mod fan;
@@ -26,6 +27,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
         Box::new(startup::Startup::new(env)),
         Box::new(capture::Capture::new(env)),
         Box::new(clipboard::Clipboard::new(env)),
+        Box::new(dictation::Dictation::new(env)),
         Box::new(claude::Claude::new(env)),
         Box::new(keep_awake::KeepAwake::new(env)),
         Box::new(fan::FanControl::new(env)),
@@ -39,6 +41,7 @@ pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "capture/capture",
     "keep_awake/card",
     "clipboard/recent",
+    "dictation/card",
     "system/storage",
     "system/memory",
     "system/cpu",
