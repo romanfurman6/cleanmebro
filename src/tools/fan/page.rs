@@ -104,7 +104,7 @@ fn mode_height(s: &Snapshot, l: &Live) -> f32 {
     if s.fans.is_empty() {
         return 64.0;
     }
-    let mut h = 84.0 + 28.0;
+    let mut h = 84.0;
     if l.needs_helper() || !l.error.is_empty() {
         h += INSTALL_H;
     }
@@ -167,7 +167,10 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
         MODE_HINTS[st.mode.index()].into()
     };
     let hint_col = if l.guard.tripped && st.mode != Mode::Auto { AMBER } else { TEXT_DIM };
-    text_fit(&p, Pos2::new(lx, y), Align2::LEFT_CENTER, &hint, font(12.0), hint_col, mr.width() - 28.0);
+    text_fit(&p, Pos2::new(lx, y), Align2::LEFT_CENTER, &hint, font(12.0), hint_col, mr.width() - 140.0);
+    if matches!(l.helper, HelperState::Ready | HelperState::Outdated) && !l.busy && link(ui, Pos2::new(rx, y), Align2::RIGHT_CENTER, "Remove helper", 11.0).clicked() {
+        cmds.push(Cmd::Uninstall);
+    }
     y += 20.0;
 
     // the helper, when the mode needs it
@@ -193,21 +196,13 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
     match st.mode {
         Mode::Fixed => {
             fixed_slider(ui, Rect::from_min_size(Pos2::new(lx, y), Vec2::new(mr.width() - 28.0, FIXED_H - 8.0)), st, &fan0, cmds);
-            y += FIXED_H;
         }
         Mode::Curve => {
             curve_editor(ui, Rect::from_min_size(Pos2::new(lx, y), Vec2::new(mr.width() - 28.0, CURVE_H - 12.0)), st, &fan0, temp, cmds);
-            y += CURVE_H;
         }
         _ => {}
     }
 
-    // footer: the safety promise, and a way to take the helper out
-    let fy = y + 8.0;
-    hairline(&p, Pos2::new(lx, y - 4.0), Pos2::new(rx, y - 4.0));
-    if matches!(l.helper, HelperState::Ready | HelperState::Outdated) && !l.busy && link(ui, Pos2::new(rx, fy), Align2::RIGHT_CENTER, "Remove helper", 11.0).clicked() {
-        cmds.push(Cmd::Uninstall);
-    }
 }
 
 /// "Speed" with a slider over the fan's range and the rpm it gives.
