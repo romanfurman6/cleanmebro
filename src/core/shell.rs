@@ -583,6 +583,20 @@ impl eframe::App for App {
                 crate::kit::native::apply_glass(r);
             }
         }
+        // CMDMEOW_SELF_SHOT=<dir>: open the panel, then let screencapture
+        // (run by the app, so with its Screen Recording permission) save the
+        // screen, to check how the panel looks over the desktop
+        if let Some(dir) = std::env::var_os("CMDMEOW_SELF_SHOT") {
+            if self.frame == 60 {
+                self.open_panel(&ctx);
+            }
+            if self.frame == 150 {
+                let out = std::path::Path::new(&dir).join("panel.png");
+                let ok = std::process::Command::new("/usr/sbin/screencapture").arg("-x").arg(&out).status().map(|s| s.success()).unwrap_or(false);
+                eprintln!("[self-shot] {} {}", out.display(), if ok { "saved" } else { "failed" });
+            }
+            ctx.request_repaint();
+        }
         if std::env::var_os("CMDMEOW_SCALE_LOG").is_some() {
             // the scale egui renders at, logged when it changes (the panel
             // shown on another display)

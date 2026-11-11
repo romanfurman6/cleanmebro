@@ -269,7 +269,7 @@ pub fn backdrop(painter: &Painter, rect: Rect, radius: f32, opaque: bool, _t: f6
     } else {
         &[(0.0, hex(0x22401D)), (0.35, hex(0x132610)), (0.7, hex(0x0A150A)), (1.0, hex(0x070D07))]
     };
-    let alpha = if opaque { 1.0 } else { 0.86 };
+    let alpha = if opaque { 1.0 } else { backdrop_alpha() };
     let glow = Pos2::new(rect.center().x, rect.top());
     // the glow is an ellipse: wide across, reaching the bottom edge
     let (rx, ry) = (rect.width() * 0.75, rect.height() * 1.05);
@@ -308,6 +308,13 @@ pub fn backdrop(painter: &Painter, rect: Rect, radius: f32, opaque: bool, _t: f6
     }
     painter.add(Shape::mesh(mesh));
     painter.rect_stroke(rect, radius, Stroke::new(1.0, white(HAIRLINE_STRONG)), StrokeKind::Inside);
+}
+
+/// How much the backdrop covers what's behind live windows: solid by
+/// default (`CMDMEOW_BACKDROP_ALPHA` lets the blur through when tuning).
+fn backdrop_alpha() -> f32 {
+    static A: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *A.get_or_init(|| std::env::var("CMDMEOW_BACKDROP_ALPHA").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0))
 }
 
 /// `pts` (a closed outline) with extra points so no edge is longer than `step`.

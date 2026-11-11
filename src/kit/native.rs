@@ -73,7 +73,15 @@ mod mac {
             // (Liquid Glass refracts what's behind instead of blurring it,
             // which reads as a stretched picture under the panel)
             let e = NSVisualEffectView::initWithFrame(mtm.alloc::<NSVisualEffectView>(), frame);
-            e.setMaterial(NSVisualEffectMaterial::Popover);
+            // CMDMEOW_BLUR_MATERIAL picks another material when tuning
+            let material = match std::env::var("CMDMEOW_BLUR_MATERIAL").as_deref() {
+                Ok("popover") => NSVisualEffectMaterial::Popover,
+                Ok("hud") => NSVisualEffectMaterial::HUDWindow,
+                Ok("sidebar") => NSVisualEffectMaterial::Sidebar,
+                Ok("under") => NSVisualEffectMaterial::UnderWindowBackground,
+                _ => NSVisualEffectMaterial::Menu,
+            };
+            e.setMaterial(material);
             e.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
             e.setState(NSVisualEffectState::Active);
             // rounded through a stretchable mask image: rounding the view's
