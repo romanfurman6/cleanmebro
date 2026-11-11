@@ -122,7 +122,7 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
         SheetAction::Open(tool) => cx.open_page(tool, ""),
         SheetAction::SpeedTest => monitor::start_speed_test(mon.clone(), ui.ctx().clone()),
         SheetAction::MeasureFolders => monitor::measure_folders(mon.clone(), ui.ctx().clone()),
-        SheetAction::ToggleAlerts => monitor::change_bt_prefs(mon, |p| p.alerts = !p.alerts),
+        SheetAction::ToggleAlerts => monitor::change_bt_prefs(mon, |p| crate::kit::notify::flip(&mut p.alerts)),
         SheetAction::ToggleMenuBar => monitor::change_bt_prefs(mon, |p| p.menu_bar = !p.menu_bar),
         SheetAction::OpenBluetooth => super::devices::open_bluetooth_settings(),
         SheetAction::None | SheetAction::Close => {}

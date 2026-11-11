@@ -272,7 +272,7 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 }
             }
             let (low, crit) = (m::BT_LOW_BATTERY_MAX_PCT + 1, m::BT_CRITICAL_BATTERY_MAX_PCT + 1);
-            sp.switches.push(("Low battery alerts", format!("macOS notification below {low}% and {crit}%"), s.bt_prefs.alerts, Action::ToggleAlerts));
+            sp.switches.push(("Low battery alerts", format!("macOS notification below {low}% and {crit}%"), crate::kit::notify::shown(s.bt_prefs.alerts), Action::ToggleAlerts));
             sp.switches.push(("Show in menu bar", format!("Only while a device is below {low}%"), s.bt_prefs.menu_bar, Action::ToggleMenuBar));
             sp.buttons = vec![("Bluetooth Settings", BTN_SECONDARY, Action::OpenBluetooth)];
             sp

@@ -311,7 +311,7 @@ pub fn detail(mon: &monitor::Shared, d: &str, ui: &mut Ui, rect: Rect, cx: &mut 
         Action::Open(tool) => cx.open_page(tool, ""),
         Action::SpeedTest => monitor::start_speed_test(mon.clone(), ui.ctx().clone()),
         Action::MeasureFolders => monitor::measure_folders(mon.clone(), ui.ctx().clone()),
-        Action::ToggleAlerts => monitor::change_bt_prefs(mon, |p| p.alerts = !p.alerts),
+        Action::ToggleAlerts => monitor::change_bt_prefs(mon, |p| crate::kit::notify::flip(&mut p.alerts)),
         Action::ToggleMenuBar => monitor::change_bt_prefs(mon, |p| p.menu_bar = !p.menu_bar),
         Action::OpenBluetooth => devices::open_bluetooth_settings(),
         Action::None => {}

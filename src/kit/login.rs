@@ -1,6 +1,7 @@
 //! Opening Cmd+Meow at login, through macOS's own login items
-//! (SMAppService, macOS 13+). On by default the first time the app runs
-//! from its bundle; the switch is in Settings › General.
+//! (SMAppService, macOS 13+). Setup's last step shows it on and applies it
+//! when setup finishes; the switch is also in Settings › General. Nothing is
+//! registered at launch (macOS announces every new login item).
 
 /// Whether the app opens at login.
 pub fn enabled() -> bool {
@@ -12,17 +13,30 @@ pub fn set(on: bool) -> Result<(), String> {
     imp::set(on)
 }
 
-/// The first run from the .app: turn it on once. Later runs leave the
-/// person's choice alone.
-pub fn default_on() {
-    let marker = crate::kit::fs::data_path("login-default-done");
-    if marker.exists() || !in_bundle() {
-        return;
-    }
-    if let Some(dir) = marker.parent() {
+fn marker() -> std::path::PathBuf {
+    crate::kit::fs::data_path("login-default-done")
+}
+
+/// Setup hasn't settled Open at login yet: its switch shows on.
+pub fn default_pending() -> bool {
+    !marker().exists() && in_bundle()
+}
+
+/// The person picked (or setup applied the default): later runs leave it alone.
+pub fn settle() {
+    let m = marker();
+    if let Some(dir) = m.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::write(&marker, b"");
+    let _ = std::fs::write(&m, b"");
+}
+
+/// End of setup: turn it on once, unless the person switched it off.
+pub fn default_on() {
+    if !default_pending() {
+        return;
+    }
+    settle();
     if let Err(e) = set(true) {
         eprintln!("[login] couldn't add Cmd+Meow to login items: {e}");
     }

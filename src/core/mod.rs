@@ -2,6 +2,7 @@
 //! settings, and talks to tools only through the [`tool::Tool`] trait.
 
 pub mod editor;
+pub mod gate;
 pub mod layout;
 pub mod onboard;
 pub mod panel;

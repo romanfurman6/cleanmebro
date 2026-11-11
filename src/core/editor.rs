@@ -339,7 +339,7 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
                 let label = if here { format!("{} · {} · in the panel", z.name(), z.label()) } else { format!("{} · {}", z.name(), z.label()) };
                 text_fit(&p, Pos2::new(cx, y), Align2::LEFT_TOP, &label, ty::caption(), if here { ACCENT() } else { ty::caption_color() }, sz.x.max(150.0));
                 let wr = Rect::from_min_size(Pos2::new(cx, y + label_h), sz);
-                panel::draw_at(app, ui, owner, spec.id, *z, wr, &mut quiet);
+                panel::draw_at(app, ui, owner, spec.id, *z, wr, None, &mut quiet);
                 let resp = ui.interact(wr, ui.scope_id().with(("var", key, z.label())), Sense::click_and_drag());
                 if here {
                     p.rect_stroke(wr.expand(2.0), R_CARD + 2.0, Stroke::new(2.0, ACCENT()), StrokeKind::Outside);

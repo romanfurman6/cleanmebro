@@ -86,12 +86,15 @@ enum Row {
     App(LoginApp),
     Job(Job),
     Note(String),
+    /// System Events access is missing: the login apps can't be read.
+    Allow,
 }
 
 pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     s.load_apps();
+    let events_ok = s.events_allowed();
     let (loaded, jobs, apps, apps_loaded, apps_err, new_labels, undo, busy, notify) = {
         let g = s.state();
         (g.jobs_loaded, g.jobs.clone(), g.apps.clone(), g.apps_loaded, g.apps_error.clone(), g.new_labels.clone(), g.undoable(), g.busy.clone(), g.settings.notify_new)
@@ -157,7 +160,8 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         if !a.is_empty() || (s.filter == Filter::All && needle.is_empty()) {
             rows.push(Row::Head("Open at login", "", true));
             match (&apps_err, apps_loaded) {
-                (Some(e), _) => rows.push(Row::Note(format!("Couldn't read the list ({e}). Allow System Events in Privacy & Security › Automation"))),
+                _ if !events_ok => rows.push(Row::Allow),
+                (Some(_), _) => rows.push(Row::Allow),
                 (None, false) => rows.push(Row::Note("Reading…".into())),
                 (None, true) if a.is_empty() => rows.push(Row::Note("None".into())),
                 _ => rows.extend(a.into_iter().cloned().map(Row::App)),
@@ -187,6 +191,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let list_h: f32 = rows.iter().map(|r| match r {
         Row::Head(..) => HEAD_H,
         Row::Note(_) => 40.0,
+        Row::Allow => 50.0,
         _ => ROW_H + ROW_GAP,
     }).sum::<f32>()
         + 56.0;
@@ -198,6 +203,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let mut trash: Option<Job> = None;
     let mut turn_off_all = false;
     let mut do_undo = false;
+    let mut retry = false;
     let mut set_notify: Option<bool> = None;
     let mut budget = ICONS_PER_FRAME;
     let w = area.width() - 12.0;
@@ -255,6 +261,25 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                     glass_card(&p, r, 10.0, 0.0, false);
                     text_fit(&p, Pos2::new(r.left() + 14.0, r.center().y), Align2::LEFT_CENTER, t, font(12.0), TEXT_DIM(), r.width() - 28.0);
                     y += 40.0;
+                }
+                Row::Allow => {
+                    use crate::kit::perms::{Perm, Status};
+                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 46.0));
+                    glass_card(&p, r, 10.0, 0.0, false);
+                    icon(&p, Icon::Script, Rect::from_center_size(Pos2::new(r.left() + 24.0, r.center().y), Vec2::splat(18.0)), TEXT_SOFT());
+                    p.text(Pos2::new(r.left() + 44.0, r.center().y), Align2::LEFT_CENTER, Perm::SystemEvents.name(), bold(13.0), TEXT());
+                    let label = if s.events.0 == Status::Denied { "Open Settings" } else { "Allow" };
+                    let bw = button_width(&p, label, BTN_PRIMARY);
+                    let br = Rect::from_min_size(Pos2::new(r.right() - 12.0 - bw, r.center().y - 14.0), Vec2::new(bw, 28.0));
+                    if pill_button(ui, br, label, BTN_PRIMARY, true).clicked() {
+                        Perm::SystemEvents.ask();
+                        retry = true;
+                    }
+                    if !events_ok {
+                        // repaint now and then so the row goes once access lands
+                        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+                    }
+                    y += 50.0;
                 }
                 Row::App(la) => {
                     let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), ROW_H));
@@ -360,12 +385,17 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         let nr = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 40.0));
         p.text(Pos2::new(nr.left() + 4.0, nr.center().y), Align2::LEFT_CENTER, "Tell me when an app adds itself to startup", font(13.0), TEXT_SOFT());
         let sw = Rect::from_center_size(Pos2::new(nr.right() - 30.0, nr.center().y), Vec2::new(36.0, 20.0));
-        if switch(ui, sw, ui.scope_id().with("su-notify"), notify, true).clicked() {
-            set_notify = Some(!notify);
+        if switch(ui, sw, ui.scope_id().with("su-notify"), crate::kit::notify::shown(notify), true).clicked() {
+            let mut v = notify;
+            crate::kit::notify::flip(&mut v);
+            set_notify = Some(v);
         }
     });
     if turn_off_all {
         s.turn_off_suggested();
+    }
+    if retry {
+        s.retry_apps();
     }
     if do_undo {
         s.undo();

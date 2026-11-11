@@ -188,6 +188,7 @@ impl PermWatch {
 
     /// Turn Open at login on or off, and show it at once.
     pub fn set_login(&mut self, on: bool) {
+        crate::kit::login::settle();
         match crate::kit::login::set(on) {
             Ok(()) => self.login = Some(on),
             Err(e) => eprintln!("[login] {e}"),
@@ -196,6 +197,20 @@ impl PermWatch {
 
     pub fn status(&self, p: Perm) -> Status {
         self.status.get(&p).copied().unwrap_or(Status::NotAsked)
+    }
+
+    /// The status once a read has landed (None before that).
+    pub fn known(&self, p: Perm) -> Option<Status> {
+        self.status.get(&p).copied()
+    }
+
+    /// Ask for a system permission (the spinner shows until it flips).
+    pub fn ask(&mut self, p: Perm, now: f64) {
+        self.asked.insert(p, now);
+        self.polled = 0.0;
+        if self.demo.is_none() {
+            p.ask();
+        }
     }
 
     pub fn waiting(&self, p: Perm, now: f64) -> bool {
@@ -576,19 +591,17 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         y += row_h + 6.0;
     }
     if let Some(perm) = ask {
-        app.perm_watch.asked.insert(perm, now);
-        app.perm_watch.polled = 0.0;
-        if app.perm_watch.demo.is_none() {
-            match perm {
-                Perm::Own { id, .. } => {
-                    if let Some(r) = list.iter().find(|r| r.perm == perm) {
-                        if let Some(&i) = r.tools.first() {
-                            app.tools[i].ask_own(id);
-                        }
+        match perm {
+            Perm::Own { id, .. } => {
+                app.perm_watch.asked.insert(perm, now);
+                app.perm_watch.polled = 0.0;
+                if app.perm_watch.demo.is_none() {
+                    if let Some(&i) = list.iter().find(|r| r.perm == perm).and_then(|r| r.tools.first()) {
+                        app.tools[i].ask_own(id);
                     }
                 }
-                _ => perm.ask(),
             }
+            _ => app.perm_watch.ask(perm, now),
         }
     }
     y - area.top()
@@ -629,7 +642,8 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     icon(&p, Icon::Power, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), TEXT_SOFT());
     p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, "Open at login", bold(13.0), TEXT());
     let now = ui.ctx().input(|i| i.time);
-    let on = app.perm_watch.login_on(app.demo, now);
+    // on by default; registered when setup finishes
+    let on = crate::kit::login::default_pending() || app.perm_watch.login_on(app.demo, now);
     let sw = Rect::from_min_size(Pos2::new(row.right() - 50.0, row.center().y - 11.0), Vec2::new(38.0, 22.0));
     if switch(ui, sw, ui.scope_id().with("setup-login"), on, true).clicked() && !app.demo {
         app.perm_watch.set_login(!on);
