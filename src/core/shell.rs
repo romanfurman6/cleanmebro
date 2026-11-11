@@ -84,6 +84,8 @@ impl App {
         install_fonts(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
         let demo = opts.screenshot.is_some();
+        // screenshots stay silent; otherwise sounds are on until switched off
+        crate::kit::sound::set_on(!demo && cc.storage.and_then(|s| eframe::get_value(s, crate::kit::sound::STORAGE_KEY)).unwrap_or(true));
         let tools = crate::tools::all(&ToolEnv { ctx: ctx.clone(), demo });
         if !demo {
             crate::kit::login::default_on();
@@ -193,6 +195,7 @@ impl App {
         if !self.demo {
             eframe::set_value(storage, super::settings::STORAGE_KEY, &WidgetPrefs::from_entries(&self.widgets));
             eframe::set_value(storage, super::settings::TOOLS_KEY, &self.tools_off);
+            eframe::set_value(storage, crate::kit::sound::STORAGE_KEY, &crate::kit::sound::on());
         }
     }
 
@@ -648,7 +651,7 @@ impl eframe::App for App {
                 self.toast = None;
             }
         }
-        let off_before = self.tools_off.clone();
+        let off_before = (self.tools_off.clone(), crate::kit::sound::on());
         if self.app_open {
             self.app_viewport(&ctx);
         }
@@ -658,7 +661,7 @@ impl eframe::App for App {
         if self.screenshot.is_none() {
             super::onboard::fda_helper(self, &ctx);
         }
-        if self.tools_off != off_before {
+        if (&self.tools_off, crate::kit::sound::on()) != (&off_before.0, off_before.1) {
             if let Some(s) = frame.storage_mut() {
                 self.save_widgets(s);
             }

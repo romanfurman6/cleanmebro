@@ -135,6 +135,9 @@ pub fn start(shared: Shared, root: PathBuf, ctx: egui::Context) {
         *shared.live.lock().unwrap() = None;
         shared.running.store(false, Ordering::SeqCst);
         ctx.request_repaint();
+        if !shared.stop.load(Ordering::SeqCst) {
+            crate::kit::sound::play(crate::kit::sound::Cue::Ready);
+        }
     });
 }
 
