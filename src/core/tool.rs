@@ -231,6 +231,11 @@ pub trait Tool {
     }
     /// Start setting up an own need (may show an admin prompt; never blocks).
     fn ask_own(&mut self, _id: &str) {}
+    /// How setting up an own need is going, when the tool can tell:
+    /// (still working, last error). `None` keeps the plain timed spinner.
+    fn own_progress(&self, _id: &str) -> Option<(bool, String)> {
+        None
+    }
     /// Global shortcuts worth showing at the end of setup: (label, keys).
     fn setup_shortcuts(&self) -> Vec<(&'static str, String)> {
         Vec::new()

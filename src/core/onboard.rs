@@ -63,6 +63,8 @@ pub struct PermWatch {
     polled: f64,
     /// When a permission's button was pressed (spinner until it flips).
     asked: HashMap<Perm, f64>,
+    /// Last error of a tool's own setup step (shown on its row).
+    own_err: HashMap<Perm, String>,
     /// When a permission turned Allowed while we watched (check pops).
     allowed_at: HashMap<Perm, f64>,
     /// Sample statuses for screenshots.
@@ -167,6 +169,14 @@ impl PermWatch {
                     if let Some(&i) = r.tools.first() {
                         let st = app_tools[i].own_status(id);
                         self.apply(r.perm, st, now);
+                        // the tool says when its setup is over: stop the
+                        // spinner then (cancelled or failed), not after a minute
+                        if let Some((busy, err)) = app_tools[i].own_progress(id) {
+                            if !busy {
+                                self.asked.remove(&r.perm);
+                            }
+                            self.own_err.insert(r.perm, err);
+                        }
                     }
                 }
             }
@@ -579,12 +589,27 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         } else if waiting {
             let c = Pos2::new(right - 8.0, rr.center().y);
             spinner(&p, c, 6.0, now, BLUE());
-            let hint = if r.perm == Perm::FullDisk { "Switch it on in System Settings" } else { "System Settings" };
+            // a tool's own step (an admin prompt, a download) isn't in System Settings
+            let hint = match r.perm {
+                Perm::FullDisk => "Switch it on in System Settings",
+                Perm::Own { .. } => "",
+                _ => "System Settings",
+            };
             p.text(Pos2::new(c.x - 16.0, c.y), Align2::RIGHT_CENTER, hint, font(12.0), TEXT_FAINT());
         } else {
-            let (label, kind) = if st == Status::Denied { ("Open Settings", BTN_SECONDARY) } else { (r.perm.ask_label(), BTN_SECONDARY) };
+            let err = app.perm_watch.own_err.get(&r.perm).filter(|e| !e.is_empty());
+            let (label, kind) = if err.is_some() {
+                ("Try again", BTN_SECONDARY)
+            } else if st == Status::Denied {
+                ("Open Settings", BTN_SECONDARY)
+            } else {
+                (r.perm.ask_label(), BTN_SECONDARY)
+            };
             let w = button_width(&p, label, kind);
             let b = Rect::from_min_size(Pos2::new(right - w, rr.center().y - 13.0), Vec2::new(w, 26.0));
+            if let Some(e) = err {
+                text_fit(&p, Pos2::new(b.left() - 10.0, rr.center().y), Align2::RIGHT_CENTER, e, font(12.0), RED(), 260.0);
+            }
             if pill_button(ui, b, label, kind, true).clicked() {
                 ask = Some(r.perm);
             }

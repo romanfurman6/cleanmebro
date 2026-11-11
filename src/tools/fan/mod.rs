@@ -271,6 +271,11 @@ impl Tool for FanControl {
         }
     }
 
+    fn own_progress(&self, id: &str) -> Option<(bool, String)> {
+        let l = self.live.lock_ok();
+        (id == "fan-helper").then(|| (l.busy, l.error.clone()))
+    }
+
     fn ask_own(&mut self, id: &str) {
         if id == "fan-helper" {
             let ctx = self.ctx.clone();
