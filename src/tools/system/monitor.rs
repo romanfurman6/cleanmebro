@@ -256,8 +256,15 @@ fn in_background(name: &str, f: impl FnOnce() + Send + 'static) {
 
 /// Measure the storage chart's folders (Applications, Documents, Downloads,
 /// Desktop, Trash). Only on the user's click: it walks every file.
+/// Documents, Downloads and Desktop are behind macOS's folder questions, so
+/// without Full Disk Access the click asks for that instead.
 pub fn measure_folders(shared: Shared, ctx: egui::Context) {
+    use crate::kit::perms::{Perm, Status};
     if SIZING.load(Ordering::Relaxed) {
+        return;
+    }
+    if Perm::FullDisk.status() != Status::Allowed {
+        Perm::FullDisk.ask();
         return;
     }
     shared.lock().unwrap().sizing = true;

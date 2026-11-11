@@ -268,6 +268,8 @@ mod imp {
 
     // 0 unknown, 1 not asked, 2 denied, 3 allowed; refreshed in the background
     static NOTIF: AtomicU8 = AtomicU8::new(0);
+    // when the last refresh was asked for (ms since the epoch): at most once a second
+    static NOTIF_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     fn bundled() -> bool {
         objc2_foundation::NSBundle::mainBundle().bundleIdentifier().is_some()
@@ -278,6 +280,11 @@ mod imp {
             return Status::Allowed; // falls back to AppleScript, which needs nothing
         }
         use objc2_user_notifications::{UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter};
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        if now.saturating_sub(NOTIF_AT.load(Ordering::Relaxed)) < 1000 && NOTIF.load(Ordering::Relaxed) != 0 {
+            return cached();
+        }
+        NOTIF_AT.store(now, Ordering::Relaxed);
         let center = UNUserNotificationCenter::currentNotificationCenter();
         let done = block2::RcBlock::new(|s: std::ptr::NonNull<UNNotificationSettings>| {
             let st = unsafe { s.as_ref().authorizationStatus() };
@@ -291,6 +298,10 @@ mod imp {
             NOTIF.store(v, Ordering::Relaxed);
         });
         center.getNotificationSettingsWithCompletionHandler(&done);
+        cached()
+    }
+
+    fn cached() -> Status {
         match NOTIF.load(Ordering::Relaxed) {
             2 => Status::Denied,
             3 => Status::Allowed,

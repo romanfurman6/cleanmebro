@@ -71,15 +71,26 @@ pub fn place(app: &App, width: f32) -> (Vec<Placed>, f32) {
 
 /// Draw one placed widget at `r`.
 pub fn draw_widget(app: &mut App, ui: &mut Ui, w: &Placed, r: Rect, cx: &mut Cx) {
-    draw_at(app, ui, w.owner, w.id, w.size, r, cx);
+    let lock = w.owner.and_then(|i| super::gate::missing(app, i));
+    draw_at(app, ui, w.owner, w.id, w.size, r, lock, cx);
 }
 
 /// Draw widget `id` of `owner` (`None`: the shell's) at `size` in `r`.
-pub fn draw_at(app: &mut App, ui: &mut Ui, owner: Option<usize>, id: &'static str, size: Size, r: Rect, cx: &mut Cx) {
+/// `lock`: a required permission is missing, so it shows dimmed and off.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_at(app: &mut App, ui: &mut Ui, owner: Option<usize>, id: &'static str, size: Size, r: Rect, lock: Option<crate::kit::perms::Perm>, cx: &mut Cx) {
     match owner {
         Some(i) => {
-            let mut child = ui.new_child(UiBuilder::new().max_rect(r).id_salt((app.tools[i].id(), id, size.label())));
+            let salt = (app.tools[i].id(), id, size.label());
+            let mut child = ui.new_child(UiBuilder::new().max_rect(r).id_salt(salt));
+            if lock.is_some() {
+                child.disable();
+                child.multiply_opacity(0.45);
+            }
             app.tools[i].widget_ui(id, size, &mut child, r, cx);
+            if let Some(perm) = lock {
+                super::gate::widget_cover(app, ui, r, perm, ui.scope_id().with(salt));
+            }
         }
         None => {}
     }
@@ -91,6 +102,8 @@ pub fn content_height(app: &App) -> f32 {
 }
 
 pub fn panel(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+    let ctx = ui.ctx().clone();
+    super::gate::watch(app, &ctx);
     header(app, ui, rect);
     let area = Rect::from_min_max(Pos2::new(rect.left() + PAD, rect.top() + HEADER), Pos2::new(rect.right() - PAD, rect.bottom() - FOOTER));
     let need = content_height(app);

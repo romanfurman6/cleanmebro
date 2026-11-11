@@ -99,11 +99,23 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
         super::editor::settings_page(app, &mut child, content);
         return;
     }
-    let Some(tool) = app.tools.get_mut(app.page).filter(|t| t.has_page()) else {
+    if !app.tools.get(app.page).is_some_and(|t| t.has_page()) {
         p.text(content.center(), Align2::CENTER_CENTER, "No tools with a page are installed", font(15.0), TEXT_DIM());
         return;
+    }
+    // a required permission is missing: Allow row on top, the page dimmed and off
+    super::gate::watch(app, &ctx);
+    let lock = super::gate::missing(app, app.page);
+    let content = match lock {
+        Some(perm) => super::gate::page_bar(app, ui, content, perm),
+        None => content,
     };
+    let tool = &mut app.tools[app.page];
     let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt(("page", tool.id())));
+    if lock.is_some() {
+        child.disable();
+        child.multiply_opacity(0.5);
+    }
     tool.page_ui(&mut child, content, cx);
 }
 

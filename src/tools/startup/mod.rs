@@ -131,13 +131,15 @@ pub struct Startup {
     pub filter: Filter,
     pub search: String,
     apps_requested: bool,
+    /// System Events access, read at most once a second while the page shows.
+    pub events: (crate::kit::perms::Status, Option<std::time::Instant>),
 }
 
 impl Startup {
     pub fn new(env: &ToolEnv) -> Self {
         let user_library = crate::kit::fs::home().join("Library");
         let st: Shared = Arc::new(Mutex::new(State::default()));
-        let me = Startup { st: st.clone(), ctx: env.ctx.clone(), demo: env.demo, user_library: user_library.clone(), filter: Filter::All, search: String::new(), apps_requested: false, icons: Default::default() };
+        let me = Startup { st: st.clone(), ctx: env.ctx.clone(), demo: env.demo, user_library: user_library.clone(), filter: Filter::All, search: String::new(), apps_requested: false, icons: Default::default(), events: (crate::kit::perms::Status::NotAsked, None) };
         if env.demo {
             demo(&mut st.lock().unwrap(), false);
             return me;
@@ -158,9 +160,22 @@ impl Startup {
         self.st.lock().unwrap()
     }
 
-    /// Read the login apps (macOS asks once to let us), the first time the page shows.
+    /// Whether System Events lets us read the login apps (never asks).
+    pub fn events_allowed(&mut self) -> bool {
+        use crate::kit::perms::{Perm, Status};
+        if self.demo {
+            return true;
+        }
+        if self.events.1.is_none_or(|t| t.elapsed().as_secs_f32() > 1.0) {
+            self.events = (Perm::SystemEvents.status(), Some(std::time::Instant::now()));
+        }
+        self.events.0 == Status::Allowed
+    }
+
+    /// Read the login apps once System Events access is there (setup or the
+    /// page's Allow button asks for it; opening the page never does).
     pub fn load_apps(&mut self) {
-        if self.apps_requested || self.demo {
+        if self.apps_requested || self.demo || !self.events_allowed() {
             return;
         }
         self.apps_requested = true;
@@ -186,6 +201,15 @@ impl Startup {
                 ctx.request_repaint();
             })
             .ok();
+    }
+
+    /// Read the login apps again (after an Allow click, or an error).
+    pub fn retry_apps(&mut self) {
+        self.apps_requested = false;
+        self.events.1 = None;
+        let mut g = self.state();
+        g.apps_error = None;
+        g.apps_loaded = false;
     }
 
     /// Run `f` off the main thread (it may wait for a password), then read the jobs again.
@@ -437,7 +461,7 @@ impl Tool for Startup {
     }
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};
-        vec![Need::must(Perm::SystemEvents), Need::may(Perm::Notifications)]
+        vec![Need::may(Perm::SystemEvents), Need::may(Perm::Notifications)]
     }
 
     fn section(&self) -> &'static str {

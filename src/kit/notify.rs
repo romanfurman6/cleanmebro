@@ -1,6 +1,32 @@
 //! macOS notifications. Inside the app bundle they go through the system's
-//! notification center (macOS asks once for permission); a bare binary
-//! without a bundle id falls back to AppleScript's `display notification`.
+//! notification center; a bare binary without a bundle id falls back to
+//! AppleScript's `display notification`. Sending never asks macOS for
+//! permission: setup asks, or the switch that turns an alert on ([`flip`]).
+
+use crate::kit::perms::{Perm, Status};
+
+/// Notifications are allowed (an alert switch shows on only then).
+pub fn allowed() -> bool {
+    Perm::Notifications.status() == Status::Allowed
+}
+
+/// What an alert switch shows: the person's choice, if macOS lets it through.
+pub fn shown(pref: bool) -> bool {
+    pref && allowed()
+}
+
+/// Click on an alert switch: off when it shows on; otherwise on, asking
+/// macOS (or opening its settings) when notifications aren't allowed yet.
+pub fn flip(pref: &mut bool) {
+    if shown(*pref) {
+        *pref = false;
+    } else {
+        *pref = true;
+        if !allowed() {
+            Perm::Notifications.ask();
+        }
+    }
+}
 
 /// Post a notification with a title and one line of text.
 pub fn send(title: &str, body: &str) {
@@ -12,14 +38,10 @@ pub fn send(title: &str, body: &str) {
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use block2::RcBlock;
-    use objc2::runtime::Bool;
-    use objc2_foundation::{NSBundle, NSError, NSString};
-    use objc2_user_notifications::{UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest, UNUserNotificationCenter};
-    use std::sync::Once;
+    use objc2_foundation::{NSBundle, NSString};
+    use objc2_user_notifications::{UNMutableNotificationContent, UNNotificationRequest, UNUserNotificationCenter};
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    static ASKED: Once = Once::new();
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
     pub fn send(title: &str, body: &str) {
@@ -30,10 +52,6 @@ mod mac {
             return;
         }
         let center = UNUserNotificationCenter::currentNotificationCenter();
-        ASKED.call_once(|| {
-            let done = RcBlock::new(|_granted: Bool, _err: *mut NSError| {});
-            center.requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound, &done);
-        });
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(title));
         content.setBody(&NSString::from_str(body));

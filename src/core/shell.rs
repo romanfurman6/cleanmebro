@@ -89,9 +89,6 @@ impl App {
         // screenshots stay silent; otherwise sounds are on until switched off
         crate::kit::sound::set_on(!demo && cc.storage.and_then(|s| eframe::get_value(s, crate::kit::sound::STORAGE_KEY)).unwrap_or(true));
         let tools = crate::tools::all(&ToolEnv { ctx: ctx.clone(), demo });
-        if !demo {
-            crate::kit::login::default_on();
-        }
 
         // the menu bar icon
         let (tx, tray_rx): (Sender<tray_icon::TrayIconEvent>, _) = std::sync::mpsc::channel();
@@ -234,6 +231,12 @@ impl App {
 
     /// `--view`: "panel", or whatever a tool recognizes.
     fn apply_view(&mut self, view: &str) {
+        // "locked-<view>": the same view with Screen Recording and Full Disk Access missing
+        if let Some(rest) = view.strip_prefix("locked-") {
+            use crate::kit::perms::{Perm, Status};
+            self.perm_watch.demo = Some(Perm::SYSTEM.into_iter().map(|p| (p, if matches!(p, Perm::Screen | Perm::FullDisk) { Status::NotAsked } else { Status::Allowed })).collect());
+            return self.apply_view(rest);
+        }
         match view {
             "panel" => return,
             // the widget editor, with a widget selected / a search typed
@@ -783,6 +786,9 @@ impl App {
             finish = super::onboard::setup_ui(self, ui, full);
         });
         if closed || finish != Finish::No {
+            if finish != Finish::No {
+                crate::kit::login::default_on();
+            }
             super::onboard::mark_done();
             self.setup = None;
             crate::kit::native::set_dock_icon(self.app_open);
