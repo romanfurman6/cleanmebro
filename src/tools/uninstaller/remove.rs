@@ -30,6 +30,8 @@ pub struct Moved {
     pub to: PathBuf,
     pub admin: bool,
     pub bytes: u64,
+    /// Owner (uid, gid) before an admin move, given back on Undo.
+    pub owner: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -40,12 +42,92 @@ pub struct Report {
     /// Names of the apps handled.
     pub names: Vec<String>,
     pub reset: bool,
+    /// Apps whose bundle was meant to go.
+    pub apps: Vec<String>,
+    /// Of those, the ones whose bundle stayed.
+    pub kept: Vec<String>,
+    /// What didn't move, ready for another try.
+    pub retry: Vec<Target>,
 }
 
 impl Report {
     pub fn bytes(&self) -> u64 {
         self.moved.iter().map(|m| m.bytes).sum()
     }
+
+    /// The result line and, when something stayed, a second line saying what.
+    pub fn summary(&self) -> (String, Option<String>) {
+        let size = human_bytes(self.bytes());
+        let who = match self.names.len() {
+            0 => "Nothing".to_string(),
+            1 => self.names[0].clone(),
+            n => format!("{n} apps"),
+        };
+        let items = |n: usize| format!("{n} item{} couldn't be moved", if n == 1 { "" } else { "s" });
+        let failed = (!self.failed.is_empty()).then(|| items(self.failed.len()));
+        if self.moved.is_empty() {
+            return (format!("{who} couldn't be removed"), failed);
+        }
+        if self.reset {
+            return (format!("{who} is reset · {size} to the Trash"), failed);
+        }
+        if self.apps.is_empty() {
+            return (format!("{size} of {who}'s files moved to the Trash"), failed);
+        }
+        let gone = self.apps.len() - self.kept.len();
+        let stayed = (!self.kept.is_empty()).then(|| format!("{} stayed", list_names(&self.kept)));
+        let title = match (gone, self.apps.len()) {
+            (0, 1) => format!("{} stayed · {size} of its files moved", self.apps[0]),
+            (0, _) => format!("No app removed · {size} of their files moved"),
+            (g, n) if g == n => format!("{who} moved to the Trash · {size}"),
+            (g, n) => format!("{g} of {n} apps moved to the Trash · {size}"),
+        };
+        let detail = match (gone, stayed) {
+            (0, _) => self.failed.first().map(|(_, why)| why.clone()),
+            (_, Some(s)) => Some(s),
+            (_, None) => failed,
+        };
+        (title, detail)
+    }
+}
+
+/// "A", "A and B", "A, B and 2 more".
+fn list_names(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [a] => a.clone(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, rest @ ..] => format!("{a}, {b} and {} more", rest.len()),
+    }
+}
+
+fn human_bytes(b: u64) -> String {
+    crate::kit::glass::human_bytes(b)
+}
+
+/// Whether moving `p` needs root: its folder isn't writable, or it is a
+/// folder that isn't (an App Store or installer-package app is root's).
+pub fn needs_root(p: &Path) -> bool {
+    let Some(parent) = p.parent() else { return false };
+    if !writable(parent) {
+        return true;
+    }
+    p.symlink_metadata().is_ok_and(|m| m.is_dir()) && !writable(p)
+}
+
+fn writable(p: &Path) -> bool {
+    let c = std::ffi::CString::new(p.to_string_lossy().as_bytes()).unwrap_or_default();
+    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
+}
+
+#[cfg(unix)]
+fn owner_of(p: &Path) -> Option<(u32, u32)> {
+    use std::os::unix::fs::MetadataExt;
+    p.symlink_metadata().ok().map(|m| (m.uid(), m.gid()))
+}
+#[cfg(not(unix))]
+fn owner_of(_p: &Path) -> Option<(u32, u32)> {
+    None
 }
 
 /// Where removal may ever reach: app folders, ~/Library and the system's
@@ -85,10 +167,16 @@ fn trash_dest(trash: &Path, name: &str) -> PathBuf {
 pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progress: impl FnMut(String)) -> Report {
     let mut rep = Report { reset: targets.iter().all(|t| t.reset), ..Default::default() };
     let trash = crate::kit::fs::home().join(".Trash");
-    // items that need the admin password, done together at the end
-    let mut admin: Vec<(PathBuf, u64, Kind)> = Vec::new();
-    for t in targets {
+    // what didn't move, per target, for another try
+    let mut retry: Vec<Vec<Item>> = vec![Vec::new(); targets.len()];
+    // items that need the admin password, done together at the end: (target, item)
+    let mut admin: Vec<(usize, Item)> = Vec::new();
+    for (k, t) in targets.iter().enumerate() {
         rep.names.push(t.name.clone());
+        let app_item = t.items.iter().find(|i| i.kind == Kind::App && i.selected && !t.reset);
+        if app_item.is_some() {
+            rep.apps.push(t.name.clone());
+        }
         if t.app.is_some() && mac::is_running(&t.id) {
             progress(format!("Asking {} to quit…", t.name));
             mac::ask_to_quit(&t.id);
@@ -98,6 +186,7 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
             }
             if mac::is_running(&t.id) {
                 rep.failed.push((t.name.clone(), "It is still open. Quit it, then try again.".into()));
+                retry[k] = t.items.iter().filter(|i| i.selected).cloned().collect();
                 continue;
             }
         }
@@ -114,8 +203,8 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
                 rep.failed.push((it.path.display().to_string(), "Not a place apps keep their files; left alone".into()));
                 continue;
             }
-            if it.admin {
-                admin.push((it.path.clone(), it.bytes, it.kind));
+            if it.admin || needs_root(&it.path) {
+                admin.push((k, it.clone()));
                 continue;
             }
             if it.kind == Kind::Launch {
@@ -125,11 +214,14 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
             match crate::kit::fs::move_to_trash_at(&it.path) {
                 Ok(to) => {
                     prefs |= it.kind == Kind::Preferences;
-                    rep.moved.push(Moved { from: it.path.clone(), to, admin: false, bytes: it.bytes });
+                    rep.moved.push(Moved { from: it.path.clone(), to, admin: false, bytes: it.bytes, owner: None });
                 }
-                // a bundle installed by an installer package can be root's
-                Err(_) if it.kind == Kind::App && !writable_parent(&it.path) => admin.push((it.path.clone(), it.bytes, it.kind)),
-                Err(e) => rep.failed.push((it.path.display().to_string(), e)),
+                // root's, or locked down some other way: one more go with the password
+                Err(e) if e.to_lowercase().contains("permission") => admin.push((k, it.clone())),
+                Err(e) => {
+                    rep.failed.push((it.path.display().to_string(), e));
+                    retry[k].push(it.clone());
+                }
             }
         }
         if t.reset && prefs && !t.id.is_empty() {
@@ -142,16 +234,17 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
         let mut cmd = String::new();
         let mut planned = Vec::new();
         let mut taken: Vec<PathBuf> = Vec::new();
-        for (p, bytes, kind) in &admin {
+        for (k, it) in &admin {
+            let p = &it.path;
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let mut dest = trash_dest(&trash, &name);
-            let mut k = 1;
+            let mut n = 1;
             while taken.contains(&dest) {
-                dest = trash_dest(&trash, &format!("{k} {name}"));
-                k += 1;
+                dest = trash_dest(&trash, &format!("{n} {name}"));
+                n += 1;
             }
             taken.push(dest.clone());
-            if *kind == Kind::Launch && p.extension().is_some_and(|e| e == "plist") {
+            if it.kind == Kind::Launch && p.extension().is_some_and(|e| e == "plist") {
                 let domain = if p.starts_with(roots.system.join("Library/LaunchDaemons")) { "system".to_string() } else { format!("gui/{}", mac::uid()) };
                 cmd.push_str(&format!("/bin/launchctl bootout {domain} {} 2>/dev/null; ", mac::sh_quote(&p.to_string_lossy())));
             }
@@ -161,33 +254,39 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
                 dst = mac::sh_quote(&dest.to_string_lossy()),
                 uid = mac::uid()
             ));
-            planned.push(Moved { from: p.clone(), to: dest, admin: true, bytes: *bytes });
+            planned.push((*k, it.clone(), Moved { from: p.clone(), to: dest, admin: true, bytes: it.bytes, owner: owner_of(p) }));
         }
         cmd.push_str("true");
-        match mac::run_admin(&cmd, "Cmd+Meow wants to move app files that belong to the system to your Trash.") {
-            Ok(_) => {
-                for m in planned {
-                    if m.to.symlink_metadata().is_ok() && m.from.symlink_metadata().is_err() {
-                        rep.moved.push(m);
-                    } else {
-                        rep.failed.push((m.from.display().to_string(), "Couldn't be moved".into()));
-                    }
+        let res = mac::run_admin(&cmd, "Cmd+Meow wants to move apps and their files to your Trash.");
+        for (k, it, m) in planned {
+            let why = match &res {
+                Ok(_) if m.to.symlink_metadata().is_ok() && m.from.symlink_metadata().is_err() => {
+                    rep.moved.push(m);
+                    continue;
                 }
-            }
-            Err(e) => {
-                for m in planned {
-                    rep.failed.push((m.from.display().to_string(), e.clone()));
-                }
-            }
+                Ok(_) => "macOS didn't let it move".to_string(),
+                Err(e) if e.contains("-128") || e.to_lowercase().contains("cancel") => "Password not given".to_string(),
+                Err(e) => e.clone(),
+            };
+            rep.failed.push((m.from.display().to_string(), why));
+            retry[k].push(it);
+        }
+    }
+    for (t, items) in targets.iter().zip(retry) {
+        let app_kept = !t.reset && items.iter().any(|i| i.kind == Kind::App);
+        if app_kept {
+            rep.kept.push(t.name.clone());
+        }
+        if !items.is_empty() {
+            let mut again = t.clone();
+            again.items = items.into_iter().map(|mut i| {
+                i.selected = true;
+                i
+            }).collect();
+            rep.retry.push(again);
         }
     }
     rep
-}
-
-fn writable_parent(p: &Path) -> bool {
-    let Some(parent) = p.parent() else { return false };
-    let c = std::ffi::CString::new(parent.to_string_lossy().as_bytes()).unwrap_or_default();
-    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
 }
 
 /// Put everything from `rep` back where it was. Returns (restored, failures).
@@ -206,7 +305,8 @@ pub fn undo(rep: &Report) -> (usize, Vec<(String, String)>) {
             continue;
         }
         if m.admin {
-            admin_cmd.push_str(&format!("/bin/mv -n {} {} && /usr/sbin/chown -R root:wheel {}; ", mac::sh_quote(&m.to.to_string_lossy()), mac::sh_quote(&m.from.to_string_lossy()), mac::sh_quote(&m.from.to_string_lossy())));
+            let owner = m.owner.map(|(u, g)| format!("{u}:{g}")).unwrap_or_else(|| "root:wheel".into());
+            admin_cmd.push_str(&format!("/bin/mv -n {} {} && /usr/sbin/chown -R {owner} {}; ", mac::sh_quote(&m.to.to_string_lossy()), mac::sh_quote(&m.from.to_string_lossy()), mac::sh_quote(&m.from.to_string_lossy())));
             admin_items.push(m);
             continue;
         }
@@ -317,6 +417,47 @@ mod tests {
         assert!(outside.exists());
         assert_eq!(rep.failed.len(), 1);
         assert!(rep.reset);
+        undo(&rep);
+    }
+
+    #[test]
+    fn summary_counts_only_what_moved() {
+        let mv = |p: &str, b| Moved { from: PathBuf::from(p), to: PathBuf::from("/t"), admin: false, bytes: b, owner: None };
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // all gone
+        let all = Report { moved: vec![mv("/Applications/A.app", 1000)], names: names(&["A"]), apps: names(&["A"]), ..Default::default() };
+        assert_eq!(all.summary(), (format!("A moved to the Trash · {}", human_bytes(1000)), None));
+        // two of five stayed
+        let part = Report {
+            moved: vec![mv("/Applications/A.app", 1), mv("/Applications/B.app", 1), mv("/Applications/C.app", 1)],
+            failed: vec![("/Applications/D.app".into(), "x".into()), ("/Applications/E.app".into(), "x".into())],
+            names: names(&["A", "B", "C", "D", "E"]),
+            apps: names(&["A", "B", "C", "D", "E"]),
+            kept: names(&["D", "E"]),
+            ..Default::default()
+        };
+        let (t, d) = part.summary();
+        assert!(t.starts_with("3 of 5 apps moved"), "{t}");
+        assert_eq!(d.as_deref(), Some("D and E stayed"));
+        // the app stayed, only its files went
+        let one = Report { moved: vec![mv("/Users/a/Library/Caches/x", 5)], failed: vec![("/Applications/A.app".into(), "Password not given".into())], names: names(&["A"]), apps: names(&["A"]), kept: names(&["A"]), ..Default::default() };
+        let (t, d) = one.summary();
+        assert!(t.starts_with("A stayed · "), "{t}");
+        assert_eq!(d.as_deref(), Some("Password not given"));
+    }
+
+    #[test]
+    fn what_fails_comes_back_for_another_try() {
+        let f = Fake::new("retry");
+        let app = f.file("apps/Thing.app/x", "x").parent().unwrap().to_path_buf();
+        let outside = f.file("elsewhere/file", "x");
+        let item = |p: &Path, kind| Item { path: p.to_path_buf(), kind, bytes: 1, admin: false, selected: true };
+        let t = Target { name: "Thing".into(), id: "com.retry.app".into(), app: Some(app.clone()), items: vec![item(&app, Kind::App), item(&outside, Kind::Support)], reset: false };
+        let rep = run(&[t], &f.roots, &[f.root.join("apps")], |_| {});
+        assert_eq!(rep.apps, vec!["Thing".to_string()]);
+        assert!(rep.kept.is_empty(), "the app moved");
+        // a path outside app places is refused for good, not offered again
+        assert!(rep.retry.is_empty());
         undo(&rep);
     }
 }

@@ -327,8 +327,8 @@ impl Uninstaller {
             return;
         }
         if self.demo {
-            let moved = targets.iter().flat_map(|t| t.items.iter().filter(|i| i.selected)).map(|i| remove::Moved { from: i.path.clone(), to: i.path.clone(), admin: false, bytes: i.bytes }).collect();
-            g.last = Some((Report { moved, names: targets.iter().map(|t| t.name.clone()).collect(), reset: targets.iter().all(|t| t.reset), failed: vec![] }, Instant::now()));
+            let moved = targets.iter().flat_map(|t| t.items.iter().filter(|i| i.selected)).map(|i| remove::Moved { from: i.path.clone(), to: i.path.clone(), admin: false, bytes: i.bytes, owner: None }).collect();
+            g.last = Some((Report { moved, names: targets.iter().map(|t| t.name.clone()).collect(), reset: targets.iter().all(|t| t.reset), apps: targets.iter().filter(|t| !t.reset && t.app.is_some()).map(|t| t.name.clone()).collect(), ..Default::default() }, Instant::now()));
             return;
         }
         g.working = Some("Starting…".into());
@@ -481,7 +481,7 @@ fn read_app(path: &Path, casks: &[String], roots: &Roots, others: &[Owner], _app
 }
 
 fn fill_items(row: &mut AppRow, index: &Index, all: &[Owner]) {
-    let mut items = vec![Item { path: row.path.clone(), kind: Kind::App, bytes: dir_size(&row.path), admin: false, selected: true }];
+    let mut items = vec![Item { path: row.path.clone(), kind: Kind::App, bytes: dir_size(&row.path), admin: remove::needs_root(&row.path), selected: true }];
     for mut it in index.for_app(&row.owner(), all) {
         it.bytes = dir_size(&it.path);
         items.push(it);
