@@ -14,6 +14,12 @@ const PILL_TITLE: &str = "Cmd+Meow Dictation";
 const PILL_H: f32 = 34.0;
 const PILL_W: f32 = 132.0;
 const ROW_H: f32 = 36.0;
+/// History cards: inner padding, the meta line, the gap under it, the gap
+/// between cards.
+const PAD: f32 = 12.0;
+const META_H: f32 = 14.0;
+const GAP: f32 = 6.0;
+const ROW_GAP: f32 = 8.0;
 /// The red of a live mic.
 const LIVE: Color32 = Color32::from_rgb(0xFF, 0x45, 0x3A);
 
@@ -235,20 +241,21 @@ fn history(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
         let p = ui.painter().clone();
         let tw = w - 24.0 - 120.0;
         // each entry is as tall as its text
-        let heights: Vec<f32> = d.history.items.iter().map(|s| p.layout(s.text.clone(), font(13.0), TEXT, tw).size().y.max(18.0) + 34.0).collect();
+        // 12 pad · meta 14 · 6 gap · text · 12 pad, then the 8 gap between cards
+        let heights: Vec<f32> = d.history.items.iter().map(|s| PAD + META_H + GAP + p.layout(s.text.clone(), font(13.0), TEXT, tw).size().y.max(18.0) + PAD + ROW_GAP).collect();
         let total: f32 = heights.iter().sum::<f32>() + 40.0;
         let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), total), Sense::hover());
         let mut y = area.top() + 16.0;
         let id = ui.scope_id().with("dict-rows");
         for (k, s) in d.history.items.iter().enumerate() {
-            let rr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, heights[k] - 8.0));
+            let rr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, heights[k] - ROW_GAP));
             let resp = ui.interact(rr, id.with(k), Sense::click());
             let h = ui.ctx().animate_bool(id.with(("h", k)), resp.hovered());
             p.rect_filled(rr, R_CARD, lerp_color(CARD, RAISED, h * 0.5));
             let meta = format!("{} · {} · {:.0} s", ago(s.at), if s.app.is_empty() { "—" } else { &s.app }, s.secs.max(1.0));
-            p.text(Pos2::new(rr.left() + 12.0, rr.top() + 10.0), Align2::LEFT_TOP, meta, font(11.0), TEXT_FAINT);
-            paragraph(&p, Pos2::new(rr.left() + 12.0, rr.top() + 26.0), &s.text, font(13.0), TEXT, tw);
-            let cr = Rect::from_min_size(Pos2::new(rr.right() - 12.0 - 64.0, rr.center().y - 13.0), Vec2::new(64.0, 26.0));
+            p.text(Pos2::new(rr.left() + PAD, rr.top() + PAD), Align2::LEFT_TOP, meta, font(11.0), TEXT_FAINT);
+            paragraph(&p, Pos2::new(rr.left() + PAD, rr.top() + PAD + META_H + GAP), &s.text, font(13.0), TEXT, tw);
+            let cr = Rect::from_min_size(Pos2::new(rr.right() - PAD - 64.0, rr.center().y - 13.0), Vec2::new(64.0, 26.0));
             let xr = Rect::from_center_size(Pos2::new(cr.left() - 20.0, cr.center().y), Vec2::splat(22.0));
             if h > 0.01 && icon_button(ui, xr, Icon::Trash, "Remove").clicked() {
                 remove = Some(k);
