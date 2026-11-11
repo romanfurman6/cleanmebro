@@ -20,6 +20,24 @@
   if (!still) ['.hero', '.drop', '.float', '.awake-mini'].forEach((s, i) => {
     const el = document.querySelector(s); if (el) { el.classList.add('reveal'); el.style.animationDelay = (i * 0.12) + 's'; }
   });
+  // Tool switcher: list on the left, window on the right; cycles until a click
+  const swData = $('sw-data');
+  if (swData) {
+    const tools = JSON.parse(swData.textContent), items = [...document.querySelectorAll('.sw-item')];
+    const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+    let sel = 0, held = false;
+    const show = i => {
+      sel = i; const t = tools[i];
+      items.forEach((b, k) => b.classList.toggle('on', k === i));
+      $('sw-n').textContent = t.n; $('sw-big').textContent = t.big; $('sw-sub').textContent = t.sub;
+      $('sw-rows').innerHTML = t.rows.map(([l, v, w]) => `<div class="sr"><span>${esc(l)}</span><span class="trk"><b style="width:0%"></b></span><span class="num dm">${esc(v)}</span></div>`).join('');
+      const bs = $('sw-rows').querySelectorAll('b');
+      requestAnimationFrame(() => requestAnimationFrame(() => t.rows.forEach(([, , w], k) => { if (w) bs[k].style.width = w + '%'; })));
+    };
+    items.forEach((b, i) => b.addEventListener('click', () => { held = true; show(i); }));
+    if (!still) setInterval(() => { if (!held && !document.hidden) show((sel + 1) % tools.length); }, 3500);
+  }
+
   if (still) return;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
