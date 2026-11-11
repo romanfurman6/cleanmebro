@@ -104,93 +104,95 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     page_header(&p, r, "Cleanup", "", TEXT_DIM());
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
 
-    // past cleans fill the space under the disk card; before the first
-    // clean the disk card itself takes the page, with a big ring
-    let hist = super::engine::history();
-    let note_h = if has_claude { 0.0 } else { claude_note_height(&p, body.width(), avail) + sp::L };
-    let compact = !hist.is_empty() && body.height() - note_h - 128.0 - sp::L > 120.0;
-    let top_h = if compact { 128.0 } else { (body.height() - note_h).max(128.0) };
-    let top = Rect::from_min_size(body.min, Vec2::new(body.width(), top_h));
-    glass_card(&p, top, R_CARD, 0.0, false);
-    let ti = top.shrink(sp::L);
+    // top: the disk in one line; middle: a round Scan button; bottom: the
+    // five groups with what the last scan found in each
     let (total, free) = crate::kit::fs::volume_space("/");
     let used = if total > 0 { 1.0 - free as f32 / total as f32 } else { 0.0 };
-    let bw = 200.0;
-    let scan_h = if has_claude { 44.0 + sp::M + 18.0 } else { 44.0 };
-    let br = if compact {
-        p.text(ti.left_top(), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT());
-        let y = ti.top() + 16.0 + sp::M;
-        let g = p.layout_no_wrap(human_bytes(free), ty::hero(), TEXT());
-        let gw = g.size().x;
-        p.galley(Pos2::new(ti.left(), y), g, TEXT());
-        if total > 0 {
-            p.text(Pos2::new(ti.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
+    let disk = Rect::from_min_size(body.min, Vec2::new(body.width(), 56.0));
+    glass_card(&p, disk, R_CARD, 0.0, false);
+    let di = disk.shrink2(Vec2::new(sp::L, 0.0));
+    icon(&p, Icon::Disk, Rect::from_center_size(Pos2::new(di.left() + 9.0, di.center().y), Vec2::splat(18.0)), TEXT_SOFT());
+    let name = p.text(Pos2::new(di.left() + 18.0 + sp::M, di.center().y), Align2::LEFT_CENTER, "Macintosh HD", ty::title(), TEXT());
+    let right = if total > 0 { format!("{} free of {}", human_bytes(free), human_bytes(total)) } else { String::new() };
+    let rr = p.text(Pos2::new(di.right(), di.center().y), Align2::RIGHT_CENTER, &right, ty::body(), TEXT_SOFT());
+    let bar_r = Rect::from_min_max(Pos2::new(name.right() + sp::XL, di.center().y - 4.0), Pos2::new(rr.left() - sp::XL, di.center().y + 4.0));
+    if bar_r.width() > 40.0 {
+        bar(&p, bar_r, used, BLUE());
+    }
+
+    // the groups, with the last scan's sizes (sample sizes in the demo)
+    let last = if app.demo { Some(super::engine::LastScan { when: chrono::Utc::now().timestamp() - 3 * 86400, groups: vec![3_400_000_000, 1_900_000_000, 6_200_000_000, 410_000_000, 820_000_000] }) } else { super::engine::last_scan() };
+    let hist = super::engine::history();
+    let tiles_h = 116.0;
+    let tiles = Rect::from_min_max(Pos2::new(body.left(), body.bottom() - tiles_h), body.max);
+    let head_y = tiles.top() - sp::M - 16.0;
+    if let Some(l) = &last {
+        p.text(Pos2::new(body.left(), head_y), Align2::LEFT_TOP, format!("Last scan {}", super::engine::days_ago(l.when)), ty::label(), TEXT_DIM());
+    }
+    if !hist.is_empty() {
+        let freed: u64 = hist.iter().map(|h| h.1).sum();
+        p.text(Pos2::new(body.right(), head_y), Align2::RIGHT_TOP, format!("{} freed in {} clean{}", human_bytes(freed), hist.len(), if hist.len() == 1 { "" } else { "s" }), ty::label(), TEXT_DIM());
+    }
+    let n = Group::ALL.len() as f32;
+    let gap = sp::M;
+    let tw = (tiles.width() - gap * (n - 1.0)) / n;
+    for (i, g) in Group::ALL.iter().enumerate() {
+        let t = Rect::from_min_size(Pos2::new(tiles.left() + i as f32 * (tw + gap), tiles.top()), Vec2::new(tw, tiles_h));
+        glass_card(&p, t, R_CARD, 0.0, false);
+        let ti = t.shrink(sp::L);
+        let col = junk_ramp(i);
+        let chip = Rect::from_min_size(ti.min, Vec2::splat(30.0));
+        p.circle_filled(chip.center(), 15.0, with_alpha(col, 0.18));
+        let ir = Rect::from_center_size(chip.center(), Vec2::splat(16.0));
+        let drawn = match g {
+            Group::Developer => symbol(&p, "hammer", ir, col),
+            _ => false,
+        };
+        if !drawn {
+            let ic = match g {
+                Group::AiTools => Icon::Gauge,
+                Group::AppCaches => Icon::Folder,
+                Group::Developer => Icon::Gear,
+                Group::Logs => Icon::Doc,
+                Group::Trash => Icon::Trash,
+            };
+            icon(&p, ic, ir, col);
         }
-        let bar_w = (ti.width() - bw - sp::XL * 2.0).max(120.0);
-        bar(&p, Rect::from_min_size(Pos2::new(ti.left(), ti.bottom() - 8.0), Vec2::new(bar_w, 8.0)), used, BLUE());
-        Rect::from_min_size(Pos2::new(ti.right() - bw, ti.center().y - scan_h / 2.0), Vec2::new(bw, 44.0))
-    } else {
-        // left half: the used-space ring; right half: the numbers and Scan
-        let half = ti.width() / 2.0;
-        let rr = ((ti.height() - sp::XL) / 2.0).min(half / 2.0 - sp::L).clamp(40.0, 130.0);
-        let c = Pos2::new(ti.left() + half / 2.0, ti.center().y);
-        let w = (rr * 0.12).clamp(10.0, 16.0);
-        crate::kit::tile::ring(&p, c, rr - w / 2.0, w, used.max(0.01), BLUE());
-        text_fit(&p, c - Vec2::new(0.0, 10.0), Align2::CENTER_CENTER, &format!("{:.0}%", used * 100.0), ty::hero(), TEXT(), (rr - w) * 1.6);
-        p.text(c + Vec2::new(0.0, 22.0), Align2::CENTER_CENTER, "used", ty::body(), ty::caption_color());
-        let x = ti.left() + half + sp::L;
-        let col_w = ti.right() - x;
-        let block_h = 16.0 + sp::M + 34.0 + sp::S + 18.0 + sp::XL + scan_h;
-        let y0 = ti.center().y - block_h / 2.0;
-        p.text(Pos2::new(x, y0), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT());
-        let y = y0 + 16.0 + sp::M;
-        text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, &human_bytes(free), ty::hero(), TEXT(), col_w);
-        if total > 0 {
-            p.text(Pos2::new(x, y + 34.0 + sp::S), Align2::LEFT_TOP, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
+        let size = last.as_ref().and_then(|l| l.groups.get(i).copied());
+        let name_y = if size.is_some() { ti.bottom() - 22.0 } else { ti.bottom() };
+        text_fit(&p, Pos2::new(ti.left(), name_y), Align2::LEFT_BOTTOM, g.title(), ty::body(), TEXT_SOFT(), ti.width());
+        if let Some(b) = size {
+            text_fit(&p, Pos2::new(ti.left(), ti.bottom()), Align2::LEFT_BOTTOM, &human_bytes(b), ty::title(), TEXT(), ti.width());
         }
-        Rect::from_min_size(Pos2::new(x, y + 34.0 + sp::S + 18.0 + sp::XL), Vec2::new(bw.min(col_w), 44.0))
-    };
-    if pill_button(ui, br, "Scan", BTN_PRIMARY, true).clicked() {
+    }
+
+    // the middle: a note when Claude is missing, then the Scan button
+    let mut mid = Rect::from_min_max(Pos2::new(body.left(), disk.bottom() + sp::L), Pos2::new(body.right(), head_y - sp::L));
+    if !has_claude {
+        let h = claude_note(ui, Pos2::new(body.left(), mid.bottom() - claude_note_height(&p, body.width(), avail)), body.width(), avail, tcx);
+        mid.max.y -= h + sp::L;
+    }
+    let below = if has_claude { 18.0 + sp::L } else { 0.0 };
+    let r_btn = ((mid.height() - below) / 2.0 - sp::M).clamp(36.0, 84.0);
+    let c = Pos2::new(mid.center().x, mid.center().y - below / 2.0);
+    let id = ui.scope_id().with("scan-round");
+    let resp = ui.interact(Rect::from_center_size(c, Vec2::splat(r_btn * 2.0)), id, Sense::click());
+    let hover = ui.ctx().animate_bool(id.with("h"), resp.hovered());
+    p.circle_filled(c, r_btn + 10.0 + 4.0 * hover, with_alpha(BLUE(), 0.10 + 0.06 * hover));
+    p.circle_filled(c, r_btn, BLUE());
+    p.text(c, Align2::CENTER_CENTER, "Scan", ty::hero(), on_color(BLUE()));
+    if resp.clicked() {
         cleanup::start_scan(app.clean.clone(), ctx, app.use_ai && has_claude);
     }
     if has_claude {
-        let sw = Rect::from_min_size(Pos2::new(br.left(), br.bottom() + sp::M), Vec2::new(30.0, 18.0));
+        let label = "Check with AI";
+        let lw = p.layout_no_wrap(label.into(), ty::body(), TEXT()).size().x;
+        let total_w = 30.0 + sp::S + lw;
+        let sw = Rect::from_min_size(Pos2::new(c.x - total_w / 2.0, c.y + r_btn + 14.0 + sp::L), Vec2::new(30.0, 18.0));
         if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
             app.use_ai = !app.use_ai;
         }
-        text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Check with AI", ty::body(), TEXT(), bw - 40.0);
-    }
-
-    let mut y = top.bottom() + sp::L;
-    if !has_claude {
-        y += claude_note(ui, Pos2::new(body.left(), y), body.width(), avail, tcx) + sp::L;
-    }
-    if compact {
-        past_cleans(&p, Rect::from_min_max(Pos2::new(body.left(), y), body.max), &hist);
-    }
-}
-
-/// What earlier cleans removed: the total, and one bar per clean.
-fn past_cleans(p: &egui::Painter, r: Rect, hist: &[(i64, u64)]) {
-    glass_card(p, r, R_CARD, 0.0, false);
-    let ri = r.shrink(sp::L);
-    let total: u64 = hist.iter().map(|h| h.1).sum();
-    p.text(ri.left_top(), Align2::LEFT_TOP, "Past cleans", ty::title(), TEXT());
-    p.text(Pos2::new(ri.right(), ri.top()), Align2::RIGHT_TOP, format!("{} freed in {} clean{}", human_bytes(total), hist.len(), if hist.len() == 1 { "" } else { "s" }), ty::body(), TEXT_DIM());
-    let chart = Rect::from_min_max(Pos2::new(ri.left(), ri.top() + 16.0 + sp::L), Pos2::new(ri.right(), ri.bottom() - 18.0));
-    let n = hist.len().min(((chart.width() + 8.0) / 44.0).floor().max(1.0) as usize);
-    let shown = &hist[hist.len() - n..];
-    let max = shown.iter().map(|h| h.1).max().unwrap_or(1).max(1) as f32;
-    let bw = ((chart.width() - (n as f32 - 1.0) * 8.0) / n as f32).min(56.0);
-    for (i, (when, b)) in shown.iter().enumerate() {
-        let x = chart.left() + i as f32 * (bw + 8.0);
-        let h = (chart.height() - 16.0) * (*b as f32 / max).max(0.02);
-        let last = i + 1 == n;
-        let br = Rect::from_min_max(Pos2::new(x, chart.bottom() - h), Pos2::new(x + bw, chart.bottom()));
-        p.rect_filled(br, 4.0, if last { BLUE() } else { white(46) });
-        text_fit(p, Pos2::new(br.center().x, br.top() - 3.0), Align2::CENTER_BOTTOM, &human_bytes(*b), font(11.0), TEXT_DIM(), bw + 8.0);
-        let day = chrono::DateTime::from_timestamp(*when, 0).map(|d| d.with_timezone(&chrono::Local).format("%b %-d").to_string()).unwrap_or_default();
-        text_fit(p, Pos2::new(br.center().x, chart.bottom() + 4.0), Align2::CENTER_TOP, &day, font(11.0), TEXT_FAINT(), bw + 8.0);
+        p.text(Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, label, ty::body(), TEXT());
     }
 }
 

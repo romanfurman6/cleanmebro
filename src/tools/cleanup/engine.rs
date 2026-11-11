@@ -340,6 +340,7 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
         }
         ctx.request_repaint();
         if !use_ai && !stopped {
+            record_scan(&shared.lock().unwrap());
             crate::kit::sound::play(crate::kit::sound::Cue::Ready);
         }
         if use_ai && !stopped {
@@ -349,6 +350,7 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
                 it.selected = it.verdict == Verdict::Safe && !it.permanent;
             }
             g.phase = Phase::Results;
+            record_scan(&g);
             ctx.request_repaint();
             crate::kit::sound::play(crate::kit::sound::Cue::Ready);
         }
@@ -885,6 +887,36 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
 /// Past cleans, oldest first: (unix seconds, bytes removed). Kept so the
 /// widget can show what Cleanup did without a new scan.
 /// Read once from disk, then kept in memory (the widget asks every frame).
+/// What the last finished scan found per group, and when (kept on disk so
+/// the start page can show it).
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct LastScan {
+    pub when: i64,
+    /// bytes per group, in `Group::ALL` order
+    pub groups: Vec<u64>,
+}
+
+pub fn last_scan() -> Option<LastScan> {
+    let mut c = LAST_SCAN.lock().unwrap();
+    if c.is_none() {
+        *c = Some(std::fs::read_to_string(crate::kit::fs::data_path("cleanup").join("last-scan.json")).ok().and_then(|s| serde_json::from_str(&s).ok()));
+    }
+    c.clone().flatten()
+}
+
+static LAST_SCAN: Mutex<Option<Option<LastScan>>> = Mutex::new(None);
+
+fn record_scan(g: &State) {
+    let ls = LastScan { when: chrono::Utc::now().timestamp(), groups: Group::ALL.iter().map(|k| g.group_bytes(*k)).collect() };
+    let dir = crate::kit::fs::data_path("cleanup");
+    if std::fs::create_dir_all(&dir).is_ok() {
+        if let Ok(s) = serde_json::to_string(&ls) {
+            let _ = std::fs::write(dir.join("last-scan.json"), s);
+        }
+    }
+    *LAST_SCAN.lock().unwrap() = Some(Some(ls));
+}
+
 pub fn history() -> Vec<(i64, u64)> {
     let mut c = HISTORY.lock().unwrap();
     c.get_or_insert_with(|| std::fs::read_to_string(crate::kit::fs::data_path("cleanup").join("history.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()).clone()
