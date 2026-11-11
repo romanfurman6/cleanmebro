@@ -508,7 +508,9 @@ impl App {
         let Some(tray) = &self.tray else { return };
         let title = self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).find_map(|(_, t)| t.tray_title()).unwrap_or_default();
         if title != self.tray_title {
-            tray.set_title(if title.is_empty() { None } else { Some(&title) });
+            // tray-icon's set_title(None) leaves the old text on macOS (the
+            // recording clock stayed after a stop); an empty title clears it
+            tray.set_title(Some(&title));
             self.tray_title = title;
         }
     }
