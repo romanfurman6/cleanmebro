@@ -646,12 +646,21 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
     // block clicks to the page underneath
     let _ = ui.interact(r, ui.scope_id().with("confirm-scrim"), Sense::click());
     p.rect_filled(r, CornerRadius { nw: 0, sw: 0, ne: WIN_R as u8, se: WIN_R as u8 }, Color32::from_black_alpha(115));
-    let (n, bytes, perm) = {
+    let (n, bytes, perm, trashed) = {
         let g = app.clean.lock().unwrap();
         let sel: Vec<&Item> = g.items.iter().filter(|i| i.selected).collect();
-        (sel.len(), sel.iter().map(|i| i.bytes).sum::<u64>(), sel.iter().any(|i| i.permanent))
+        let trashed = sel.iter().filter(|i| !i.permanent && !i.rebuilds()).count();
+        (sel.len(), sel.iter().map(|i| i.bytes).sum::<u64>(), sel.iter().any(|i| i.permanent), trashed)
     };
-    let mut body = if app.delete_now { "They'll be deleted right away. This can't be undone.".to_string() } else { "They go to the Trash, so you can put anything back.".to_string() };
+    let mut body = if app.delete_now {
+        "They'll be deleted right away. This can't be undone.".to_string()
+    } else if trashed == 0 {
+        "Caches and logs are deleted; apps rebuild them.".to_string()
+    } else if trashed + perm as usize == n {
+        "They go to the Trash, so you can put anything back.".to_string()
+    } else {
+        format!("Caches and logs are deleted; apps rebuild them. The other {trashed} go to the Trash.")
+    };
     if perm {
         body.push_str(" Emptying the Trash is permanent.");
     }
@@ -687,12 +696,12 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     let st = app.clean.lock().unwrap().clone();
     page_header(&p, r, "Cleanup", "Finished", TEXT_DIM());
     let ok = st.failed.is_empty();
-    let failed: std::collections::HashSet<&str> = st.failed.iter().map(|(n, _)| n.as_str()).collect();
+    // removed items leave the list; the engine keeps what each one was
     let mut rows: Vec<(Group, usize, u64)> = Group::ALL
         .iter()
         .map(|g| {
-            let it: Vec<&Item> = st.items.iter().filter(|i| i.group == *g && i.selected && !failed.contains(i.title.as_str())).collect();
-            (*g, it.len(), it.iter().map(|i| i.bytes).sum())
+            let it: Vec<u64> = st.cleaned.iter().filter(|c| c.0 == *g).map(|c| c.1).collect();
+            (*g, it.len(), it.iter().sum())
         })
         .filter(|r| r.1 > 0)
         .collect();
@@ -718,10 +727,18 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     p.text(Pos2::new(tx, c.y - 1.0), Align2::LEFT_BOTTOM, "Cleanup finished", ty::title(), TEXT());
     p.text(Pos2::new(tx, c.y + 3.0), Align2::LEFT_TOP, format!("{} of {} items", st.cleaned_count, total), ty::caption(), ty::caption_color());
     let mut y = li.top() + 44.0 + sp::L;
-    let g = p.layout_no_wrap(human_bytes(st.cleaned_bytes), ty::hero(), TEXT());
+    let freed = st.cleaned_bytes.saturating_sub(st.trashed_bytes);
+    let g = p.layout_no_wrap(human_bytes(if freed > 0 { freed } else { st.cleaned_bytes }), ty::hero(), TEXT());
     let gw = g.size().x;
     p.galley(Pos2::new(li.left(), y), g, TEXT());
-    p.text(Pos2::new(li.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, if app.delete_now { "deleted" } else { "to the Trash" }, ty::body(), ty::caption_color());
+    let what = if st.trashed_bytes == 0 {
+        "freed".to_string()
+    } else if freed == 0 {
+        "to the Trash".to_string()
+    } else {
+        format!("freed · {} to the Trash", human_bytes(st.trashed_bytes))
+    };
+    p.text(Pos2::new(li.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, what, ty::body(), ty::caption_color());
     y += 34.0 + sp::XS;
     y += sp::L;
     if !ok {
@@ -793,6 +810,7 @@ pub fn demo_results() -> cleanup::State {
         verdict,
         reason: reason.into(),
         rule_reason: reason.into(),
+        rule_verdict: verdict,
         by,
         selected: verdict == Verdict::Safe,
         hard_keep: false,
@@ -822,6 +840,8 @@ pub fn demo_done() -> cleanup::State {
     let sel: Vec<&Item> = st.items.iter().filter(|i| i.selected).collect();
     st.cleaned_count = sel.len();
     st.cleaned_bytes = sel.iter().map(|i| i.bytes).sum();
+    st.cleaned = sel.iter().map(|i| (i.group, i.bytes)).collect();
+    st.trashed_bytes = sel.iter().filter(|i| !i.rebuilds()).map(|i| i.bytes).sum();
     st.log = sel.iter().map(|i| format!("Moved to Trash: {}", i.path.display())).collect();
     st
 }

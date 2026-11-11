@@ -85,11 +85,23 @@ pub struct Item {
     pub verdict: Verdict,
     pub reason: String,
     pub rule_reason: String,
+    /// What the built-in rules said, before Claude or the person.
+    pub rule_verdict: Verdict,
     pub by: Who,
     pub selected: bool,
     pub hard_keep: bool,
     pub permanent: bool, // emptying the Trash can't be undone
     pub app_running: bool,
+}
+
+impl Item {
+    /// Rebuilt by its app or tool when needed, and nothing in it is the
+    /// person's: deleted outright even in "Move to Trash" mode, because in
+    /// the Trash it would still take the space this clean promised to free.
+    /// Anything the rules or Claude weren't sure of goes to the Trash.
+    pub fn rebuilds(&self) -> bool {
+        self.verdict == Verdict::Safe && self.rule_verdict == Verdict::Safe && self.by != Who::You && matches!(self.kind, "Caches" | "Logs" | "Temp Files" | "Build Data")
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -115,7 +127,12 @@ pub struct State {
     pub ai_used: bool,
     pub ai_error: Option<String>,
     pub cleaned_bytes: u64,
+    /// The part of `cleaned_bytes` that went to the Trash (space comes back
+    /// once it's emptied).
+    pub trashed_bytes: u64,
     pub cleaned_count: usize,
+    /// Group and size of each item removed (they leave `items`).
+    pub cleaned: Vec<(Group, u64)>,
     pub failed: Vec<(String, String)>,
     pub log: Vec<String>,
     pub stop: bool,
@@ -182,25 +199,23 @@ impl Ctx {
             self.hidden_kept += 1;
             return;
         }
-        if !path.exists() {
+        if path.symlink_metadata().is_err() {
             return;
         }
-        self.status(&path.display().to_string(), -1.0);
-        let bytes = dir_size(&path);
-        if bytes < m::MIN_ITEM_BYTES {
-            return;
-        }
+        // measured later, all at once and in parallel, once nested and
+        // repeated paths are dropped (see `measure`)
         let age_days = age_days(&path);
         let mut it = Item {
             group,
             title: title.to_string(),
             path: path.clone(),
-            bytes,
+            bytes: 0,
             age_days,
             kind,
             verdict,
             reason: reason.to_string(),
             rule_reason: reason.to_string(),
+            rule_verdict: verdict,
             by: Who::Rule,
             selected: false,
             hard_keep: false,
@@ -212,15 +227,62 @@ impl Ctx {
             it.reason = why.into();
             it.hard_keep = true;
         }
-        let name = path.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if verdict == Verdict::Safe && kind == "Caches" && (self.running_ids.contains(&name) || self.running_names.contains(&title.to_lowercase())) {
+        if verdict == Verdict::Safe && kind == "Caches" && app_open(&self.running_ids, &self.running_names, &path, title) {
+            let name = path.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
             it.verdict = Verdict::Ask;
+            it.rule_verdict = Verdict::Ask;
             it.app_running = true;
             let app = if title.contains(' ') && title.len() > 18 { pretty(&name) } else { title.to_string() };
             it.reason = format!("{} is open right now — quit it first or allow anyway", if app.is_empty() { title.to_string() } else { app });
         }
         self.items.push(it);
     }
+}
+
+/// The app a cache belongs to is running (by its folder's bundle id or the
+/// item's title).
+fn app_open(ids: &HashSet<String>, names: &HashSet<String>, path: &Path, title: &str) -> bool {
+    let name = path.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    ids.contains(&name) || names.contains(&title.to_lowercase())
+}
+
+/// Drop repeated and nested paths (the outer one stays), then measure what's
+/// left on all cores and drop items too small to matter. Sizing is nearly all
+/// of a scan's time, so nothing is measured twice.
+fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f32) {
+    let mut seen = HashSet::new();
+    items.retain(|it| seen.insert(it.path.clone()));
+    let all: HashSet<PathBuf> = items.iter().map(|i| i.path.clone()).collect();
+    items.retain(|it| !it.path.ancestors().skip(1).any(|a| all.contains(a)));
+    let n = items.len();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let sizes: Vec<std::sync::atomic::AtomicU64> = (0..n).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
+    let workers = std::thread::available_parallelism().map(|c| c.get()).unwrap_or(4).saturating_sub(1).clamp(1, 8);
+    std::thread::scope(|s| {
+        for _ in 0..workers.min(n.max(1)) {
+            s.spawn(|| {
+                crate::kit::activity::low_priority();
+                loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if k >= n || shared.lock().unwrap().stop {
+                        break;
+                    }
+                    sizes[k].store(dir_size(&items[k].path), std::sync::atomic::Ordering::Relaxed);
+                    let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let mut g = shared.lock().unwrap();
+                    g.current = items[k].path.display().to_string();
+                    g.progress = from + (1.0 - from) * d as f32 / n as f32;
+                    drop(g);
+                    ctx.request_repaint();
+                }
+            });
+        }
+    });
+    for (it, s) in items.iter_mut().zip(sizes.iter()) {
+        it.bytes = s.load(std::sync::atomic::Ordering::Relaxed);
+    }
+    items.retain(|it| it.bytes >= m::MIN_ITEM_BYTES);
 }
 
 fn age_days(p: &Path) -> f64 {
@@ -313,20 +375,18 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
             ("Developer caches", scan_developer),
             ("Trash", scan_trash),
         ];
+        // finding what to look at is quick; measuring it is the long part
+        const FIND: f32 = 0.1;
         for (i, (_, f)) in steps.iter().enumerate() {
             if c.stopped() {
                 break;
             }
-            c.status("", i as f32 / steps.len() as f32);
+            c.status("", FIND * i as f32 / steps.len() as f32);
             f(&mut c);
-            c.shared.lock().unwrap().progress = (i + 1) as f32 / steps.len() as f32;
         }
-        // de-duplicate (a path found by two rules keeps the first)
-        let mut seen = HashSet::new();
-        c.items.retain(|it| seen.insert(it.path.clone()));
-        // drop items nested inside another item
-        let paths: Vec<PathBuf> = c.items.iter().map(|i| i.path.clone()).collect();
-        c.items.retain(|it| !paths.iter().any(|p| p != &it.path && it.path.starts_with(p)));
+        if !c.stopped() {
+            measure(&mut c.items, &shared, &ctx, FIND);
+        }
         c.items.sort_by(|a, b| a.group.cmp(&b.group).then(b.bytes.cmp(&a.bytes)));
         for it in c.items.iter_mut() {
             it.selected = it.verdict == Verdict::Safe && !it.permanent;
@@ -826,6 +886,14 @@ fn parse_verdicts(text: &str) -> Vec<(usize, Verdict, String)> {
 
 // ---------------------------------------------------------------- removal
 
+/// What a clean removes, in order: the Trash is emptied first, so what this
+/// clean moves there can still be put back.
+fn clean_order(items: &[Item]) -> Vec<Item> {
+    let mut t: Vec<Item> = items.iter().filter(|i| i.selected && i.verdict != Verdict::Keep && !i.hard_keep).cloned().collect();
+    t.sort_by_key(|i| i.group != Group::Trash);
+    t
+}
+
 pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
     let targets: Vec<Item> = {
         let mut g = shared.lock().unwrap();
@@ -834,10 +902,14 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
         g.cleaned_count = 0;
         g.failed.clear();
         g.log.clear();
-        g.items.iter().filter(|i| i.selected && i.verdict != Verdict::Keep && !i.hard_keep).cloned().collect()
+        g.trashed_bytes = 0;
+        g.cleaned.clear();
+        clean_order(&g.items)
     };
     std::thread::spawn(move || {
         let n = targets.len().max(1);
+        // minutes may have passed since the scan: an app opened since then keeps its cache
+        let (running_ids, running_names) = running_apps();
         for (k, it) in targets.iter().enumerate() {
             {
                 let mut g = shared.lock().unwrap();
@@ -852,18 +924,29 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
                 g.log.push(format!("Skipped {}: {why}", it.path.display()));
                 continue;
             }
+            if it.kind == "Caches" && !it.app_running && it.by != Who::You && app_open(&running_ids, &running_names, &it.path, &it.title) {
+                let mut g = shared.lock().unwrap();
+                g.failed.push((it.title.clone(), "the app is open now".into()));
+                g.log.push(format!("Skipped {}: its app was opened after the scan", it.path.display()));
+                continue;
+            }
+            let to_trash = !delete_now && !it.rebuilds();
             let res = if it.group == Group::Trash {
                 empty_folder(&it.path)
-            } else if delete_now {
-                remove(&it.path)
-            } else {
+            } else if to_trash {
                 move_to_trash(&it.path)
+            } else {
+                remove(&it.path)
             };
             let mut g = shared.lock().unwrap();
             match res {
                 Ok(()) => {
+                    if to_trash {
+                        g.trashed_bytes += it.bytes;
+                    }
                     g.cleaned_bytes += it.bytes;
                     g.cleaned_count += 1;
+                    g.cleaned.push((it.group, it.bytes));
                     g.log.push(format!("Removed {} ({})", it.path.display(), crate::kit::glass::human_bytes(it.bytes)));
                     g.items.retain(|x| x.path != it.path);
                 }
@@ -1021,6 +1104,78 @@ mod tests {
         assert_eq!(merge_verdict(Keep, Ask, false), Keep);
     }
 
+    fn it(group: Group, path: &str, kind: &'static str, verdict: Verdict, by: Who) -> Item {
+        Item {
+            group,
+            title: String::new(),
+            path: PathBuf::from(path),
+            bytes: 0,
+            age_days: 0.0,
+            kind,
+            verdict,
+            reason: String::new(),
+            rule_reason: String::new(),
+            rule_verdict: verdict,
+            by,
+            selected: true,
+            hard_keep: false,
+            permanent: false,
+            app_running: false,
+        }
+    }
+
+    #[test]
+    fn trash_is_emptied_before_anything_moves_there() {
+        let items = vec![
+            it(Group::AiTools, "/a", "Caches", Verdict::Safe, Who::Rule),
+            it(Group::Logs, "/b", "Logs", Verdict::Safe, Who::Rule),
+            it(Group::Trash, "/t", "Trash", Verdict::Safe, Who::Rule),
+        ];
+        let order: Vec<Group> = clean_order(&items).iter().map(|i| i.group).collect();
+        assert_eq!(order, vec![Group::Trash, Group::AiTools, Group::Logs]);
+    }
+
+    #[test]
+    fn only_sure_rebuildable_items_skip_the_trash() {
+        assert!(it(Group::AppCaches, "/c", "Caches", Verdict::Safe, Who::Rule).rebuilds());
+        assert!(it(Group::Logs, "/l", "Logs", Verdict::Safe, Who::Ai).rebuilds());
+        assert!(it(Group::Developer, "/d", "Build Data", Verdict::Safe, Who::Rule).rebuilds());
+        // the rules weren't sure (iOS backups, Telegram media): to the Trash even when Claude relaxed it
+        let mut relaxed = it(Group::AppCaches, "/m", "Caches", Verdict::Ask, Who::Rule);
+        relaxed.verdict = Verdict::Safe;
+        relaxed.by = Who::Ai;
+        assert!(!relaxed.rebuilds());
+        // the person allowed it by hand
+        assert!(!it(Group::AppCaches, "/y", "Caches", Verdict::Safe, Who::You).rebuilds());
+        // not a cache
+        assert!(!it(Group::AiTools, "/v", "Stale Versions", Verdict::Safe, Who::Rule).rebuilds());
+        assert!(!it(Group::AiTools, "/s", "Old Sessions", Verdict::Safe, Who::Rule).rebuilds());
+    }
+
+    #[test]
+    fn nested_and_repeated_paths_are_measured_once() {
+        let base = std::env::temp_dir().join(format!("cmb-measure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("outer/inner")).unwrap();
+        std::fs::write(base.join("outer/inner/f"), vec![1u8; 200_000]).unwrap();
+        std::fs::create_dir_all(base.join("tiny")).unwrap();
+        std::fs::write(base.join("tiny/f"), b"x").unwrap();
+        let p = |r: &str| base.join(r).display().to_string();
+        let mut items = vec![
+            it(Group::AppCaches, &p("outer/inner"), "Caches", Verdict::Safe, Who::Rule),
+            it(Group::AppCaches, &p("outer"), "Caches", Verdict::Safe, Who::Rule),
+            it(Group::Logs, &p("outer"), "Logs", Verdict::Safe, Who::Rule),
+            it(Group::Logs, &p("tiny"), "Logs", Verdict::Safe, Who::Rule),
+        ];
+        let shared: Shared = Default::default();
+        measure(&mut items, &shared, &egui::Context::default(), 0.0);
+        assert_eq!(items.len(), 1, "inner, the repeat and the tiny one are gone");
+        assert_eq!(items[0].path, base.join("outer"));
+        assert_eq!(items[0].group, Group::AppCaches, "the first rule wins");
+        assert!(items[0].bytes >= 200_000);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn state_totals() {
         let item = |group, bytes, verdict, selected| Item {
@@ -1033,6 +1188,7 @@ mod tests {
             verdict,
             reason: String::new(),
             rule_reason: String::new(),
+            rule_verdict: Verdict::Safe,
             by: Who::Rule,
             selected,
             hard_keep: false,
