@@ -845,7 +845,7 @@ fn bar_settings(c: &mut Capture, ctx: &egui::Context) {
         let x0 = r.left() + 14.0;
         let x1 = r.right() - 14.0;
         let mut y = r.top() + 12.0;
-        p.text(Pos2::new(x0, y + 6.0), Align2::LEFT_CENTER, "RECORDING", bold(11.0), TEXT_FAINT);
+        p.text(Pos2::new(x0, y + 6.0), Align2::LEFT_CENTER, "Recording", bold(11.0), TEXT_FAINT);
         y += 22.0;
         let row = |p: &egui::Painter, y: f32, label: &str| {
             p.text(Pos2::new(x0, y + 15.0), Align2::LEFT_CENTER, label, font(13.0), TEXT);

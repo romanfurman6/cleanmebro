@@ -83,7 +83,7 @@ fn source_chip(p: &egui::Painter, pos: Pos2, s: Source) -> Option<Rect> {
     };
     let g = p.layout_no_wrap(label.to_string(), font(10.0), col);
     let r = Align2::LEFT_CENTER.anchor_size(pos, g.size() + Vec2::new(10.0, 2.0));
-    p.rect_stroke(r, 4.0, Stroke::new(1.0, with_alpha(col, 0.45)), StrokeKind::Inside);
+    // quiet text, no box: a tag is meta, not a button
     p.galley(r.center() - g.size() / 2.0, g, col);
     Some(r)
 }
@@ -91,7 +91,7 @@ fn source_chip(p: &egui::Painter, pos: Pos2, s: Source) -> Option<Rect> {
 fn outline_chip(p: &egui::Painter, pos: Pos2, align: Align2, label: &str, col: Color32) -> Rect {
     let g = p.layout_no_wrap(label.to_string(), font(10.0), col);
     let r = align.anchor_size(pos, g.size() + Vec2::new(10.0, 2.0));
-    p.rect_stroke(r, 4.0, Stroke::new(1.0, with_alpha(col, 0.45)), StrokeKind::Inside);
+    // quiet text, no box: a tag is meta, not a button
     p.galley(r.center() - g.size() / 2.0, g, col);
     r
 }
@@ -513,7 +513,7 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
             let sr = p.text(Pos2::new(rr.right(), rr.center().y), Align2::RIGHT_CENTER, human_bytes(it.bytes), font(12.0), TEXT_DIM);
             let mut right = sr.left() - 8.0;
             if it.admin {
-                right = outline_chip(&p, Pos2::new(right, rr.center().y), Align2::RIGHT_CENTER, "admin", Color32::from_rgb(0xF2, 0xC4, 0x6B)).left() - 6.0;
+                right = outline_chip(&p, Pos2::new(right, rr.center().y), Align2::RIGHT_CENTER, "admin", TEXT_FAINT).left() - 6.0;
             }
             let label = item_label(it, &lib);
             let lr = text_fit(&p, Pos2::new(cb.right() + 8.0, rr.center().y), Align2::LEFT_CENTER, &label, font(12.0), if it.selected { TEXT } else { TEXT_FAINT }, right - cb.right() - 12.0);
@@ -626,7 +626,7 @@ fn review(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
                     let sr = p.text(Pos2::new(rr.right(), rr.center().y), Align2::RIGHT_CENTER, human_bytes(it.bytes), font(12.0), TEXT_FAINT);
                     let mut right = sr.left() - 8.0;
                     if it.admin {
-                        right = outline_chip(&p, Pos2::new(right, rr.center().y), Align2::RIGHT_CENTER, "admin", Color32::from_rgb(0xF2, 0xC4, 0x6B)).left() - 6.0;
+                        right = outline_chip(&p, Pos2::new(right, rr.center().y), Align2::RIGHT_CENTER, "admin", TEXT_FAINT).left() - 6.0;
                     }
                     text_fit(&p, Pos2::new(cb.right() + 8.0, rr.center().y), Align2::LEFT_CENTER, &item_label(it, &lib), font(12.0), if it.selected { TEXT_SOFT } else { TEXT_FAINT }, right - cb.right() - 12.0);
                     yy += 22.0;

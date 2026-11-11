@@ -25,7 +25,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
         sub.push(format!("hottest {g} {c:.0} °C"));
     }
     let br = page_header(&p, r, "Fan Control", &if s.loaded { sub.join(" · ") } else { "Reading sensors…".into() }, TEXT_DIM);
-    if s.loaded {
+    if s.loaded && s.thermal > 0 {
         let (_, col) = thermal_hint(s.thermal);
         let label = format!("Thermal pressure: {}", s.thermal_word().to_lowercase());
         let w = p.layout_no_wrap(label.clone(), font(12.0), col).size().x + 30.0;
@@ -95,7 +95,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
     cmds
 }
 
-const MODE_HINTS: [&str; 5] = ["Set by macOS", "May stop when cool", "One speed", "", "Full speed"];
+const MODE_HINTS: [&str; 5] = [""; 5];
 const INSTALL_H: f32 = 52.0;
 const FIXED_H: f32 = 40.0;
 const CURVE_H: f32 = 222.0;

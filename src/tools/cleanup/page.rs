@@ -130,55 +130,24 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
         text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Ask Claude what's safe", ty::body(), TEXT, bw - 40.0);
     }
 
-    // where it looks | never touched, one height
-    let cw = (body.width() - sp::L) / 2.0;
+    // where it looks: one card, four columns; what it never touches is a tooltip
     let row_h = 32.0;
-    let per_col = Group::ALL.len().div_ceil(2);
-    let names = ["Documents", "Desktop", "Pictures", "Projects", "iCloud Drive", "Mail", "Messages", "Keychains", ".ssh", "Claude settings", "Folders with .git"];
-    let inner = cw - 2.0 * sp::L;
-    let mut lines: Vec<Vec<(&str, f32)>> = vec![Vec::new()];
-    let mut lw = 0.0;
-    for name in names {
-        let w = p.layout_no_wrap(name.to_string(), ty::label(), TEXT_SOFT).size().x + 2.0 * sp::S + 4.0;
-        if lw + w > inner && !lines.last().unwrap().is_empty() {
-            lines.push(Vec::new());
-            lw = 0.0;
-        }
-        lines.last_mut().unwrap().push((name, w));
-        lw += w + sp::S;
-    }
-    let chips_h = lines.len() as f32 * (24.0 + sp::S) - sp::S;
+    let cols = 4;
+    let per_col = Group::ALL.len().div_ceil(cols);
     let head = 16.0 + sp::M;
-    let h = 2.0 * sp::L + head + (per_col as f32 * row_h).max(chips_h);
-    let left = Rect::from_min_size(Pos2::new(body.left(), top.bottom() + sp::L), Vec2::new(cw, h));
-    let right = Rect::from_min_size(Pos2::new(left.right() + sp::L, left.top()), Vec2::new(cw, h));
+    let left = Rect::from_min_size(Pos2::new(body.left(), top.bottom() + sp::L), Vec2::new(body.width(), 2.0 * sp::L + head + per_col as f32 * row_h));
     glass_card(&p, left, R_CARD, 0.0, false);
-    glass_card(&p, right, R_CARD, 0.0, false);
-
     let li = left.shrink(sp::L);
-    p.text(li.left_top(), Align2::LEFT_TOP, "Where it looks", ty::title(), TEXT);
-    let colw = li.width() / 2.0;
+    let title = p.text(li.left_top(), Align2::LEFT_TOP, "Where it looks", ty::title(), TEXT);
+    ui.interact(title, ui.scope_id().with("never"), Sense::hover())
+        .on_hover_text("Never touched: Documents, Desktop, Pictures, Projects, iCloud Drive, Mail, Messages, Keychains, .ssh, Claude settings, folders with .git");
+    let colw = li.width() / cols as f32;
     for (k, g) in Group::ALL.iter().enumerate() {
         let (c, rw) = (k / per_col, k % per_col);
         let row = Rect::from_min_size(Pos2::new(li.left() + c as f32 * colw, li.top() + head + rw as f32 * row_h), Vec2::new(colw - sp::S, row_h));
         icon(&p, Icon::Check, Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(12.0)), TEXT_FAINT);
         text_fit(&p, Pos2::new(row.left() + 20.0, row.center().y), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT, row.width() - 20.0);
         ui.interact(row, ui.scope_id().with(("look", k)), Sense::hover()).on_hover_text(g.blurb());
-    }
-
-    let ri = right.shrink(sp::L);
-    p.text(ri.left_top(), Align2::LEFT_TOP, "Never touched", ty::title(), TEXT);
-    let mut cy = ri.top() + head;
-    for line in &lines {
-        let mut cx = ri.left();
-        for (name, w) in line {
-            let gl = p.layout_no_wrap(name.to_string(), ty::label(), TEXT_SOFT);
-            let pr = Rect::from_min_size(Pos2::new(cx, cy), Vec2::new(*w, 24.0));
-            p.rect_filled(pr, 12.0, white(15));
-            p.galley(pr.center() - gl.size() / 2.0, gl, TEXT_SOFT);
-            cx += w + sp::S;
-        }
-        cy += 24.0 + sp::S;
     }
 
     if !has_claude {
@@ -242,9 +211,8 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
     // what it's doing right now
     match phase {
         Phase::Judging => {
-            icon(&p, Icon::Sparkle, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(14.0)), CLAUDE);
             let line = if st.ai_status.is_empty() { "Asking Claude…".to_string() } else { st.ai_status.clone() };
-            text_fit(&p, Pos2::new(x0 + 22.0, y + 7.0), Align2::LEFT_CENTER, &format!("{line} · only paths, sizes and dates are sent"), font(12.0), TEXT_FAINT, x1 - x0 - 22.0);
+            text_fit(&p, Pos2::new(x0, y + 7.0), Align2::LEFT_CENTER, &line, font(12.0), TEXT_FAINT, x1 - x0);
         }
         _ => {
             let line = st.current.replacen(&home_str(), "~", 1);
@@ -395,7 +363,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let c_size = tr.right() - 24.0;
     let c_verdict = c_size - 80.0 - 12.0 - 110.0;
     let hy = tr.top() + 10.0;
-    section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_TOP, &format!("{} · {}", gtitle.to_uppercase(), human_bytes(gbytes)));
+    section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_TOP, &format!("{} · {}", gtitle, human_bytes(gbytes)));
     section_header(&p, Pos2::new(c_verdict, hy), Align2::LEFT_TOP, "Verdict");
     section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_TOP, "Size");
     // bulk actions on the right of the blurb line
@@ -471,14 +439,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     // footer
     let f = page_footer(&p, r, WIN_R);
     let fy = f.center().y;
-    p.text(Pos2::new(f.left() + 24.0, fy - 9.0), Align2::LEFT_CENTER, format!("{} selected", human_bytes(selected)), bold(13.0), TEXT);
-    p.text(
-        Pos2::new(f.left() + 24.0, fy + 10.0),
-        Align2::LEFT_CENTER,
-        if app.delete_now { "Deleted right away. This can't be undone." } else { "Goes to the Trash. You can put it back." },
-        font(12.0),
-        if app.delete_now { AMBER } else { TEXT_FAINT },
-    );
+    // the segmented control already says where it goes; only warn when it can't come back
+    let ty_ = if app.delete_now { fy - 9.0 } else { fy };
+    p.text(Pos2::new(f.left() + 24.0, ty_), Align2::LEFT_CENTER, format!("{} selected", human_bytes(selected)), bold(13.0), TEXT);
+    if app.delete_now {
+        p.text(Pos2::new(f.left() + 24.0, fy + 10.0), Align2::LEFT_CENTER, "Can't be undone", font(12.0), AMBER);
+    }
     let clean_label = format!("Clean {}", human_bytes(selected));
     let cw = button_width(&p, &clean_label, BTN_PRIMARY).max(120.0);
     let cr = Rect::from_min_size(Pos2::new(f.right() - 24.0 - cw, fy - 16.0), Vec2::new(cw, 32.0));
@@ -533,7 +499,7 @@ fn item_row(app: &mut App, ui: &mut Ui, i: usize, w: f32, cols: (f32, f32, f32))
     text_fit(&p, Pos2::new(cn, rect.top() + 10.0), Align2::LEFT_TOP, &it.title, bold(13.0), TEXT, name_w);
     text_fit(&p, Pos2::new(cn, rect.top() + 28.0), Align2::LEFT_TOP, &middle_ellipsis(&short_path(&it.path), 90), mono(11.0), TEXT_FAINT, name_w);
     let who = match it.by {
-        Who::Ai => "Claude: ",
+        Who::Ai => "",
         Who::You => "",
         Who::Rule => "",
     };

@@ -440,7 +440,7 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let mut k = 0;
     for (ci, sec) in secs.iter().enumerate() {
         let x = body.left() + ci as f32 * (cw + gap);
-        p.text(Pos2::new(x + 2.0, top), Align2::LEFT_TOP, sec.to_uppercase(), font(11.0), TEXT_FAINT);
+        p.text(Pos2::new(x + 2.0, top), Align2::LEFT_TOP, sec, font(11.0), TEXT_FAINT);
         let mut y = top + 20.0;
         for i in 0..app.tools.len() {
             if app.tools[i].section() != *sec {

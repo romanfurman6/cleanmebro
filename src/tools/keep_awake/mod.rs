@@ -145,7 +145,7 @@ impl Tool for KeepAwake {
         "Utilities"
     }
     fn about(&self) -> &'static str {
-        "Keep the Mac awake by hand or while Claude Code works"
+        "Keep the Mac awake, or only while Claude Code works"
     }
     fn sidebar_meta(&self) -> String {
         ui::short_state(self.state()).into()

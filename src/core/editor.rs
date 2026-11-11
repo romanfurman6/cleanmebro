@@ -99,7 +99,7 @@ fn gallery(app: &App, query: &str) -> Vec<(String, Vec<Item>)> {
             .filter(|it| matches(query, &it.title, &it.words))
             .collect();
         if !items.is_empty() {
-            groups.push((t.name().to_uppercase(), items));
+            groups.push((t.name().to_string(), items));
         }
     }
     groups

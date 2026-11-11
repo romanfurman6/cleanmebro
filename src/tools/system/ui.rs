@@ -22,11 +22,11 @@ fn level_color(l: Level) -> Color32 {
 pub fn header(s: &Snapshot) -> PanelHeader {
     let title = if s.model.is_empty() { "Mac".to_string() } else { s.model.clone() };
     if !s.ready {
-        return PanelHeader { title, status: "Checking…".into(), dot: TEXT_FAINT };
+        return PanelHeader { title, status: String::new(), dot: TEXT_FAINT };
     }
     let health = s.health();
     let status = match health {
-        Level::Good => "All good",
+        Level::Good => "",
         Level::Fair => "Needs a look",
         Level::Critical => "Needs attention",
     };

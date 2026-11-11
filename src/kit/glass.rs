@@ -38,16 +38,17 @@ pub const GREEN: Color32 = Color32::from_rgb(0x30, 0xD1, 0x58);
 /// Orange: attention (busy spikes, "suggested", warnings).
 pub const AMBER: Color32 = Color32::from_rgb(0xFF, 0x9F, 0x0A);
 pub const RED: Color32 = Color32::from_rgb(0xFF, 0x45, 0x3A);
-/// Claude's tint (limit bars and rings).
-pub const CLAUDE: Color32 = Color32::from_rgb(0xBF, 0x5A, 0xF2);
-/// Second blue for charts (wired memory, second series).
-pub const INDIGO: Color32 = Color32::from_rgb(0x5E, 0x5C, 0xE6);
+/// Claude's limit bars and rings: system blue like every other tool (no
+/// AI purple).
+pub const CLAUDE: Color32 = BLUE;
+/// Second series in charts: a lighter step of the accent.
+pub const INDIGO: Color32 = Color32::from_rgb(0x64, 0xB5, 0xFF);
 pub const TEAL: Color32 = Color32::from_rgb(0x64, 0xD2, 0xFF);
-pub const PURPLE: Color32 = Color32::from_rgb(0xBF, 0x8C, 0xFF);
+/// Third series / "other": a neutral step, not a hue.
+pub const PURPLE: Color32 = Color32::from_rgb(0x63, 0x63, 0x66);
 pub const GRAY: Color32 = Color32::from_rgb(152, 152, 157);
 
-/// Tool tints. D6 drops the rainbow: every tool uses system blue, and only
-/// Claude keeps its own colour because its data is Claude's.
+/// Tool tints. D6 drops the rainbow: every tool uses system blue.
 pub mod tint {
     use egui::Color32;
     pub const CLEANUP: Color32 = super::BLUE;
@@ -715,7 +716,7 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Headphones => "headphones",
         Icon::Shield => "checkmark.shield",
         Icon::Sparkle => "sparkle",
-        Icon::Broom => "bubbles.and.sparkles",
+        Icon::Broom => "wind",
         Icon::Gear => "gearshape",
         Icon::Trash => "trash",
         Icon::Folder => "folder",
