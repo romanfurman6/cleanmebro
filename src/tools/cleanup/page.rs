@@ -97,15 +97,13 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     let avail = claude_now(app);
     let has_claude = avail.ready();
     let p = ui.painter().clone();
-    page_header(&p, r, "Cleanup", "Caches, logs and leftovers", TEXT_DIM());
+    page_header(&p, r, "Cleanup", "", TEXT_DIM());
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
 
     // past cleans fill the space under the cards; before the first clean the
     // cards sit in the middle instead of at the top of an empty page
     let hist = super::engine::history();
-    let per_col0 = Group::ALL.len().div_ceil(4);
-    let cards_h = 128.0 + sp::L + 2.0 * sp::L + 16.0 + sp::M + per_col0 as f32 * 32.0;
-    let y0 = if hist.is_empty() && has_claude { body.top() + ((body.height() - cards_h) * 0.4).max(0.0) } else { body.top() };
+    let y0 = body.top();
     // the disk, with Scan on the right
     let top = Rect::from_min_size(Pos2::new(body.left(), y0), Vec2::new(body.width(), 128.0));
     glass_card(&p, top, R_CARD, 0.0, false);
@@ -136,27 +134,7 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
         text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Ask Claude what's safe", ty::body(), TEXT(), bw - 40.0);
     }
 
-    // where it looks: one card, four columns; what it never touches is a tooltip
-    let row_h = 32.0;
-    let cols = 4;
-    let per_col = Group::ALL.len().div_ceil(cols);
-    let head = 16.0 + sp::M;
-    let left = Rect::from_min_size(Pos2::new(body.left(), top.bottom() + sp::L), Vec2::new(body.width(), 2.0 * sp::L + head + per_col as f32 * row_h));
-    glass_card(&p, left, R_CARD, 0.0, false);
-    let li = left.shrink(sp::L);
-    let title = p.text(li.left_top(), Align2::LEFT_TOP, "Where it looks", ty::title(), TEXT());
-    ui.interact(title, ui.scope_id().with("never"), Sense::hover())
-        .on_hover_text("Never touched: Documents, Desktop, Pictures, Projects, iCloud Drive, Mail, Messages, Keychains, .ssh, Claude settings, folders with .git");
-    let colw = li.width() / cols as f32;
-    for (k, g) in Group::ALL.iter().enumerate() {
-        let (c, rw) = (k / per_col, k % per_col);
-        let row = Rect::from_min_size(Pos2::new(li.left() + c as f32 * colw, li.top() + head + rw as f32 * row_h), Vec2::new(colw - sp::S, row_h));
-        icon(&p, Icon::Check, Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(12.0)), TEXT_FAINT());
-        text_fit(&p, Pos2::new(row.left() + 20.0, row.center().y), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT(), row.width() - 20.0);
-        ui.interact(row, ui.scope_id().with(("look", k)), Sense::hover()).on_hover_text(g.blurb());
-    }
-
-    let mut y = left.bottom() + sp::L;
+    let mut y = top.bottom() + sp::L;
     if !has_claude {
         y += claude_note(ui, Pos2::new(body.left(), y), body.width(), avail, tcx) + sp::L;
     }
@@ -750,15 +728,15 @@ pub fn demo_results() -> cleanup::State {
         app_running: false,
     };
     let items = vec![
-        mk(Group::Claude, "Claude Desktop cache", "~/Library/Application Support/Claude/Cache", 678_000_000, "Caches", Verdict::Safe, "Web view cache, rebuilt automatically", Who::Ai),
-        mk(Group::Claude, "Claude Desktop VM image", "~/Library/Application Support/Claude/vm_bundles", 9_000_000_000, "Downloads", Verdict::Ask, "Agent sandbox image, large to download again", Who::Ai),
-        mk(Group::Claude, "Project · old-experiment", "~/.claude/projects/-Users-me-old-experiment", 412_000_000, "Old Sessions", Verdict::Ask, "Chat history for a folder that no longer exists", Who::Ai),
-        mk(Group::Claude, "Project · cmdmeow", "~/.claude/projects/-Users-me-Projects-cmdmeow", 96_000_000, "Projects", Verdict::Keep, "You used this project today", Who::Rule),
-        mk(Group::Claude, "Claude Desktop logs", "~/Library/Logs/Claude", 42_000_000, "Logs", Verdict::Safe, "Old app logs", Who::Ai),
-        mk(Group::Claude, "Claude CLI logs", "~/Library/Caches/claude-cli-nodejs", 18_000_000, "Logs", Verdict::Safe, "Old CLI logs", Who::Ai),
-        mk(Group::UserCache, "Spotify", "~/Library/Caches/com.spotify.client", 1_200_000_000, "Caches", Verdict::Safe, "Streaming cache, rebuilt automatically", Who::Ai),
-        mk(Group::UserCache, "Google Chrome", "~/Library/Caches/Google", 820_000_000, "Caches", Verdict::Safe, "Browser cache, rebuilt automatically", Who::Ai),
-        mk(Group::Xcode, "Derived Data · MyApp", "~/Library/Developer/Xcode/DerivedData/MyApp-abc", 3_400_000_000, "Build Data", Verdict::Safe, "Build products and index, Xcode rebuilds them", Who::Rule),
+        mk(Group::AiTools, "Claude Desktop cache", "~/Library/Application Support/Claude/Cache", 678_000_000, "Caches", Verdict::Safe, "Web view cache, rebuilt automatically", Who::Ai),
+        mk(Group::AiTools, "Claude Desktop VM image", "~/Library/Application Support/Claude/vm_bundles", 9_000_000_000, "Downloads", Verdict::Ask, "Agent sandbox image, large to download again", Who::Ai),
+        mk(Group::AiTools, "Project · old-experiment", "~/.claude/projects/-Users-me-old-experiment", 412_000_000, "Old Sessions", Verdict::Ask, "Chat history for a folder that no longer exists", Who::Ai),
+        mk(Group::AiTools, "Project · cmdmeow", "~/.claude/projects/-Users-me-Projects-cmdmeow", 96_000_000, "Projects", Verdict::Keep, "You used this project today", Who::Rule),
+        mk(Group::AiTools, "Claude Desktop logs", "~/Library/Logs/Claude", 42_000_000, "Logs", Verdict::Safe, "Old app logs", Who::Ai),
+        mk(Group::AiTools, "Claude CLI logs", "~/Library/Caches/claude-cli-nodejs", 18_000_000, "Logs", Verdict::Safe, "Old CLI logs", Who::Ai),
+        mk(Group::AppCaches, "Spotify", "~/Library/Caches/com.spotify.client", 1_200_000_000, "Caches", Verdict::Safe, "Streaming cache, rebuilt automatically", Who::Ai),
+        mk(Group::AppCaches, "Google Chrome", "~/Library/Caches/Google", 820_000_000, "Caches", Verdict::Safe, "Browser cache, rebuilt automatically", Who::Ai),
+        mk(Group::Developer, "Derived Data · MyApp", "~/Library/Developer/Xcode/DerivedData/MyApp-abc", 3_400_000_000, "Build Data", Verdict::Safe, "Build products and index, Xcode rebuilds them", Who::Rule),
         mk(Group::AppCaches, "Adobe Media Cache", "~/Library/Application Support/Adobe/Common/Media Cache Files", 2_100_000_000, "Caches", Verdict::Safe, "Premiere/After Effects media cache", Who::Rule),
         mk(Group::Developer, "npm cache", "~/.npm/_cacache", 640_000_000, "Caches", Verdict::Safe, "npm downloads, fetched again when needed", Who::Ai),
     ];

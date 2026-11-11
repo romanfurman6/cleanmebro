@@ -45,7 +45,7 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     }
     let (sub, sub_col) = match recs.first() {
         Some(rec) => (rec.title.clone(), AMBER()),
-        None => (sub.join(" · "), TEXT_DIM()),
+        None => { let _ = sub; (String::new(), TEXT_DIM()) }
     };
     let btns = page_header(&p, r, "Mac Health", &sub, sub_col);
     let mut right = btns.right();
@@ -129,18 +129,45 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     }
 }
 
-/// Card title (13/600) with its caption, and an optional big value on the
-/// right. Returns the y where the content starts.
-fn card_title(p: &egui::Painter, r: Rect, title: &str, caption: &str, big: Option<(&str, &str)>) -> f32 {
+/// Card title (13/600), an optional status chip after it, and an optional
+/// big value on the right. Returns the y where the content starts.
+fn card_title(p: &egui::Painter, r: Rect, title: &str, status: Option<(&str, Color32)>, big: Option<(&str, &str)>) -> f32 {
     let mut right = r.right();
     if let Some((num, unit)) = big {
         let u = p.text(Pos2::new(r.right(), r.top() + 26.0), Align2::RIGHT_BOTTOM, unit, ty::body(), ty::caption_color());
         let n = p.text(Pos2::new(u.left() - 3.0, r.top() + 28.0), Align2::RIGHT_BOTTOM, num, ty::hero(), TEXT());
         right = n.left() - sp::M;
     }
-    text_fit(p, r.left_top(), Align2::LEFT_TOP, title, ty::title(), TEXT(), right - r.left());
-    text_fit(p, Pos2::new(r.left(), r.top() + 17.0 + sp::XS - 2.0), Align2::LEFT_TOP, caption, ty::caption(), ty::caption_color(), right - r.left());
-    r.top() + 34.0 + sp::M
+    let cy = r.top() + 9.0;
+    let t = text_fit(p, Pos2::new(r.left(), cy), Align2::LEFT_CENTER, title, ty::title(), TEXT(), right - r.left());
+    if let Some((label, c)) = status {
+        if t.right() + 80.0 < right {
+            chip(p, Pos2::new(t.right() + sp::S, cy), Align2::LEFT_CENTER, label, (with_alpha(c, 0.16), c));
+        }
+    }
+    r.top() + 28.0 + sp::M
+}
+
+/// A big ring with a value and its unit inside, centred in `area`.
+fn ring_stat(p: &egui::Painter, area: Rect, frac: f32, color: Color32, value: &str, unit: &str) {
+    let rr = (area.width().min(area.height()) / 2.0).min(78.0);
+    if rr < 24.0 {
+        return;
+    }
+    let c = area.center();
+    let w = (rr * 0.14).clamp(8.0, 12.0);
+    tile::ring(p, c, rr - w / 2.0, w, frac.max(0.01), color);
+    let inner = (rr - w) * 1.6;
+    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, value, ty::number(), TEXT(), inner);
+    p.text(c + Vec2::new(0.0, 15.0), Align2::CENTER_CENTER, unit, ty::caption(), ty::caption_color());
+}
+
+fn level_status(l: Level) -> Color32 {
+    match l {
+        Level::Good => GREEN(),
+        Level::Fair => AMBER(),
+        Level::Critical => RED(),
+    }
 }
 
 /// Legend lines (22 pt each) at the bottom of `r`.
@@ -161,7 +188,7 @@ fn legend(p: &egui::Painter, r: Rect, rows: &[(Option<Color32>, String, String)]
 
 fn cpu_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
     let load = format!("{:.0}", s.cpu_load);
-    let y = card_title(p, r, "CPU", &s.thermal_word(), Some((&load, "%")));
+    let y = card_title(p, r, "CPU", Some((s.thermal_word(), level_status(s.thermal_level()))), Some((&load, "%")));
     let foot = r.bottom() - 18.0;
     let gr = Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), foot - sp::M));
     let peak = s.cpu_history.iter().copied().fold(0.0f32, f32::max);
@@ -174,32 +201,21 @@ fn cpu_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
 
 fn disk_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option<SheetAction> {
     let name = if s.volume_name.is_empty() { "Macintosh HD".to_string() } else { s.volume_name.clone() };
-    let mut cap = vec![human_bytes(s.disk_total)];
-    if !s.smart_status.is_empty() {
-        cap.push(format!("drive {}", s.smart_status.to_lowercase()));
-    }
-    let y = card_title(p, r, &name, &cap.join(" · "), None);
+    let y = card_title(p, r, &name, None, None);
     let used = if s.disk_total > 0 { 1.0 - s.disk_free as f32 / s.disk_total as f32 } else { 0.0 };
-    let foot_h = 26.0 + sp::M;
-    let avail = (r.bottom() - foot_h - sp::M - y).max(60.0);
-    let rr = (avail / 2.0).min(46.0);
-    let c = Pos2::new(r.left() + rr + 2.0, y + avail / 2.0);
-    tile::ring(p, c, rr - 5.0, 10.0, used.max(0.01), if s.disk_level() == Level::Good { INDIGO() } else { level_color(s.disk_level()) });
-    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, &human_bytes(s.disk_free), bold(14.0), TEXT(), rr * 1.5);
-    p.text(c + Vec2::new(0.0, 10.0), Align2::CENTER_CENTER, "free", ty::caption(), ty::caption_color());
-    // biggest folders beside the ring
-    let lr = Rect::from_min_max(Pos2::new(c.x + rr + sp::L, y), Pos2::new(r.right(), y + avail));
-    let colors = [tint::HEALTH(), INDIGO(), PURPLE()];
-    let rows: Vec<(Option<Color32>, String, String)> = s.categories.iter().take(3).enumerate().map(|(i, (n, b))| (Some(colors[i]), n.clone(), human_bytes(*b))).collect();
-    if rows.is_empty() {
-        text_fit(p, Pos2::new(lr.left(), lr.center().y), Align2::LEFT_CENTER, if s.sizing { "Measuring folders…" } else { "Folders not measured" }, ty::label(), ty::caption_color(), lr.width());
-    } else {
-        let lh = rows.len() as f32 * sp::LEGEND_H;
-        legend(p, Rect::from_min_max(Pos2::new(lr.left(), lr.center().y - lh / 2.0), Pos2::new(lr.right(), lr.center().y + lh / 2.0)), &rows);
+    let mut rows: Vec<(Option<Color32>, String, String)> = vec![
+        (None, "Used".to_string(), human_bytes(s.disk_total.saturating_sub(s.disk_free))),
+        (None, "Size".to_string(), human_bytes(s.disk_total)),
+    ];
+    if !s.smart_status.is_empty() {
+        rows.push((None, "Drive".to_string(), s.smart_status.clone()));
     }
+    let bottom = Rect::from_min_max(r.min, Pos2::new(r.right(), r.bottom() - 26.0 - sp::M));
+    let lt = legend(p, bottom, &rows);
+    let col = if s.disk_level() == Level::Good { tint::HEALTH() } else { level_color(s.disk_level()) };
+    ring_stat(p, Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), lt - sp::M)), used, col, &human_bytes(s.disk_free), "free");
     // footer: Trash and the way to free space
     let fy = r.bottom() - 26.0;
-    p.line_segment([Pos2::new(r.left(), fy - sp::M), Pos2::new(r.right(), fy - sp::M)], egui::Stroke::new(1.0, white(15)));
     let mut out = None;
     let bw = button_width(p, "Free up space", BTN_SECONDARY);
     let br = Rect::from_min_size(Pos2::new(r.right() - bw, fy), Vec2::new(bw, 26.0));
@@ -213,12 +229,12 @@ fn disk_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option<Sh
 
 fn memory_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
     let word = match s.mem_level() {
-        Level::Good => "pressure normal",
-        Level::Fair => "pressure elevated",
-        Level::Critical => "pressure high",
+        Level::Good => "Normal",
+        Level::Fair => "Elevated",
+        Level::Critical => "High",
     };
     let pct = format!("{:.0}", s.mem_pressure);
-    let y = card_title(p, r, "Memory", &format!("{} · {word}", human_bytes(s.mem_total)), Some((&pct, "%")));
+    let y = card_title(p, r, "Memory", Some((word, level_status(s.mem_level()))), Some((&pct, "%")));
     // one stacked bar of what holds the memory
     let tot = s.mem_total.max(1) as f32;
     let parts = [(s.mem_active, tint::HEALTH()), (s.mem_wired, INDIGO()), (s.mem_compressed, PURPLE())];
@@ -228,6 +244,7 @@ fn memory_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
         (Some(INDIGO()), "Wired".to_string(), human_bytes(s.mem_wired)),
         (Some(PURPLE()), "Compressed".to_string(), human_bytes(s.mem_compressed)),
         (None, "Swap used".to_string(), human_bytes(s.swap_used)),
+        (None, "Installed".to_string(), human_bytes(s.mem_total)),
     ];
     let lt = legend(p, r, &rows);
     // pressure over the last minutes, then what holds the memory
@@ -239,39 +256,29 @@ fn memory_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
     }
 }
 
-/// A horizontal battery: outline, fill to `frac`, a nub on the right and
-/// the label inside.
-fn battery_glyph(p: &egui::Painter, r: Rect, frac: f32, color: Color32, label: &str) {
-    let body = Rect::from_min_max(r.min, Pos2::new(r.right() - 6.0, r.bottom()));
-    p.rect_stroke(body, 8.0, egui::Stroke::new(2.0, white(70)), egui::StrokeKind::Inside);
-    let inner = body.shrink(4.0);
-    let w = (inner.width() * frac.clamp(0.0, 1.0)).max(4.0);
-    p.rect_filled(Rect::from_min_size(inner.min, Vec2::new(w, inner.height())), 5.0, color);
-    p.rect_filled(Rect::from_min_max(Pos2::new(body.right() + 2.0, r.center().y - 7.0), Pos2::new(r.right(), r.center().y + 7.0)), 2.0, white(70));
-    p.text(body.center(), Align2::CENTER_CENTER, label, bold((r.height() * 0.32).clamp(14.0, 20.0)), if frac > 0.5 { on_color(color) } else { TEXT() });
-}
-
 fn battery_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
     let b = &s.battery;
     if !b.present {
-        let y = card_title(p, r, "Power", "Power adapter", None);
-        text_fit(p, Pos2::new(r.left(), y + 10.0), Align2::LEFT_CENTER, "This Mac has no battery.", ty::label(), ty::caption_color(), r.width());
+        card_title(p, r, "Power", Some(("No battery", TEXT_DIM())), None);
         return;
     }
-    let status = if b.full || (b.plugged && b.percent >= 100) {
-        "Fully charged".to_string()
+    let (status, scol) = if b.full || (b.plugged && b.percent >= 100) {
+        ("Charged", GREEN())
     } else if b.charging {
-        "Charging".to_string()
+        ("Charging", GREEN())
     } else if b.plugged {
-        "On adapter, not charging".to_string()
-    } else if let Some(min) = b.minutes_left {
-        format!("{} remaining", human_duration(min as u64 * 60))
+        ("Plugged in", TEXT_DIM())
     } else {
-        "On battery".to_string()
+        ("On battery", if b.percent <= 20 { RED() } else { TEXT_DIM() })
     };
-    let y = card_title(p, r, "Battery", &status, None);
+    let y = card_title(p, r, "Battery", Some((status, scol)), None);
     let col = if b.percent <= 20 { RED() } else { GREEN() };
     let mut rows = Vec::new();
+    if !b.plugged {
+        if let Some(min) = b.minutes_left {
+            rows.push((None, "Time left".to_string(), human_duration(min as u64 * 60)));
+        }
+    }
     if let Some(h) = b.health_pct {
         rows.push((None, "Health".to_string(), format!("{h:.0}%")));
     } else if !b.health_text.is_empty() {
@@ -285,22 +292,15 @@ fn battery_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
         rows.push((None, "Temperature".to_string(), format!("{t:.0} °C")));
     }
     let lt = legend(p, r, &rows);
-    let gh = ((lt - y - sp::L) * 0.5).clamp(40.0, 64.0);
-    let gw = (gh * 2.6).min(r.width());
-    let gr = Rect::from_center_size(Pos2::new(r.left() + gw / 2.0, (y + lt) / 2.0), Vec2::new(gw, gh));
-    battery_glyph(p, gr, b.percent as f32 / 100.0, col, &format!("{}%", b.percent));
+    ring_stat(p, Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), lt - sp::M)), b.percent as f32 / 100.0, col, &format!("{}%", b.percent), "charge");
 }
 
 fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option<SheetAction> {
-    let title = if s.wifi.wired { "Ethernet".to_string() } else if s.wifi.name.is_empty() { "Network".to_string() } else { "Wi-Fi".to_string() };
-    let mut cap = Vec::new();
-    if !s.wifi.name.is_empty() {
-        cap.push(s.wifi.name.clone());
-    }
-    if !s.online {
-        cap.push("offline".into());
-    }
-    let y = card_title(p, r, &title, &cap.join(" · "), None);
+    // the network's own name when macOS gives it (not just "Wi-Fi")
+    let named = !s.wifi.name.is_empty() && !s.wifi.name.eq_ignore_ascii_case("wi-fi") && !s.wifi.name.eq_ignore_ascii_case("ethernet");
+    let title = if named { s.wifi.name.clone() } else if s.wifi.wired { "Ethernet".to_string() } else if s.wifi.name.is_empty() { "Network".to_string() } else { "Wi-Fi".to_string() };
+    let status = if !s.online { Some(("Offline", RED())) } else { None };
+    let y = card_title(p, r, &title, status, None);
     // two numbers side by side
     let colw = r.width() / 2.0;
     for (k, (v, label, col)) in [(human_rate(s.net_down), "download", TEXT()), (human_rate(s.net_up), "upload", TEAL())].into_iter().enumerate() {

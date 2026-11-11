@@ -202,16 +202,17 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         Size::S11 => {
             let resp = tile::card(ui, rect, id, sel);
             let p = ui.painter();
-            let c = Pos2::new(rect.center().x, rect.top() + 32.0);
-            ring(p, c, 22.0, 4.0, frac, LINE());
-            blades(p, c, 16.0, spin("fan-avg", t, rpm.unwrap_or(0.0)), BLADE(), CARD());
+            let (c, rr) = tile::small_ring_at(rect);
+            let w = (rr * 0.2).clamp(4.0, 6.0);
+            ring(p, c, rr - w / 2.0, w, frac, LINE());
+            blades(p, c, rr * 0.7, spin("fan-avg", t, rpm.unwrap_or(0.0)), BLADE(), BG());
             text_fit(p, Pos2::new(rect.center().x, rect.bottom() - 9.0), Align2::CENTER_BOTTOM, &value, font(11.0), TEXT_SOFT(), rect.width() - 10.0);
             resp
         }
         Size::S12 => tile::wide(ui, rect, id, Icon::Fan, tint::FAN(), "Fans", &value, if rpm.is_some() { Ok((frac.max(0.02), LINE())) } else { Err(hot.as_str()) }, sel),
         _ => {
             // the hottest part is a line on the right; the left says how hard the fans work
-            let load = if rpm.is_some() { format!("{:.0}% of max", frac * 100.0) } else { hot.clone() };
+            let load = hot.clone();
             let (resp, right) = tile::row_split(ui, rect, id, Icon::Fan, tint::FAN(), "Fans", &value, &load, sel);
             let mut lines: Vec<(String, Option<(f32, Color32)>, String)> = s.fans.iter().take(2).enumerate().map(|(i, f)| (fan_name(i, s.fans.len()), Some((f.frac().max(0.02), LINE())), format!("{} rpm", rpm_text(f.rpm)))).collect();
             if let Some((g, c)) = hottest_text(s) {
@@ -227,8 +228,11 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let p = ui.painter();
         // over the static glyph: the ring's centre (Wide) or the round chip (Row)
         let spot = match size {
-            Size::S12 => Some((Pos2::new(rect.left() + tile::PAD + 17.0, rect.center().y), 9.0, 7.0, CARD())),
-            Size::S14 => Some((tile::row_chip(rect).center(), 12.0, 10.0, lerp_color(CARD(), Color32::WHITE, 14.0 / 255.0))),
+            Size::S12 => {
+                let (c, rr) = tile::wide_ring(rect);
+                Some((c, rr * 0.62, rr * 0.55, BG()))
+            }
+            Size::S14 => Some((tile::row_chip(rect).center(), 12.0, 10.0, lerp_color(BG(), TEXT(), 0.06))),
             _ => None,
         };
         if let Some((c, cover, br, hub)) = spot {

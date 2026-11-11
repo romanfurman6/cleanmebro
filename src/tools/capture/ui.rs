@@ -2,7 +2,7 @@
 //! History and Settings page in the full window.
 
 use super::icons::{self, Ico};
-use super::settings::{After, Command, Format, Shortcut, DELAYS, KEEP_MAX, KEEP_MIN};
+use super::settings::{After, Command, Format, Shortcut, KEEP_MAX, KEEP_MIN};
 use super::folder::{self, FileShot};
 use super::store::{Kind, Shot};
 use super::{mac, record, Capture, Tab, ID};
@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 const ROW_H: f32 = 36.0;
-const HOVER_BTN: Color32 = Color32::from_rgb(0x2C, 0x2C, 0x31);
 
 pub fn command_icon(c: Command) -> Ico {
     match c {
@@ -36,7 +35,8 @@ fn key_label(c: &Capture, cmd: Command) -> String {
 
 // ---------------------------------------------------------------- panel
 
-const MODES: [(Command, &str); 5] = [(Command::Area, "Area"), (Command::Window, "Window"), (Command::Screen, "Screen"), (Command::Text, "Text"), (Command::Record, "Record")];
+/// The widget's actions: grab an area, a window, or record the screen.
+const MODES: [(Command, &str); 3] = [(Command::Area, "Area"), (Command::Window, "Window"), (Command::Record, "Record")];
 
 /// The Capture widget at `size`.
 pub fn widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
@@ -57,14 +57,14 @@ pub fn widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
                 tool_chip(&p, Rect::from_min_size(Pos2::new(x0 + 2.0, rect.top() + 9.0), Vec2::splat(18.0)), Icon::Crop, tint::CAPTURE());
                 p.text(Pos2::new(x0 + 26.0, rect.top() + 18.0), Align2::LEFT_CENTER, "Capture", font(11.0), TEXT_DIM());
                 let r = Rect::from_min_max(Pos2::new(x0, rect.top() + 32.0), Pos2::new(rect.right() - 8.0, rect.bottom() - 8.0));
-                modes(c, ui, &p, id, r, &MODES[..2], false);
+                modes(c, ui, &p, id, r, &[MODES[0], MODES[2]], false);
             } else {
                 // the round chip every other row has
                 let chip = tile::row_chip(rect);
                 p.circle_filled(chip.center(), 17.0, white(14));
                 icon(&p, Icon::Crop, Rect::from_center_size(chip.center(), Vec2::splat(18.0)), lift(tint::CAPTURE()));
                 x0 = chip.right() + 10.0;
-                modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, rect.top() + 9.0), Pos2::new(rect.right() - 9.0, rect.bottom() - 9.0)), &MODES, true);
+                modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, rect.top() + 9.0), Pos2::new(rect.right() - 9.0, rect.bottom() - 9.0)), &MODES, false);
             }
         }
         _ => card(c, ui, rect, cx),
@@ -88,8 +88,9 @@ fn modes(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, id: egui::Id, r: Rect,
         let b = Rect::from_min_size(Pos2::new(r.left() + k as f32 * (bw + gap), r.top()), Vec2::new(bw, r.height()));
         let resp = ui.interact(b, id.with(("mode", k)), Sense::click());
         let h = ui.ctx().animate_bool(id.with(("mode-h", k)), resp.hovered());
-        p.rect_filled(b, R_BUTTON, lerp_color(HOVER_BTN, Color32::from_rgb(0x36, 0x36, 0x3C), h));
-        p.rect_stroke(b, R_BUTTON, Stroke::new(1.0, white(20)), StrokeKind::Inside);
+        p.rect_filled(b, R_BUTTON, white((12.0 + 12.0 * h) as u8));
+        // Record is the one red glyph, like a camera's button
+        let fg = if *cmd == Command::Record && fg == TEXT() { RED() } else { fg };
         if tall {
             let top = b.top() + if keys { 15.0 } else { 18.0 };
             icons::draw(p, command_icon(*cmd), Rect::from_center_size(Pos2::new(b.center().x, top), Vec2::splat(17.0)), fg);
@@ -132,18 +133,12 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         c.tab = Tab::History;
         cx.open_page(ID, "history");
     }
-    // the delay, in the header
-    let sr = Rect::from_min_size(Pos2::new(h_left - 12.0 - 150.0, y - 1.0), Vec2::new(150.0, 22.0));
-    let cur = DELAYS.iter().position(|d| *d == c.settings.delay).unwrap_or(0);
-    if let Some(i) = segmented(ui, sr, id.with("delay"), &["Off", "3 s", "5 s", "10 s"], cur) {
-        c.settings.delay = DELAYS[i];
-        c.save_settings();
-    }
+    let _ = h_left;
     y += 30.0;
 
     let gap = 6.0;
     let bw = (x1 - x0 - 3.0 * gap) / 4.0;
-    modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 52.0)), &MODES, true);
+    modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 52.0)), &MODES, false);
     y += 52.0 + 10.0;
 
     // the newest images in the screenshot folder; history when it has none

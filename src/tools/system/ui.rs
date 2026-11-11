@@ -127,21 +127,37 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
         Size::S11 => match mt.bar {
             Some((f, c)) => {
                 // a name with the number: "CPU 16%", "1.44 TB free"
-                let cap = if id == "storage" { format!("{} free", mt.value()) } else { format!("{} {}", short_label(id), mt.value()) };
+                let cap = if id == "storage" || id == "battery" { mt.value() } else { format!("{} {}", short_label(id), mt.value()) };
                 tile::small_ring(ui, r, wid, mt.glyph, f, c, &cap, sel)
             }
             None => tile::small(ui, r, wid, mt.glyph, col, &mt.value().replace("/sec", "/s"), &mt.label, sel),
         },
         Size::S12 => tile::wide(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), mt.bar.ok_or(mt.caption.as_str()), sel),
+        // Storage's Row is its old Medium: the free space, a bar across, the folders
+        Size::S14 if id == "storage" => {
+            let resp = tile::card(ui, r, wid, sel);
+            let p = ui.painter();
+            let body = tile::head(p, r, mt.glyph, col, &mt.label, "");
+            let big = p.text(Pos2::new(body.left(), body.bottom() - 12.0), Align2::LEFT_BOTTOM, &mt.big, bold(26.0), TEXT());
+            p.text(Pos2::new(big.right() + 4.0, big.bottom() - 5.0), Align2::LEFT_BOTTOM, &mt.unit, font(13.0), TEXT_DIM());
+            if s.disk_total > 0 {
+                p.text(Pos2::new(body.right(), big.bottom() - 5.0), Align2::RIGHT_BOTTOM, format!("of {}", human_bytes(s.disk_total)), font(12.0), TEXT_DIM());
+                let used = 1.0 - s.disk_free as f32 / s.disk_total as f32;
+                bar(p, Rect::from_min_size(Pos2::new(body.left(), body.bottom() - 6.0), egui::Vec2::new(body.width(), 6.0)), used, mt.bar.map(|b| b.1).unwrap_or(tint::HEALTH()));
+            }
+            resp
+        }
         Size::S14 => {
-            let (resp, right) = tile::row_split(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), &mt.caption, sel);
+            // CPU's graph is the point of its Row, so it gets most of the width
+            let ratio = if id == "cpu" { 0.32 } else { 0.47 };
+            let (resp, right) = tile::row_split_at(ui, r, wid, mt.glyph, col, &mt.label, &mt.value(), &mt.caption, sel, ratio);
             row_body(&s, id, &mt, ui.painter(), right);
             resp
         }
         _ => {
             let resp = tile::card(ui, r, wid, sel);
             let p = ui.painter();
-            let note = if id == "network" { "download" } else { mt.caption.as_str() };
+            let note = if id == "network" { "" } else { mt.caption.as_str() };
             let body = tile::head(p, r, mt.glyph, col, &mt.label, note);
             medium_body(&s, id, &mt, p, body);
             resp
@@ -154,6 +170,16 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
 
 /// A list line: label, optional bar, value.
 type Line = (String, Option<(f32, Color32)>, String);
+
+/// A history graph with its time span under it ("2 min ago" … "now").
+fn spark_span(p: &egui::Painter, r: Rect, values: &[f32], color: Color32) {
+    let gr = Rect::from_min_max(r.min, Pos2::new(r.right(), r.bottom() - 13.0));
+    tile::spark(p, gr, values, color, None);
+    let span = values.len() as u64 * crate::kit::mechanics::MONITOR_REFRESH_MS / 1000;
+    let start = if span >= 60 { format!("{} min ago", span / 60) } else { format!("{span} s ago") };
+    p.text(Pos2::new(r.left(), r.bottom()), Align2::LEFT_BOTTOM, start, ty::caption(), ty::caption_color());
+    p.text(Pos2::new(r.right(), r.bottom()), Align2::RIGHT_BOTTOM, "now", ty::caption(), ty::caption_color());
+}
 
 /// The right half of a Row metric: its breakdown, or the CPU's history.
 fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
@@ -170,7 +196,8 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
             [("App", s.mem_active), ("Wired", s.mem_wired), ("Compressed", s.mem_compressed)].into_iter().map(|(n, b)| (n.to_string(), Some(((b as f32 / top).clamp(0.01, 1.0), tint::HEALTH())), human_bytes(b))).collect()
         }
         "cpu" => {
-            tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(tint::HEALTH()), None);
+            // the graph, with its time span under it
+            spark_span(p, r, &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(tint::HEALTH()));
             return;
         }
         "battery" => {
@@ -190,7 +217,7 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
         "network" => {
             // the left half has both speeds; here, how they moved
             if s.net_history.len() > 1 {
-                tile::spark(p, r.shrink2(egui::Vec2::new(0.0, 6.0)), &s.net_history, tint::HEALTH(), None);
+                spark_span(p, r, &s.net_history, tint::HEALTH());
                 return;
             }
             vec![("Today".into(), None, human_bytes(s.net_recv_total))]
@@ -236,13 +263,13 @@ fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rec
         }
         "cpu" => {
             let list = Rect::from_min_max(Pos2::new(body.left(), y), body.max);
-            tile::spark(p, list.shrink2(egui::Vec2::new(0.0, 2.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(tint::HEALTH()), None);
+            spark_span(p, list.shrink2(egui::Vec2::new(0.0, 2.0)), &s.cpu_history, mt.bar.map(|b| b.1).unwrap_or(tint::HEALTH()));
             Vec::new()
         }
         "network" => {
             let list = Rect::from_min_max(Pos2::new(body.left(), y), Pos2::new(body.right(), body.bottom() - 2.0 * 22.0 - 4.0));
-            if s.net_history.len() > 1 && list.height() > 16.0 {
-                tile::spark(p, list, &s.net_history, tint::HEALTH(), None);
+            if s.net_history.len() > 1 && list.height() > 30.0 {
+                spark_span(p, list, &s.net_history, tint::HEALTH());
                 y = list.bottom() + 4.0;
             }
             vec![("Upload".into(), None, human_rate(s.net_up)), ("Today".into(), None, format!("{} in · {} out", human_bytes(s.net_recv_total), human_bytes(s.net_sent_total)))]

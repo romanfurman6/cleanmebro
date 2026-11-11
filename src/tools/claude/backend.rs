@@ -28,15 +28,27 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
             let mut limits_at = Every::default();
             let mut local_at = Every::default();
             let mut size_at = Every::default();
+            // what each provider showed last, so switching back is instant
+            let mut cache: std::collections::HashMap<usize, (UsageInfo, Every, Every, Every)> = Default::default();
             loop {
-                // another provider was picked: start over with it
+                // another provider was picked: show its last data, refresh only when due
                 if ai::selected() != cur {
+                    let old = s.lock().unwrap().clone();
+                    cache.insert(cur, (old, limits_at, local_at, size_at));
                     cur = ai::selected();
                     p = ai::make(cur);
-                    *s.lock().unwrap() = UsageInfo { loading: true, ..UsageInfo::new(p.name()) };
-                    limits_at = Every::default();
-                    local_at = Every::default();
-                    size_at = Every::default();
+                    match cache.remove(&cur) {
+                        Some((info, a, b, c)) => {
+                            *s.lock().unwrap() = info;
+                            (limits_at, local_at, size_at) = (a, b, c);
+                        }
+                        None => {
+                            *s.lock().unwrap() = UsageInfo { loading: true, ..UsageInfo::new(p.name()) };
+                            limits_at = Every::default();
+                            local_at = Every::default();
+                            size_at = Every::default();
+                        }
+                    }
                     activity::repaint(&ctx);
                 }
                 // turned off in Settings: no CLI calls, no log reading
