@@ -68,7 +68,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAppleEventsUsageDescription</key><string>$DISPLAY_NAME asks Finder to pick a folder for saved captures, and System Events for the apps that open at login.</string>
-  <key>NSMicrophoneUsageDescription</key><string>$DISPLAY_NAME records your voice in screen recordings when you turn the microphone on.</string>
+  <key>NSMicrophoneUsageDescription</key><string>$DISPLAY_NAME hears your voice for dictation, and in screen recordings when you turn the microphone on.</string>
   <key>NSCameraUsageDescription</key><string>$DISPLAY_NAME shows your camera in screen recordings when you turn the camera on.</string>
 </dict>
 </plist>
