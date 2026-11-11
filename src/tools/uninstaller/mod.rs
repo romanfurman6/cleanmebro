@@ -40,6 +40,8 @@ pub const LARGE: u64 = 1_000_000_000;
 const ORPHAN_MIN_AGE: i64 = 7 * 86400;
 /// How often the app folders are checked for apps that came or went.
 const WATCH_EVERY: Duration = Duration::from_secs(8);
+/// With folder events on, the look that catches anything they missed.
+const WATCH_FALLBACK: Duration = Duration::from_secs(300);
 /// How long Undo stays offered.
 pub const UNDO_FOR: Duration = Duration::from_secs(60);
 
@@ -625,9 +627,13 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
         .name("uninstaller-watch".into())
         .spawn(move || {
             crate::kit::activity::low_priority();
+            static CHANGED: crate::kit::activity::Kick = crate::kit::activity::Kick::new();
+            // app folders change rarely: wait for macOS to say so, with a slow
+            // look now and then in case an event was missed
+            let hooked = crate::kit::fswatch::watch(&app_roots, 2.0, &CHANGED);
             let mut last = apps::find_bundles(&app_roots);
             loop {
-                std::thread::sleep(WATCH_EVERY);
+                crate::kit::activity::nap(if hooked { WATCH_FALLBACK } else { WATCH_EVERY }, Some(&CHANGED));
                 let now_b = apps::find_bundles(&app_roots);
                 if now_b == last {
                     continue;

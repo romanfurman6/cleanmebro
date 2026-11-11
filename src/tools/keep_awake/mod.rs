@@ -24,6 +24,8 @@ const MENU_TOGGLE: &str = "toggle";
 
 /// How often Claude Code's logs are checked and the state is brought up to date.
 const POLL: Duration = Duration::from_secs(5);
+/// With folder events on, the full read that catches anything they missed.
+const RESCAN: Duration = Duration::from_secs(60);
 
 type Shared = Arc<Mutex<Engine>>;
 
@@ -71,14 +73,32 @@ fn watch(engine: Shared, ctx: egui::Context) {
     crate::kit::activity::low_priority();
     let mut scanner = sessions::Scanner::default();
     let root = crate::kit::claude_code::projects_dir();
+    // Claude's logs are read again only when macOS says they changed (and
+    // once a minute in case an event was missed); the cheap state step still
+    // runs every POLL so timers and the switch stay prompt
+    static CHANGED: crate::kit::activity::Kick = crate::kit::activity::Kick::new();
+    let hooked = crate::kit::fswatch::watch(std::slice::from_ref(&root), 1.0, &CHANGED);
+    let mut rescan = crate::kit::activity::Every::default();
+    let mut was_watching = false;
     loop {
         let t = now();
         let watch_claude = engine.lock_ok().settings.claude;
-        let found = if watch_claude { scanner.scan(&root, t) } else { Vec::new() };
+        let fresh = !hooked || CHANGED.take() || !was_watching || rescan.due(RESCAN);
+        was_watching = watch_claude;
+        let found = match (watch_claude, fresh) {
+            (false, _) => Some(Vec::new()),
+            (true, true) => {
+                rescan.mark();
+                Some(scanner.scan(&root, t))
+            }
+            (true, false) => None,
+        };
         {
             let mut e = engine.lock_ok();
             let before = (e.state(t), e.sessions.clone());
-            e.sessions = found;
+            if let Some(found) = found {
+                e.sessions = found;
+            }
             e.step(t);
             if before != (e.state(t), e.sessions.clone()) {
                 crate::kit::activity::repaint(&ctx);

@@ -26,6 +26,8 @@ const SUMMARY: &str = "summary";
 pub const UNDO_FOR: Duration = Duration::from_secs(60);
 /// How often the launchd folders are read again.
 const POLL: Duration = Duration::from_secs(20);
+/// The same while nothing is on screen and folder events are on.
+const HIDDEN_POLL: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Filter {
@@ -369,6 +371,9 @@ pub fn plural(n: usize, word: &str) -> String {
 
 /// Read the launchd folders now and then; announce plists that weren't there before.
 fn watch(st: Shared, lib: PathBuf, ctx: egui::Context) {
+    static CHANGED: crate::kit::activity::Kick = crate::kit::activity::Kick::new();
+    let folders: Vec<PathBuf> = items::dirs(&lib, std::path::Path::new("/")).into_iter().map(|(d, _)| d).collect();
+    let hooked = crate::kit::fswatch::watch(&folders, 1.0, &CHANGED);
     loop {
         let jobs = items::read_jobs(&lib);
         let paths: BTreeSet<PathBuf> = items::plist_paths(&lib, std::path::Path::new("/")).into_iter().collect();
@@ -402,7 +407,10 @@ fn watch(st: Shared, lib: PathBuf, ctx: egui::Context) {
             crate::kit::notify::send(&format!("{app} added itself to startup"), &format!("{} · runs {}. Turn it off in Cmd+Meow › Startup.", j.label, j.when.label(j.scope)));
         }
         ctx.request_repaint();
-        std::thread::sleep(POLL);
+        // a new or removed plist comes as a folder event; what's running
+        // only matters on screen, so hidden it's read rarely
+        let wait = if !hooked || crate::kit::activity::visible() { POLL } else { HIDDEN_POLL };
+        crate::kit::activity::nap(wait, Some(&CHANGED));
     }
 }
 
