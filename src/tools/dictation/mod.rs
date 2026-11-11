@@ -46,10 +46,11 @@ const IDLE_UNLOAD: Duration = Duration::from_secs(10 * 60);
 const PASTE_DELAY: Duration = Duration::from_millis(90);
 /// Wait after ⌘V before putting the old clipboard back.
 const RESTORE_DELAY: Duration = Duration::from_millis(600);
-/// While listening, the words so far are read this often for the pill.
+/// Typing as you speak: the words so far are read this often.
 const PEEK_EVERY: Duration = Duration::from_millis(700);
-/// Only the end of a long take is read again; the pill shows its end anyway.
-const PEEK_SECS: f32 = 20.0;
+/// Longer than this, the rest is typed at the end (reading it all again
+/// each time gets slow).
+const PEEK_SECS: f32 = 90.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -72,6 +73,14 @@ pub enum Note {
     Problem(String),
 }
 
+/// How the words reach the field.
+enum Out {
+    /// On the clipboard, then ⌘V.
+    Paste(String),
+    /// ⌫ this many times, then type the text.
+    Type(usize, String),
+}
+
 /// Where dictation is.
 pub enum Phase {
     Idle,
@@ -86,7 +95,7 @@ enum Job {
     /// Load the model now, while the user is still talking.
     Warm(Engine),
     Run { job: u64, engine: Engine, lang: Option<&'static str>, pcm: Vec<f32> },
-    /// The words so far, for the pill; `job` is the take being listened to.
+    /// The words so far, to type as you speak; `job` is the take listened to.
     Peek { job: u64, engine: Engine, lang: Option<&'static str>, pcm: Vec<f32> },
 }
 
@@ -131,12 +140,15 @@ pub struct Dictation {
     heard: Receiver<Heard>,
     next_job: u64,
     voice_secs: f32,
-    /// The words heard so far in this take, shown in the pill.
-    pub live: String,
+    /// This take types into the field as it goes.
+    typing: bool,
+    /// What this take typed so far, and the words last read.
+    typed: String,
+    last_read: String,
     /// When the words were last asked for, and whether an answer is due.
     peek_at: Instant,
     peeking: bool,
-    paste_at: Option<(Instant, String)>,
+    paste_at: Option<(Instant, Out)>,
     restore_at: Option<(Instant, mac::Saved, isize)>,
     pub download: Option<Download>,
     download_error: Option<String>,
@@ -181,7 +193,9 @@ impl Dictation {
             heard,
             next_job: 0,
             voice_secs: 0.0,
-            live: String::new(),
+            typing: false,
+            typed: String::new(),
+            last_read: String::new(),
             peek_at: Instant::now(),
             peeking: false,
             paste_at: None,
@@ -292,7 +306,9 @@ impl Dictation {
         let at = caret.map(|c| c.center()).or(mouse).unwrap_or(Pos2::new(600.0, 400.0));
         self.place = (caret, mouse, mac::screen_at(at));
         self.levels.clear();
-        self.live.clear();
+        self.typed.clear();
+        self.last_read.clear();
+        self.typing = false;
         match Perm::Microphone.status() {
             Status::Allowed => {}
             Status::NotAsked => {
@@ -319,6 +335,7 @@ impl Dictation {
                 self.next_job += 1;
                 self.peek_at = Instant::now();
                 self.peeking = false;
+                self.typing = self.settings.live_typing && mac::accessibility();
                 self.phase = Phase::Listening { mic, since: Instant::now(), tapped: false, heard: Instant::now() };
             }
             Err(e) => self.show(Note::Problem(e), 2.5),
@@ -353,6 +370,11 @@ impl Dictation {
         if let Phase::Listening { mic, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
             let _ = mic.stop();
         }
+        // take back what was typed as it went
+        if !self.typed.is_empty() {
+            mac::type_text(self.typed.chars().count(), "");
+            self.typed.clear();
+        }
         // a Working job's answer is ignored now: phase is Idle
     }
 
@@ -361,7 +383,14 @@ impl Dictation {
             if h.job == self.next_job && matches!(self.phase, Phase::Listening { .. }) {
                 self.peeking = false;
                 if let Ok(t) = h.text {
-                    self.live = t;
+                    let sure = settled(&self.last_read, &t);
+                    self.last_read = t;
+                    // a shorter reading waits; only new or changed words are typed
+                    if !self.typed.starts_with(&sure) {
+                        let (back, add) = edit(&self.typed, &sure);
+                        mac::type_text(back, &add);
+                        self.typed = sure;
+                    }
                 }
             }
             return;
@@ -378,9 +407,15 @@ impl Dictation {
                     self.history.add(Said { at: chrono::Local::now().timestamp(), text: t.clone(), app: self.target.name.clone(), secs: self.voice_secs });
                     self.save_history();
                 }
-                if mac::accessibility() {
+                if self.typing {
+                    let (back, add) = edit(&self.typed, &t);
+                    self.typed.clear();
                     mac::activate(&self.target);
-                    self.paste_at = Some((Instant::now() + PASTE_DELAY, t));
+                    self.paste_at = Some((Instant::now() + PASTE_DELAY, Out::Type(back, add)));
+                    self.show(Note::Pasted, 0.8);
+                } else if mac::accessibility() {
+                    mac::activate(&self.target);
+                    self.paste_at = Some((Instant::now() + PASTE_DELAY, Out::Paste(t)));
                     self.show(Note::Pasted, 0.8);
                 } else {
                     let _ = mac::paste(&t, false);
@@ -482,7 +517,7 @@ impl Dictation {
             if quiet {
                 eprintln!("[dictation] stopped after silence");
             }
-            let peek = !too_long && !self.peeking && self.peek_at.elapsed() > PEEK_EVERY;
+            let peek = self.typing && !too_long && !self.peeking && self.peek_at.elapsed() > PEEK_EVERY && mic.seconds() < PEEK_SECS;
             if peek {
                 let pcm = mic.tail(PEEK_SECS);
                 self.peek_at = Instant::now();
@@ -502,8 +537,15 @@ impl Dictation {
             self.on_heard(h);
         }
         if self.paste_at.as_ref().is_some_and(|(t, _)| Instant::now() >= *t) {
-            let (_, text) = self.paste_at.take().unwrap();
-            if let Some((saved, count)) = mac::paste(&text, true) {
+            let (_, out) = self.paste_at.take().unwrap();
+            let text = match out {
+                Out::Paste(t) => Some(t),
+                Out::Type(back, add) => {
+                    mac::type_text(back, &add);
+                    None
+                }
+            };
+            if let Some((saved, count)) = text.and_then(|t| mac::paste(&t, true)) {
                 if self.settings.restore_clipboard {
                     // a restore still pending holds the clipboard from before
                     let saved = self.restore_at.take().map(|(_, old, _)| old).unwrap_or(saved);
@@ -588,6 +630,22 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
         let _ = tx.send(Heard { job, text, live });
         ctx.request_repaint();
     }
+}
+
+/// The words two readings in a row agree on, from the start: the last
+/// word or two still change while the voice goes on.
+fn settled(before: &str, now: &str) -> String {
+    let same = before.split_whitespace().zip(now.split_whitespace()).take_while(|(a, b)| a == b).count();
+    now.split_whitespace().take(same).collect::<Vec<_>>().join(" ")
+}
+
+/// From `typed` to `want`: how many characters to delete from the end, then
+/// what to type. A word that follows typed text gets its space.
+fn edit(typed: &str, want: &str) -> (usize, String) {
+    let keep = typed.chars().zip(want.chars()).take_while(|(a, b)| a == b).count();
+    let back = typed.chars().count() - keep;
+    let add: String = want.chars().skip(keep).collect();
+    (back, add)
 }
 
 fn today_start() -> i64 {
@@ -742,8 +800,23 @@ mod tests {
         // words so far never end a take
         d.on_heard(Heard { job: 2, text: Ok("so far".into()), live: true });
         assert!(matches!(d.phase, Phase::Working { job: 2, .. }));
-        assert!(d.live.is_empty());
+        assert!(d.typed.is_empty());
         d.on_heard(Heard { job: 2, text: Ok(String::new()), live: false });
         assert!(matches!(&d.phase, Phase::Showing { note: Note::Problem(_), .. }));
+    }
+
+    #[test]
+    fn only_words_two_readings_agree_on_are_typed() {
+        assert_eq!(settled("", "hello"), "");
+        assert_eq!(settled("Привіт як", "Привіт як справи"), "Привіт як");
+        assert_eq!(settled("Hello world", "Привіт світ"), "");
+    }
+
+    #[test]
+    fn edits_fix_only_the_changed_end() {
+        assert_eq!(edit("", "Привіт"), (0, "Привіт".into()));
+        assert_eq!(edit("Привіт як", "Привіт як справи?"), (0, " справи?".into()));
+        assert_eq!(edit("Привіт як", "Привіт, як"), (3, ", як".into()));
+        assert_eq!(edit("Привіт", ""), (6, String::new()));
     }
 }

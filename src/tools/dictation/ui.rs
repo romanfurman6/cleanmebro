@@ -13,9 +13,6 @@ use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, U
 const PILL_TITLE: &str = "Cmd+Meow Dictation";
 const PILL_H: f32 = 34.0;
 const PILL_W: f32 = 132.0;
-const PILL_MAX: f32 = 360.0;
-/// Characters of the words so far that fit in the widest pill.
-const LIVE_CHARS: usize = 36;
 const ROW_H: f32 = 36.0;
 /// History cards: inner padding, the meta line, the gap under it, the gap
 /// between cards.
@@ -67,16 +64,12 @@ pub fn pill(d: &mut Dictation, ctx: &egui::Context) {
         Phase::Showing { note, .. } => note_text(note),
         _ => None,
     };
-    // the words so far, their end when they don't fit
-    let live = match &d.phase {
-        Phase::Listening { .. } | Phase::Working { .. } if !d.live.is_empty() => Some(tail(&d.live, LIVE_CHARS)),
-        _ => None,
-    };
-    // about 6.6 pt a character at 12 pt
-    let w = match (&text, &live) {
-        (Some(t), _) => (t.chars().count() as f32 * 6.6 + 56.0).clamp(PILL_W, PILL_MAX),
-        (None, Some(t)) => (t.chars().count() as f32 * 6.6 + 84.0).clamp(PILL_W, PILL_MAX),
-        _ => PILL_W,
+    let w = match &text {
+        Some(t) => {
+            // about 6.6 pt a character at 12 pt
+            (t.chars().count() as f32 * 6.6 + 56.0).clamp(PILL_W, 360.0)
+        }
+        None => PILL_W,
     };
     let size = Vec2::new(w, PILL_H);
     let (caret, mouse, screen) = d.place;
@@ -111,21 +104,11 @@ pub fn pill(d: &mut Dictation, ctx: &egui::Context) {
                 let pulse = 0.55 + 0.45 * (0.5 + 0.5 * (t * 5.0).sin()) as f32;
                 p.circle_filled(Pos2::new(r.left() + 16.0, cy), 4.5, with_alpha(LIVE, pulse));
                 let tr = p.text(Pos2::new(r.right() - 13.0, cy), Align2::RIGHT_CENTER, clock(phase_secs), mono(12.0), TEXT_SOFT());
-                match &live {
-                    Some(words) => {
-                        text_fit(&p, Pos2::new(r.left() + 28.0, cy), Align2::LEFT_CENTER, words, font(12.0), TEXT(), tr.left() - 10.0 - (r.left() + 28.0));
-                    }
-                    None => bars(&p, Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top() + 8.0), Pos2::new(tr.left() - 10.0, r.bottom() - 8.0)), &levels, white(225)),
-                }
+                bars(&p, Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top() + 8.0), Pos2::new(tr.left() - 10.0, r.bottom() - 8.0)), &levels, white(225));
             }
             Phase::Working { .. } => {
                 spinner(&p, Pos2::new(r.left() + 17.0, cy), 6.5, t, TEXT_SOFT());
-                match &live {
-                    Some(words) => {
-                        text_fit(&p, Pos2::new(r.left() + 32.0, cy), Align2::LEFT_CENTER, words, font(12.0), TEXT_SOFT(), r.width() - 46.0);
-                    }
-                    None => bars(&p, Rect::from_min_max(Pos2::new(r.left() + 32.0, r.top() + 8.0), Pos2::new(r.right() - 14.0, r.bottom() - 8.0)), &levels, white(70)),
-                }
+                bars(&p, Rect::from_min_max(Pos2::new(r.left() + 32.0, r.top() + 8.0), Pos2::new(r.right() - 14.0, r.bottom() - 8.0)), &levels, white(70));
             }
             Phase::Showing { note: Note::Pasted, .. } => {
                 icon(&p, Icon::Check, Rect::from_center_size(r.center(), Vec2::splat(16.0)), GREEN());
@@ -143,18 +126,6 @@ pub fn pill(d: &mut Dictation, ctx: &egui::Context) {
             Phase::Idle => {}
         }
     });
-}
-
-/// The last `n` characters of `s`, from a word start, with … in front
-/// when cut.
-fn tail(s: &str, n: usize) -> String {
-    let count = s.chars().count();
-    if count <= n {
-        return s.to_string();
-    }
-    let cut: String = s.chars().skip(count - n).collect();
-    let cut = cut.split_once(' ').map(|(_, rest)| rest).filter(|r| !r.is_empty()).unwrap_or(&cut);
-    format!("…{cut}")
 }
 
 /// The voice as bars, newest on the right, mirrored around the middle.
@@ -386,7 +357,7 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     let x0 = col.left();
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Speaking", bold(15.0), TEXT());
     let whisper = d.settings.engine == Engine::Whisper;
-    let rows = if whisper { 5 } else { 4 };
+    let rows = if whisper { 6 } else { 5 };
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), rows);
 
     // shortcut
@@ -485,10 +456,19 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
         changed = true;
     }
 
+    // typing: once at the end, or into the field while speaking
+    label(p, card, 4, "Type");
+    let y = row_y(card, 4);
+    let tr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 230.0, y - 13.0), Pos2::new(card.right() - 12.0, y + 13.0));
+    if let Some(i) = segmented(ui, tr, id.with("typing"), &["At the end", "As you speak"], d.settings.live_typing as usize) {
+        d.settings.live_typing = i == 1;
+        changed = true;
+    }
+
     // language (Whisper only; Parakeet tells it itself)
     if whisper {
-        label(p, card, 4, "Language");
-        let y = row_y(card, 4);
+        label(p, card, 5, "Language");
+        let y = row_y(card, 5);
         let lr = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 300.0, y - 13.0), Pos2::new(card.right() - 12.0, y + 13.0));
         let li = Lang::ALL.iter().position(|l| *l == d.settings.lang).unwrap_or(0);
         let names: Vec<&str> = Lang::ALL.iter().map(|l| l.label()).collect();
@@ -547,16 +527,4 @@ fn right_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
         }
     }
     changed
-}
-
-#[cfg(test)]
-mod tests {
-    use super::tail;
-
-    #[test]
-    fn live_words_keep_their_end() {
-        assert_eq!(tail("раз два", 36), "раз два");
-        assert_eq!(tail("one two three four", 9), "…four");
-        assert_eq!(tail("abcdefghij", 4), "…ghij");
-    }
 }

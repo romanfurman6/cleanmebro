@@ -90,6 +90,8 @@ pub struct Settings {
     pub keep_history: bool,
     /// Hands-free: stop after this many quiet seconds; 0 never.
     pub silence_secs: u32,
+    /// Type the words into the field while speaking, not once at the end.
+    pub live_typing: bool,
     /// Settings format; 1 moved the old default ⌥Space to ⌥D. Missing in
     /// a file means 0, not today's.
     #[serde(default)]
@@ -116,7 +118,7 @@ pub fn default_shortcut() -> Shortcut {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, lang: Lang::Auto, restore_clipboard: true, keep_history: true, silence_secs: 5, version: VERSION }
+        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, lang: Lang::Auto, restore_clipboard: true, keep_history: true, silence_secs: 5, live_typing: false, version: VERSION }
     }
 }
 
@@ -216,6 +218,7 @@ mod tests {
         assert_eq!(s.lang, Lang::Uk);
         assert_eq!(s.shortcut, Some(default_shortcut()));
         assert!(s.restore_clipboard);
+        assert!(!s.live_typing);
         assert_eq!(s.stop_after_silence(), Some(std::time::Duration::from_secs(5)));
         assert_eq!(Settings { silence_secs: 0, ..s.clone() }.stop_after_silence(), None);
         assert_eq!(Lang::Uk.code(), Some("uk"));

@@ -30,7 +30,7 @@ pub fn plausible_caret(r: Rect) -> bool {
     r.is_finite() && !at_origin && r.height() > 2.0 && r.height() < 200.0 && r.width() < 2000.0
 }
 
-pub use imp::{accessibility, activate, float, front_app, mouse, paste, restore, screen_at};
+pub use imp::{accessibility, activate, float, front_app, mouse, paste, restore, screen_at, type_text};
 
 #[cfg(target_os = "macos")]
 mod imp {
@@ -97,6 +97,7 @@ mod imp {
         fn CGEventCreateKeyboardEvent(source: CFTypeRef, key: u16, down: bool) -> CFTypeRef;
         fn CGEventSetFlags(e: CFTypeRef, flags: u64);
         fn CGEventPost(tap: u32, e: CFTypeRef);
+        fn CGEventKeyboardSetUnicodeString(e: CFTypeRef, len: usize, chars: *const u16);
     }
 
     /// An owned CoreFoundation object, released on drop.
@@ -258,6 +259,45 @@ mod imp {
         Some((saved, count))
     }
 
+    /// Press ⌫ `delete` times, then type `text`, as keystrokes into
+    /// whatever has focus. Needs Accessibility.
+    pub fn type_text(delete: usize, text: &str) {
+        const KEY_DELETE: u16 = 51;
+        unsafe {
+            // a private source with no flags: the shortcut's ⌥, still held,
+            // must not turn letters into symbols
+            let src = Cf(CGEventSourceCreate(-1));
+            let post = |key: u16, chars: Option<&[u16]>| {
+                for down in [true, false] {
+                    let e = Cf(CGEventCreateKeyboardEvent(src.0, key, down));
+                    if e.0.is_null() {
+                        return;
+                    }
+                    CGEventSetFlags(e.0, 0);
+                    if let Some(c) = chars {
+                        CGEventKeyboardSetUnicodeString(e.0, c.len(), c.as_ptr());
+                    }
+                    CGEventPost(0, e.0);
+                }
+            };
+            for _ in 0..delete {
+                post(KEY_DELETE, None);
+            }
+            // apps take at most 20 UTF-16 units an event
+            let units: Vec<u16> = text.encode_utf16().collect();
+            let mut k = 0;
+            while k < units.len() {
+                let mut end = (k + 20).min(units.len());
+                // never split a surrogate pair
+                if end < units.len() && (0xDC00..0xE000).contains(&units[end]) {
+                    end -= 1;
+                }
+                post(0, Some(&units[k..end]));
+                k = end;
+            }
+        }
+    }
+
     fn press_cmd_v() {
         const KEY_V: u16 = 9;
         const FLAG_CMD: u64 = 0x0010_0000;
@@ -351,6 +391,7 @@ mod imp {
         None
     }
     pub fn restore(_saved: Saved, _count: isize) {}
+    pub fn type_text(_delete: usize, _text: &str) {}
 }
 
 /// Top-left of a `size` pill: just under the caret, else under the mouse,
