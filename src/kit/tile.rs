@@ -145,18 +145,14 @@ pub fn lines(p: &egui::Painter, r: Rect, lines: &[(String, Option<(f32, Color32)
         text_fit(p, r.center(), Align2::CENTER_CENTER, empty, font(11.0), TEXT_FAINT, r.width());
         return;
     }
-    // narrow: label and value on one line, the bar as a thin rule under it
-    let n = lines.len().min(3);
+    // one line each: label, a short inline bar, the value. Bars sit between
+    // the words instead of under them, so lines never crowd each other
+    let n = lines.len().min(3).min(((r.height() / 20.0).floor() as usize).max(1));
     let lh = (r.height() / n as f32).min(24.0);
     let top = r.center().y - lh * n as f32 / 2.0;
     for (k, (label, frac, value)) in lines.iter().take(n).enumerate() {
         let lr = Rect::from_min_size(Pos2::new(r.left(), top + k as f32 * lh), Vec2::new(r.width(), lh));
-        let ty = if frac.is_some() { lr.top() + lh * 0.4 } else { lr.center().y };
-        let vr = text_fit(p, Pos2::new(lr.right(), ty), Align2::RIGHT_CENTER, value, font(12.0), TEXT, lr.width() * 0.55);
-        text_fit(p, Pos2::new(lr.left(), ty), Align2::LEFT_CENTER, label, font(12.0), white(166), vr.left() - lr.left() - 6.0);
-        if let Some((f, c)) = frac {
-            bar(p, Rect::from_min_max(Pos2::new(lr.left(), lr.bottom() - 5.0), Pos2::new(lr.right(), lr.bottom() - 2.5)), *f, *c);
-        }
+        bar_line(p, lr, label, *frac, value);
     }
 }
 

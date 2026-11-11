@@ -6,8 +6,8 @@
 pub mod engine;
 mod page;
 
-use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
-use crate::kit::glass::{bold, font, human_bytes, tint, Icon, ACCENT, TEXT, TEXT_DIM};
+use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec};
+use crate::kit::glass::{human_bytes, tint, Icon, ACCENT};
 use crate::kit::tile;
 use egui::{Rect, Ui};
 use engine::Group;
@@ -68,7 +68,7 @@ impl Tool for Cleanup {
         "Clean"
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
-        vec![WidgetSpec { id: "clean", title: "Clean", about: "Junk found by the last scan; opens Cleanup.", sizes: UP_TO_MEDIUM, size: Size::S11, default_on: true }]
+        vec![WidgetSpec { id: "clean", title: "Clean", about: "Junk found by the last scan; opens Cleanup.", sizes: &[Size::S11, Size::S12, Size::S14], size: Size::S11, default_on: true }]
     }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let g = self.clean.lock().unwrap().clone();
@@ -90,7 +90,7 @@ impl Tool for Cleanup {
         let resp = match size {
             Size::S11 => tile::small(ui, rect, id, Icon::Broom, col, "Clean", &value, false),
             Size::S12 => tile::wide(ui, rect, id, Icon::Broom, col, "Clean", &value, bar, false),
-            Size::S14 => {
+            _ => {
                 let (resp, right) = tile::row_split(ui, rect, id, Icon::Broom, col, "Clean", &value, &sub, false);
                 let p = ui.painter();
                 let lines: Vec<(String, Option<(f32, egui::Color32)>, String)> = match g.phase {
@@ -101,43 +101,11 @@ impl Tool for Cleanup {
                         groups.iter().take(3).map(|(grp, b)| (grp.title().to_string(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), human_bytes(*b))).collect()
                     }
                     engine::Phase::Scanning | engine::Phase::Judging | engine::Phase::Cleaning => vec![("Progress".into(), frac.map(|f| (f.clamp(0.01, 1.0), ACCENT)), format!("{:.0}%", frac.unwrap_or(0.0) * 100.0))],
-                    engine::Phase::Intro if disk_total > 0 => vec![("Used".into(), Some((used_frac, ACCENT)), human_bytes(disk_used)), ("Free".into(), None, human_bytes(disk_free))],
+                    engine::Phase::Intro if disk_total > 0 => vec![("Used".into(), Some((used_frac, ACCENT)), human_bytes(disk_used)), ("Disk".into(), None, human_bytes(disk_total))],
                     _ => Vec::new(),
                 };
                 let empty = if g.phase == engine::Phase::Done { "All clean" } else { "" };
                 tile::lines(p, right, &lines, empty);
-                resp
-            }
-            _ => {
-                let resp = tile::card(ui, rect, id, false);
-                let p = ui.painter();
-                let body = tile::head(p, rect, Icon::Broom, col, "Clean", if g.phase == engine::Phase::Intro { "" } else { value.as_str() });
-                if g.phase == engine::Phase::Results {
-                    let tot = g.total().max(1) as f32;
-                    let mut groups: Vec<(engine::Group, u64)> = engine::Group::ALL.iter().map(|k| (*k, g.group_bytes(*k))).filter(|(_, b)| *b > 0).collect();
-                    groups.sort_by_key(|g| std::cmp::Reverse(g.1));
-                    let lh = 22.0;
-                    for (k, (grp, b)) in groups.iter().take(4).enumerate() {
-                        let lr = Rect::from_min_size(egui::pos2(body.left(), body.top() + k as f32 * lh), egui::vec2(body.width(), lh));
-                        tile::bar_line(p, lr, grp.title(), Some(((*b as f32 / tot).clamp(0.01, 1.0), ACCENT)), &human_bytes(*b));
-                    }
-                } else if disk_total > 0 {
-                    // the disk it would clean: free space, used bar, and Scan
-                    let free_s = human_bytes(disk_free);
-                    let (num, unit) = free_s.split_once(' ').unwrap_or((free_s.as_str(), ""));
-                    let big = p.text(body.left_top(), egui::Align2::LEFT_TOP, num, bold(26.0), TEXT);
-                    p.text(egui::pos2(big.right() + 4.0, big.bottom() - 5.0), egui::Align2::LEFT_BOTTOM, format!("{unit} free of {}", human_bytes(disk_total)), font(13.0), TEXT_DIM);
-                    let br = Rect::from_min_size(egui::pos2(body.left(), big.bottom() + 10.0), egui::vec2(body.width(), 6.0));
-                    crate::kit::glass::bar(p, br, used_frac, ACCENT);
-                    let label = if g.phase == engine::Phase::Done { "Scan again" } else { "Scan" };
-                    let bw = crate::kit::glass::button_width(p, label, crate::kit::glass::BTN_PRIMARY);
-                    let br = Rect::from_min_size(egui::pos2(body.right() - bw, body.bottom() - 28.0), egui::vec2(bw, 28.0));
-                    if crate::kit::glass::pill_button(ui, br, label, crate::kit::glass::BTN_PRIMARY, true).clicked() {
-                        cx.open_page(ID, "");
-                    }
-                } else {
-                    tile::empty_note(p, body, &sub);
-                }
                 resp
             }
         };
