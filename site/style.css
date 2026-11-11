@@ -9,7 +9,7 @@ a { color: inherit; }
 .num { font-variant-numeric: tabular-nums; }
 .ph { fill: currentColor; flex: none; }
 
-.desk { position: relative; min-height: max(720px, 100svh); background: #12141c url(desk.webp) center 60% / cover no-repeat; overflow: hidden; }
+.desk { position: relative; min-height: max(720px, 100svh); background: #12141c image-set(url(desk-1280.webp) 1x, url(desk.webp) 2x) center 60% / cover no-repeat; overflow: hidden; }
 .desk::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 55%, var(--bg)); pointer-events: none; }
 .mbar { position: relative; z-index: 3; display: flex; justify-content: space-between; align-items: center; height: 30px; padding: 0 16px;
   background: rgba(20,22,30,.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); font: 500 13px/1 -apple-system, var(--sans); }
@@ -43,6 +43,7 @@ h1 { font: 500 80px/84px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .foot { display: flex; justify-content: space-between; padding-top: 24px; padding-bottom: 40px; border-top: 1px solid var(--hair); color: var(--ink2); font-size: 14px; }
 .foot a { text-decoration: none; }
 
+@media (min-width: 1000px) { .desk { background-image: url(desk.webp); } }
 @media (max-width: 1180px) { .float { display: none; } }
 @media (max-width: 860px) {
   .desk { min-height: 0; padding-bottom: 64px; }
