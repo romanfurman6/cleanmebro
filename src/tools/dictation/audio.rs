@@ -114,6 +114,9 @@ impl Mic {
     pub fn failed(&self) -> Option<String> {
         None
     }
+    pub fn tail(&self, _secs: f32) -> Vec<f32> {
+        Vec::new()
+    }
     pub fn stop(self) -> Vec<f32> {
         Vec::new()
     }
@@ -307,6 +310,12 @@ mod imp {
 
         pub fn failed(&self) -> Option<String> {
             self.buf.lock().ok().and_then(|b| b.failed.clone())
+        }
+
+        /// A copy of the last `secs` of voice, still listening.
+        pub fn tail(&self, secs: f32) -> Vec<f32> {
+            let n = (secs * MODEL_RATE as f32) as usize;
+            self.buf.lock().map(|b| b.pcm[b.pcm.len().saturating_sub(n)..].to_vec()).unwrap_or_default()
         }
 
         /// Stop listening; the voice at 16 kHz mono.

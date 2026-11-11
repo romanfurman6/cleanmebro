@@ -46,6 +46,10 @@ const IDLE_UNLOAD: Duration = Duration::from_secs(10 * 60);
 const PASTE_DELAY: Duration = Duration::from_millis(90);
 /// Wait after ⌘V before putting the old clipboard back.
 const RESTORE_DELAY: Duration = Duration::from_millis(600);
+/// While listening, the words so far are read this often for the pill.
+const PEEK_EVERY: Duration = Duration::from_millis(700);
+/// Only the end of a long take is read again; the pill shows its end anyway.
+const PEEK_SECS: f32 = 20.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -82,11 +86,15 @@ enum Job {
     /// Load the model now, while the user is still talking.
     Warm(Engine),
     Run { job: u64, engine: Engine, lang: Option<&'static str>, pcm: Vec<f32> },
+    /// The words so far, for the pill; `job` is the take being listened to.
+    Peek { job: u64, engine: Engine, lang: Option<&'static str>, pcm: Vec<f32> },
 }
 
 struct Heard {
     job: u64,
     text: Result<String, String>,
+    /// An answer to a Peek.
+    live: bool,
 }
 
 /// A model download running on a thread.
@@ -123,6 +131,11 @@ pub struct Dictation {
     heard: Receiver<Heard>,
     next_job: u64,
     voice_secs: f32,
+    /// The words heard so far in this take, shown in the pill.
+    pub live: String,
+    /// When the words were last asked for, and whether an answer is due.
+    peek_at: Instant,
+    peeking: bool,
     paste_at: Option<(Instant, String)>,
     restore_at: Option<(Instant, mac::Saved, isize)>,
     pub download: Option<Download>,
@@ -168,6 +181,9 @@ impl Dictation {
             heard,
             next_job: 0,
             voice_secs: 0.0,
+            live: String::new(),
+            peek_at: Instant::now(),
+            peeking: false,
             paste_at: None,
             restore_at: None,
             download: None,
@@ -276,6 +292,7 @@ impl Dictation {
         let at = caret.map(|c| c.center()).or(mouse).unwrap_or(Pos2::new(600.0, 400.0));
         self.place = (caret, mouse, mac::screen_at(at));
         self.levels.clear();
+        self.live.clear();
         match Perm::Microphone.status() {
             Status::Allowed => {}
             Status::NotAsked => {
@@ -299,6 +316,9 @@ impl Dictation {
         match Mic::start() {
             Ok(mic) => {
                 let _ = self.jobs.send(Job::Warm(engine));
+                self.next_job += 1;
+                self.peek_at = Instant::now();
+                self.peeking = false;
                 self.phase = Phase::Listening { mic, since: Instant::now(), tapped: false, heard: Instant::now() };
             }
             Err(e) => self.show(Note::Problem(e), 2.5),
@@ -337,6 +357,15 @@ impl Dictation {
     }
 
     fn on_heard(&mut self, h: Heard) {
+        if h.live {
+            if h.job == self.next_job && matches!(self.phase, Phase::Listening { .. }) {
+                self.peeking = false;
+                if let Ok(t) = h.text {
+                    self.live = t;
+                }
+            }
+            return;
+        }
         let Phase::Working { job, .. } = self.phase else { return };
         if job != h.job {
             return;
@@ -450,6 +479,18 @@ impl Dictation {
             if self.levels.len() > 64 {
                 self.levels.remove(0);
             }
+            if quiet {
+                eprintln!("[dictation] stopped after silence");
+            }
+            let peek = !too_long && !self.peeking && self.peek_at.elapsed() > PEEK_EVERY;
+            if peek {
+                let pcm = mic.tail(PEEK_SECS);
+                self.peek_at = Instant::now();
+                if !audio::silent(&pcm, MODEL_RATE) {
+                    let job = Job::Peek { job: self.next_job, engine: self.settings.engine, lang: self.settings.lang.code(), pcm };
+                    self.peeking = self.jobs.send(job).is_ok();
+                }
+            }
             if too_long {
                 self.finish();
             } else if let Some(e) = failed {
@@ -514,7 +555,7 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
             Err(_) => return,
         };
         let engine = match &job {
-            Job::Warm(e) | Job::Run { engine: e, .. } => *e,
+            Job::Warm(e) | Job::Run { engine: e, .. } | Job::Peek { engine: e, .. } => *e,
         };
         if loaded.as_ref().is_none_or(|(e, _)| *e != engine) {
             loaded = None;
@@ -523,22 +564,28 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
                 Err(e) => {
                     eprintln!("[dictation] {e}");
                     if let Job::Run { job, .. } = job {
-                        let _ = tx.send(Heard { job, text: Err(e) });
+                        let _ = tx.send(Heard { job, text: Err(e), live: false });
                         ctx.request_repaint();
                     }
                     continue;
                 }
             }
         }
-        let Job::Run { job, lang, pcm, .. } = job else { continue };
+        let (job, lang, pcm, live) = match job {
+            Job::Warm(_) => continue,
+            Job::Run { job, lang, pcm, .. } => (job, lang, pcm, false),
+            Job::Peek { job, lang, pcm, .. } => (job, lang, pcm, true),
+        };
         let t0 = Instant::now();
         let text = match &loaded {
             Some((_, Loaded::Parakeet(m))) => m.run(&pcm).map(|t| audio::tidy_text(&[t])),
             Some((_, Loaded::Whisper(m))) => m.run(&pcm, lang, None).map(|segs| audio::tidy_text(&segs.into_iter().map(|s| s.2).collect::<Vec<_>>())),
             None => Err("The speech model didn't load".into()),
         };
-        eprintln!("[dictation] {:.1} s of voice in {} ms", pcm.len() as f32 / MODEL_RATE as f32, t0.elapsed().as_millis());
-        let _ = tx.send(Heard { job, text });
+        if !live {
+            eprintln!("[dictation] {:.1} s of voice in {} ms", pcm.len() as f32 / MODEL_RATE as f32, t0.elapsed().as_millis());
+        }
+        let _ = tx.send(Heard { job, text, live });
         ctx.request_repaint();
     }
 }
@@ -690,9 +737,13 @@ mod tests {
     fn an_answer_for_an_old_job_is_ignored() {
         let mut d = demo();
         d.phase = Phase::Working { job: 2 };
-        d.on_heard(Heard { job: 1, text: Ok("old".into()) });
+        d.on_heard(Heard { job: 1, text: Ok("old".into()), live: false });
         assert!(matches!(d.phase, Phase::Working { job: 2, .. }));
-        d.on_heard(Heard { job: 2, text: Ok(String::new()) });
+        // words so far never end a take
+        d.on_heard(Heard { job: 2, text: Ok("so far".into()), live: true });
+        assert!(matches!(d.phase, Phase::Working { job: 2, .. }));
+        assert!(d.live.is_empty());
+        d.on_heard(Heard { job: 2, text: Ok(String::new()), live: false });
         assert!(matches!(&d.phase, Phase::Showing { note: Note::Problem(_), .. }));
     }
 }
