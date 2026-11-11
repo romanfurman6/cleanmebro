@@ -535,7 +535,7 @@ fn countdown(c: &mut Capture, ctx: &egui::Context) {
             p.circle_filled(c0 + Vec2::new(0.0, 3.0), k, Color32::from_black_alpha(a));
         }
         p.circle_filled(c0, 70.0, Color32::from_rgba_unmultiplied(22, 22, 24, 235));
-        p.circle_stroke(c0, 66.0, Stroke::new(2.0, Color32::from_black_alpha(90)));
+        crate::kit::glass::stroke_circle(&p, c0, 66.0, Stroke::new(2.0, Color32::from_black_alpha(90)));
         let frac = (left / total.max(0.1)).clamp(0.0, 1.0);
         // macOS animates the ring itself, smooth whatever our frame rate;
         // elsewhere (and before its window is up) egui draws it
@@ -651,7 +651,7 @@ fn bar(c: &mut Capture, ctx: &egui::Context) {
         let sresp = ui.interact(sr, id.with("stop"), Sense::click());
         p.rect_filled(sr, sr.height() / 2.0, with_alpha(color, if sresp.hovered() { 0.28 } else { 0.16 }));
         let dot = Pos2::new(sr.left() + 20.0, sr.center().y);
-        p.circle_stroke(dot, 10.0, Stroke::new(2.0, color));
+        crate::kit::glass::stroke_circle(&p, dot, 10.0, Stroke::new(2.0, color));
         p.rect_filled(Rect::from_center_size(dot, Vec2::splat(8.0)), 2.0, color);
         p.text(Pos2::new(dot.x + 18.0, sr.center().y), Align2::LEFT_CENTER, timeline::clock_label(length), bold(16.0), color);
         if sresp.hovered() {

@@ -109,7 +109,7 @@ pub fn draw(p: &Painter, i: Ico, rect: Rect, color: Color32) {
         p.rect_stroke(Rect::from_min_max(pt(x0, y0), pt(x1, y1)), 1.5 * u, Stroke::new(w, color), StrokeKind::Middle);
     };
     let circle = |x: f32, y: f32, r: f32| {
-        p.circle_stroke(pt(x, y), r * u, Stroke::new(w, color));
+        crate::kit::glass::stroke_circle(&p, pt(x, y), r * u, Stroke::new(w, color));
     };
     match i {
         Ico::Area => {

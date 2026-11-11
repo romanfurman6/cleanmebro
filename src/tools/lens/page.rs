@@ -241,7 +241,7 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     let hint = p.text(Pos2::new(stop_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, hint_text, font(12.0), TEXT_DIM);
     let t = now as f32;
     let c = Pos2::new(hint.left() - 12.0, hr.center().y);
-    p.circle_stroke(c, 5.0, Stroke::new(1.5, white(40)));
+    crate::kit::glass::stroke_circle(&p, c, 5.0, Stroke::new(1.5, white(40)));
     let pts: Vec<Pos2> = (0..=12).map(|i| t * 5.0 + i as f32 * 0.15).map(|a| c + Vec2::angled(a) * 5.0).collect();
     p.add(egui::Shape::line(pts, Stroke::new(1.5, tint::DISK_MAP)));
     if pill_button(ui, stop_r, "Stop", BTN_SECONDARY, true).clicked() {
@@ -433,7 +433,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         // a spinner dot before the progress text
         let t = ctx.input(|i| i.time) as f32;
         let c = Pos2::new(hint.left() - 12.0, hr.center().y);
-        p.circle_stroke(c, 5.0, Stroke::new(1.5, white(40)));
+        crate::kit::glass::stroke_circle(&p, c, 5.0, Stroke::new(1.5, white(40)));
         let a0 = t * 5.0;
         let pts: Vec<Pos2> = (0..=12).map(|i| a0 + i as f32 * 0.15).map(|a| c + Vec2::angled(a) * 5.0).collect();
         p.add(egui::Shape::line(pts, Stroke::new(1.5, tint::DISK_MAP)));

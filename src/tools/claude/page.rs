@@ -163,7 +163,7 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         text_fit(&p, inner.left_top(), Align2::LEFT_TOP, &claude::short_label(&l.label), ty::title(), TEXT, inner.width());
         let rr = 36.0;
         let c = Pos2::new(inner.left() + rr + 5.0, inner.bottom() - rr - 5.0);
-        crate::kit::tile::ring(&p, c, rr, 9.0, (l.pct / 100.0).max(0.01), usage_color(l.pct));
+        crate::kit::tile::ring(&p, c, rr, 9.0, l.pct / 100.0, usage_color(l.pct));
         p.text(c, Align2::CENTER_CENTER, format!("{:.0}%", l.pct), ty::lead(), TEXT);
         let tx = c.x + rr + sp::L;
         if !l.resets.is_empty() {

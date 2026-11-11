@@ -178,7 +178,7 @@ fn countdown(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         p.rect_filled(card, 24.0, Color32::from_rgba_unmultiplied(28, 28, 31, 235));
         p.rect_stroke(card, 24.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
         let c0 = card.center() - Vec2::new(0.0, 16.0);
-        p.circle_stroke(c0, 44.0, Stroke::new(4.0, white(30)));
+        crate::kit::glass::stroke_circle(&p, c0, 44.0, Stroke::new(4.0, white(30)));
         let frac = (left / total.max(0.1)).clamp(0.0, 1.0);
         let a0 = -std::f32::consts::FRAC_PI_2;
         p.add(egui::epaint::PathShape::line(arc_points(c0, 44.0, a0, a0 + frac * std::f32::consts::TAU, 64), egui::epaint::PathStroke::new(4.0, tint::CAPTURE)));

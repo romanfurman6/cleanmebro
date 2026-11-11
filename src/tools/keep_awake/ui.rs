@@ -156,11 +156,11 @@ fn scene(p: &Painter, rect: Rect, st: State, frac: f32, t: f64) {
     let at = |x: f32, y: f32| rect.min + Vec2::new(x * s, y * s);
     let c = at(48.0, 48.0);
     let rr = 42.0 * s;
-    p.circle_stroke(c, rr, Stroke::new(4.0 * s, white(26)));
+    crate::kit::glass::stroke_circle(&p, c, rr, Stroke::new(4.0 * s, white(26)));
     let a0 = -PI / 2.0;
     let a1 = a0 + TAU * frac;
     if frac >= 0.999 {
-        p.circle_stroke(c, rr, Stroke::new(4.0 * s, lk.ring));
+        crate::kit::glass::stroke_circle(&p, c, rr, Stroke::new(4.0 * s, lk.ring));
     } else if frac > 0.0 {
         p.add(PathShape::line(arc_points(c, rr, a0, a1, 72), PathStroke::new(4.0 * s, lk.ring)));
         for a in [a0, a1] {

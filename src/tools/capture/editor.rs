@@ -478,10 +478,10 @@ impl Editor {
                     let r = Rect::from_center_size(Pos2::new(x + 9.0, y), Vec2::splat(18.0));
                     let resp = ui.interact(r.expand(3.0), ui.scope_id().with(("color", k)), Sense::click()).on_hover_text(*cname);
                     if self.color == k {
-                        p.circle_stroke(r.center(), 11.5, Stroke::new(2.0, BLUE));
+                        crate::kit::glass::stroke_circle(&p, r.center(), 11.5, Stroke::new(2.0, BLUE));
                     }
                     p.circle_filled(r.center(), 9.0, Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
-                    p.circle_stroke(r.center(), 9.0, Stroke::new(1.0, if self.color == k { Color32::WHITE } else { white(64) }));
+                    crate::kit::glass::stroke_circle(&p, r.center(), 9.0, Stroke::new(1.0, if self.color == k { Color32::WHITE } else { white(64) }));
                     if resp.clicked() {
                         self.color = k;
                         self.recolor_selected();

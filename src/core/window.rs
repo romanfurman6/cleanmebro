@@ -121,7 +121,7 @@ fn traffic_lights(ui: &mut Ui, p: &egui::Painter, full: Rect) {
         let r = Rect::from_center_size(center, Vec2::splat(13.0));
         let resp = ui.interact(r, ui.scope_id().with(("light", k)), Sense::click());
         p.circle_filled(center, 6.2, c);
-        p.circle_stroke(center, 6.2, egui::Stroke::new(0.6, Color32::from_black_alpha(60)));
+        crate::kit::glass::stroke_circle(&p, center, 6.2, egui::Stroke::new(0.6, Color32::from_black_alpha(60)));
         if any_hover {
             let s = egui::Stroke::new(1.2, Color32::from_black_alpha(150));
             match k {

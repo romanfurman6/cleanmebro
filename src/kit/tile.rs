@@ -185,7 +185,7 @@ pub fn head_with(p: &egui::Painter, rect: Rect, title: &str, caption: &str, note
 
 /// A progress ring from 12 o'clock, clockwise, on a faint track.
 pub fn ring(p: &egui::Painter, c: Pos2, r: f32, width: f32, frac: f32, color: Color32) {
-    p.circle_stroke(c, r, Stroke::new(width, white(26)));
+    crate::kit::glass::stroke_circle(&p, c, r, Stroke::new(width, white(26)));
     let f = frac.clamp(0.0, 1.0);
     if f > 0.005 {
         let a0 = -std::f32::consts::FRAC_PI_2;

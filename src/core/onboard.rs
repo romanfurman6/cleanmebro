@@ -383,7 +383,7 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let c = Pos2::new(body.center().x, body.top() + 150.0);
     // the ring draws itself, then the tools land on it one by one
     let ring = 86.0;
-    p.circle_stroke(c, ring, Stroke::new(2.0, white(14)));
+    crate::kit::glass::stroke_circle(&p, c, ring, Stroke::new(2.0, white(14)));
     let start = -std::f32::consts::FRAC_PI_2;
     let k = ease(t / 1.4);
     if k > 0.0 {
@@ -398,7 +398,7 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
             continue;
         }
         p.circle_filled(at, 15.0 * s, Color32::from_rgb(0x1E, 0x1E, 0x20));
-        p.circle_stroke(at, 15.0 * s, Stroke::new(1.0, white(36)));
+        crate::kit::glass::stroke_circle(&p, at, 15.0 * s, Stroke::new(1.0, white(36)));
         icon(&p, tool.badge().icon, Rect::from_center_size(at, Vec2::splat(14.0 * s)), TEXT_SOFT);
     }
     let bob = if t > 1.8 { ((t - 1.8) * 1.6).sin() * 3.0 } else { 0.0 };
@@ -504,7 +504,7 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
     let done = req.iter().filter(|r| app.perm_watch.status(r.perm) == Status::Allowed).count();
     // progress ring
     let c = Pos2::new(body.left() + 22.0, body.top() + 22.0);
-    p.circle_stroke(c, 18.0, Stroke::new(4.0, white(20)));
+    crate::kit::glass::stroke_circle(&p, c, 18.0, Stroke::new(4.0, white(20)));
     let frac = if req.is_empty() { 1.0 } else { done as f32 / req.len() as f32 };
     let shown = ui.ctx().animate_value_with_time(ui.scope_id().with("perm-ring"), frac, 0.6);
     let full = done == req.len();

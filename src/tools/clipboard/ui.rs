@@ -87,7 +87,7 @@ pub fn kind_glyph(p: &egui::Painter, kind: Kind, r: Rect, col: Color32, swatch: 
         Kind::Color => {
             let sw = swatch.unwrap_or(col);
             p.circle_filled(c, 6.0 * u, sw);
-            p.circle_stroke(c, 6.0 * u, Stroke::new(1.0, white(60)));
+            crate::kit::glass::stroke_circle(&p, c, 6.0 * u, Stroke::new(1.0, white(60)));
         }
         Kind::File => {
             let pts = vec![pt(-5.0, -7.0), pt(2.0, -7.0), pt(5.5, -3.5), pt(5.5, 7.0), pt(-5.0, 7.0), pt(-5.0, -7.0)];

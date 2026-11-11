@@ -60,7 +60,7 @@ pub fn blades(p: &egui::Painter, c: Pos2, r: f32, angle: f32, color: Color32, hu
         p.add(Shape::convex_polygon(pts, color, Stroke::NONE));
     }
     p.circle_filled(c, r * 0.24, hub);
-    p.circle_stroke(c, r * 0.24, Stroke::new(1.0, white(46)));
+    crate::kit::glass::stroke_circle(&p, c, r * 0.24, Stroke::new(1.0, white(46)));
 }
 
 /// A 270° dial: track plus the filled part for `frac`.
@@ -80,7 +80,7 @@ pub fn dial(p: &egui::Painter, c: Pos2, r: f32, width: f32, frac: f32, color: Co
 
 /// A full ring for small fan icons: track and filled part, starting at 12 o'clock.
 pub fn ring(p: &egui::Painter, c: Pos2, r: f32, width: f32, frac: f32, color: Color32) {
-    p.circle_stroke(c, r, Stroke::new(width, white(20)));
+    crate::kit::glass::stroke_circle(&p, c, r, Stroke::new(width, white(20)));
     let a0 = -PI / 2.0;
     let pts = arc_points(c, r, a0, a0 + TAU * frac.clamp(0.02, 1.0), 48);
     p.add(Shape::line(pts, Stroke::new(width, color)));

@@ -883,8 +883,8 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             closed(&[(9.0, 8.0), (16.0, 15.0), (13.0, 21.0), (3.0, 11.0)]);
         }
         Icon::Gear => {
-            p.circle_stroke(pt(12.0, 12.0), 3.0 * u, st);
-            p.circle_stroke(pt(12.0, 12.0), 7.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 3.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 7.0 * u, st);
             for i in 0..8 {
                 let a = i as f32 / 8.0 * TAU;
                 let d = Vec2::new(a.cos(), a.sin());
@@ -898,7 +898,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         }
         Icon::Folder => closed(&[(3.0, 6.0), (9.5, 6.0), (11.5, 8.0), (21.0, 8.0), (21.0, 19.0), (3.0, 19.0)]),
         Icon::Lens | Icon::Search => {
-            p.circle_stroke(pt(11.0, 11.0), 7.0 * u, st);
+            stroke_circle(&p, pt(11.0, 11.0), 7.0 * u, st);
             open(&[(16.0, 16.0), (21.0, 21.0)]);
         }
         Icon::Laptop => {
@@ -917,11 +917,11 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         }
         Icon::Thermo => {
             boxr(10.0, 3.0, 14.0, 15.0, 2.0);
-            p.circle_stroke(pt(12.0, 18.0), 3.0 * u, st);
+            stroke_circle(&p, pt(12.0, 18.0), 3.0 * u, st);
             open(&[(12.0, 8.0), (12.0, 16.0)]);
         }
         Icon::Clock => {
-            p.circle_stroke(pt(12.0, 12.0), 9.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 9.0 * u, st);
             open(&[(12.0, 7.0), (12.0, 12.0), (15.5, 14.0)]);
         }
         Icon::Up => {
@@ -935,7 +935,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         Icon::Back => open(&[(15.0, 6.0), (9.0, 12.0), (15.0, 18.0)]),
         Icon::Forward => open(&[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)]),
         Icon::Info => {
-            p.circle_stroke(pt(12.0, 12.0), 9.0 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 9.0 * u, st);
             dot(12.0, 7.8, 1.2);
             open(&[(12.0, 11.0), (12.0, 16.5)]);
         }
@@ -982,7 +982,7 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         }
         Icon::Fan => {
             // six curved blades around a hub (four straight arms read wrong)
-            p.circle_stroke(pt(12.0, 12.0), 1.8 * u, st);
+            stroke_circle(&p, pt(12.0, 12.0), 1.8 * u, st);
             for k in 0..6 {
                 let a0 = k as f32 * TAU / 6.0;
                 let pts: Vec<Pos2> = (0..=6)
@@ -1181,4 +1181,11 @@ pub fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, focus: 
         resp.request_focus();
     }
     resp
+}
+
+/// A circle outline centred on `r`. egui 0.37 paints circle strokes outside
+/// the radius, which put ring tracks a half-stroke off the arcs drawn on them.
+pub fn stroke_circle(p: &Painter, c: Pos2, r: f32, stroke: impl Into<Stroke>) {
+    let s: Stroke = stroke.into();
+    p.circle_stroke(c, (r - s.width / 2.0).max(0.0), s);
 }

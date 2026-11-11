@@ -52,7 +52,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
             let c = Pos2::new(fr.center().x, fr.top() + 100.0);
             dial(&p, c, 58.0, 7.0, f.frac(), tint::FAN);
             p.circle_filled(c, 44.0, BG);
-            p.circle_stroke(c, 44.0, Stroke::new(1.0, white(15)));
+            crate::kit::glass::stroke_circle(&p, c, 44.0, Stroke::new(1.0, white(15)));
             blades(&p, c, 40.0, spin(&format!("fan-{i}"), t, f.rpm), BLADE, RAISED);
             let g = p.layout_no_wrap(rpm_text(f.rpm), bold(26.0), TEXT);
             let u = p.layout_no_wrap("rpm".into(), font(13.0), TEXT_DIM);
@@ -70,7 +70,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
         let fr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(fan_w * 2.0 + GAP, ROW1_H));
         glass_card(&p, fr, 14.0, 0.0, false);
         let c = Pos2::new(fr.left() + 56.0, fr.top() + 64.0);
-        p.circle_stroke(c, 32.0, Stroke::new(1.5, white(30)));
+        crate::kit::glass::stroke_circle(&p, c, 32.0, Stroke::new(1.5, white(30)));
         blades(&p, c, 24.0, 0.3, white(40), CARD);
         let title = if s.has_smc { "This Mac has no fans" } else { "Fan speed isn't available" };
         p.text(Pos2::new(fr.left() + 104.0, c.y - 10.0), Align2::LEFT_CENTER, title, bold(15.0), TEXT);
@@ -225,7 +225,7 @@ fn fixed_slider(ui: &mut Ui, r: Rect, st: &Settings, fan: &Fan, cmds: &mut Vec<C
     p.rect_filled(Rect::from_min_max(track.min, Pos2::new(track.left() + track.width() * v, track.bottom())), 3.0, LINE);
     let knob = Pos2::new(track.left() + track.width() * v, cy);
     p.circle_filled(knob, 9.0, Color32::WHITE);
-    p.circle_stroke(knob, 9.0, Stroke::new(1.0, with_alpha(Color32::BLACK, 0.3)));
+    crate::kit::glass::stroke_circle(&p, knob, 9.0, Stroke::new(1.0, with_alpha(Color32::BLACK, 0.3)));
     p.text(Pos2::new(track.left(), cy + 15.0), Align2::LEFT_CENTER, rpm_text(fan.min), font(10.0), TEXT_FAINT);
     p.text(Pos2::new(track.right(), cy + 15.0), Align2::RIGHT_CENTER, rpm_text(fan.max), font(10.0), TEXT_FAINT);
     if resp.hovered() || resp.dragged() {
@@ -289,7 +289,7 @@ fn curve_editor(ui: &mut Ui, r: Rect, st: &Settings, fan: &Fan, temp: Option<f32
         let (dx, dy) = (x_of(tx), y_of(c.at(t)));
         p.add(egui::Shape::dashed_line(&[Pos2::new(dx, chart.bottom()), Pos2::new(dx, dy)], Stroke::new(1.0, white(70)), 3.0, 3.0));
         p.circle_filled(Pos2::new(dx, dy), 6.0, Color32::WHITE);
-        p.circle_stroke(Pos2::new(dx, dy), 9.0, Stroke::new(3.0, with_alpha(Color32::WHITE, 0.2)));
+        crate::kit::glass::stroke_circle(&p, Pos2::new(dx, dy), 9.0, Stroke::new(3.0, with_alpha(Color32::WHITE, 0.2)));
     }
     // handles
     let mut n = st.clone();
@@ -313,7 +313,7 @@ fn curve_editor(ui: &mut Ui, r: Rect, st: &Settings, fan: &Fan, temp: Option<f32
             p.text(hp + Vec2::new(0.0, -18.0), Align2::CENTER_BOTTOM, format!("{:.0}° · {}", c.pts[i].0, rpm_text(speed(fan, c.pts[i].1))), bold(11.0), TEXT);
         }
         p.circle_filled(hp, 7.5, BG);
-        p.circle_stroke(hp, 7.5, Stroke::new(3.0, if hot { Color32::WHITE } else { LINE }));
+        crate::kit::glass::stroke_circle(&p, hp, 7.5, Stroke::new(3.0, if hot { Color32::WHITE } else { LINE }));
     }
 
     // side: presets and source

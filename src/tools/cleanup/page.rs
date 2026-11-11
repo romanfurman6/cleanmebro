@@ -240,7 +240,7 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
             p.circle_filled(mark, 8.0, tint::HEALTH);
             icon(&p, Icon::Check, Rect::from_center_size(mark, Vec2::splat(11.0)), Color32::WHITE);
         } else {
-            p.circle_stroke(mark, 7.5, Stroke::new(1.5, white(64)));
+            crate::kit::glass::stroke_circle(&p, mark, 7.5, Stroke::new(1.5, white(64)));
         }
         p.text(Pos2::new(cols[1], row.center().y), Align2::LEFT_CENTER, grp.title(), font(13.0), TEXT);
         let (status, sc) = if n > 0 { (format!("{n} found"), Color32::from_rgb(0x5B, 0xE0, 0x7F)) } else { ("—".to_string(), TEXT_FAINT) };
