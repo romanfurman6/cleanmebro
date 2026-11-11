@@ -112,6 +112,8 @@ pub struct Settings {
     pub silence_secs: u32,
     /// Type the words into the field while speaking, not once at the end.
     pub live_typing: bool,
+    /// Fix misheard words with an AI tool before they go in.
+    pub polish: super::polish::Polish,
     /// Settings format; 1 moved the old default ⌥Space to ⌥D. Missing in
     /// a file means 0, not today's.
     #[serde(default)]
@@ -138,7 +140,7 @@ pub fn default_shortcut() -> Shortcut {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, lang: Lang::Auto, restore_clipboard: true, keep_history: true, silence_secs: 5, live_typing: false, version: VERSION }
+        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, lang: Lang::Auto, restore_clipboard: true, keep_history: true, silence_secs: 5, live_typing: false, polish: super::polish::Polish::Off, version: VERSION }
     }
 }
 

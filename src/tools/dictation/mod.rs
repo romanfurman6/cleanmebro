@@ -8,6 +8,7 @@
 
 mod audio;
 mod mac;
+mod polish;
 pub mod probe;
 mod settings;
 mod ui;
@@ -108,6 +109,8 @@ struct Heard {
     /// An answer to a Peek.
     live: bool,
     cut: Option<usize>,
+    /// Already through the AI fix (or not to go through it).
+    polished: bool,
 }
 
 /// A model download running on a thread.
@@ -142,6 +145,8 @@ pub struct Dictation {
     recording_seen: Instant,
     jobs: Sender<Job>,
     heard: Receiver<Heard>,
+    /// For the AI fix's answer.
+    heard_tx: Sender<Heard>,
     next_job: u64,
     voice_secs: f32,
     /// This take types into the field as it goes.
@@ -177,7 +182,8 @@ impl Dictation {
         };
         if !env.demo {
             let ctx = env.ctx.clone();
-            std::thread::Builder::new().name("dictation".into()).spawn(move || worker(job_rx, heard_tx, ctx)).ok();
+            let tx = heard_tx.clone();
+            std::thread::Builder::new().name("dictation".into()).spawn(move || worker(job_rx, tx, ctx)).ok();
         }
         Dictation {
             settings,
@@ -198,6 +204,7 @@ impl Dictation {
             recording_seen: Instant::now(),
             jobs,
             heard,
+            heard_tx,
             next_job: 0,
             voice_secs: 0.0,
             typing: false,
@@ -426,9 +433,25 @@ impl Dictation {
             Ok(t) if self.typing && !self.cut_text.is_empty() => {
                 let t = join(&self.cut_text, &t);
                 self.cut_text.clear();
-                self.on_heard(Heard { job: h.job, text: Ok(t), live: false, cut: None })
+                self.on_heard(Heard { text: Ok(t), ..h })
             }
             Ok(t) if t.is_empty() => self.show(Note::Problem("Didn't catch that".into()), 1.6),
+            Ok(t) if !h.polished && self.settings.polish != polish::Polish::Off => {
+                // the pill keeps spinning; the words go in once fixed, or
+                // as heard when the tool fails
+                let (tool, tx, ctx, job) = (self.settings.polish, self.heard_tx.clone(), self.ctx.clone(), h.job);
+                std::thread::Builder::new()
+                    .name("dictation-polish".into())
+                    .spawn(move || {
+                        let text = polish::run(tool, &t).unwrap_or_else(|e| {
+                            eprintln!("[dictation] {e}");
+                            t
+                        });
+                        let _ = tx.send(Heard { job, text: Ok(text), live: false, cut: None, polished: true });
+                        ctx.request_repaint();
+                    })
+                    .ok();
+            }
             Ok(t) => {
                 if self.settings.keep_history {
                     self.history.add(Said { at: chrono::Local::now().timestamp(), text: t.clone(), app: self.target.name.clone(), secs: self.voice_secs });
@@ -641,7 +664,7 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
                 Err(e) => {
                     eprintln!("[dictation] {e}");
                     if let Job::Run { job, .. } = job {
-                        let _ = tx.send(Heard { job, text: Err(e), live: false, cut: None });
+                        let _ = tx.send(Heard { job, text: Err(e), live: false, cut: None, polished: false });
                         ctx.request_repaint();
                     }
                     continue;
@@ -662,7 +685,7 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
         if !live {
             eprintln!("[dictation] {:.1} s of voice in {} ms", pcm.len() as f32 / MODEL_RATE as f32, t0.elapsed().as_millis());
         }
-        let _ = tx.send(Heard { job, text, live, cut });
+        let _ = tx.send(Heard { job, text, live, cut, polished: false });
         ctx.request_repaint();
     }
 }
@@ -839,13 +862,13 @@ mod tests {
     fn an_answer_for_an_old_job_is_ignored() {
         let mut d = demo();
         d.phase = Phase::Working { job: 2 };
-        d.on_heard(Heard { job: 1, text: Ok("old".into()), live: false, cut: None });
+        d.on_heard(Heard { job: 1, text: Ok("old".into()), live: false, cut: None, polished: true });
         assert!(matches!(d.phase, Phase::Working { job: 2, .. }));
         // words so far never end a take
-        d.on_heard(Heard { job: 2, text: Ok("so far".into()), live: true, cut: None });
+        d.on_heard(Heard { job: 2, text: Ok("so far".into()), live: true, cut: None, polished: true });
         assert!(matches!(d.phase, Phase::Working { job: 2, .. }));
         assert!(d.typed.is_empty());
-        d.on_heard(Heard { job: 2, text: Ok(String::new()), live: false, cut: None });
+        d.on_heard(Heard { job: 2, text: Ok(String::new()), live: false, cut: None, polished: true });
         assert!(matches!(&d.phase, Phase::Showing { note: Note::Problem(_), .. }));
     }
 
