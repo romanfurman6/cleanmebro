@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 const ROW_H: f32 = 36.0;
-const HOVER_BTN: Color32 = Color32::from_rgb(0x2C, 0x2C, 0x31);
 
 pub fn command_icon(c: Command) -> Ico {
     match c {
