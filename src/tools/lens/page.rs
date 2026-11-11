@@ -6,7 +6,7 @@ use super::scan::{self, Node};
 use super::Lens as App;
 use crate::core::tool::Cx;
 use crate::kit::glass::*;
-use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
+use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
@@ -250,23 +250,23 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
         app.lens_order_at = now;
     }
 
-    // the live treemap: folders keep their order (re-sorted at most every
-    // 1.5 s), the layout is redone at most once a second, and every tile
-    // glides to its new place, so nothing jumps while sizes grow
+    // live bubbles, the same look as the finished map: folders keep their
+    // order (re-sorted at most every 1.5 s), the packing is redone at most
+    // once a second, and every bubble glides to its new place and size, so
+    // nothing jumps while sizes grow
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, r.bottom() - 16.0));
     let fr = Rect::from_min_max(Pos2::new(body.left(), body.bottom() - INFO_H), body.max);
     let area = Rect::from_min_max(body.min, Pos2::new(body.right(), fr.top() - 8.0));
-    const MAX_TILES: usize = 12;
     let ordered: Vec<&scan::LiveRow> = app.lens_order.iter().filter_map(|pa| rows.iter().find(|x| &x.path == pa)).collect();
-    let (shown_rows, rest) = if ordered.len() > MAX_TILES { (&ordered[..MAX_TILES - 1], &ordered[MAX_TILES - 1..]) } else { (&ordered[..], &ordered[..0]) };
+    let (shown_rows, rest) = if ordered.len() > MAX_BUBBLES { (&ordered[..MAX_BUBBLES - 1], &ordered[MAX_BUBBLES - 1..]) } else { (&ordered[..], &ordered[..0]) };
     let more = PathBuf::from("\0more");
     let total: u64 = rows.iter().map(|x| x.bytes).sum::<u64>().max(1);
-    let floor = total as f32 * 0.012;
+    let floor = (total as f64 * 0.004) as u64;
     let mut keys: Vec<PathBuf> = shown_rows.iter().map(|x| x.path.clone()).collect();
-    let mut weights: Vec<f32> = shown_rows.iter().map(|x| (x.bytes as f32).max(floor)).collect();
+    let mut weights: Vec<u64> = shown_rows.iter().map(|x| x.bytes.max(floor).max(1)).collect();
     if !rest.is_empty() {
         keys.push(more.clone());
-        weights.push((rest.iter().map(|x| x.bytes).sum::<u64>() as f32).max(floor));
+        weights.push(rest.iter().map(|x| x.bytes).sum::<u64>().max(floor).max(1));
     }
     let targets = LIVE_LAYOUT.with(|c| {
         let mut c = c.borrow_mut();
@@ -275,38 +275,54 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
             None => true,
         };
         if stale {
-            let rects = squarify(&weights, area);
+            // pack biggest first, then hand the circles back in `keys` order
+            let mut idx: Vec<usize> = (0..weights.len()).collect();
+            idx.sort_by_key(|&i| std::cmp::Reverse(weights[i]));
+            let sorted: Vec<u64> = idx.iter().map(|&i| weights[i]).collect();
+            let packed = pack(&sorted);
+            let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+            for (at, rr) in &packed {
+                lo = lo.min(*at - Vec2::splat(*rr));
+                hi = hi.max(*at + Vec2::splat(*rr));
+            }
+            let span = (hi - lo).max(Vec2::splat(0.01));
+            let sc = ((area.width() - 24.0) / span.x).min((area.height() - 24.0) / span.y);
+            let mid = (lo + hi) / 2.0;
+            let mut rects = vec![Rect::NOTHING; weights.len()];
+            for (n, &i) in idx.iter().enumerate() {
+                let (at, rr) = packed[n];
+                rects[i] = Rect::from_center_size(area.center() + (at - mid) * sc, Vec2::splat(rr * sc * 2.0));
+            }
             *c = Some((now, area, keys.clone(), rects));
         }
         c.as_ref().map(|x| x.3.clone()).unwrap_or_default()
     });
     let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.1);
-    let k = 1.0 - (-dt * 6.0).exp();
+    let k = 1.0 - (-dt * 5.0).exp();
     let mut drawn = std::collections::HashMap::new();
     let pointer = ctx.pointer_hover_pos();
     let mut hovered: Option<(&scan::LiveRow, Color32)> = None;
+    let bp = p.with_clip_rect(area.expand(4.0));
     for (n, key) in keys.iter().enumerate() {
         let Some(&target) = targets.get(n) else { continue };
-        // glide from last frame; a new tile grows from its centre
+        // glide from last frame; a new bubble grows from its centre
         let prev = app.lens_rows.get(key).map(|x| x.0).unwrap_or(Rect::from_center_size(target.center(), Vec2::ZERO));
         let rr = lerp_rect(prev, target, k);
         drawn.insert(key.clone(), (rr, 0.0));
-        let tile = rr.shrink(3.0);
-        if tile.width() < 2.0 || tile.height() < 2.0 {
+        let (c, rad) = (rr.center(), rr.width().min(rr.height()) / 2.0);
+        if rad < 1.0 {
             continue;
         }
         if *key == more {
             let bytes: u64 = rest.iter().map(|x| x.bytes).sum();
-            let busy = rest.iter().any(|x| !x.done);
-            live_tile(&p, tile, &format!("{} more", rest.len()), bytes, GRAY(), busy, false, now);
+            live_bubble(&bp, c, rad, &format!("{} more", rest.len()), bytes, PURPLE(), rest.iter().any(|x| !x.done), false, now);
             continue;
         }
         let row = shown_rows[n];
-        let hue = hue_of(app, root, &row.path);
-        let hov = pointer.is_some_and(|q| tile.contains(q));
-        live_tile(&p, tile, &row.name, row.bytes, hue, !row.done, hov, now);
+        let hov = pointer.is_some_and(|q| (q - c).length() <= rad);
+        live_bubble(&bp, c, rad, &row.name, row.bytes, BLUE(), !row.done, hov, now);
         if hov {
-            hovered = Some((row, hue));
+            hovered = Some((row, BLUE()));
         }
     }
     if rows.is_empty() {
@@ -338,92 +354,25 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
 }
 
 thread_local! {
-    /// The live treemap's last layout: when, the area, which tiles, their rects.
+    /// The live bubbles' last packing: when, the area, which folders, their squares on screen.
     static LIVE_LAYOUT: std::cell::RefCell<Option<(f64, Rect, Vec<PathBuf>, Vec<Rect>)>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Squarified treemap: `weights` (any order) laid out in `r`, one rect each.
-fn squarify(weights: &[f32], r: Rect) -> Vec<Rect> {
-    let total: f32 = weights.iter().sum();
-    if weights.is_empty() || total <= 0.0 || !r.is_positive() {
-        return vec![Rect::from_center_size(r.center(), Vec2::ZERO); weights.len()];
-    }
-    let scale = r.area() / total;
-    let areas: Vec<f32> = weights.iter().map(|w| w * scale).collect();
-    let mut out = vec![Rect::NOTHING; areas.len()];
-    let mut free = r;
-    let mut i = 0;
-    while i < areas.len() {
-        let side = free.width().min(free.height()).max(1.0);
-        let worst = |row: &[f32]| -> f32 {
-            let s: f32 = row.iter().sum();
-            let (mx, mn) = row.iter().fold((0.0f32, f32::MAX), |(a, b), &x| (a.max(x), b.min(x)));
-            ((side * side * mx) / (s * s)).max((s * s) / (side * side * mn.max(1e-3)))
-        };
-        let mut j = i + 1;
-        while j < areas.len() && worst(&areas[i..=j]) <= worst(&areas[i..j]) {
-            j += 1;
-        }
-        let row = &areas[i..j];
-        let s: f32 = row.iter().sum();
-        if free.width() >= free.height() {
-            // a column on the left
-            let w = (s / free.height()).min(free.width());
-            let mut y = free.top();
-            for (n, a) in row.iter().enumerate() {
-                let h = if j == areas.len() && n == row.len() - 1 { free.bottom() - y } else { a / w };
-                out[i + n] = Rect::from_min_size(Pos2::new(free.left(), y), Vec2::new(w, h));
-                y += h;
-            }
-            free.min.x += w;
-        } else {
-            // a row on top
-            let h = (s / free.width()).min(free.height());
-            let mut x = free.left();
-            for (n, a) in row.iter().enumerate() {
-                let w = if j == areas.len() && n == row.len() - 1 { free.right() - x } else { a / h };
-                out[i + n] = Rect::from_min_size(Pos2::new(x, free.top()), Vec2::new(w, h));
-                x += w;
-            }
-            free.min.y += h;
-        }
-        i = j;
-    }
-    out
-}
-
-/// One tile of the live treemap: solid when measured, striped while still
-/// growing (with a spinner); the name on top, the size at the bottom.
+/// One live bubble, in the finished map's look: a tinted circle with a
+/// hairline. Still measuring: fainter, with a spinner on top.
 #[allow(clippy::too_many_arguments)]
-fn live_tile(p: &egui::Painter, t: Rect, name: &str, bytes: u64, hue: Color32, busy: bool, hov: bool, now: f64) {
-    let rad = 10.0f32.min(t.width() / 3.0).min(t.height() / 3.0);
-    let fg = if busy { TEXT() } else { on_color(hue) };
-    if busy {
-        p.rect_filled(t, rad, with_alpha(hue, if hov { 0.26 } else { 0.18 }));
-        let cp = p.with_clip_rect(t.shrink(1.0).intersect(p.clip_rect()));
-        let step = 14.0;
-        let mut x = t.left() - t.height();
-        while x < t.right() {
-            cp.line_segment([Pos2::new(x, t.bottom()), Pos2::new(x + t.height(), t.top())], Stroke::new(5.0, with_alpha(hue, 0.10)));
-            x += step;
-        }
-        p.rect_stroke(t, rad, Stroke::new(1.0, with_alpha(hue, 0.45)), StrokeKind::Inside);
-    } else {
-        p.rect_filled(t, rad, if hov { lerp_color(hue, Color32::WHITE, 0.12) } else { hue });
+fn live_bubble(p: &egui::Painter, c: Pos2, rad: f32, name: &str, bytes: u64, base: Color32, busy: bool, hov: bool, now: f64) {
+    let fill = if busy { 0.10 } else { 0.2 } + if hov { 0.12 } else { 0.0 };
+    p.circle_filled(c, rad, with_alpha(base, fill));
+    crate::kit::glass::stroke_circle(p, c, rad, Stroke::new(1.0, with_alpha(base, if busy { 0.35 } else { 0.6 })));
+    let txt = if busy { TEXT_SOFT() } else { TEXT() };
+    if rad >= 30.0 {
+        text_fit(p, c - Vec2::new(0.0, 1.0), Align2::CENTER_BOTTOM, name, bold(if rad >= 46.0 { 12.0 } else { 11.0 }), txt, rad * 1.6);
+        text_fit(p, c + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, &human_bytes(bytes), font(if rad >= 46.0 { 11.0 } else { 10.0 }), TEXT_SOFT(), rad * 1.6);
     }
-    if t.width() < 44.0 || t.height() < 34.0 {
-        return;
-    }
-    let tp = p.with_clip_rect(t.intersect(p.clip_rect()));
-    let pad = if t.width() > 120.0 && t.height() > 80.0 { 14.0 } else { 8.0 };
-    let spin_w = if busy { 18.0 } else { 0.0 };
-    text_fit(&tp, Pos2::new(t.left() + pad, t.top() + pad), Align2::LEFT_TOP, name, bold(13.0), fg, t.width() - pad * 2.0 - spin_w);
-    if busy {
-        spinner(&tp, Pos2::new(t.right() - pad - 6.0, t.top() + pad + 8.0), 5.0, now, hue);
-    }
-    if t.height() >= 56.0 {
-        let size = (t.width().min(t.height() * 1.6) / 9.0).clamp(13.0, 34.0);
-        text_fit(&tp, Pos2::new(t.left() + pad, t.bottom() - pad), Align2::LEFT_BOTTOM, &human_bytes(bytes), FontId::new(size, egui::FontFamily::Name("hero".into())), fg, t.width() - pad * 2.0);
+    if busy && rad >= 16.0 {
+        let y = if rad >= 30.0 { c.y - 26.0 } else { c.y };
+        spinner(p, Pos2::new(c.x, y), 5.0, now, base);
     }
 }
 

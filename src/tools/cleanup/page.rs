@@ -243,6 +243,11 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
     // headline number
     let (big, caption) = if phase == Phase::Cleaning {
         (human_bytes(st.cleaned_bytes), format!("cleaned so far · {} items", st.cleaned_count))
+    } else if phase == Phase::Scanning {
+        // the items arrive at the end; the live tallies grow as each place is measured
+        let bytes: u64 = st.live.iter().map(|l| l.bytes).sum();
+        let n: usize = st.live.iter().map(|l| l.items).sum();
+        (human_bytes(bytes), format!("found so far · {n} items"))
     } else {
         (human_bytes(st.items.iter().filter(|i| i.verdict != Verdict::Keep).map(|i| i.bytes).sum()), format!("found so far · {} items", st.items.len()))
     };
@@ -292,11 +297,17 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
         if row.bottom() > r.bottom() - 8.0 {
             break;
         }
-        let items: Vec<&Item> = st.items.iter().filter(|i| i.group == grp).collect();
-        let n = items.len();
-        let bytes: u64 = items.iter().filter(|i| i.verdict != Verdict::Keep).map(|i| i.bytes).sum();
+        let (n, bytes, finished) = if phase == Phase::Scanning {
+            let l = st.live[Group::ALL.iter().position(|g| *g == grp).unwrap_or(0)];
+            (l.items, l.bytes, st.listed && l.done >= l.total)
+        } else {
+            let items: Vec<&Item> = st.items.iter().filter(|i| i.group == grp).collect();
+            (items.len(), items.iter().filter(|i| i.verdict != Verdict::Keep).map(|i| i.bytes).sum(), true)
+        };
         let mark = Pos2::new(cols[0] + 8.0, row.center().y);
-        if n > 0 {
+        if !finished {
+            spinner(&p, mark, 7.0, t, BLUE());
+        } else if n > 0 {
             p.circle_filled(mark, 8.0, tint::HEALTH());
             icon(&p, Icon::Check, Rect::from_center_size(mark, Vec2::splat(11.0)), ON_ACTION);
         } else {
