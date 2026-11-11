@@ -27,8 +27,24 @@ pub struct Drag {
 }
 
 const TOP_H: f32 = 52.0;
-/// The list of widgets on the left of Settings › Widgets.
+/// The list of widgets on the left of Settings › Widgets: as wide as there is
+/// room for, between these.
 const LIST_W: f32 = 184.0;
+const LIST_MIN_W: f32 = 140.0;
+/// Room on each side of the panel preview.
+const PREVIEW_PAD: f32 = 12.0;
+
+/// Settings › Widgets side by side: the list, the sizes, the panel preview.
+/// Narrower than this, they would overlap.
+pub const MIN_WIDTH: f32 = LIST_MIN_W + 1.0 + sizes_width() + 1.0 + preview_width();
+
+const fn sizes_width() -> f32 {
+    m::PANEL_WIDTH - 2.0 * panel::PAD + 2.0 * sp::L
+}
+
+const fn preview_width() -> f32 {
+    m::PANEL_WIDTH + 2.0 * PREVIEW_PAD
+}
 const LIST_ROW_H: f32 = 30.0;
 const END_SLOT_H: f32 = 40.0;
 /// Under the panel preview: the selected widget's sizes.
@@ -69,8 +85,6 @@ struct Item {
     title: String,
     /// The tool's name and the widget's one-liner, for search.
     words: String,
-    /// How many sizes it comes in.
-    sizes: usize,
     glyph: Icon,
     color: Color32,
     added: bool,
@@ -94,7 +108,7 @@ fn gallery(app: &App, query: &str) -> Vec<(String, Vec<Item>)> {
             .into_iter()
             .map(|w| {
                 let key = widget_key(t.id(), w.id);
-                Item { added: added(&key), key: Some(key), title: w.title.into(), words: format!("{} {}", t.name(), w.about), sizes: w.sizes.len(), glyph: b.icon, color: b.color }
+                Item { added: added(&key), key: Some(key), title: w.title.into(), words: format!("{} {}", t.name(), w.about), glyph: b.icon, color: b.color }
             })
             .filter(|it| matches(query, &it.title, &it.words))
             .collect();
@@ -109,8 +123,9 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let pointer = ctx.pointer_latest_pos();
-    let lr = Rect::from_min_size(body.min, Vec2::new(LIST_W, body.height()));
-    let vr = Rect::from_min_size(Pos2::new(lr.right() + 1.0, body.top()), Vec2::new(panel::inner_width() + 2.0 * sp::L, body.height()));
+    let list_w = (body.width() - 2.0 - sizes_width() - preview_width()).clamp(LIST_MIN_W, LIST_W);
+    let lr = Rect::from_min_size(body.min, Vec2::new(list_w, body.height()));
+    let vr = Rect::from_min_size(Pos2::new(lr.right() + 1.0, body.top()), Vec2::new(sizes_width(), body.height()));
     let gr = Rect::from_min_max(lr.min, vr.max);
     let pr = Rect::from_min_max(Pos2::new(gr.right() + 1.0, body.top()), body.max);
     let dragging_out = app.drag.as_ref().is_some_and(|d| !d.from_gallery);
@@ -129,7 +144,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     hairline(&p, gr.right_top(), gr.right_bottom());
 
     // list: search, then each tool's widgets
-    let sr = Rect::from_min_size(lr.min + Vec2::new(sp::M, sp::L), Vec2::new(LIST_W - 2.0 * sp::M, 28.0));
+    let sr = Rect::from_min_size(lr.min + Vec2::new(sp::M, sp::L), Vec2::new(list_w - 2.0 * sp::M, 28.0));
     let mut q = std::mem::take(&mut app.widget_search);
     let sresp = search_field(ui, sr, &mut q, "Search", false, 13.0);
     if sresp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -168,9 +183,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
                     p.rect_filled(rr, 7.0, white(12));
                 }
                 icon(&p, it.glyph, Rect::from_center_size(Pos2::new(rr.left() + 16.0, rr.center().y), Vec2::splat(14.0)), if sel { ON_ACTION } else { lift(it.color) });
-                let meta = if it.sizes == 1 { "1 size".to_string() } else { format!("{} sizes", it.sizes) };
-                let mr = p.text(Pos2::new(rr.right() - 8.0, rr.center().y), Align2::RIGHT_CENTER, meta, ty::caption(), if sel { with_alpha(ON_ACTION, 0.7) } else { ty::caption_color() });
-                let mut right = mr.left() - 6.0;
+                let mut right = rr.right() - 8.0;
                 if it.added {
                     p.circle_filled(Pos2::new(right - 3.0, rr.center().y), 3.0, GREEN());
                     right -= 12.0;
@@ -196,14 +209,15 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let p = ui.painter().clone();
     p.rect_filled(pr, CornerRadius { se: 12, ..Default::default() }, BG());
     let bar = Rect::from_min_size(pr.min, Vec2::new(pr.width(), 26.0));
-    p.rect_filled(bar, CornerRadius::ZERO, white(13));
+    p.rect_filled(bar, CornerRadius::ZERO, POPOVER());
     hairline(&p, bar.left_bottom(), bar.right_bottom());
     let pw = m::PANEL_WIDTH;
     let px = pr.center().x - pw / 2.0;
-    // the app's menu bar icon, highlighted, above the panel it opens
+    // the app's menu bar icon, highlighted as when its panel is open
     let tray = Rect::from_center_size(Pos2::new(px + pw - 40.0, bar.center().y), Vec2::splat(15.0));
-    p.rect_filled(tray, 4.0, white(220));
-    p.rect_stroke(tray.expand(3.0), 6.0, Stroke::new(1.5, with_alpha(ACCENT(), 0.8)), StrokeKind::Outside);
+    p.rect_filled(tray.expand2(Vec2::new(5.0, 3.0)), 5.0, white(36));
+    let g = crate::kit::brand::glyph(&ctx);
+    p.image(g.id(), tray, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), TEXT());
     icon(&p, Icon::Wifi, Rect::from_center_size(Pos2::new(tray.center().x + 30.0, bar.center().y), Vec2::splat(14.0)), TEXT_SOFT());
     icon(&p, Icon::Battery(80), Rect::from_center_size(Pos2::new(tray.center().x - 30.0, bar.center().y), Vec2::splat(16.0)), TEXT_SOFT());
     let title_y = bar.bottom() + 12.0;
@@ -305,11 +319,7 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
     let w = panel::inner_width();
     let mut y = r.top() + sp::L;
     text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, spec.title, ty::title(), TEXT(), w);
-    y += 16.0 + sp::XS;
-    let n = spec.sizes.len();
-    let hint = if n == 1 { "1 size".to_string() } else { format!("{n} sizes") };
-    text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, &hint, ty::caption(), ty::caption_color(), w);
-    y += 14.0 + sp::M;
+    y += 16.0 + sp::M;
     let cur = app.widgets.iter().find(|e| e.key == key && e.on).map(|e| spec.fit(e.size));
     // rows: Small and Wide share one; the rest get their own
     let mut rows: Vec<Vec<Size>> = vec![];
@@ -336,8 +346,9 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
             for z in row {
                 let sz = panel::size_px(*z, w);
                 let here = cur == Some(*z);
-                let label = if here { format!("{} · {} · in the panel", z.name(), z.label()) } else { format!("{} · {}", z.name(), z.label()) };
-                text_fit(&p, Pos2::new(cx, y), Align2::LEFT_TOP, &label, ty::caption(), if here { ACCENT() } else { ty::caption_color() }, sz.x.max(150.0));
+                // no wider than the widget under it, so Small's never runs into Wide's
+                let label = format!("{} · {}", z.name(), z.label());
+                text_fit(&p, Pos2::new(cx, y), Align2::LEFT_TOP, &label, ty::caption(), if here { ACCENT() } else { ty::caption_color() }, sz.x);
                 let wr = Rect::from_min_size(Pos2::new(cx, y + label_h), sz);
                 panel::draw_at(app, ui, owner, spec.id, *z, wr, None, &mut quiet);
                 let resp = ui.interact(wr, ui.scope_id().with(("var", key, z.label())), Sense::click_and_drag());
@@ -539,7 +550,25 @@ pub fn version_label() -> String {
     }
 }
 
+/// A tab's body that scrolls when its content is taller than the window.
+/// `f` draws into the given rect (moved by the scroll) and returns the bottom
+/// of what it drew.
+fn scroll_body(ui: &mut Ui, body: Rect, salt: &str, f: impl FnOnce(&mut Ui, Rect) -> f32) {
+    let mut child = ui.new_child(UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
+    child.set_clip_rect(body);
+    ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show(&mut child, |ui| {
+        let top = ui.cursor().min;
+        let r = Rect::from_min_size(top, body.size());
+        let bottom = f(ui, r);
+        ui.allocate_rect(Rect::from_min_max(top, Pos2::new(r.right(), bottom.max(top.y))), Sense::hover());
+    });
+}
+
 fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
+    scroll_body(ui, body, "settings-tools", |ui, body| tools_list(app, ui, body));
+}
+
+fn tools_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     let p = ui.painter().clone();
     let w = 560.0f32.min(body.width() - 48.0);
     let x = body.center().x - w / 2.0;
@@ -573,10 +602,15 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     if let Some((i, on)) = flip {
         app.set_tool_on(i, on);
     }
+    card.bottom() + 24.0
 }
 
 /// Open at login, sounds, what macOS allows the tools (live), and setup again.
 fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
+    scroll_body(ui, body, "settings-general", |ui, body| general_list(app, ui, body));
+}
+
+fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     let p = ui.painter().clone();
     let w = 600.0f32.min(body.width() - 48.0);
     let x = body.center().x - w / 2.0;
@@ -609,7 +643,7 @@ fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
         let (tools, watch) = (&app.tools, &mut app.perm_watch);
         watch.poll(tools, &list, now);
     }
-    let area = Rect::from_min_max(Pos2::new(x, y), Pos2::new(x + w, body.bottom()));
+    let area = Rect::from_min_max(Pos2::new(x, y), Pos2::new(x + w, body.bottom().max(y)));
     let used = super::onboard::perm_list(app, ui, area, &list, 10.0, now);
     y += used + 16.0;
     let label = "Run setup again";
@@ -619,4 +653,5 @@ fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     }
     p.text(Pos2::new(x + w, y + 15.0), Align2::RIGHT_CENTER, version_label(), font(11.0), TEXT_FAINT());
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
+    y + 30.0 + 24.0
 }

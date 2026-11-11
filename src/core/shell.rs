@@ -722,7 +722,8 @@ impl App {
         egui::ViewportBuilder::default()
             .with_title("Cmd+Meow")
             .with_inner_size([m::APP_WIDTH, m::APP_HEIGHT])
-            .with_min_inner_size([980.0, 640.0])
+            // Settings › Widgets sets the narrowest the window can go
+            .with_min_inner_size([crate::kit::glass::SIDEBAR_W + super::editor::MIN_WIDTH, 640.0])
             .with_transparent(true)
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
