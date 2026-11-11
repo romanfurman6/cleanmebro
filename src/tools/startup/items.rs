@@ -113,6 +113,9 @@ pub struct Job {
     /// The app it belongs to (the outermost .app around its program).
     pub owner: Option<PathBuf>,
     pub name: String,
+    /// Registered by its app from inside its bundle (SMAppService): it can
+    /// be switched, but its file is part of the app and stays.
+    pub bundled: bool,
 }
 
 impl Job {
@@ -258,7 +261,7 @@ pub fn jobs(user_library: &Path, system: &Path, disabled_user: &HashSet<String>,
                 let on = !disabled.contains(&label) && v.get_bool("Disabled") != Some(true);
                 let owner = program.as_deref().and_then(owner_app);
                 let name = display_name(&label, owner.as_deref());
-                Some(Job { pid: if on { pids.get(&label).copied() } else { None }, when: when_of(&v), label, plist: path, program, scope, on, orphan, owner, name })
+                Some(Job { pid: if on { pids.get(&label).copied() } else { None }, when: when_of(&v), label, plist: path, program, scope, on, orphan, owner, name, bundled: false })
             })
             .collect();
         found.sort_by_key(|j| j.name.to_lowercase());
@@ -289,6 +292,107 @@ pub fn parse_list(out: &str) -> HashMap<String, u32> {
             (pid > 0).then(|| (label.to_string(), pid))
         })
         .collect()
+}
+
+/// Every job `launchctl list` knows, running or not.
+pub fn parse_list_loaded(out: &str) -> HashSet<String> {
+    out.lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            let pid = it.next()?;
+            let _status = it.next()?;
+            let label = it.next()?;
+            (pid == "-" || pid.parse::<u32>().is_ok()).then(|| label.to_string())
+        })
+        .collect()
+}
+
+/// Every job in the `services = { … }` block of `launchctl print system`.
+pub fn parse_print_loaded(out: &str) -> HashSet<String> {
+    let mut inside = false;
+    let mut found = HashSet::new();
+    for l in out.lines() {
+        let t = l.trim();
+        if !inside {
+            inside = t.starts_with("services = {");
+            continue;
+        }
+        if t == "}" {
+            break;
+        }
+        let parts: Vec<&str> = t.split_whitespace().collect();
+        if parts.len() >= 3 && (parts[0] == "-" || parts[0].parse::<u32>().is_ok()) {
+            found.insert(parts[parts.len() - 1].to_string());
+        }
+    }
+    found
+}
+
+/// What launchd knows about, per domain: loaded and switched-off labels.
+pub struct Known<'a> {
+    pub loaded_user: &'a HashSet<String>,
+    pub loaded_system: &'a HashSet<String>,
+    pub disabled_user: &'a HashSet<String>,
+    pub disabled_system: &'a HashSet<String>,
+    pub pids: &'a HashMap<String, u32>,
+}
+
+/// Agents and daemons apps register from inside their own bundle
+/// (`Contents/Library/LaunchAgents|LaunchDaemons`, SMAppService). They never
+/// appear in the launchd folders; a plist counts once launchd has it loaded
+/// or someone switched it off.
+pub fn bundled_jobs(apps: &[PathBuf], k: &Known) -> Vec<Job> {
+    let mut out = Vec::new();
+    for app in apps {
+        for (sub, scope) in [("Contents/Library/LaunchAgents", Scope::User), ("Contents/Library/LaunchDaemons", Scope::System)] {
+            let Ok(rd) = std::fs::read_dir(app.join(sub)) else { continue };
+            for e in rd.flatten() {
+                let path = e.path();
+                if path.extension().is_none_or(|x| x != "plist") {
+                    continue;
+                }
+                let Some(v) = plist::read(&path) else { continue };
+                let Some(label) = v.get_str("Label").map(str::to_string) else { continue };
+                let (loaded, disabled) = if scope == Scope::System { (k.loaded_system, k.disabled_system) } else { (k.loaded_user, k.disabled_user) };
+                if label.starts_with("com.apple.") || !(loaded.contains(&label) || disabled.contains(&label)) {
+                    continue;
+                }
+                let program = v
+                    .get_str("BundleProgram")
+                    .map(|b| app.join(b))
+                    .or_else(|| v.get_str("Program").map(PathBuf::from))
+                    .or_else(|| match v.get("ProgramArguments") {
+                        Some(plist::Value::Array(a)) => a.first().and_then(|x| x.str()).map(PathBuf::from),
+                        _ => None,
+                    });
+                let on = !disabled.contains(&label) && v.get_bool("Disabled") != Some(true);
+                let owner = Some(app.clone());
+                let name = display_name(&label, owner.as_deref());
+                out.push(Job { pid: if on { k.pids.get(&label).copied() } else { None }, when: when_of(&v), label, plist: path, program, scope, on, orphan: false, owner, name, bundled: true });
+            }
+        }
+    }
+    out.sort_by_key(|j| j.name.to_lowercase());
+    out
+}
+
+/// Apps in the usual folders (and one level of subfolders), for bundled jobs.
+fn app_bundles(user_home: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for root in [PathBuf::from("/Applications"), user_home.join("Applications")] {
+        let Ok(rd) = std::fs::read_dir(&root) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "app") {
+                out.push(p);
+            } else if p.is_dir() && !p.is_symlink() {
+                if let Ok(inner) = std::fs::read_dir(&p) {
+                    out.extend(inner.flatten().map(|e| e.path()).filter(|q| q.extension().is_some_and(|x| x == "app")));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Running jobs from the `services = { … }` block of `launchctl print system`
@@ -326,9 +430,18 @@ pub fn read_jobs(user_library: &Path) -> Vec<Job> {
     let gui = format!("gui/{}", macos::uid());
     let du = parse_disabled(&run(&["print-disabled", &gui]));
     let ds = parse_disabled(&run(&["print-disabled", "system"]));
-    let mut pids = parse_print_services(&run(&["print", "system"]));
-    pids.extend(parse_list(&run(&["list"])));
-    jobs(user_library, Path::new("/"), &du, &ds, &pids)
+    let sys = run(&["print", "system"]);
+    let list = run(&["list"]);
+    let mut pids = parse_print_services(&sys);
+    pids.extend(parse_list(&list));
+    let mut out = jobs(user_library, Path::new("/"), &du, &ds, &pids);
+    let (lu, ls) = (parse_list_loaded(&list), parse_print_loaded(&sys));
+    let home = user_library.parent().unwrap_or(Path::new("/"));
+    let bundled = bundled_jobs(&app_bundles(home), &Known { loaded_user: &lu, loaded_system: &ls, disabled_user: &du, disabled_system: &ds, pids: &pids });
+    // a label already in a launchd folder is that job, not a second one
+    let fresh: Vec<Job> = bundled.into_iter().filter(|b| !out.iter().any(|j| j.label == b.label && (j.scope == Scope::System) == (b.scope == Scope::System))).collect();
+    out.extend(fresh);
+    out
 }
 
 /// The shell command that turns a job on or off; it stays switched across restarts.
@@ -489,8 +602,43 @@ pub mod tests {
     }
 
     #[test]
+    fn finds_jobs_apps_register_from_their_bundle() {
+        let f = Fake::new("bundled");
+        let xml = |label: &str, extra: &str| format!("<plist><dict><key>Label</key><string>{label}</string><key>BundleProgram</key><string>Contents/MacOS/helper</string>{extra}</dict></plist>");
+        f.file("apps/Tool.app/Contents/Library/LaunchAgents/com.tool.agent.plist", &xml("com.tool.agent", "<key>RunAtLoad</key><true/>"));
+        f.file("apps/Tool.app/Contents/Library/LaunchDaemons/com.tool.daemon.plist", &xml("com.tool.daemon", "<key>KeepAlive</key><true/>"));
+        f.file("apps/Tool.app/Contents/Library/LaunchAgents/com.tool.unused.plist", &xml("com.tool.unused", ""));
+        f.file("apps/Off.app/Contents/Library/LaunchAgents/com.off.agent.plist", &xml("com.off.agent", ""));
+        let apps = vec![f.root.join("apps/Tool.app"), f.root.join("apps/Off.app"), f.root.join("apps/None.app")];
+        let lu: HashSet<String> = ["com.tool.agent".to_string()].into();
+        let ls: HashSet<String> = ["com.tool.daemon".to_string()].into();
+        let du: HashSet<String> = ["com.off.agent".to_string()].into();
+        let pids: HashMap<String, u32> = [("com.tool.daemon".to_string(), 42)].into();
+        let js = bundled_jobs(&apps, &Known { loaded_user: &lu, loaded_system: &ls, disabled_user: &du, disabled_system: &HashSet::new(), pids: &pids });
+        let labels: Vec<&str> = js.iter().map(|j| j.label.as_str()).collect();
+        // registered (loaded or switched off) ones only, never a plist launchd doesn't know
+        assert_eq!(js.len(), 3, "{labels:?}");
+        let find = |l: &str| js.iter().find(|j| j.label == l).unwrap();
+        let a = find("com.tool.agent");
+        assert!(a.bundled && a.on && a.scope == Scope::User && a.when == When::AtLogin);
+        assert_eq!(a.program, Some(f.root.join("apps/Tool.app/Contents/MacOS/helper")));
+        assert_eq!((a.name.as_str(), a.owner.clone()), ("Tool", Some(f.root.join("apps/Tool.app"))));
+        let d = find("com.tool.daemon");
+        assert_eq!((d.scope, d.pid, d.when), (Scope::System, Some(42), When::KeepsRunning));
+        assert!(!find("com.off.agent").on);
+    }
+
+    #[test]
+    fn lists_loaded_jobs_running_or_not() {
+        let l = parse_list_loaded("PID\tStatus\tLabel\n123\t0\tcom.a\n-\t0\tcom.b\n");
+        assert_eq!(l, ["com.a".to_string(), "com.b".to_string()].into());
+        let p = parse_print_loaded("system = {\n\tservices = {\n\t\t 0\t-\tcom.c\n\t\t 88\t0\tcom.d\n\t}\n}");
+        assert_eq!(p, ["com.c".to_string(), "com.d".to_string()].into());
+    }
+
+    #[test]
     fn suggestions_skip_protected_jobs() {
-        let mut j = Job { label: "com.acme.vpn.updater".into(), plist: PathBuf::new(), program: None, scope: Scope::User, on: true, when: When::AtLogin, pid: None, orphan: false, owner: None, name: String::new() };
+        let mut j = Job { label: "com.acme.vpn.updater".into(), plist: PathBuf::new(), program: None, scope: Scope::User, on: true, when: When::AtLogin, pid: None, orphan: false, owner: None, name: String::new(), bundled: false };
         assert_eq!(j.why(), None);
         j.label = "com.acme.updater".into();
         assert_eq!(j.why(), Some(Why::Updater));
@@ -529,7 +677,7 @@ pub mod tests {
 
     #[test]
     fn switch_commands() {
-        let j = Job { label: "com.a.b".into(), plist: "/L/com.a.b.plist".into(), program: None, scope: Scope::System, on: true, when: When::AtLogin, pid: None, orphan: false, owner: None, name: "B".into() };
+        let j = Job { label: "com.a.b".into(), plist: "/L/com.a.b.plist".into(), program: None, scope: Scope::System, on: true, when: When::AtLogin, pid: None, orphan: false, owner: None, name: "B".into(), bundled: false };
         assert_eq!(switch_cmd(&j, false), "/bin/launchctl disable 'system/com.a.b'; /bin/launchctl bootout 'system/com.a.b' 2>/dev/null; ");
         assert_eq!(switch_cmd(&j, true), "/bin/launchctl enable 'system/com.a.b'; /bin/launchctl bootstrap system '/L/com.a.b.plist' 2>/dev/null; ");
     }

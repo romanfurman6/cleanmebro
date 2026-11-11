@@ -493,6 +493,9 @@ mod tests {
         c.settings.record_concealed = true;
         c.take(pw);
         assert_eq!(c.store.entries.len(), n + 1, "turned on in Settings");
+        assert!(c.store.entries[0].secret, "a password stays in memory only");
+        c.take(Clip { text: Some("one-time hand-over".into()), transient: true, ..Default::default() });
+        assert_eq!(c.store.entries.len(), n + 1, "transient never kept, even with concealed on");
     }
 
     #[test]

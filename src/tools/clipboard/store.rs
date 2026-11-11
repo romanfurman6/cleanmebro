@@ -49,8 +49,10 @@ pub struct Clip {
     pub html: Option<Vec<u8>>,
     pub png: Option<Vec<u8>>,
     pub files: Vec<PathBuf>,
-    /// Marked by the copying app as a password or as not meant for history.
+    /// Marked by the copying app as a password.
     pub concealed: bool,
+    /// Marked as temporary or auto-generated: never kept.
+    pub transient: bool,
     /// The app in front when it was copied.
     pub app: String,
     pub bundle: String,
@@ -90,6 +92,10 @@ pub struct Entry {
     #[serde(default)]
     pub bytes: u64,
     pub hash: u64,
+    /// A password (concealed clip): kept in memory only, never written to
+    /// disk, gone when the app quits.
+    #[serde(skip)]
+    pub secret: bool,
 }
 
 /// Characters of a clip a list row needs at most.
@@ -162,6 +168,7 @@ impl Entry {
             html: self.html,
             bytes: self.bytes,
             hash: self.hash,
+            secret: self.secret,
         }
     }
 
@@ -390,16 +397,21 @@ impl Store {
         }
         // off the UI thread: the index (every clip's text) is rewritten on
         // every copy, and it can be megabytes
-        crate::kit::fs::save_json_later(&self.dir.join("index.json"), &self.entries, false);
+        let kept: Vec<&Entry> = self.entries.iter().filter(|e| !e.secret).collect();
+        crate::kit::fs::save_json_later(&self.dir.join("index.json"), &kept, false);
     }
 
     /// Add a clip copied at `now` (ms). Returns its id, or None for an empty
     /// clip. A repeat moves the old entry to the top when `dedupe` is on.
     pub fn add(&mut self, clip: &Clip, now: i64, lim: Limits) -> Option<u64> {
-        if clip.is_empty() {
+        if clip.is_empty() || clip.transient {
             return None;
         }
         let kind = classify(clip);
+        // a password lives in memory only, so only as plain text
+        if clip.concealed && matches!(kind, Kind::Image) {
+            return None;
+        }
         let (text, h, w, ht) = match kind {
             Kind::File => {
                 let t = clip.files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n");
@@ -424,6 +436,7 @@ impl Store {
                 e.count += 1;
                 e.app = clip.app.clone();
                 e.bundle = clip.bundle.clone();
+                e.secret |= clip.concealed;
                 let id = e.id;
                 self.entries.insert(0, e);
                 self.trim(lim, now);
@@ -437,8 +450,8 @@ impl Store {
             id += 1;
         }
         let mut bytes = text.len() as u64;
-        let mut e = Entry { id, kind, text, app: clip.app.clone(), bundle: clip.bundle.clone(), first: now, last: now, count: 1, pinned: false, w, h: ht, rtf: false, html: false, bytes: 0, hash: h };
-        if self.saves {
+        let mut e = Entry { id, kind, text, app: clip.app.clone(), bundle: clip.bundle.clone(), first: now, last: now, count: 1, pinned: false, w, h: ht, rtf: false, html: false, bytes: 0, hash: h, secret: clip.concealed };
+        if self.saves && !clip.concealed {
             let _ = std::fs::create_dir_all(self.dir.join("blobs"));
             if let (Kind::Image, Some(png)) = (kind, &clip.png) {
                 if std::fs::write(self.blob(id, "png"), png).is_err() {
@@ -649,7 +662,12 @@ mod tests {
         let mut s = Store::open(dir.clone());
         let img = s.add(&Clip { png: Some(png.clone()), app: "Capture".into(), ..Default::default() }, 10, LIM).unwrap();
         let rich = s.add(&Clip { text: Some("bold".into()), rtf: Some(b"{\\rtf1 bold}".to_vec()), ..Default::default() }, 11, LIM).unwrap();
+        let pw = s.add(&Clip { text: Some("hunter2".into()), rtf: Some(b"{\\rtf1 hunter2}".to_vec()), concealed: true, ..Default::default() }, 12, LIM).unwrap();
+        assert_eq!(s.entries.len(), 3);
         crate::kit::fs::flush_writes();
+        // the password was never written: not in the index, no blob
+        assert!(!std::fs::read_to_string(dir.join("index.json")).unwrap().contains("hunter2"));
+        assert!(!s.blob(pw, "rtf").exists());
         let back = Store::open(dir.clone());
         assert_eq!(back.entries.len(), 2);
         assert_eq!(back.get(img).map(|e| (e.kind, e.w, e.h)), Some((Kind::Image, 4, 3)));

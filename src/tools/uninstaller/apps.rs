@@ -48,6 +48,37 @@ pub fn read_info(app: &Path) -> Option<Info> {
     Some(Info { id, name, version })
 }
 
+/// Bundle ids of what an app carries inside it (extensions, login items,
+/// helpers, XPC services, system extensions) from the same vendor, beyond
+/// those already under the app's own id. Their data ("~/Library/Containers/
+/// com.1password.safari") belongs to the app too.
+pub fn embedded_ids(app: &Path, main_id: &str) -> Vec<String> {
+    let main = main_id.to_lowercase();
+    let vendor: Vec<&str> = main.split('.').take(2).collect();
+    if vendor.len() < 2 {
+        return Vec::new();
+    }
+    let vendor = format!("{}.{}.", vendor[0], vendor[1]);
+    let mut out = Vec::new();
+    for sub in ["Contents/PlugIns", "Contents/Library/LoginItems", "Contents/Library/SystemExtensions", "Contents/XPCServices", "Contents/Helpers", "Contents/Frameworks", "Contents/Library/Helpers"] {
+        let Ok(rd) = std::fs::read_dir(app.join(sub)) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.extension().is_some_and(|x| ["app", "appex", "xpc", "systemextension"].iter().any(|k| x == *k)) {
+                continue;
+            }
+            let Some(v) = plist::read(&p.join("Contents/Info.plist")) else { continue };
+            let Some(id) = v.get_str("CFBundleIdentifier").map(|s| s.trim().to_lowercase()) else { continue };
+            let below_main = id == main || id.starts_with(&format!("{main}."));
+            if id.starts_with(&vendor) && !below_main && !out.contains(&id) {
+                out.push(id);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// The folders apps are installed in.
 pub fn app_roots() -> Vec<PathBuf> {
     vec![PathBuf::from("/Applications"), crate::kit::fs::home().join("Applications")]

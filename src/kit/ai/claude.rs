@@ -33,7 +33,9 @@ impl Provider for ClaudeCode {
     }
     fn local_tokens(&mut self) -> LocalTokens {
         // project folders hold the session logs one level down
-        self.cache.update(recent_jsonl(&projects_dir(), 1), usage_entry)
+        // <project>/<session>.jsonl, and subagents' own logs in
+        // <project>/<session>/subagents/, which count toward the limits too
+        self.cache.update(recent_jsonl(&projects_dir(), 3), usage_entry)
     }
     fn projects(&mut self) -> Vec<Project> {
         scan_projects()
@@ -213,6 +215,23 @@ mod tests {
         assert_eq!(info.plan_title(), "Claude Max");
         let (l, c, n) = parse_usage("");
         assert!(l.is_empty() && c.is_empty() && n.is_empty());
+    }
+
+    #[test]
+    fn a_resumed_session_copying_old_replies_counts_them_once() {
+        let dir = std::env::temp_dir().join(format!("cmb-resume-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("p/s1/subagents")).unwrap();
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let line = |id: &str, out: u64| format!("{{\"timestamp\":\"{now}\",\"message\":{{\"id\":\"{id}\",\"usage\":{{\"input_tokens\":10,\"output_tokens\":{out}}}}}}}\n");
+        std::fs::write(dir.join("p/s1.jsonl"), line("msg_a", 1) + &line("msg_b", 2)).unwrap();
+        // the resumed session starts with a copy of s1, then goes on
+        std::fs::write(dir.join("p/s2.jsonl"), line("msg_a", 1) + &line("msg_b", 2) + &line("msg_c", 3)).unwrap();
+        // a subagent's own replies count too
+        std::fs::write(dir.join("p/s1/subagents/agent-x.jsonl"), line("msg_d", 4)).unwrap();
+        let mut cache = LogCache::default();
+        let t = cache.update(recent_jsonl(&dir, 3), usage_entry);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(t.output_7d, 1 + 2 + 3 + 4);
     }
 
     #[test]

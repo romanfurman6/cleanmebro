@@ -423,9 +423,31 @@ pub fn flush_writes() {
     }
 }
 
-/// (total, available) bytes of the volume holding `path`.
+/// (total, available) bytes of the volume holding `path`. On macOS
+/// "available" is what Finder shows: free space plus what macOS can purge
+/// on its own (local snapshots, caches it manages), so a nearly full disk
+/// isn't reported as full. Kept for a few seconds, since pages ask for it
+/// every frame and the purgeable part takes a moment to work out.
 pub fn volume_space(path: &str) -> (u64, u64) {
-    let c = std::ffi::CString::new(path).unwrap();
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<HashMap<String, (Instant, (u64, u64))>>> = Mutex::new(None);
+    if let Some((at, v)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).get(path) {
+        if at.elapsed() < Duration::from_secs(5) {
+            return *v;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    let v = finder_space(path).unwrap_or_else(|| statvfs_space(path));
+    #[cfg(not(target_os = "macos"))]
+    let v = statvfs_space(path);
+    CACHE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(path.to_string(), (Instant::now(), v));
+    v
+}
+
+/// Free space without purgeable: what `df` shows.
+fn statvfs_space(path: &str) -> (u64, u64) {
+    let Ok(c) = std::ffi::CString::new(path) else { return (0, 0) };
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
     if unsafe { libc::statvfs(c.as_ptr(), &mut st) } == 0 {
         let total = st.f_blocks as u64 * st.f_frsize as u64;
@@ -434,6 +456,19 @@ pub fn volume_space(path: &str) -> (u64, u64) {
     } else {
         (0, 0)
     }
+}
+
+/// Total and "available for important usage" from the volume's URL keys.
+#[cfg(target_os = "macos")]
+fn finder_space(path: &str) -> Option<(u64, u64)> {
+    use objc2_foundation::{NSArray, NSNumber, NSString, NSURLVolumeAvailableCapacityForImportantUsageKey, NSURLVolumeTotalCapacityKey, NSURL};
+    let url = NSURL::fileURLWithPath(&NSString::from_str(path));
+    let (total_key, avail_key) = unsafe { (NSURLVolumeTotalCapacityKey, NSURLVolumeAvailableCapacityForImportantUsageKey) };
+    let keys = NSArray::from_slice(&[total_key, avail_key]);
+    let values = url.resourceValuesForKeys_error(&keys).ok()?;
+    let num = |k: &NSString| values.objectForKey(k).and_then(|o| o.downcast::<NSNumber>().ok()).map(|n| n.longLongValue().max(0) as u64);
+    let (total, avail) = (num(total_key)?, num(avail_key)?);
+    (total > 0).then_some((total, avail.min(total)))
 }
 
 /// Paths that are never offered for removal, whatever the rules or the AI say.

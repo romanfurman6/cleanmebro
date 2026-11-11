@@ -171,9 +171,12 @@ impl Index {
     /// Everything that belongs to `app` and to no other app in `all`
     /// (sizes not filled in).
     pub fn for_app(&self, app: &Owner, all: &[Owner]) -> Vec<Item> {
+        // what the app carries inside (extensions, helpers) owns data too;
+        // matched by id only, never by name
+        let inner: Vec<Owner> = if app.path.as_os_str().is_empty() { Vec::new() } else { super::apps::embedded_ids(&app.path, &app.id).into_iter().map(|id| Owner { id, name: String::new(), path: PathBuf::new() }).collect() };
         let mut out = Vec::new();
         for e in &self.entries {
-            if !belongs(e, app, all) {
+            if !belongs(e, app, all) && !inner.iter().any(|o| belongs(e, o, all)) {
                 continue;
             }
             if all.iter().any(|o| o.id != app.id && o.path != app.path && belongs(e, o, all)) {
@@ -460,6 +463,28 @@ pub mod tests {
         let admin: Vec<_> = got.iter().filter(|i| i.admin).collect();
         assert_eq!(admin.len(), 1);
         assert!(got.iter().all(|i| i.selected));
+    }
+
+    #[test]
+    fn data_of_extensions_and_helpers_inside_the_app_counts() {
+        let f = Fake::new("embedded");
+        let info = |id: &str| format!("<plist><dict><key>CFBundleIdentifier</key><string>{id}</string></dict></plist>");
+        let app = f.root.join("apps/1Password.app");
+        f.file("apps/1Password.app/Contents/Info.plist", &info("com.1password.1password"));
+        f.file("apps/1Password.app/Contents/PlugIns/Safari.appex/Contents/Info.plist", &info("com.1password.safari"));
+        f.file("apps/1Password.app/Contents/Library/LoginItems/Helper.app/Contents/Info.plist", &info("com.1password.browser-support"));
+        // a stock helper from another vendor is never taken as the app's
+        f.file("apps/1Password.app/Contents/Frameworks/Electron Helper.app/Contents/Info.plist", &info("com.github.electron.helper"));
+        f.lib("Containers/com.1password.safari/x");
+        f.lib("Application Support/com.1password.browser-support/x");
+        f.lib("Caches/com.github.electron.helper/x");
+        let idx = Index::build(&f.roots);
+        let me = owner("com.1password.1password", "1Password", &app.to_string_lossy());
+        let got = rels(&idx.for_app(&me, std::slice::from_ref(&me)), &f);
+        assert!(got.iter().any(|p| p.ends_with("Containers/com.1password.safari")), "{got:?}");
+        assert!(got.iter().any(|p| p.ends_with("Application Support/com.1password.browser-support")), "{got:?}");
+        assert!(!got.iter().any(|p| p.contains("electron")), "{got:?}");
+        assert_eq!(super::super::apps::embedded_ids(&app, "com.1password.1password"), vec!["com.1password.browser-support".to_string(), "com.1password.safari".to_string()]);
     }
 
     #[test]

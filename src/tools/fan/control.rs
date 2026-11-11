@@ -12,6 +12,11 @@ pub const TRIP_C: f32 = 95.0;
 pub const RESUME_C: f32 = 80.0;
 /// Below this Quiet leaves the fans to macOS, which stops them when cool.
 pub const QUIET_FROM_C: f32 = 60.0;
+/// …and once holding, Quiet lets go only below this, so a temperature
+/// hovering at 60 °C doesn't flip the fans every few seconds.
+pub const QUIET_UNTIL_C: f32 = 55.0;
+/// How much of each new reading the smoothed temperature takes in.
+const SMOOTH_ALPHA: f32 = 0.3;
 /// Curve x range, °C.
 pub const CURVE_LO: f32 = 30.0;
 pub const CURVE_HI: f32 = 95.0;
@@ -174,6 +179,19 @@ impl Settings {
         fans.iter().map(|f| frac.map(|k| speed(f, k))).collect()
     }
 
+    /// [`Settings::targets`] on a smoothed temperature, with Quiet's
+    /// hysteresis, so a sensor spike doesn't make the fans hunt.
+    pub fn steady_targets(&self, fans: &[Fan], temp: Option<f32>, st: &mut Steady) -> Vec<Option<f32>> {
+        let t = temp.map(|t| st.smooth(t));
+        if self.mode == Mode::Quiet {
+            let on = t.is_some_and(|t| t >= QUIET_FROM_C || (st.quiet_on && t >= QUIET_UNTIL_C));
+            st.quiet_on = on;
+            return fans.iter().map(|f| on.then(|| speed(f, 0.0))).collect();
+        }
+        st.quiet_on = false;
+        self.targets(fans, t)
+    }
+
     fn sanitize(mut self) -> Self {
         self.fixed = if self.fixed.is_finite() { self.fixed.clamp(0.0, 1.0) } else { 0.4 };
         let ok = self.curve.pts.iter().all(|(t, f)| t.is_finite() && f.is_finite()) && self.curve.pts.windows(2).all(|w| w[0].0 < w[1].0);
@@ -181,6 +199,26 @@ impl Settings {
             self.curve = Curve::default();
         }
         self
+    }
+}
+
+/// What the fan loop carries between samples.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Steady {
+    /// Smoothed source temperature.
+    pub ema: Option<f32>,
+    /// Quiet is holding the fans.
+    pub quiet_on: bool,
+}
+
+impl Steady {
+    fn smooth(&mut self, t: f32) -> f32 {
+        let v = match self.ema {
+            Some(e) if e.is_finite() => e + SMOOTH_ALPHA * (t - e),
+            _ => t,
+        };
+        self.ema = Some(v);
+        v
     }
 }
 
@@ -259,6 +297,35 @@ mod tests {
         assert_eq!(c.pts[0], (CURVE_LO, 0.2));
         c.drag(2, 120.0, 2.0);
         assert_eq!(c.pts[2], (CURVE_HI, 1.0));
+    }
+
+    #[test]
+    fn quiet_holds_between_55_and_60_and_spikes_are_smoothed() {
+        let fans = [fan()];
+        let s = Settings { mode: Mode::Quiet, ..Default::default() };
+        let mut st = Steady::default();
+        assert_eq!(s.steady_targets(&fans, Some(58.0), &mut st), vec![None]);
+        // warm for a while: Quiet takes the fans
+        for _ in 0..10 {
+            s.steady_targets(&fans, Some(62.0), &mut st);
+        }
+        assert!(st.quiet_on);
+        // back to 57: still held (no flapping around 60)
+        for _ in 0..10 {
+            s.steady_targets(&fans, Some(57.0), &mut st);
+        }
+        assert!(st.quiet_on);
+        for _ in 0..10 {
+            s.steady_targets(&fans, Some(50.0), &mut st);
+        }
+        assert!(!st.quiet_on);
+        // one hot reading moves a curve only part of the way
+        let mut c = Settings { mode: Mode::Curve, ..Default::default() };
+        c.curve.pts = [(40.0, 0.0), (60.0, 0.5), (80.0, 1.0)];
+        let mut st = Steady::default();
+        let calm = c.steady_targets(&fans, Some(40.0), &mut st)[0].unwrap();
+        let spike = c.steady_targets(&fans, Some(80.0), &mut st)[0].unwrap();
+        assert!(spike > calm && spike < speed(&fans[0], 1.0), "{calm} {spike}");
     }
 
     #[test]

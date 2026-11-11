@@ -7,7 +7,7 @@
 //! thing that moves, and only because time passes.
 
 use crate::kit::sync::LockExt;
-use super::engine::{Engine, Span, State, GRACE_CHOICES, WORKING_SECS};
+use super::engine::{Engine, Span, State, GRACE_CHOICES};
 use super::{KeepAwake, ID};
 use crate::core::tool::Size;
 use crate::kit::glass::*;
@@ -595,7 +595,7 @@ fn sessions(p: &Painter, r: Rect, e: &Engine, now: i64) {
     }
     for s in &shown {
         let cy = y + 16.0;
-        let working = now - s.last_write <= WORKING_SECS;
+        let working = s.working(now);
         p.circle_filled(Pos2::new(card.left() + 16.0, cy), 3.0, if working { GREEN() } else { Color32::from_rgb(0x63, 0x63, 0x66) });
         text_fit(p, Pos2::new(card.left() + 28.0, cy), Align2::LEFT_CENTER, &s.project, mono(11.5), TEXT_SOFT(), card.width() - 140.0);
         let when = if working { "working".to_string() } else { ago(now - s.last_write) };

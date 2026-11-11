@@ -26,6 +26,8 @@ const SUMMARY: &str = "summary";
 pub const UNDO_FOR: Duration = Duration::from_secs(60);
 /// How often the launchd folders are read again.
 const POLL: Duration = Duration::from_secs(20);
+/// The same while nothing is on screen and folder events are on.
+const HIDDEN_POLL: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Filter {
@@ -340,6 +342,9 @@ impl Startup {
 
     /// Stop a job and move its file to the Trash.
     pub fn trash(&self, j: &Job) {
+        if j.bundled {
+            return;
+        }
         let j = j.clone();
         let demo = self.demo;
         self.work(
@@ -369,6 +374,9 @@ pub fn plural(n: usize, word: &str) -> String {
 
 /// Read the launchd folders now and then; announce plists that weren't there before.
 fn watch(st: Shared, lib: PathBuf, ctx: egui::Context) {
+    static CHANGED: crate::kit::activity::Kick = crate::kit::activity::Kick::new();
+    let folders: Vec<PathBuf> = items::dirs(&lib, std::path::Path::new("/")).into_iter().map(|(d, _)| d).collect();
+    let hooked = crate::kit::fswatch::watch(&folders, 1.0, &CHANGED);
     loop {
         let jobs = items::read_jobs(&lib);
         let paths: BTreeSet<PathBuf> = items::plist_paths(&lib, std::path::Path::new("/")).into_iter().collect();
@@ -402,7 +410,10 @@ fn watch(st: Shared, lib: PathBuf, ctx: egui::Context) {
             crate::kit::notify::send(&format!("{app} added itself to startup"), &format!("{} · runs {}. Turn it off in Cmd+Meow › Startup.", j.label, j.when.label(j.scope)));
         }
         ctx.request_repaint();
-        std::thread::sleep(POLL);
+        // a new or removed plist comes as a folder event; what's running
+        // only matters on screen, so hidden it's read rarely
+        let wait = if !hooked || crate::kit::activity::visible() { POLL } else { HIDDEN_POLL };
+        crate::kit::activity::nap(wait, Some(&CHANGED));
     }
 }
 
@@ -416,7 +427,7 @@ pub fn demo(g: &mut State, done: bool) {
             Scope::AllUsers => "/Library/LaunchAgents",
             Scope::System => "/Library/LaunchDaemons",
         };
-        Job { label: label.into(), plist: PathBuf::from(format!("{dir}/{label}.plist")), program, scope, on, when, pid, orphan, owner, name: name.into() }
+        Job { label: label.into(), plist: PathBuf::from(format!("{dir}/{label}.plist")), program, scope, on, when, pid, orphan, owner, name: name.into(), bundled: false }
     };
     g.jobs = vec![
         job("com.docker.helper", "Docker", "/Applications/Docker.app/Contents/Library/LaunchServices/com.docker.helper", Scope::User, When::KeepsRunning, true, Some(812), false),
