@@ -145,7 +145,7 @@ impl Tool for Cleanup {
         // always on offer, at the lowest priority
         let mut v = vec![Recommendation {
             priority: 0,
-            title: "Let's give your Mac a quick clean".into(),
+            title: "Clean caches and logs".into(),
             body: if self.demo || crate::kit::claude_code::availability().ready() {
                 "Claude checks each cache and log path and tells you what's safe to remove.".into()
             } else {

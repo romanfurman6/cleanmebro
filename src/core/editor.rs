@@ -307,7 +307,7 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
     text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, spec.title, ty::title(), TEXT, w);
     y += 16.0 + sp::XS;
     let n = spec.sizes.len();
-    let hint = if n == 1 { "Drag it into the panel, or click to add it.".to_string() } else { format!("{n} sizes. Drag the one you want into the panel, or click it.") };
+    let hint = if n == 1 { "1 size".to_string() } else { format!("{n} sizes") };
     text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, &hint, ty::caption(), ty::caption_color(), w);
     y += 14.0 + sp::M;
     let cur = app.widgets.iter().find(|e| e.key == key && e.on).map(|e| spec.fit(e.size));
@@ -389,7 +389,7 @@ fn size_bar(app: &mut App, ui: &mut Ui, r: Rect) {
         Some((k, spec, cur))
     });
     let Some((key, spec, cur)) = sel else {
-        text_fit(&p, r.center(), Align2::CENTER_CENTER, "Click a widget to resize it · drag to move · − to remove", font(12.0), TEXT_FAINT, r.width());
+        text_fit(&p, r.center(), Align2::CENTER_CENTER, "Click a widget to resize it", font(12.0), TEXT_FAINT, r.width());
         return;
     };
     let ty = r.top() + 8.0;
@@ -543,28 +543,9 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let p = ui.painter().clone();
     let w = 560.0f32.min(body.width() - 48.0);
     let x = body.center().x - w / 2.0;
-    let mut y = body.top() + 24.0;
-    // general
-    p.text(Pos2::new(x, y), Align2::LEFT_TOP, "General", bold(15.0), TEXT);
-    y += 28.0;
-    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 54.0));
-    glass_card(&p, card, R_CARD, 0.0, false);
-    let sw = Rect::from_min_size(Pos2::new(card.right() - 42.0, card.center().y - 9.0), Vec2::new(30.0, 18.0));
-    p.text(Pos2::new(card.left() + 16.0, card.top() + 11.0), Align2::LEFT_TOP, "Open at login", font(13.0), TEXT);
-    p.text(Pos2::new(card.left() + 16.0, card.top() + 29.0), Align2::LEFT_TOP, "Start Cmd+Meow in the menu bar when you log in to your Mac", font(11.0), TEXT_FAINT);
-    let on = crate::kit::login::enabled();
-    if switch(ui, sw, ui.scope_id().with("open-at-login"), on, true).clicked() {
-        if let Err(e) = crate::kit::login::set(!on) {
-            eprintln!("[login] {e}");
-        }
-    }
-    p.text(Pos2::new(x + 2.0, card.bottom() + 8.0), Align2::LEFT_TOP, version_label(), font(11.0), TEXT_FAINT);
-    y = card.bottom() + 44.0;
-    p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Tools", bold(15.0), TEXT);
-    p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, "Each tool is separate. Turning one off hides its widgets and its page.", font(12.0), TEXT_DIM);
-    y += 50.0;
+    let y = body.top() + 24.0;
     let rows = app.tools.len();
-    let row_h = 46.0;
+    let row_h = 44.0;
     let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, rows as f32 * row_h + 8.0));
     glass_card(&p, card, R_CARD, 0.0, false);
     let mut flip: Option<(usize, bool)> = None;
@@ -580,8 +561,8 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
         {
             let b = t.badge();
             tool_chip(&p, chip, b.icon, b.color);
-            text_fit(&p, Pos2::new(chip.right() + 12.0, rr.top() + 8.0), Align2::LEFT_TOP, t.name(), font(13.0), TEXT, tw);
-            text_fit(&p, Pos2::new(chip.right() + 12.0, rr.top() + 26.0), Align2::LEFT_TOP, t.about(), font(11.0), TEXT_FAINT, tw);
+            text_fit(&p, Pos2::new(chip.right() + 12.0, rr.center().y), Align2::LEFT_CENTER, t.name(), font(13.0), TEXT, tw);
+            ui.interact(rr, ui.scope_id().with(("tool-about", t.id())), egui::Sense::hover()).on_hover_text(t.about());
             let on = app.tool_on(k);
             let id = ui.scope_id().with(("tool-on", t.id()));
             if switch(ui, sw, id, on, true).on_hover_text(if on { "Turn off" } else { "Turn on" }).clicked() {
@@ -622,8 +603,7 @@ fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     }
     y = card.bottom() + 28.0;
     p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Permissions", bold(15.0), TEXT);
-    p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, "What the tools you use need from macOS. Updates live.", font(12.0), TEXT_DIM);
-    y += 50.0;
+    y += 28.0;
     let list = super::onboard::rows(app);
     {
         let (tools, watch) = (&app.tools, &mut app.perm_watch);
@@ -637,5 +617,6 @@ fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     if pill_button(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(bw, 30.0)), label, BTN_SECONDARY, true).clicked() {
         app.open_setup();
     }
+    p.text(Pos2::new(x + w, y + 15.0), Align2::RIGHT_CENTER, version_label(), font(11.0), TEXT_FAINT);
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
 }

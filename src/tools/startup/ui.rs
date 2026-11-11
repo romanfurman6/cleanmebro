@@ -153,18 +153,18 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     if s.filter != Filter::Suggested {
         let a: Vec<&LoginApp> = apps.iter().filter(|a| app_ok(a)).collect();
         if !a.is_empty() || (s.filter == Filter::All && needle.is_empty()) {
-            rows.push(Row::Head("OPEN AT LOGIN", "Apps macOS opens when you log in", true));
+            rows.push(Row::Head("Open at login", "", true));
             match (&apps_err, apps_loaded) {
-                (Some(e), _) => rows.push(Row::Note(format!("Couldn't read the list ({e}). Allow Cmd+Meow to control System Events in System Settings › Privacy & Security › Automation."))),
+                (Some(e), _) => rows.push(Row::Note(format!("Couldn't read the list ({e}). Allow System Events in Privacy & Security › Automation"))),
                 (None, false) => rows.push(Row::Note("Reading…".into())),
-                (None, true) if a.is_empty() => rows.push(Row::Note("No apps open at login.".into())),
+                (None, true) if a.is_empty() => rows.push(Row::Note("None".into())),
                 _ => rows.extend(a.into_iter().cloned().map(Row::App)),
             }
         }
     }
     for (scopes, title, hint) in [
-        (&[Scope::User, Scope::AllUsers][..], "BACKGROUND AGENTS", "~/Library/LaunchAgents and /Library/LaunchAgents"),
-        (&[Scope::System][..], "SYSTEM DAEMONS", "/Library/LaunchDaemons · run as admin, ask your password"),
+        (&[Scope::User, Scope::AllUsers][..], "Background agents", ""),
+        (&[Scope::System][..], "System daemons", ""),
     ] {
         let js: Vec<&Job> = jobs.iter().filter(|j| scopes.contains(&j.scope) && job_ok(j)).collect();
         if js.is_empty() {
@@ -175,9 +175,9 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     }
     if rows.is_empty() {
         rows.push(Row::Note(match s.filter {
-            Filter::Suggested => "Nothing to turn off. Everything that starts with your Mac looks needed.".into(),
-            Filter::Off => "Nothing is turned off.".into(),
-            Filter::All => "Nothing matches.".into(),
+            Filter::Suggested => "Nothing to turn off".into(),
+            Filter::Off => "Nothing turned off".into(),
+            Filter::All => "No matches".into(),
         }));
     }
 
@@ -221,7 +221,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                     do_undo = true;
                 }
                 p.text(Pos2::new(cr.left() + 58.0, cr.center().y - 9.0), Align2::LEFT_CENTER, format!("{} turned off", plural(n, "item")), bold(13.0), TEXT);
-                text_fit(&p, Pos2::new(cr.left() + 58.0, cr.center().y + 9.0), Align2::LEFT_CENTER, "Nothing was removed. The apps still work when you open them.", font(12.0), TEXT_DIM, br.left() - cr.left() - 70.0);
+                text_fit(&p, Pos2::new(cr.left() + 58.0, cr.center().y + 9.0), Align2::LEFT_CENTER, "The apps still open", font(12.0), TEXT_DIM, br.left() - cr.left() - 70.0);
             } else {
                 glass_card(&p, cr, R_CARD, 0.0, false);
                 tool_chip(&p, Rect::from_center_size(Pos2::new(cr.left() + 30.0, cr.center().y), Vec2::splat(34.0)), Icon::Power, tint::STARTUP);
@@ -407,7 +407,7 @@ fn why_line(list: &[&Job]) -> String {
     };
     let mut c = s.chars();
     let s: String = c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default();
-    format!("{s}. Apps still work when you open them.")
+    s
 }
 
 struct Cols {
@@ -532,9 +532,9 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
                     s.undo();
                 }
                 p.text(Pos2::new(c.x + 30.0, c.y - 9.0), Align2::LEFT_CENTER, format!("{} turned off", plural(k, "item")), bold(13.0), TEXT);
-                text_fit(&p, Pos2::new(c.x + 30.0, c.y + 9.0), Align2::LEFT_CENTER, "Nothing removed. The apps still open.", font(12.0), TEXT_DIM, br.left() - c.x - 40.0);
+                text_fit(&p, Pos2::new(c.x + 30.0, c.y + 9.0), Align2::LEFT_CENTER, "The apps still open", font(12.0), TEXT_DIM, br.left() - c.x - 40.0);
             } else if n == 0 {
-                let msg = if loaded { "Everything that starts with your Mac looks needed." } else { "Reading what starts with your Mac…" };
+                let msg = if loaded { "Nothing to turn off" } else { "Reading what starts with your Mac…" };
                 tile::empty_note(&p, body.shrink2(Vec2::new(0.0, 6.0)), msg);
             } else {
                 let lh = 28.0;
@@ -583,7 +583,7 @@ mod tests {
         super::super::demo(&mut g, false);
         let list = g.suggested();
         let refs: Vec<&Job> = list.iter().collect();
-        assert_eq!(why_line(&refs), "2 updaters that check in the background, Steam Cleaner, and 1 agent of an app you removed. Apps still work when you open them.");
+        assert_eq!(why_line(&refs), "2 updaters that check in the background, Steam Cleaner, and 1 agent of an app you removed");
     }
 
     /// Every demo view renders without a panic.

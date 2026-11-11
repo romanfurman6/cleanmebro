@@ -89,7 +89,7 @@ fn main() -> eframe::Result {
     // the shell sizes the window for the chosen view on its first frame
     let viewport = egui::ViewportBuilder::default()
         .with_title("Cmd+Meow")
-        .with_app_id("com.romanfurman6.cmdmeow")
+        .with_app_id(if kit::fs::is_dev() { "com.romanfurman6.cmdmeow.dev" } else { "com.romanfurman6.cmdmeow" })
         .with_inner_size([kit::mechanics::PANEL_WIDTH, kit::mechanics::PANEL_HEIGHT])
         .with_transparent(true)
         .with_decorations(false)

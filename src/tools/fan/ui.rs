@@ -208,7 +208,7 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         Size::S12 => tile::wide(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, if rpm.is_some() { Ok((frac.max(0.02), LINE)) } else { Err(hot.as_str()) }, sel),
         _ => {
             let (resp, right) = tile::row_split(ui, rect, id, Icon::Fan, tint::FAN, "Fans", &value, &hot, sel);
-            let mut lines: Vec<(String, Option<(f32, Color32)>, String)> = s.fans.iter().take(2).enumerate().map(|(i, f)| (fan_name(i, s.fans.len()), Some((f.frac().max(0.02), LINE)), format!("{:.0} rpm", f.rpm))).collect();
+            let mut lines: Vec<(String, Option<(f32, Color32)>, String)> = s.fans.iter().take(2).enumerate().map(|(i, f)| (fan_name(i, s.fans.len()), Some((f.frac().max(0.02), LINE)), format!("{} rpm", rpm_text(f.rpm)))).collect();
             if let Some((g, c)) = hottest_text(s) {
                 lines.push((g, None, format!("{c:.0} °C")));
             }
@@ -262,7 +262,7 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     } else if s.fans.is_empty() {
         let r = Rect::from_min_size(Pos2::new(x0, fy), Vec2::new(x1 - x0, fh));
         p.rect_filled(r, 10.0, white(10));
-        let msg = if s.has_smc { "This Mac has no fans. It cools passively." } else { "Fan speed isn't available on this Mac." };
+        let msg = if s.has_smc { "No fans. Cools passively" } else { "Fan speed isn't available on this Mac." };
         text_fit(&p, Pos2::new(r.left() + 12.0, r.center().y), Align2::LEFT_CENTER, msg, font(12.0), TEXT_DIM, r.width() - 24.0);
     } else {
         let n = s.fans.len().min(2);
@@ -350,8 +350,7 @@ pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Ve
             }
             y += 36.0;
         }
-        p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "The tick marks the lowest speed the fan allows.", font(11.0), TEXT_FAINT);
-        y += 24.0;
+        y += 4.0;
         // quick mode switch; anything that needs more (helper, curve) opens the page
         let labels: Vec<&str> = Mode::ALL.iter().map(|m| m.label()).collect();
         if let Some(i) = segmented(ui, Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 28.0)), ui.scope_id().with("fan-mode"), &labels, l.settings.mode.index()) {
@@ -368,7 +367,7 @@ pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Ve
         let msg = if !s.loaded {
             "Reading sensors…"
         } else if s.has_smc {
-            "This Mac has no fans. It cools passively and slows down a little when hot."
+            "No fans. Cools passively"
         } else {
             "Fan speed isn't available on this Mac."
         };
@@ -433,10 +432,10 @@ pub fn mode_word(l: &Live) -> String {
 /// Hint line and colour for a thermal pressure level.
 pub fn thermal_hint(level: u8) -> (&'static str, Color32) {
     match level {
-        0 => ("No slowdown. macOS only throttles from Serious up.", GREEN),
-        1 => ("Slightly slowed. A hard surface under the Mac helps.", AMBER),
-        2 => ("macOS is slowing the chip down to cool it.", AMBER),
-        _ => ("Heavily slowed. Close demanding apps and give the Mac air.", RED),
+        0 => ("No slowdown", GREEN),
+        1 => ("Slightly slowed", AMBER),
+        2 => ("Slowed to cool down", AMBER),
+        _ => ("Heavily slowed", RED),
     }
 }
 

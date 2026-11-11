@@ -92,7 +92,7 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
         }
         "network" => {
             let name = if s.wifi.name.is_empty() { "Network".to_string() } else { s.wifi.name.clone() };
-            (Icon::Wifi, name, split_num(&human_rate(s.net_down)), format!("down · ↑ {} up", human_rate(s.net_up)), None)
+            (Icon::Wifi, name, split_num(&human_rate(s.net_down)), format!("↑ {}", human_rate(s.net_up)), None)
         }
         "devices" => {
             let n = s.devices.len();

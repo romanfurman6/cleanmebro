@@ -120,6 +120,7 @@ impl Engine {
         }
     }
 
+    #[cfg(test)]
     pub fn held(&self) -> Want {
         self.power.held()
     }

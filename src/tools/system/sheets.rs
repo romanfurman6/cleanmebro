@@ -123,9 +123,9 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             let (hv, hc, hh) = if s.smart_status.is_empty() {
                 ("—".to_string(), TEXT, "macOS didn't report the drive's health.")
             } else if s.smart_status.eq_ignore_ascii_case("Verified") {
-                ("Verified".into(), GREEN, "The drive reports no problems.")
+                ("Verified".into(), GREEN, "No problems")
             } else {
-                (s.smart_status.clone(), RED, "Back up now. This drive should be replaced soon.")
+                (s.smart_status.clone(), RED, "Back up now and replace it")
             };
             sp.facts.push(fact("Drive health", hv, hc, hh));
             match s.trash_bytes {
@@ -133,7 +133,7 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                     let hint = if s.trash_overfill() { format!("Over the {} nudge limit.", human_bytes(m::TRASH_SIZE_THRESHOLD)) } else { format!("Under the {} nudge limit.", human_bytes(m::TRASH_SIZE_THRESHOLD)) };
                     sp.facts.push(fact("Trash", human_bytes(b), if s.trash_overfill() { AMBER } else { TEXT }, &hint));
                 }
-                None => sp.facts.push(fact("Trash", "—", TEXT, "Allow Full Disk Access to measure it.")),
+                None => sp.facts.push(fact("Trash", "—", TEXT, "Needs Full Disk Access")),
             }
             let measure = if s.categories.is_empty() { "Measure folders" } else { "Measure again" };
             sp.buttons = vec![(measure, BTN_SECONDARY, Action::MeasureFolders), ("Disk Map", BTN_SECONDARY, Action::Open("lens")), ("Free up space", BTN_PRIMARY, Action::Open("cleanup"))];
@@ -157,9 +157,9 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 Level::Fair => "elevated",
                 Level::Critical => "high",
             };
-            let hint = if l == Level::Good { "Plenty of room for more apps." } else { "Quit a few unused apps to relieve memory." };
+            let hint = if l == Level::Good { "" } else { "Memory is tight" };
             sp.facts.push(fact("Pressure", format!("{:.0}% · {word}", s.mem_pressure), level_color(l), hint));
-            sp.facts.push(fact("Swap used", human_bytes(s.swap_used), TEXT, "Swap grows when memory runs short."));
+            sp.facts.push(fact("Swap used", human_bytes(s.swap_used), TEXT, ""));
             sp
         }
         Sheet::Battery => {
@@ -188,18 +188,18 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                     if b.health_pct.map(|h| h >= 99.5).unwrap_or(true) {
                         "Normal."
                     } else {
-                        "Normal. Some capacity lost with age."
+                        "Normal"
                     }
                 }
-                m::BatteryHealthState::Fair => "Some capacity lost, still works fine.",
+                m::BatteryHealthState::Fair => "Some capacity lost",
                 m::BatteryHealthState::Poor | m::BatteryHealthState::Service => "Should be replaced soon.",
-                m::BatteryHealthState::Unknown => "Couldn't be calculated right now.",
+                m::BatteryHealthState::Unknown => "Not available",
             };
             sp.facts.push(fact("Health", hv, level_color(s.battery_level()), hd));
             sp.facts.push(fact("Charge cycles", format!("{} of {}", b.cycles, if b.design_cycles > 0 { b.design_cycles } else { 1000 }), TEXT, ""));
             match b.temp_c {
                 Some(t) => sp.facts.push(fact("Temperature", format!("{t:.0} °C"), if t < 35.0 { TEXT } else { AMBER }, if t < 35.0 { "Within the normal range." } else { "Warmer than ideal." })),
-                None => sp.facts.push(fact("Temperature", "—", TEXT, "This Mac doesn't report it.")),
+                None => sp.facts.push(fact("Temperature", "—", TEXT, "Not reported")),
             }
             let time = if b.charging {
                 b.minutes_left.map(|m| (format!("{} until full", human_duration(m as u64 * 60)), ""))
@@ -227,12 +227,12 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             ];
             let (th, tc) = match s.thermal {
                 0 => ("No thermal slowdown.", GREEN),
-                1 => ("Warming up, still within normal.", AMBER),
-                2 => ("Hot. macOS is slowing down to cool off.", RED),
-                _ => ("Far too hot. Act to avoid damage.", RED),
+                1 => ("Warm", AMBER),
+                2 => ("Hot, slowing down", RED),
+                _ => ("Too hot", RED),
             };
             sp.facts.push(fact("Temperature", s.thermal_word(), tc, th));
-            let uh = if s.uptime_warning() { "Over a week. Restart to clear temp files and memory." } else { "Restart once a week to clear temp files." };
+            let uh = if s.uptime_warning() { "Over a week" } else { "" };
             sp.facts.push(fact("Uptime", human_duration(s.uptime_secs), if s.uptime_warning() { AMBER } else { TEXT }, uh));
             sp
         }
@@ -427,7 +427,7 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
         }
         y += h + 14.0;
     } else if kind == Sheet::Devices {
-        y += paragraph(p, Pos2::new(x0, y), "Connect wireless or wired devices to your Mac and they appear here.", font(13.0), TEXT_DIM, w) + 14.0;
+        y += paragraph(p, Pos2::new(x0, y), "No devices", font(13.0), TEXT_DIM, w) + 14.0;
     }
 
     // speed test card
@@ -456,10 +456,10 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
             text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &format!("{e}. Check the connection and try again."), font(12.0), AMBER, w - 24.0);
         } else if let Some(d) = sp_.down_mbps {
             let good = monitor::good_for(d);
-            let txt = if good.is_empty() { "Very slow. Try reconnecting to Wi-Fi.".to_string() } else { format!("Good for {}.", good.join(", ").to_lowercase()) };
+            let txt = if good.is_empty() { "Very slow".to_string() } else { format!("Good for {}.", good.join(", ").to_lowercase()) };
             text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, &txt, font(12.0), TEXT_DIM, w - 24.0);
         } else {
-            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, "Downloads a small test file to measure your connection.", font(12.0), TEXT_DIM, w - 24.0);
+            text_fit(p, Pos2::new(lr.left() + 12.0, note_y), Align2::LEFT_TOP, "", font(12.0), TEXT_DIM, w - 24.0);
         }
         y += 120.0 + 14.0;
     }
