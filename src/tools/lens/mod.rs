@@ -105,6 +105,11 @@ impl Tool for Lens {
                 return None;
             }
             Some(View::Page)
+        } else if view == "lens-none" {
+            page::demo_tree(self);
+            self.lens_selected.clear();
+            self.lens_focus = None;
+            Some(View::Page)
         } else if view == "lens-live" {
             page::demo_live(self);
             Some(View::Page)

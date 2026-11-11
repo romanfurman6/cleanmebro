@@ -20,7 +20,8 @@ const OTHER_HUE: Color32 = Color32::from_rgb(0x3A, 0x3A, 0x3E);
 /// How long the rings take to sweep in, seconds.
 const SWEEP_SECS: f64 = 0.45;
 const HEADER_H: f32 = 57.0;
-const FOOTER_H: f32 = 42.0;
+const INFO_H: f32 = 28.0;
+const KID_H: f32 = 32.0;
 const ASIDE_W: f32 = 260.0;
 const DETAILS_MIN_W: f32 = 240.0;
 /// Inner-ring folders drawn on their own; the rest fold into "Other".
@@ -265,9 +266,10 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     }
 
     // the list
-    let fr = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - FOOTER_H), r.max);
-    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, fr.top() - 12.0));
-    let area = Rect::from_min_max(body.min, Pos2::new(body.right() - ASIDE_W - 16.0, body.bottom()));
+    // full width: nothing can be picked while mapping, so no side column
+    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, r.bottom() - 16.0));
+    let fr = Rect::from_min_max(Pos2::new(body.left(), body.bottom() - INFO_H), body.max);
+    let area = Rect::from_min_max(body.min, Pos2::new(body.right(), fr.top() - 8.0));
     const ROW_H: f32 = 44.0;
     const GAP: f32 = 4.0;
     let fit = (((area.height() + GAP) / (ROW_H + GAP)).floor() as usize).max(1);
@@ -319,27 +321,17 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
         crate::kit::glass::animate(&ctx);
     }
 
-    // aside
-    let ar = Rect::from_min_max(Pos2::new(area.right() + 16.0, body.top()), body.max);
-    section_header(&p, ar.min, Align2::LEFT_TOP, "To remove");
-    paragraph(&p, Pos2::new(ar.left(), ar.top() + 24.0), "Available when mapping finishes", font(12.0), TEXT_FAINT, ar.width());
-    let rb = Rect::from_min_max(Pos2::new(ar.left(), ar.bottom() - 34.0), ar.max);
-    pill_button(ui, rb, "Review and remove", BTN_PRIMARY, false);
-
-    // footer: what's under the pointer, or what's being measured
-    p.rect_filled(fr, CornerRadius { se: 12, ..Default::default() }, FOOTER);
-    hairline(&p, fr.left_top(), fr.right_top());
+    // under the list: what's under the pointer, or what's being measured
     match hovered {
         Some((row, hue)) => {
-            p.rect_filled(Rect::from_center_size(Pos2::new(fr.left() + 25.0, fr.center().y), Vec2::splat(10.0)), 3.0, hue);
+            p.rect_filled(Rect::from_center_size(Pos2::new(fr.left() + 5.0, fr.center().y), Vec2::splat(10.0)), 3.0, hue);
             let info = if row.done { format!("{} · {}% of what's measured", human_bytes(row.bytes), pct(row.bytes, measured)) } else { format!("{} so far · still measuring", human_bytes(row.bytes)) };
-            let ir = p.text(Pos2::new(fr.right() - 20.0, fr.center().y), Align2::RIGHT_CENTER, info, font(13.0), TEXT_DIM);
-            text_fit(&p, Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, &tilde(&row.path), mono(12.0), TEXT_SOFT, ir.left() - fr.left() - 56.0);
+            let ir = p.text(Pos2::new(fr.right(), fr.center().y), Align2::RIGHT_CENTER, info, font(13.0), TEXT_DIM);
+            text_fit(&p, Pos2::new(fr.left() + 18.0, fr.center().y), Align2::LEFT_CENTER, &tilde(&row.path), mono(12.0), TEXT_SOFT, ir.left() - fr.left() - 34.0);
         }
         None => {
             let cur = app.lens.current.lock().unwrap().clone();
-            p.text(Pos2::new(fr.left() + 20.0, fr.center().y), Align2::LEFT_CENTER, "Measuring", font(12.0), TEXT_FAINT);
-            text_fit(&p, Pos2::new(fr.left() + 92.0, fr.center().y), Align2::LEFT_CENTER, &tilde(Path::new(&cur)), mono(12.0), TEXT_SOFT, fr.width() - 112.0);
+            text_fit(&p, Pos2::new(fr.left(), fr.center().y), Align2::LEFT_CENTER, &tilde(Path::new(&cur)), mono(12.0), TEXT_FAINT, fr.width());
         }
     }
     act
@@ -478,9 +470,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
 
     // rings: the folder in the centre, its folders on the inner ring and
     // what is inside each of them on the outer ring
-    let fr = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - FOOTER_H), r.max);
-    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, fr.top() - 12.0));
-    let area = Rect::from_min_max(body.min, Pos2::new(body.right() - ASIDE_W - 16.0, body.bottom()));
+    // nothing sits empty: the "To remove" column shows only once something
+    // is picked, and the hover line takes no panel of its own
+    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, r.bottom() - 16.0));
+    let show_aside = !live && !app.lens_selected.is_empty();
+    let area = Rect::from_min_max(body.min, Pos2::new(if show_aside { body.right() - ASIDE_W - 16.0 } else { body.right() }, body.bottom()));
+    let fr = Rect::from_min_max(Pos2::new(area.left(), area.bottom() - INFO_H), area.max);
     let now = ctx.input(|i| i.time);
     // the rings sweep in each time a folder opens
     if app.lens_morph.as_ref().is_none_or(|m| m.1 != node.path || m.0.is_some()) {
@@ -493,10 +488,11 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         ctx.request_repaint();
     }
     // a details card beside the rings when there is room for both
-    let diam = area.height().min(560.0).min(area.width() - 16.0 - DETAILS_MIN_W);
-    let (diam, card_w) = if diam >= 300.0 { (diam, (area.width() - diam - 16.0).min(340.0)) } else { (area.height().min(area.width()).min(560.0), 0.0) };
-    let chart_w = area.width() - if card_w > 0.0 { card_w + 16.0 } else { 0.0 };
-    let c = Pos2::new(area.left() + chart_w / 2.0, area.center().y);
+    let ring_h = area.height() - INFO_H;
+    let diam = ring_h.min(620.0).min(area.width() - 24.0 - DETAILS_MIN_W);
+    let (diam, card_w) = if diam >= 300.0 { (diam, (area.width() - diam - 24.0).min(420.0)) } else { (ring_h.min(area.width()).min(620.0), 0.0) };
+    let chart_w = area.width() - if card_w > 0.0 { card_w + 24.0 } else { 0.0 };
+    let c = Pos2::new(area.left() + chart_w / 2.0, area.top() + ring_h / 2.0);
     let big = diam / 2.0 - 4.0;
     let (r_hole, r1a, r1b, r2a, r2b) = (big * 0.39, big * 0.415, big * 0.757, big * 0.775, big);
     let whole = total.max(1) as f64;
@@ -625,9 +621,6 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
     let name = if skip > 0 { format!("Other in {}", if depth == 0 { &root_label } else { &node.name }) } else if depth == 0 { root_label.clone() } else { node.name.clone() };
     text_fit(&mp, c - Vec2::new(0.0, 15.0), Align2::CENTER_BOTTOM, &name, ty::caption(), ty::caption_color(), r_hole * 1.6);
     mp.text(c, Align2::CENTER_CENTER, human_bytes(total), ty::number(), TEXT);
-    if can_up {
-        mp.text(c + Vec2::new(0.0, 15.0), Align2::CENTER_TOP, "click to go up", ty::caption(), ty::caption_color());
-    }
     if hole_hot {
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
         if interact.clicked() {
@@ -648,13 +641,14 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
     if card_w > 0.0 {
         let subject = focus.as_ref().and_then(|f| scan::find(root, f)).unwrap_or(node);
         let is_node = subject.path == node.path;
-        let kids: Vec<&Node> = subject.children.iter().take(4).collect();
+        let kids: Vec<&Node> = subject.children.iter().collect();
         let selectable = !live && !is_node && !scan::is_essential(&subject.path);
         let on = app.lens_selected.iter().any(|(q, _)| q == &subject.path);
         let pad = sp::L;
-        let rows_h = kids.len() as f32 * sp::LEGEND_H;
-        let h = pad + 16.0 + sp::XS + 14.0 + sp::L + 34.0 + sp::XS + 14.0 + if kids.is_empty() { 0.0 } else { sp::L + rows_h } + sp::L + 30.0 + if !is_node { sp::S + 30.0 } else { 0.0 } + pad;
-        let cr = Rect::from_min_size(Pos2::new(area.right() - card_w, (c.y - diam / 2.0).max(area.top())), Vec2::new(card_w, h.min(area.height())));
+        let fixed = pad + 16.0 + sp::XS + 14.0 + sp::L + 34.0 + sp::XS + 14.0 + sp::L + 30.0 + if !is_node { sp::S + 30.0 } else { 0.0 } + pad;
+        let fit = (((area.height() - fixed - sp::L - 18.0) / KID_H).floor().max(0.0) as usize).min(kids.len());
+        let h = fixed + if fit == 0 { 0.0 } else { sp::L + fit as f32 * KID_H + if kids.len() > fit { 18.0 } else { 0.0 } };
+        let cr = Rect::from_min_size(Pos2::new(area.right() - card_w, area.top()), Vec2::new(card_w, h.min(area.height())));
         glass_card(&p, cr, R_CARD, 0.0, false);
         let x = cr.left() + pad;
         let w = cr.width() - pad * 2.0;
@@ -667,7 +661,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         p.text(Pos2::new(x, y), Align2::LEFT_TOP, human_bytes(subject.bytes), ty::hero(), TEXT);
         y += 34.0 + sp::XS;
         let share = if is_node {
-            format!("{} folders · click one for details", subject.children.len())
+            format!("{} folders", subject.children.len())
         } else {
             format!("{}% of {}", pct(subject.bytes, total), name)
         };
@@ -675,9 +669,35 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         y += 14.0;
         if !kids.is_empty() {
             y += sp::L;
-            for g in &kids {
-                legend_row(&p, Rect::from_min_size(Pos2::new(cr.left(), y), Vec2::new(cr.width() - 4.0, sp::LEGEND_H)), ACCENT, &g.name, &human_bytes(g.bytes), TEXT_SOFT);
-                y += sp::LEGEND_H;
+            // every folder inside, biggest first, each with its share; a
+            // click focuses it on the rings
+            let top_b = kids.first().map(|g| g.bytes).unwrap_or(1).max(1) as f32;
+            for (i, g) in kids.iter().take(fit).enumerate() {
+                let rr = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, KID_H));
+                let resp = ui.interact(rr, ui.scope_id().with(("kid", i)), Sense::click());
+                if resp.hovered() {
+                    p.rect_filled(rr.expand2(Vec2::new(6.0, 0.0)), R_SMALL, white(10));
+                    ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                let hue = if is_node { HUES[i % 4] } else { ACCENT };
+                let ty_ = rr.top() + 11.0;
+                p.rect_filled(Rect::from_center_size(Pos2::new(x + 4.0, ty_), Vec2::splat(8.0)), 2.0, hue);
+                let vr = p.text(Pos2::new(rr.right(), ty_), Align2::RIGHT_CENTER, human_bytes(g.bytes), font(12.0), TEXT_SOFT);
+                text_fit(&p, Pos2::new(x + 16.0, ty_), Align2::LEFT_CENTER, &g.name, font(13.0), TEXT, vr.left() - x - 26.0);
+                let br = Rect::from_min_size(Pos2::new(x + 16.0, ty_ + 10.0), Vec2::new(w - 16.0, 3.0));
+                crate::kit::glass::bar(&p, br, (g.bytes as f32 / top_b).clamp(0.01, 1.0), with_alpha(hue, 0.8));
+                if resp.clicked() {
+                    if is_node {
+                        app.lens_focus = Some(g.path.clone());
+                    } else if !g.children.is_empty() {
+                        go_to = Some(g.path.clone());
+                    }
+                }
+                y += KID_H;
+            }
+            if kids.len() > fit {
+                text_fit(&p, Pos2::new(x + 16.0, y + 2.0), Align2::LEFT_TOP, &format!("+{} more", kids.len() - fit), ty::caption(), ty::caption_color(), w);
+                y += 18.0;
             }
         }
         y += sp::L;
@@ -728,17 +748,16 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
         ctx.request_repaint();
     }
 
-    // aside: the list to remove
+    draw_info(&p, fr, hovered, live, app, depth, &root_label, &node.name, skip, total);
+    // aside: the list to remove, only while something is picked
+    if !show_aside {
+        return act;
+    }
     let ar = Rect::from_min_max(Pos2::new(area.right() + 16.0, body.top()), body.max);
     section_header(&p, ar.min, Align2::LEFT_TOP, "To remove");
     let total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     let list_top = ar.top() + 24.0;
     let list_bottom = ar.bottom() - 34.0 - 12.0 - 34.0;
-    if live {
-        paragraph(&p, Pos2::new(ar.left(), list_top), "Available when mapping finishes", font(12.0), TEXT_FAINT, ar.width());
-    } else if app.lens_selected.is_empty() {
-        paragraph(&p, Pos2::new(ar.left(), list_top), "Nothing picked", font(12.0), TEXT_FAINT, ar.width());
-    }
     let mut drop: Option<usize> = None;
     let rel = |pa: &Path| -> String {
         pa.strip_prefix(&root.path).map(|x| x.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join(" › ")).unwrap_or_else(|_| tilde(pa))
@@ -758,45 +777,29 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, pending: Option<&[P
             drop = Some(i);
         }
     }
+    // the total and the button follow the list instead of sitting at the bottom
+    let mut end = list_top + picked.len().min(max_rows) as f32 * 32.0;
     if !live && app.lens_selected.len() > max_rows {
-        p.text(Pos2::new(ar.left(), list_top + max_rows as f32 * 32.0 + 4.0), Align2::LEFT_TOP, format!("and {} more", app.lens_selected.len() - max_rows), font(12.0), TEXT_FAINT);
+        p.text(Pos2::new(ar.left(), end + 4.0), Align2::LEFT_TOP, format!("and {} more", app.lens_selected.len() - max_rows), font(12.0), TEXT_FAINT);
+        end += 22.0;
     }
+    end += sp::L;
     if let Some(i) = drop {
         app.lens_selected.remove(i);
     }
     if !live {
         let g = p.layout_no_wrap(human_bytes(total), bold(22.0), TEXT);
         let gw = g.size().x;
-        let ty = ar.bottom() - 34.0 - 12.0 - g.size().y;
+        let ty = end;
+        end += g.size().y + 12.0;
         p.galley(Pos2::new(ar.left(), ty), g, TEXT);
         p.text(Pos2::new(ar.left() + gw + 6.0, ty + 22.0 * 0.82), Align2::LEFT_BOTTOM, "selected", font(13.0), TEXT_FAINT);
     }
-    let rb = Rect::from_min_max(Pos2::new(ar.left(), ar.bottom() - 34.0), ar.max);
+    let rb = Rect::from_min_size(Pos2::new(ar.left(), end), Vec2::new(ar.width(), 34.0));
     if pill_button(ui, rb, "Review and remove", BTN_PRIMARY, !live && !app.lens_selected.is_empty()).clicked() {
         app.lens_review = true;
     }
 
-    // footer: what's under the pointer, or what's being measured
-    p.rect_filled(fr, CornerRadius { se: 12, ..Default::default() }, FOOTER);
-    hairline(&p, fr.left_top(), fr.right_top());
-    match hovered {
-        Some((path, hue, bytes, kids)) => {
-            p.rect_filled(Rect::from_center_size(Pos2::new(fr.left() + 25.0, fr.center().y), Vec2::splat(10.0)), 3.0, hue);
-            let mut parent = if depth == 0 { root_label.clone() } else { node.name.clone() };
-            if skip > 0 {
-                parent = format!("Other in {parent}");
-            }
-            let info = format!("{} · {}% of {}{}", human_bytes(bytes), pct(bytes, total), parent, kids.map(|k| format!(" · {k} items")).unwrap_or_default());
-            let ir = p.text(Pos2::new(fr.right() - 20.0, fr.center().y), Align2::RIGHT_CENTER, info, font(13.0), TEXT_DIM);
-            text_fit(&p, Pos2::new(fr.left() + 40.0, fr.center().y), Align2::LEFT_CENTER, &path, mono(12.0), TEXT_SOFT, ir.left() - fr.left() - 56.0);
-        }
-        None if live => {
-            let cur = app.lens.current.lock().unwrap().clone();
-            p.text(Pos2::new(fr.left() + 20.0, fr.center().y), Align2::LEFT_CENTER, "Measuring", font(12.0), TEXT_FAINT);
-            text_fit(&p, Pos2::new(fr.left() + 92.0, fr.center().y), Align2::LEFT_CENTER, &tilde(Path::new(&cur)), mono(12.0), TEXT_SOFT, fr.width() - 112.0);
-        }
-        None => {}
-    }
     act
 }
 
@@ -968,4 +971,28 @@ fn annulus_outline(p: &egui::Painter, c: Pos2, ra: f32, rb: f32, a0: f32, a1: f3
     let mut pts: Vec<Pos2> = ring_points(c, rb, a0, a1).collect();
     pts.extend(ring_points(c, ra, a0, a1).collect::<Vec<_>>().into_iter().rev());
     p.add(egui::Shape::closed_line(pts, stroke));
+}
+
+/// Under the rings: what's under the pointer, or what's being measured.
+/// Drawn only when there is something to say; it has no panel of its own.
+#[allow(clippy::too_many_arguments)]
+fn draw_info(p: &egui::Painter, fr: Rect, hovered: Option<(String, Color32, u64, Option<usize>)>, live: bool, app: &App, depth: usize, root_label: &str, node_name: &str, skip: usize, total: u64) {
+    let y = fr.center().y;
+    match hovered {
+        Some((path, hue, bytes, kids)) => {
+            p.rect_filled(Rect::from_center_size(Pos2::new(fr.left() + 5.0, y), Vec2::splat(10.0)), 3.0, hue);
+            let mut parent = if depth == 0 { root_label.to_string() } else { node_name.to_string() };
+            if skip > 0 {
+                parent = format!("Other in {parent}");
+            }
+            let info = format!("{} · {}% of {}{}", human_bytes(bytes), pct(bytes, total), parent, kids.map(|k| format!(" · {k} items")).unwrap_or_default());
+            let ir = p.text(Pos2::new(fr.right(), y), Align2::RIGHT_CENTER, info, font(13.0), TEXT_DIM);
+            text_fit(p, Pos2::new(fr.left() + 18.0, y), Align2::LEFT_CENTER, &path, mono(12.0), TEXT_SOFT, ir.left() - fr.left() - 34.0);
+        }
+        None if live => {
+            let cur = app.lens.current.lock().unwrap().clone();
+            text_fit(p, Pos2::new(fr.left(), y), Align2::LEFT_CENTER, &tilde(Path::new(&cur)), mono(12.0), TEXT_FAINT, fr.width());
+        }
+        None => {}
+    }
 }
