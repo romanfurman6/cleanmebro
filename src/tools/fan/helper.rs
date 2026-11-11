@@ -117,6 +117,9 @@ pub fn install() -> Result<(), String> {
 /// - put the new binary at a new inode (copy, then rename): copying over
 ///   the old file in place keeps the kernel's cached code signature of the
 ///   old one, so the new helper is killed at launch and never answers;
+/// - re-sign the copy on its own (ad-hoc, with the helper's id): the app's
+///   signature binds the bundle's Info.plist, so a copy taken out of the
+///   bundle is "not valid" to AMFI (-420) and launchd can't start it;
 /// - re-enable the service, in case it was turned off.
 fn install_script(exe: &str, plist: &str) -> String {
     format!(
@@ -128,6 +131,7 @@ fn install_script(exe: &str, plist: &str) -> String {
          cp {exe} {BIN}.new\n\
          chown root:wheel {BIN}.new\n\
          chmod 755 {BIN}.new\n\
+         /usr/bin/codesign --force --sign - --identifier {LABEL} {BIN}.new\n\
          mv -f {BIN}.new {BIN}\n\
          cp -f {plist} {PLIST}\n\
          chown root:wheel {PLIST}\n\
@@ -333,6 +337,9 @@ mod tests {
         // never copy over the running binary in place
         assert!(!s.contains(&format!("cp -f '/x/cmdmeow' {BIN}\n")));
         assert!(s.contains(&format!("mv -f {BIN}.new {BIN}")));
+        // signed on its own before it goes in place
+        let sign = s.find(&format!("/usr/bin/codesign --force --sign - --identifier {LABEL} {BIN}.new")).unwrap();
+        assert!(sign < s.find("mv -f").unwrap());
         // waits for the old helper before bootstrapping the new one
         let wait = s.find("while launchctl print").unwrap();
         assert!(wait < s.find("launchctl bootstrap").unwrap());
