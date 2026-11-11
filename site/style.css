@@ -69,6 +69,8 @@ h1 { font: 500 76px/80px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 
 .foot { display: flex; justify-content: space-between; padding-top: 24px; padding-bottom: 40px; border-top: 1px solid var(--hair); color: var(--ink2); font-size: 14px; }
 .foot a { text-decoration: none; }
+.foot .gh { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); }
+.foot .gh:hover { color: var(--ink2); }
 
 @media (min-width: 1000px) { .desk { background-image: url(desk.jpg); } }
 @media (max-width: 1280px) { h1 { font-size: 64px; line-height: 68px; } .float { right: 390px; width: 340px; } .snap, .cursor, .toast { display: none; } }
