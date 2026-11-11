@@ -66,6 +66,9 @@ pub fn level(rms: f32) -> f32 {
     ((db + 55.0) / 43.0).clamp(0.0, 1.0)
 }
 
+/// The [`level`] of the quietest speech: `silent`'s threshold.
+pub const VOICE_LEVEL: f32 = 0.25;
+
 /// Nothing above a whisper in any tenth of a second: don't bother the
 /// model (on silence it makes words up).
 pub fn silent(pcm: &[f32], rate: u32) -> bool {

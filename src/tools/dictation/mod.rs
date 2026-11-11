@@ -71,7 +71,8 @@ pub enum Note {
 /// Where dictation is.
 pub enum Phase {
     Idle,
-    Listening { mic: Mic, since: Instant, tapped: bool },
+    /// `heard` is when the voice was last above a whisper.
+    Listening { mic: Mic, since: Instant, tapped: bool, heard: Instant },
     Working { job: u64 },
     Showing { note: Note, until: Instant },
 }
@@ -298,7 +299,7 @@ impl Dictation {
         match Mic::start() {
             Ok(mic) => {
                 let _ = self.jobs.send(Job::Warm(engine));
-                self.phase = Phase::Listening { mic, since: Instant::now(), tapped: false };
+                self.phase = Phase::Listening { mic, since: Instant::now(), tapped: false, heard: Instant::now() };
             }
             Err(e) => self.show(Note::Problem(e), 2.5),
         }
@@ -309,6 +310,13 @@ impl Dictation {
         let Phase::Listening { mic, .. } = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
         let pcm = mic.stop();
         let secs = pcm.len() as f32 / MODEL_RATE as f32;
+        let peak = pcm.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        eprintln!("[dictation] listened {secs:.1} s, peak {peak:.3}");
+        // a real room is never exactly zero: macOS hands out digital silence
+        // when it keeps the microphone from us
+        if secs >= MIN_VOICE_SECS && peak == 0.0 {
+            return self.show(Note::Problem("The microphone gives only silence".into()), 2.5);
+        }
         if secs < MIN_VOICE_SECS || audio::silent(&pcm, MODEL_RATE) {
             return self.show(Note::Problem("Didn't hear anything".into()), 1.4);
         }
@@ -428,10 +436,17 @@ impl Dictation {
         if !cancels.is_empty() {
             self.cancel();
         }
-        if let Phase::Listening { mic, since, .. } = &self.phase {
+        let stop_after = self.settings.stop_after_silence();
+        if let Phase::Listening { mic, since, tapped, heard } = &mut self.phase {
             let failed = mic.failed();
-            let too_long = since.elapsed() > MAX_TALK;
-            self.levels.push(mic.level());
+            let level = mic.level();
+            if level > audio::VOICE_LEVEL {
+                *heard = Instant::now();
+            }
+            // hands-free (tapped) only: holding the key is its own stop
+            let quiet = *tapped && stop_after.is_some_and(|d| heard.elapsed() > d);
+            let too_long = since.elapsed() > MAX_TALK || quiet;
+            self.levels.push(level);
             if self.levels.len() > 64 {
                 self.levels.remove(0);
             }
@@ -541,7 +556,7 @@ fn demo_history() -> History {
         (3 * 3600, "Ship the dictation widget before Friday, then we test it on the real Mac together.", "Slack"),
         (40 * 60, "Привіт! Скинь, будь ласка, посилання на дизайн, я гляну ввечері.", "Telegram"),
         (12 * 60, "Fix the caret position in Electron apps and fall back to the mouse.", "Linear"),
-        (90, "Нужно обновить README и добавить скриншоты нового окна.", "Notes"),
+        (90, "Треба оновити README і додати скріншоти нового вікна.", "Notes"),
     ] {
         h.add(Said { at: now - ago, text: text.into(), app: app.into(), secs: text.len() as f32 / 14.0 });
     }
