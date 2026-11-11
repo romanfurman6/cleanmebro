@@ -155,6 +155,7 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: 
             let mut probe = probe::Probe::open();
             let chip = chip_name();
             let mut held = false;
+            let mut steady = control::Steady::default();
             let mut read_at = activity::Every::default();
             loop {
                 let on_now = on.load(Ordering::Relaxed);
@@ -178,6 +179,9 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: 
                     (l.settings.clone(), tripped)
                 };
                 let want = on_now && s.loaded && !s.fans.is_empty() && settings.mode != Mode::Auto && !tripped;
+                if !want {
+                    steady = control::Steady::default();
+                }
                 // nothing to hold and nobody looking (or the tool is off):
                 // leave the helper alone, its state is asked when shown
                 if !want && !held && !(on_now && activity::visible()) {
@@ -187,7 +191,7 @@ fn start(ctx: egui::Context, on: Arc<AtomicBool>, live: Arc<Mutex<Live>>, kick: 
                 }
                 let reply = if want {
                     let temp = settings.curve.source.read(&s);
-                    let rpm = settings.targets(&s.fans, temp);
+                    let rpm = settings.steady_targets(&s.fans, temp, &mut steady);
                     if rpm.iter().any(Option::is_some) {
                         held = true;
                         ask(&Request::Set { rpm })
