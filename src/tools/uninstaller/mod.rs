@@ -666,11 +666,18 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
 }
 
 /// Notice an app being dragged out of an app folder (any drag, anywhere) by
-/// watching the drag pasteboard, so the drop zone can appear.
+/// watching the drag pasteboard, so the drop zone can appear. A global mouse
+/// monitor wakes the watcher only while the mouse is dragging; between drags
+/// it sleeps. Without the monitor it falls back to polling.
 fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) {
     if !cfg!(target_os = "macos") {
         return;
     }
+    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+    let hooked = mac::on_mouse_drag(move || {
+        // a full queue already holds a wake-up
+        let _ = tx.try_send(());
+    });
     std::thread::Builder::new()
         .name("uninstaller-drag".into())
         .spawn(move || {
@@ -680,8 +687,19 @@ fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) {
                     let g = st.lock().unwrap();
                     g.settings.drop_zone && !g.off
                 };
-                // a drag lasts long enough for a relaxed look when the zone is off
-                std::thread::sleep(Duration::from_millis(if on { 150 } else { 1000 }));
+                // keep looking while the button is held: the drag pasteboard
+                // can fill a moment after the first drag event
+                let busy = !st.lock().unwrap().drag.apps.is_empty() || mac::mouse_down();
+                if hooked && !busy {
+                    // nothing dragged: sleep until the mouse drags somewhere
+                    if rx.recv().is_err() {
+                        return;
+                    }
+                } else {
+                    // a drag lasts long enough for a relaxed look when the zone is off
+                    std::thread::sleep(Duration::from_millis(if on { 150 } else { 1000 }));
+                    while rx.try_recv().is_ok() {}
+                }
                 let n = mac::drag_change_count();
                 let down = mac::mouse_down();
                 let mut g = st.lock().unwrap();

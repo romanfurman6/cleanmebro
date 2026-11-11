@@ -75,6 +75,27 @@ mod imp {
         unsafe { NSPasteboard::pasteboardWithName(NSPasteboardNameDrag) }.changeCount()
     }
 
+    /// Calls `f` on every mouse drag and button release in other apps (a
+    /// global event monitor, no permission needed), so nothing has to poll
+    /// while no drag is going on. Must run on the main thread; returns false
+    /// when it couldn't be set up.
+    pub fn on_mouse_drag(f: impl Fn() + 'static) -> bool {
+        use objc2_app_kit::{NSEvent, NSEventMask};
+        if objc2::MainThreadMarker::new().is_none() {
+            return false;
+        }
+        let block = block2::RcBlock::new(move |_e: std::ptr::NonNull<NSEvent>| f());
+        let mask = NSEventMask::LeftMouseDragged | NSEventMask::LeftMouseUp;
+        match NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &block) {
+            Some(m) => {
+                // the monitor lives as long as the app
+                std::mem::forget(m);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Files on the drag pasteboard (what is being, or was last, dragged).
     pub fn drag_files() -> Vec<PathBuf> {
         let pb = unsafe { NSPasteboard::pasteboardWithName(NSPasteboardNameDrag) };
@@ -107,6 +128,9 @@ mod imp {
     }
     pub fn drag_change_count() -> isize {
         0
+    }
+    pub fn on_mouse_drag(_f: impl Fn() + 'static) -> bool {
+        false
     }
     pub fn drag_files() -> Vec<PathBuf> {
         Vec::new()

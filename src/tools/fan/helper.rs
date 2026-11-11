@@ -33,6 +33,11 @@ pub const VERSION: u32 = 1;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const LEASE_SECS: u64 = 8;
 
+/// How long the idle helper waits for a call before it checks for a stop
+/// signal again (a signal also wakes it early).
+#[cfg(target_os = "macos")]
+const IDLE_WAIT_MS: i32 = 10_000;
+
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(tag = "op", rename_all = "lowercase")]
 pub enum Request {
@@ -157,6 +162,7 @@ fn run_admin(dir: &Path, script: &str, prompt: &str) -> Result<(), String> {
 pub fn serve(uid: u32) -> ! {
     use super::data::{merge, Snapshot};
     use super::probe::{mac::Control, Probe};
+    use std::os::unix::io::AsRawFd;
     use std::os::unix::net::UnixListener;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Instant, SystemTime};
@@ -207,6 +213,13 @@ pub fn serve(uid: u32) -> ! {
             let _ = std::fs::remove_file(SOCKET);
             std::process::exit(0);
         }
+        // Idle (no lease, fans on auto) the helper sleeps until the app
+        // calls: no SMC reads, no wakeups. Under a lease it ticks once a
+        // second to watch temperatures and the lease.
+        let idle = !manual && targets.iter().all(Option::is_none);
+        let wait = if idle { IDLE_WAIT_MS } else { 1000u64.saturating_sub(last_tick.elapsed().as_millis() as u64) as i32 };
+        let mut pfd = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+        unsafe { libc::poll(&mut pfd, 1, wait) };
         let mut changed = false;
         while let Ok((stream, _)) = listener.accept() {
             let _ = stream.set_nonblocking(false);
@@ -221,6 +234,10 @@ pub fn serve(uid: u32) -> ! {
                     targets = rpm.into_iter().take(ctl.ranges.len()).collect();
                     lease = SystemTime::now() + Duration::from_secs(LEASE_SECS);
                     changed = true;
+                    // read temperatures right away when waking from idle
+                    if idle {
+                        last_tick = Instant::now() - Duration::from_secs(5);
+                    }
                 }
                 Ok(Request::Auto) => {
                     targets.clear();
@@ -238,7 +255,7 @@ pub fn serve(uid: u32) -> ! {
                 let _ = (&stream).write_all(s.as_bytes());
             }
         }
-        if last_tick.elapsed() >= Duration::from_secs(1) {
+        if !(idle && !changed) && last_tick.elapsed() >= Duration::from_secs(1) {
             last_tick = Instant::now();
             let r = probe.read();
             let snap = Snapshot { sensors: merge(r.hid, r.smc_temps), ..Default::default() };
@@ -248,7 +265,6 @@ pub fn serve(uid: u32) -> ! {
             }
             apply(&mut ctl, &targets, hot, &mut manual);
         }
-        std::thread::sleep(Duration::from_millis(50));
     }
 
     fn apply(ctl: &mut Control, targets: &[Option<f32>], hot: bool, manual: &mut bool) {
