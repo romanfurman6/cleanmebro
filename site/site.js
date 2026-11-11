@@ -17,40 +17,49 @@
   tick(); setInterval(tick, 15000);
 
   // Windows rise in one after another
-  if (!still) ['.hero', '.drop', '.float', '.awake-mini'].forEach((s, i) => {
+  if (!still) ['.hero', '.drop', '.float', '.awake-mini', '.clean-mini'].forEach((s, i) => {
     const el = document.querySelector(s); if (el) { el.classList.add('reveal'); el.style.animationDelay = (i * 0.12) + 's'; }
   });
-  // Tool switcher: list on the left, window on the right; cycles until a click
-  const swData = $('sw-data');
-  if (swData) {
-    const tools = JSON.parse(swData.textContent), items = [...document.querySelectorAll('.sw-item')];
-    const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+  // Ten tools: the app window. Sidebar picks a pane; it cycles until someone clicks
+  const app = $('app');
+  if (app) {
+    const navs = [...app.querySelectorAll('.nv[data-p]')], panes = [...app.querySelectorAll('.pane')];
     let sel = 0, held = false;
     const show = i => {
-      sel = i; const t = tools[i];
-      items.forEach((b, k) => b.classList.toggle('on', k === i));
-      $('sw-n').textContent = t.n; $('sw-big').textContent = t.big; $('sw-sub').textContent = t.sub;
-      $('sw-rows').innerHTML = t.rows.map(([l, v, w]) => `<div class="sr"><span>${esc(l)}</span><span class="trk"><b style="width:0%"></b></span><span class="num dm">${esc(v)}</span></div>`).join('');
-      const bs = $('sw-rows').querySelectorAll('b');
-      requestAnimationFrame(() => requestAnimationFrame(() => t.rows.forEach(([, , w], k) => { if (w) bs[k].style.width = w + '%'; })));
+      sel = i; const key = navs[i].dataset.p;
+      navs.forEach((b, k) => { b.classList.toggle('on', k === i); b.setAttribute('aria-pressed', k === i); });
+      panes.forEach(p => { const on = p.dataset.p === key; p.hidden = !on; p.classList.toggle('on', on); });
     };
-    items.forEach((b, i) => b.addEventListener('click', () => { held = true; show(i); }));
-    if (!still) setInterval(() => { if (!held && !document.hidden) show((sel + 1) % tools.length); }, 3500);
+    navs.forEach((b, i) => b.addEventListener('click', () => { held = true; show(i); }));
+    let inView = false;
+    new IntersectionObserver(es => { inView = es[0].isIntersecting; }, { threshold: 0.4 }).observe(app);
+    if (!still) setInterval(() => { if (!held && inView && !document.hidden) show((sel + 1) % navs.length); }, 4000);
+    // Live numbers inside the window
+    const hb = $('hc-bars'), hc = $('hc-cpu'), fr = $('fc-rpm');
+    let hl = 16;
+    if (!still) setInterval(() => {
+      hl = Math.max(6, Math.min(70, hl + (Math.random() - 0.5) * 12));
+      if (hb) { const b = hb.firstElementChild; hb.appendChild(b); const h = 30 + hl; b.style.height = h + '%'; b.className = h > 90 ? 'hot' : ''; }
+      if (hc) hc.innerHTML = Math.round(hl) + '<small>%</small>';
+      if (fr) fr.textContent = (1900 + Math.round(hl * 20)).toLocaleString('en-US').replace(',', ' ');
+    }, 900);
   }
 
   if (still) return;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  // CPU: bars scroll left, a new sample every 0.8s
-  const bars = $('bars'), cpu = $('cpu'), mbCpu = $('mb-cpu'), rpm = $('rpm');
+  // CPU in the menu bar and the panel, a new sample every 0.8s
+  const cpu = $('cpu'), mbCpu = $('mb-cpu'), rpm = $('rpm');
+  const cpuRing = cpu && cpu.closest('.rw2').querySelector('circle:last-of-type');
+  const C = cpuRing ? +cpuRing.getAttribute('stroke-dasharray') : 0;
   let load = 16;
   setInterval(() => {
-    if (!bars) return;
     load = Math.max(6, Math.min(78, load + (Math.random() - 0.48) * 14));
-    const b = bars.firstElementChild; bars.appendChild(b);
-    b.style.height = load + '%'; b.className = load > 60 ? 'hot' : '';
-    const v = Math.round(load) + '%'; cpu.textContent = v; mbCpu.textContent = v;
-    rpm.textContent = (1800 + Math.round(load * 18)).toLocaleString('en-US');
+    const v = Math.round(load) + '%';
+    if (cpu) cpu.textContent = v;
+    if (mbCpu) mbCpu.textContent = v;
+    if (cpuRing) cpuRing.setAttribute('stroke-dashoffset', (C * (1 - load / 100)).toFixed(1));
+    if (rpm) rpm.textContent = (1800 + Math.round(load * 18)).toLocaleString('en-US').replace(',', ' ');
   }, 800);
 
   // Keep Awake counter
