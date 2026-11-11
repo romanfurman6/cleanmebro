@@ -76,10 +76,10 @@ mod mac {
             e.setMaterial(NSVisualEffectMaterial::Popover);
             e.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
             e.setState(NSVisualEffectState::Active);
-            e.setWantsLayer(true);
-            if let Some(layer) = e.layer() {
-                layer.setCornerRadius(corner_radius);
-                layer.setMasksToBounds(true);
+            // rounded through a stretchable mask image: rounding the view's
+            // own layer turns the blur off
+            if let Some(mask) = rounded_mask(corner_radius) {
+                e.setMaskImage(Some(&mask));
             }
             let view: Retained<NSView> = Retained::into_super(e);
             view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
@@ -87,6 +87,35 @@ mod mac {
             w.invalidateShadow();
             GLASS.with(|g| g.borrow_mut().push((num, view)));
         }
+    }
+
+    /// A white rounded square, 2x, that stretches between its corners: the
+    /// mask that gives the blur the window's rounded corners.
+    fn rounded_mask(radius: f64) -> Option<Retained<objc2_app_kit::NSImage>> {
+        use objc2_app_kit::{NSImage, NSImageResizingMode};
+        use objc2_foundation::{NSData, NSEdgeInsets, NSSize};
+        let r = radius.max(1.0);
+        let side_pt = (r * 2.0 + 2.0).ceil();
+        let px = (side_pt * 2.0) as u32;
+        let rp = r * 2.0;
+        let mut img = image::RgbaImage::new(px, px);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            // distance outside the rounded rect, in pixels (antialiased edge)
+            let (fx, fy) = (x as f64 + 0.5, y as f64 + 0.5);
+            let cx = fx.clamp(rp, px as f64 - rp);
+            let cy = fy.clamp(rp, px as f64 - rp);
+            let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt() - rp;
+            let a = (0.5 - d).clamp(0.0, 1.0);
+            *p = image::Rgba([255, 255, 255, (a * 255.0).round() as u8]);
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+        let data = NSData::with_bytes(&png);
+        let ns = NSImage::initWithData(NSImage::alloc(), &data)?;
+        ns.setSize(NSSize::new(side_pt, side_pt));
+        ns.setCapInsets(NSEdgeInsets { top: r, left: r, bottom: r, right: r });
+        ns.setResizingMode(NSImageResizingMode::Stretch);
+        Some(ns)
     }
 
     /// Diagnostic: describe our windows (frames, view classes, glass layers).
