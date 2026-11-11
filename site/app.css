@@ -34,7 +34,7 @@
 .mk .li > .ph { color: var(--blue); width: 16px; height: 16px; }
 .mk .li .r { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .mk .pill { height: 22px; padding: 0 10px; border-radius: 6px; background: var(--blue); color: #fff; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; }
-.mk .sw { width: 30px; height: 18px; border-radius: 9px; background: var(--green); position: relative; }
+.mk .sw { display: inline-block; flex: none; width: 30px; height: 18px; border-radius: 9px; background: var(--green); position: relative; }
 .mk .sw::after { content: ""; position: absolute; top: 2px; left: 14px; width: 14px; height: 14px; border-radius: 7px; background: #fff; }
 
 /* Clean Up */
@@ -110,3 +110,5 @@
   figure:has(> .mk.win) { display: flex; flex-direction: column; }
   figure > .mk.win { flex: 1; }
 }
+.mk .sw.off { background: rgba(255,255,255,.18); }
+.mk .sw.off::after { left: 2px; }

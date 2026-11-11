@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Big numbers</title><meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../app.css"><link rel="stylesheet" href="../../style.css">
+<style>
+body { padding: 96px 0 120px; }
+.vh { font: 500 40px/48px var(--sans); letter-spacing: -.025em; margin: 0 0 40px; }
+
+.rows { display: flex; flex-direction: column; gap: 120px; overflow-x: clip; padding: 40px 0; margin: -40px 0; }
+.row { display: grid; grid-template-columns: 5fr 6fr; gap: 64px; align-items: center; }
+.row.rev .txt { order: 2; }
+.huge { font: 500 112px/1 var(--sans); letter-spacing: -.05em; color: var(--ink); }
+.row h3 { margin: 24px 0 0; font: 500 24px/32px var(--sans); }
+.row p { margin: 8px 0 0; color: var(--ink2); font-size: 17px; line-height: 28px; max-width: 32ch; }
+.shot { position: relative; }
+.shot::before { content: ""; position: absolute; inset: -40px; background: radial-gradient(closest-side, rgba(90,110,180,.25), transparent); z-index: -1; }
+.row { opacity: 0; transform: translateY(24px); transition: opacity .8s cubic-bezier(.22,1,.36,1), transform .8s cubic-bezier(.22,1,.36,1); }
+.row.in { opacity: 1; transform: none; }
+@media (max-width: 860px) { .row { grid-template-columns: 1fr; gap: 24px; } .row.rev .txt { order: 0; } .huge { font-size: 60px; } .rows { gap: 80px; } }
+
+</style></head><body>
+<section class="wrap"><div class="rows"><div class="row"><div class="txt"><div class="huge num">4.2 GB</div><h3>Clean Up</h3><p>Caches, logs, Xcode data and old downloads</p></div><div class="shot"><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Clean Up</span></div><div class="body"><div class="cl-top"><span class="big num">4.2 GB</span><span class="dm">4 of 5 selected</span></div><div class="cl"><span class="ck"></span><span>Caches</span><span class="trk"><b style="width:100%"></b></span><span class="num dm">1.9 GB</span></div><div class="cl"><span class="ck"></span><span>Xcode DerivedData</span><span class="trk"><b style="width:68%"></b></span><span class="num dm">1.3 GB</span></div><div class="cl"><span class="ck"></span><span>Old downloads</span><span class="trk"><b style="width:32%"></b></span><span class="num dm">610 MB</span></div><div class="cl"><span class="ck"></span><span>Logs</span><span class="trk"><b style="width:22%"></b></span><span class="num dm">420 MB</span></div><div class="cl"><span class="ck off"></span><span>Trash</span><span class="trk"><b style="width:9%"></b></span><span class="num dm">180 MB</span></div><div class="ft"><span class="pill" style="height:28px;padding:0 14px">Move to Trash</span></div></div></div></div></div><div class="row rev"><div class="txt"><div class="huge num">688 GB</div><h3>Disk Map</h3><p>See what fills the disk</p></div><div class="shot"><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Disk Map</span></div><div class="body"><div class="tm">
+<div class="a"><b>Library</b>212 GB</div><div class="b"><b>Applications</b>148 GB</div><div class="c"><b>Movies</b>96 GB</div>
+<div class="d"><b>Xcode</b>71 GB</div><div class="e"><b>Docs</b>34 GB</div><div class="f"><b>Other</b>27 GB</div></div></div></div></div></div><div class="row"><div class="txt"><div class="huge num">⇧⌘2</div><h3>Capture</h3><p>Screenshots and screen recording with a share link</p></div><div class="shot"><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Capture</span></div><div class="body"><div class="dsk"><div class="fw w1"><i></i><i style="width:60%"></i><i style="width:75%"></i></div>
+<div class="fw w2"><i></i><i style="width:50%"></i></div><div class="cut"><span class="num">640 × 400</span></div>
+<div class="tools"><i class="on">▢</i><i>▭</i><i>◱</i><i class="rec">●</i></div></div></div></div></div></div><div class="row rev"><div class="txt"><div class="huge num">⌥⌘V</div><h3>Clipboard</h3><p>Everything you copied, searchable</p></div><div class="shot"><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Clipboard</span></div><div class="body"><div class="srch">Search</div><div class="cp cur"><span class="t mono">git push -u origin main</span><kbd>⌘1</kbd></div><div class="cp "><span class="t">Meeting moved to 15:30</span><kbd>⌘2</kbd></div><div class="cp "><span class="sq" style="background:#E8A33D"></span><span class="t mono">#E8A33D</span><kbd>⌘3</kbd></div><div class="cp "><span class="t">https://cmdmeow.furman.cat</span><kbd>⌘4</kbd></div><div class="cp "><span class="t">Screenshot 640 × 400</span><kbd>⌘5</kbd></div></div></div></div></div><div class="row"><div class="txt"><div class="huge num">1:24:10</div><h3>Keep Awake</h3><p>No sleep while a build or Claude Code runs</p></div><div class="shot"><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Keep Awake</span></div><div class="body"><div class="aw"><svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="86" class="aw-bg"/>
+<circle cx="100" cy="100" r="86" class="aw-ring" transform="rotate(-90 100 100)"/>
+<g class="aw-cup" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M68 92h52v18a20 20 0 0 1-20 20H88a20 20 0 0 1-20-20z"/><path d="M120 98h6a9 9 0 0 1 0 18h-6"/></g></svg>
+<div class="aw-t"><b class="num">1:24:10</b><span class="dm">Awake</span></div></div></div></div></div></div><div class="row rev"><div class="txt"><div class="huge num">6.6 GB</div><h3>Uninstaller</h3><p>Apps and the files they leave behind</p></div><div class="shot"><div class="mk win " aria-hidden="true"><div class="bar"><i></i><i></i><i></i><span>Uninstaller</span></div><div class="body"><div class="ap"><span class="ai" style="background:#5E5CE6"></span><span>Final Cut Pro</span><span class="num">4.8 GB</span></div><div class="ap"><span class="ai" style="background:#30D158"></span><span>Spotify</span><span class="num">612 MB</span></div><div class="ap"><span class="ai" style="background:#FF9F0A"></span><span>Sketch</span><span class="num">540 MB</span></div><div class="ap"><span class="ai" style="background:#0A84FF"></span><span>Zoom</span><span class="num">388 MB</span></div><div class="ap"><span class="ai" style="background:#FF453A"></span><span>Figma</span><span class="num">301 MB</span></div></div></div></div></div></div></section>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="mark" viewBox="0 0 100 100"><g fill="currentColor"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
+<path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="#E8A33D" stroke-width="6.5" stroke-linecap="round"/></symbol>
+<symbol id="mark-line" viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="7" stroke-linejoin="round"><path d="M16 34C18 22 23 12 27 11C30 10 34 16 38 22M84 34C82 22 77 12 73 11C70 10 66 16 62 22"/><rect x="14" y="22" width="72" height="68" rx="16"/></g>
+<path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></symbol>
+</defs></svg>
+<script>
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.2});
+document.querySelectorAll('.row').forEach(r=>io.observe(r));
+</script>
+</body></html>
