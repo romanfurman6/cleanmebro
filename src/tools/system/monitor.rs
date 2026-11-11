@@ -294,13 +294,14 @@ pub fn measure_folders(shared: Shared, ctx: egui::Context) {
     let s = shared.clone();
     in_background("folder-sizes", move || {
         let home = home_dir();
-        let cats = vec![
-            ("Applications".to_string(), dir_size(Path::new("/Applications"))),
-            ("Documents".to_string(), dir_size(&home.join("Documents"))),
-            ("Downloads".to_string(), dir_size(&home.join("Downloads"))),
-            ("Desktop".to_string(), dir_size(&home.join("Desktop"))),
-        ];
-        let trash = std::fs::read_dir(home.join(".Trash")).ok().map(|_| dir_size(&home.join(".Trash")));
+        let places = [("Applications", PathBuf::from("/Applications")), ("Documents", home.join("Documents")), ("Downloads", home.join("Downloads")), ("Desktop", home.join("Desktop"))];
+        // each folder on its own thread: the slowest one sets the wait
+        let (cats, trash) = std::thread::scope(|sc| {
+            let jobs: Vec<_> = places.iter().map(|(n, p)| sc.spawn(move || (n.to_string(), dir_size(p)))).collect();
+            let t = home.join(".Trash");
+            let trash = std::fs::read_dir(&t).ok().map(|_| dir_size(&t));
+            (jobs.into_iter().map(|j| j.join().unwrap_or_default()).collect::<Vec<_>>(), trash)
+        });
         let mut g = s.lock().unwrap();
         g.categories = cats;
         g.trash_bytes = trash;
