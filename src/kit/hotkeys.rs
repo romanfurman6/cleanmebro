@@ -97,9 +97,13 @@ pub fn key_code(key: &str) -> Option<String> {
 
 /// The library's hotkey for one of our shortcuts.
 pub fn to_hotkey(s: &Shortcut) -> Option<HotKey> {
-    // Esc is never offered to the recorder, but a tool may bind it while
-    // something of its own is on screen (Dictation's cancel)
-    let name = if s.key == "Escape" { "Escape".to_string() } else { key_code(&s.key)? };
+    // Esc and Return are never offered to the recorder, but a tool may bind
+    // them while something of its own is on screen (Dictation's cancel/done)
+    let name = match s.key.as_str() {
+        "Escape" => "Escape".to_string(),
+        "Return" => "Enter".to_string(),
+        k => key_code(k)?,
+    };
     let code = Code::from_str(&name).ok()?;
     let mut m = Modifiers::empty();
     if s.cmd {

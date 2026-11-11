@@ -44,76 +44,17 @@ impl Engine {
     }
 }
 
-/// The language spoken, or Auto to let the model tell.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Lang {
-    #[default]
-    Auto,
-    Uk,
-    En,
-    Ru,
-}
-
-impl Lang {
-    pub const ALL: [Lang; 4] = [Lang::Auto, Lang::Uk, Lang::En, Lang::Ru];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Lang::Auto => "Auto",
-            Lang::Uk => "Українська",
-            Lang::En => "English",
-            Lang::Ru => "Русский",
-        }
-    }
-
-    /// Whether `text` is written in this language's alphabet (Auto takes
-    /// any): most of its letters are Cyrillic for Ukrainian and Russian,
-    /// Latin for English.
-    pub fn fits(self, text: &str) -> bool {
-        let (mut cyr, mut lat) = (0, 0);
-        for c in text.chars().filter(|c| c.is_alphabetic()) {
-            if ('\u{0400}'..='\u{04FF}').contains(&c) {
-                cyr += 1;
-            } else if c.is_ascii_alphabetic() {
-                lat += 1;
-            }
-        }
-        match self {
-            Lang::Auto => true,
-            Lang::Uk | Lang::Ru => cyr >= lat,
-            Lang::En => lat >= cyr,
-        }
-    }
-
-    /// The model's language code; None to detect it.
-    pub fn code(self) -> Option<&'static str> {
-        match self {
-            Lang::Auto => None,
-            Lang::Uk => Some("uk"),
-            Lang::En => Some("en"),
-            Lang::Ru => Some("ru"),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// Hold to talk, or tap to start and tap again to stop.
     pub shortcut: Option<Shortcut>,
     pub engine: Engine,
-    /// Whisper is told it; with Parakeet, which finds it itself, words in
-    /// another alphabet aren't typed as you speak.
-    pub lang: Lang,
     /// Put back what was on the clipboard after pasting.
     pub restore_clipboard: bool,
     pub keep_history: bool,
     /// Hands-free: stop after this many quiet seconds; 0 never.
     pub silence_secs: u32,
-    /// Type the words into the field while speaking, not once at the end.
-    pub live_typing: bool,
-    /// Fix misheard words with an AI tool before they go in.
-    pub polish: super::polish::Polish,
     /// Settings format; 1 moved the old default ⌥Space to ⌥D. Missing in
     /// a file means 0, not today's.
     #[serde(default)]
@@ -140,7 +81,7 @@ pub fn default_shortcut() -> Shortcut {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, lang: Lang::Auto, restore_clipboard: true, keep_history: true, silence_secs: 5, live_typing: false, polish: super::polish::Polish::Off, version: VERSION }
+        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, restore_clipboard: true, keep_history: true, silence_secs: 5, version: VERSION }
     }
 }
 
@@ -236,18 +177,11 @@ mod tests {
 
     #[test]
     fn settings_round_trip_and_fill_gaps() {
+        // a file from before keeps working: unknown fields are dropped
         let s: Settings = serde_json::from_str(r#"{"lang":"Uk"}"#).unwrap();
-        assert_eq!(s.lang, Lang::Uk);
         assert_eq!(s.shortcut, Some(default_shortcut()));
         assert!(s.restore_clipboard);
-        assert!(!s.live_typing);
-        assert!(Lang::Uk.fits("Привіт, як справи"));
-        assert!(!Lang::Uk.fits("Hello, how are"));
-        assert!(Lang::En.fits("Hello"));
-        assert!(Lang::Auto.fits("Hello"));
         assert_eq!(s.stop_after_silence(), Some(std::time::Duration::from_secs(5)));
         assert_eq!(Settings { silence_secs: 0, ..s.clone() }.stop_after_silence(), None);
-        assert_eq!(Lang::Uk.code(), Some("uk"));
-        assert_eq!(Lang::Auto.code(), None);
     }
 }
