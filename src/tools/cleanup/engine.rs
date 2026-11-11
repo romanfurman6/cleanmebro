@@ -942,7 +942,8 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
             let mut g = shared.lock_ok();
             match res {
                 Ok(()) => {
-                    if to_trash {
+                    // an emptied Trash is gone for good, not "in the Trash"
+                    if to_trash && it.group != Group::Trash {
                         g.trashed_bytes += it.bytes;
                     }
                     g.cleaned_bytes += it.bytes;

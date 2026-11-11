@@ -647,24 +647,28 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
     // block clicks to the page underneath
     let _ = ui.interact(r, ui.scope_id().with("confirm-scrim"), Sense::click());
     p.rect_filled(r, CornerRadius { nw: 0, sw: 0, ne: WIN_R as u8, se: WIN_R as u8 }, Color32::from_black_alpha(115));
-    let (n, bytes, perm, trashed) = {
+    let (n, bytes, perm, trashed, rebuilt) = {
         let g = app.clean.lock_ok();
         let sel: Vec<&Item> = g.items.iter().filter(|i| i.selected).collect();
         let trashed = sel.iter().filter(|i| !i.permanent && !i.rebuilds()).count();
-        (sel.len(), sel.iter().map(|i| i.bytes).sum::<u64>(), sel.iter().any(|i| i.permanent), trashed)
+        let rebuilt = sel.iter().filter(|i| !i.permanent && i.rebuilds()).count();
+        (sel.len(), sel.iter().map(|i| i.bytes).sum::<u64>(), sel.iter().any(|i| i.permanent), trashed, rebuilt)
     };
     let mut body = if app.delete_now {
         "They'll be deleted right away. This can't be undone.".to_string()
-    } else if trashed == 0 {
-        "Caches and logs are deleted; apps rebuild them.".to_string()
-    } else if trashed + perm as usize == n {
-        "They go to the Trash, so you can put anything back.".to_string()
     } else {
-        format!("Caches and logs are deleted; apps rebuild them. The other {trashed} go to the Trash.")
+        let mut parts: Vec<String> = Vec::new();
+        if rebuilt > 0 {
+            parts.push("Caches and logs are deleted; apps rebuild them.".into());
+        }
+        if trashed > 0 {
+            parts.push(if rebuilt == 0 { "They go to the Trash, so you can put anything back.".into() } else { format!("The other {trashed} go to the Trash.") });
+        }
+        if perm {
+            parts.push("Emptying the Trash is permanent.".into());
+        }
+        parts.join(" ")
     };
-    if perm {
-        body.push_str(" Emptying the Trash is permanent.");
-    }
     body.push_str(" Quit the apps involved first for the best result.");
     let bw = 440.0 - 44.0;
     let body_h = p.layout(body.clone(), font(13.0), TEXT_SOFT(), bw).size().y;
@@ -676,7 +680,7 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
     p.text(m.min + Vec2::new(22.0, 22.0), Align2::LEFT_TOP, format!("Clean {} items ({})?", n, human_bytes(bytes)), bold(17.0), TEXT());
     paragraph(&p, m.min + Vec2::new(22.0, 58.0), &body, font(13.0), TEXT_SOFT(), bw);
     let danger = app.delete_now || perm;
-    let ok_label = if app.delete_now { "Delete now" } else { "Move to Trash" };
+    let ok_label = if app.delete_now { "Delete now" } else if trashed == 0 { "Clean" } else { "Move to Trash" };
     let okw = button_width(&p, ok_label, BTN_PRIMARY);
     let ok = Rect::from_min_size(Pos2::new(m.right() - 22.0 - okw, m.bottom() - 22.0 - 30.0), Vec2::new(okw, 30.0));
     let cw = button_width(&p, "Cancel", BTN_SECONDARY);
@@ -842,7 +846,7 @@ pub fn demo_done() -> cleanup::State {
     st.cleaned_count = sel.len();
     st.cleaned_bytes = sel.iter().map(|i| i.bytes).sum();
     st.cleaned = sel.iter().map(|i| (i.group, i.bytes)).collect();
-    st.trashed_bytes = sel.iter().filter(|i| !i.rebuilds()).map(|i| i.bytes).sum();
+    st.trashed_bytes = sel.iter().filter(|i| !i.permanent && !i.rebuilds()).map(|i| i.bytes).sum();
     st.log = sel.iter().map(|i| format!("Moved to Trash: {}", i.path.display())).collect();
     st
 }
