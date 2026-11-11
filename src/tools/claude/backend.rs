@@ -30,6 +30,7 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
             let mut size_at = Every::default();
             // what each provider showed last, so switching back is instant
             let mut cache: std::collections::HashMap<usize, (UsageInfo, Every, Every, Every)> = Default::default();
+            let mut prefetched = false;
             loop {
                 // another provider was picked: show its last data, refresh only when due
                 if ai::selected() != cur {
@@ -84,6 +85,30 @@ pub fn start(ctx: egui::Context, demo: bool) -> Shared {
                 }
                 s.lock().unwrap().loading = false;
                 activity::repaint(&ctx);
+                // once per launch, load the other providers too, so the first
+                // switch to one shows its data right away
+                if !prefetched {
+                    prefetched = true;
+                    for i in 0..ai::PROVIDERS.len() {
+                        if i == cur || cache.contains_key(&i) {
+                            continue;
+                        }
+                        let mut q = ai::make(i);
+                        if !q.enabled() {
+                            continue;
+                        }
+                        let tmp: Shared = Arc::new(Mutex::new(UsageInfo::new(q.name())));
+                        q.fetch_account(&tmp);
+                        let mut info = tmp.lock().unwrap().clone();
+                        info.projects = q.projects();
+                        info.local = q.local_tokens();
+                        info.loading = false;
+                        let (mut a, mut b) = (Every::default(), Every::default());
+                        a.mark();
+                        b.mark();
+                        cache.insert(i, (info, a, b, Every::default()));
+                    }
+                }
                 // wait, but wake early when someone asks for a refresh or the
                 // panel opens
                 if activity::nap(Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS), p.wake()) == Wake::Kicked {

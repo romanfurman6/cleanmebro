@@ -33,13 +33,17 @@ fn claude_now(app: &App) -> Availability {
 
 /// A calm note in place of the Claude switch: what's missing, how to turn it
 /// on, and that the built-in rules are used meanwhile. Returns its height.
+fn claude_note_height(p: &egui::Painter, width: f32, a: Availability) -> f32 {
+    let text_h = p.layout(a.how().to_string(), font(12.0), TEXT_DIM(), width - 54.0).size().y;
+    32.0 + text_h + 12.0 + 26.0 + 14.0
+}
+
 fn claude_note(ui: &mut Ui, pos: Pos2, width: f32, a: Availability, cx: &mut Cx) -> f32 {
     let p = ui.painter().clone();
     let x = pos.x + 40.0;
     let w = width - 54.0;
     let body = a.how().to_string();
-    let text_h = p.layout(body.clone(), font(12.0), TEXT_DIM(), w).size().y;
-    let r = Rect::from_min_size(pos, Vec2::new(width, 32.0 + text_h + 12.0 + 26.0 + 14.0));
+    let r = Rect::from_min_size(pos, Vec2::new(width, claude_note_height(&p, width, a)));
     glass_card(&p, r, R_CARD, 0.0, false);
     icon(&p, Icon::Gauge, Rect::from_min_size(r.min + Vec2::new(14.0, 14.0), Vec2::splat(16.0)), TEXT_FAINT());
     text_fit(&p, Pos2::new(x, r.top() + 13.0), Align2::LEFT_TOP, a.title(), bold(13.0), TEXT(), w);
@@ -100,29 +104,52 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     page_header(&p, r, "Cleanup", "", TEXT_DIM());
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
 
-    // past cleans fill the space under the cards; before the first clean the
-    // cards sit in the middle instead of at the top of an empty page
+    // past cleans fill the space under the disk card; before the first
+    // clean the disk card itself takes the page, with a big ring
     let hist = super::engine::history();
-    let y0 = body.top();
-    // the disk, with Scan on the right
-    let top = Rect::from_min_size(Pos2::new(body.left(), y0), Vec2::new(body.width(), 128.0));
+    let note_h = if has_claude { 0.0 } else { claude_note_height(&p, body.width(), avail) + sp::L };
+    let compact = !hist.is_empty() && body.height() - note_h - 128.0 - sp::L > 120.0;
+    let top_h = if compact { 128.0 } else { (body.height() - note_h).max(128.0) };
+    let top = Rect::from_min_size(body.min, Vec2::new(body.width(), top_h));
     glass_card(&p, top, R_CARD, 0.0, false);
     let ti = top.shrink(sp::L);
     let (total, free) = crate::kit::fs::volume_space("/");
-    p.text(ti.left_top(), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT());
-    let y = ti.top() + 16.0 + sp::M;
-    let g = p.layout_no_wrap(human_bytes(free), ty::hero(), TEXT());
-    let gw = g.size().x;
-    p.galley(Pos2::new(ti.left(), y), g, TEXT());
-    if total > 0 {
-        p.text(Pos2::new(ti.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
-    }
-    let bw = 200.0;
-    let bar_w = (ti.width() - bw - sp::XL * 2.0).max(120.0);
     let used = if total > 0 { 1.0 - free as f32 / total as f32 } else { 0.0 };
-    bar(&p, Rect::from_min_size(Pos2::new(ti.left(), ti.bottom() - 8.0), Vec2::new(bar_w, 8.0)), used, BLUE());
+    let bw = 200.0;
     let scan_h = if has_claude { 44.0 + sp::M + 18.0 } else { 44.0 };
-    let br = Rect::from_min_size(Pos2::new(ti.right() - bw, ti.center().y - scan_h / 2.0), Vec2::new(bw, 44.0));
+    let br = if compact {
+        p.text(ti.left_top(), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT());
+        let y = ti.top() + 16.0 + sp::M;
+        let g = p.layout_no_wrap(human_bytes(free), ty::hero(), TEXT());
+        let gw = g.size().x;
+        p.galley(Pos2::new(ti.left(), y), g, TEXT());
+        if total > 0 {
+            p.text(Pos2::new(ti.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
+        }
+        let bar_w = (ti.width() - bw - sp::XL * 2.0).max(120.0);
+        bar(&p, Rect::from_min_size(Pos2::new(ti.left(), ti.bottom() - 8.0), Vec2::new(bar_w, 8.0)), used, BLUE());
+        Rect::from_min_size(Pos2::new(ti.right() - bw, ti.center().y - scan_h / 2.0), Vec2::new(bw, 44.0))
+    } else {
+        // left half: the used-space ring; right half: the numbers and Scan
+        let half = ti.width() / 2.0;
+        let rr = ((ti.height() - sp::XL) / 2.0).min(half / 2.0 - sp::L).clamp(40.0, 130.0);
+        let c = Pos2::new(ti.left() + half / 2.0, ti.center().y);
+        let w = (rr * 0.12).clamp(10.0, 16.0);
+        crate::kit::tile::ring(&p, c, rr - w / 2.0, w, used.max(0.01), BLUE());
+        text_fit(&p, c - Vec2::new(0.0, 10.0), Align2::CENTER_CENTER, &format!("{:.0}%", used * 100.0), ty::hero(), TEXT(), (rr - w) * 1.6);
+        p.text(c + Vec2::new(0.0, 22.0), Align2::CENTER_CENTER, "used", ty::body(), ty::caption_color());
+        let x = ti.left() + half + sp::L;
+        let col_w = ti.right() - x;
+        let block_h = 16.0 + sp::M + 34.0 + sp::S + 18.0 + sp::XL + scan_h;
+        let y0 = ti.center().y - block_h / 2.0;
+        p.text(Pos2::new(x, y0), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT());
+        let y = y0 + 16.0 + sp::M;
+        text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, &human_bytes(free), ty::hero(), TEXT(), col_w);
+        if total > 0 {
+            p.text(Pos2::new(x, y + 34.0 + sp::S), Align2::LEFT_TOP, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
+        }
+        Rect::from_min_size(Pos2::new(x, y + 34.0 + sp::S + 18.0 + sp::XL), Vec2::new(bw.min(col_w), 44.0))
+    };
     if pill_button(ui, br, "Scan", BTN_PRIMARY, true).clicked() {
         cleanup::start_scan(app.clean.clone(), ctx, app.use_ai && has_claude);
     }
@@ -131,14 +158,14 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
         if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
             app.use_ai = !app.use_ai;
         }
-        text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Ask Claude what's safe", ty::body(), TEXT(), bw - 40.0);
+        text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Check with AI", ty::body(), TEXT(), bw - 40.0);
     }
 
     let mut y = top.bottom() + sp::L;
     if !has_claude {
         y += claude_note(ui, Pos2::new(body.left(), y), body.width(), avail, tcx) + sp::L;
     }
-    if !hist.is_empty() && body.bottom() - y > 120.0 {
+    if compact {
         past_cleans(&p, Rect::from_min_max(Pos2::new(body.left(), y), body.max), &hist);
     }
 }
@@ -175,7 +202,7 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time);
     let sub = match phase {
-        Phase::Judging => "Step 2 of 2 · Asking Claude what's safe",
+        Phase::Judging => "Step 2 of 2 · Checking with AI",
         Phase::Cleaning => "Cleaning…",
         _ if !st.with_ai => "Looking for junk",
         _ => "Step 1 of 2 · Looking for junk",

@@ -274,15 +274,31 @@ pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx
         p.text(ui_.left_top(), Align2::LEFT_TOP, "What uses your limits", ty::title(), TEXT());
         let c = &cl.contrib[0];
         p.text(ui_.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, &c.title, ty::caption(), ty::caption_color());
-        let mut ly = ui_.top() + 34.0 + sp::M;
-        for l in &c.lines {
-            let g = p.layout(l.trim().to_string(), ty::body(), TEXT_SOFT(), ui_.width());
-            if ly + g.size().y > ui_.bottom() {
+        // each line that leads with a share ("95% of …") becomes a row:
+        // the share big on the left, the rest beside it over a bar
+        let ly = ui_.top() + 34.0 + sp::M;
+        let n = c.lines.len().max(1) as f32;
+        let rh = ((ui_.bottom() - ly) / n).clamp(30.0, 60.0);
+        for (k, l) in c.lines.iter().enumerate() {
+            let row = Rect::from_min_size(Pos2::new(ui_.left(), ly + k as f32 * rh), Vec2::new(ui_.width(), rh));
+            if row.bottom() > ui_.bottom() + 1.0 {
                 break;
             }
-            let h = g.size().y;
-            p.galley(Pos2::new(ui_.left(), ly), g, TEXT_SOFT());
-            ly += h + sp::S;
+            let l = l.trim();
+            let share = l.split_once('%').and_then(|(a, rest)| a.trim().parse::<f32>().ok().map(|v| (v, rest.trim())));
+            match share {
+                Some((v, rest)) => {
+                    let vw = 64.0;
+                    text_fit(&p, Pos2::new(row.left(), row.center().y), Align2::LEFT_CENTER, &format!("{v:.0}%"), ty::number(), TEXT(), vw);
+                    let x = row.left() + vw + sp::M;
+                    let w = row.right() - x;
+                    text_fit(&p, Pos2::new(x, row.center().y - 2.0), Align2::LEFT_BOTTOM, rest, ty::body(), TEXT_SOFT(), w);
+                    bar(&p, Rect::from_min_size(Pos2::new(x, row.center().y + 4.0), Vec2::new(w, 6.0)), v / 100.0, BLUE());
+                }
+                None => {
+                    text_fit(&p, Pos2::new(row.left(), row.center().y), Align2::LEFT_CENTER, l, ty::body(), TEXT_SOFT(), row.width());
+                }
+            }
         }
     }
 
