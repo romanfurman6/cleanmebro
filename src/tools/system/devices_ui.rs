@@ -100,8 +100,10 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel
             let x0 = r.left() + tile::PAD + (r.width() - 2.0 * tile::PAD - cw * n as f32) / 2.0;
             for (k, d) in devs.iter().take(n).enumerate() {
                 let cx = x0 + cw * (k as f32 + 0.5);
-                ring_cell(p, Pos2::new(cx, r.top() + 33.0), 19.0, d, 15.0);
-                text_fit(p, Pos2::new(cx, r.bottom() - 8.0), Align2::CENTER_BOTTOM, &pct_text(d.battery()), bold(11.0), txt_col(d.battery()), cw - 4.0);
+                // ring, then the device's name, then its charge
+                ring_cell(p, Pos2::new(cx, r.top() + 26.0), 16.0, d, 13.0);
+                text_fit(p, Pos2::new(cx, r.bottom() - 21.0), Align2::CENTER_BOTTOM, &d.name, font(10.0), TEXT_DIM, cw - 6.0);
+                text_fit(p, Pos2::new(cx, r.bottom() - 7.0), Align2::CENTER_BOTTOM, &pct_text(d.battery()), bold(11.0), txt_col(d.battery()), cw - 4.0);
             }
         }
         Size::S24 => {

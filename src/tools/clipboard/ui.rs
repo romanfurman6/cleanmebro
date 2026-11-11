@@ -251,7 +251,10 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         y += 28.0 + 6.0;
     }
 
-    let fit = ((rect.bottom() - 6.0 - y) / 34.0).floor().max(1.0) as usize;
+    // as many clips as fit; rows shrink a little rather than leave a gap
+    let avail = rect.bottom() - 6.0 - y;
+    let fit = (avail / 30.0).floor().max(1.0) as usize;
+    let rh = (avail / fit as f32).min(34.0);
     let ids: Vec<u64> = c.visible(Filter::All, "").into_iter().take(fit.min(PANEL_ROWS)).collect();
     if ids.is_empty() {
         let r = Rect::from_min_max(Pos2::new(x0, y + 4.0), Pos2::new(x1, rect.bottom() - 12.0));
@@ -262,7 +265,7 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     }
     for eid in &ids {
         let Some(e) = c.store.get(*eid).cloned() else { continue };
-        let r = Rect::from_min_size(Pos2::new(x0 - 6.0, y), Vec2::new(x1 - x0 + 12.0, 34.0));
+        let r = Rect::from_min_size(Pos2::new(x0 - 6.0, y), Vec2::new(x1 - x0 + 12.0, rh));
         let resp = row_hover(ui, r, id.with(("row", e.id)));
         if resp.hovered() {
             p.rect_filled(r, 7.0, white(15));
@@ -281,7 +284,7 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         if resp.on_hover_text("Click to copy").clicked() && c.copy(e.id, false) {
             cx.toast("Copied");
         }
-        y += 34.0;
+        y += rh;
     }
 }
 
