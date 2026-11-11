@@ -53,7 +53,7 @@ fn prompt(text: &str, lang: &str) -> String {
     format!(
         "This text was dictated and transcribed by speech recognition. It is in {lang}; \
          mixed-in words in other languages stay as they are. Fix misheard words, capitals and \
-         punctuation (only where clearly needed; don't chop it into short sentences). Keep \
+         punctuation. Keep sentences as spoken: commas between phrases, a full stop only where a thought ends; never turn single words into sentences. Keep \
          its language, words and meaning: never translate a word into another language, \
          rephrase, answer or add anything. Reply with the fixed text only.\n\n{text}"
     )
@@ -114,13 +114,26 @@ fn sane(text: &str, answer: &str) -> Option<String> {
     let (a, b) = (text.chars().count() as f32, answer.chars().count() as f32);
     let new_letters = |set: &str| !text.chars().any(|c| set.contains(c)) && answer.chars().any(|c| set.contains(c));
     let swapped = new_letters("ыэъёЫЭЪЁ") || new_letters("іїєґІЇЄҐ");
-    (!answer.is_empty() && !swapped && b <= a * 1.6 + 20.0 && b >= a * 0.5 && changed(text, answer) <= 0.25).then(|| answer.to_string())
+    (!answer.is_empty() && !swapped && b <= a * 1.6 + 20.0 && b >= a * 0.5 && changed(text, answer) <= 0.25 && !russified(text, answer)).then(|| answer.to_string())
+}
+
+/// Lowercase letters only.
+fn words(s: &str) -> Vec<String> {
+    s.split_whitespace().map(|w| w.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>()).filter(|w| !w.is_empty()).collect()
+}
+
+/// A word swapped for its twin in the other language ("запис" → "запись",
+/// "тестую" → "тестирую"): the same once the letters that tell them apart
+/// are evened out.
+fn russified(text: &str, answer: &str) -> bool {
+    let even = |w: &str| w.replace('ь', "").replace("ирую", "ую").replace(['і', 'ї', 'ы'], "и").replace(['є', 'э'], "е").replace('ґ', "г").replace('ё', "е");
+    let had = words(text);
+    words(answer).iter().any(|w| !had.contains(w) && had.iter().any(|h| even(h) == even(w)))
 }
 
 /// The share of the answer's words that weren't in the text (case and
 /// punctuation aside): a fix changes a few, a translation most.
 fn changed(text: &str, answer: &str) -> f32 {
-    let words = |s: &str| s.split_whitespace().map(|w| w.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>()).filter(|w| !w.is_empty()).collect::<Vec<_>>();
     let (had, got) = (words(text), words(answer));
     if got.is_empty() {
         return 1.0;
@@ -139,6 +152,8 @@ mod tests {
         assert_eq!(sane("привіт", &"long answer ".repeat(10)), None);
         assert_eq!(sane("я тестую запис", "Я тестирую запись."), None);
         assert_eq!(sane("я тестирую запись", "Я тестірую запис."), None);
+        assert_eq!(sane("раз два три я тестую запис", "Раз, два, три. Я тестую запись."), None);
+        assert!(sane("раз два три я тестую запис", "Раз, два, три. Я тестую запис.").is_some());
         assert_eq!(run(Polish::Off, "same", None).as_deref(), Ok("same"));
         assert_eq!(language("привіт, я тестую", None), "Ukrainian");
         assert!(language("я тестую запис", None).starts_with("Ukrainian or Russian"));
