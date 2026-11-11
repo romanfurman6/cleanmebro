@@ -59,8 +59,10 @@ pub fn widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
                 let r = Rect::from_min_max(Pos2::new(x0, rect.top() + 32.0), Pos2::new(rect.right() - 8.0, rect.bottom() - 8.0));
                 modes(c, ui, &p, id, r, &MODES[..2], false);
             } else {
-                let chip = Rect::from_min_size(Pos2::new(rect.left() + 12.0, rect.center().y - 17.0), Vec2::splat(34.0));
-                tool_chip(&p, chip, Icon::Crop, tint::CAPTURE);
+                // the round chip every other row has
+                let chip = tile::row_chip(rect);
+                p.circle_filled(chip.center(), 17.0, white(14));
+                icon(&p, Icon::Crop, Rect::from_center_size(chip.center(), Vec2::splat(18.0)), lift(tint::CAPTURE));
                 x0 = chip.right() + 10.0;
                 modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, rect.top() + 9.0), Pos2::new(rect.right() - 9.0, rect.bottom() - 9.0)), &MODES, true);
             }
