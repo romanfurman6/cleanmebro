@@ -36,12 +36,18 @@
     if (!still) setInterval(() => { if (!held && inView && !document.hidden) show((sel + 1) % navs.length); }, 4000);
     // Live numbers inside the window
     const hb = $('hc-bars'), hc = $('hc-cpu'), fr = $('fc-rpm');
+    const leg = $('hc-leg'), sbr = $('sb-rpm'), fp = $('fc-pct'), fl = $('fc-l'), frr = $('fc-r'), flb = $('fc-lb'), frb = $('fc-rb');
     let hl = 16;
     if (!still) setInterval(() => {
       hl = Math.max(6, Math.min(70, hl + (Math.random() - 0.5) * 12));
       if (hb) { const b = hb.firstElementChild; hb.appendChild(b); const h = 30 + hl; b.style.height = h + '%'; b.className = h > 90 ? 'hot' : ''; }
       if (hc) hc.innerHTML = Math.round(hl) + '<small>%</small>';
-      if (fr) fr.textContent = (1900 + Math.round(hl * 20)).toLocaleString('en-US').replace(',', ' ');
+      const fmt = n => n.toLocaleString('en-US').replace(',', ' '), avg = 1900 + Math.round(hl * 20), MAX = 6000;
+      if (fr) fr.textContent = fmt(avg);
+      if (sbr) sbr.textContent = fmt(avg);
+      if (fp) fp.textContent = Math.round(avg / MAX * 100) + '%';
+      [[fl, flb, avg - 85], [frr, frb, avg + 85]].forEach(([t, b, v]) => { if (t) t.textContent = fmt(v) + ' rpm'; if (b) b.style.width = (v / MAX * 100).toFixed(1) + '%'; });
+      if (leg) { const u = Math.round(hl * 0.7); leg.innerHTML = `User ${u}%&nbsp;&nbsp; System ${Math.round(hl) - u}%&nbsp;&nbsp; Idle ${100 - Math.round(hl)}%`; }
     }, 900);
   }
 
