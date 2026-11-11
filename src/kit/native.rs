@@ -92,6 +92,7 @@ mod mac {
     /// A white rounded square, 2x, that stretches between its corners: the
     /// mask that gives the blur the window's rounded corners.
     fn rounded_mask(radius: f64) -> Option<Retained<objc2_app_kit::NSImage>> {
+        use objc2::AllocAnyThread;
         use objc2_app_kit::{NSImage, NSImageResizingMode};
         use objc2_foundation::{NSData, NSEdgeInsets, NSSize};
         let r = radius.max(1.0);
