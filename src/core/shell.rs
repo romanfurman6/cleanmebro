@@ -72,6 +72,8 @@ pub struct App {
     pending_shape: bool,
     screenshot: Option<PathBuf>,
     frame: u64,
+    /// last (ppp, native ppp) logged under CMDMEOW_SCALE_LOG
+    debug_scale: Option<(f32, Option<f32>)>,
     pub toast: Option<(String, Instant)>,
     /// First-run setup, while its window is open.
     pub setup: Option<super::onboard::Setup>,
@@ -152,6 +154,7 @@ impl App {
             pending_shape: true,
             screenshot: opts.screenshot,
             frame: 0,
+            debug_scale: None,
             toast: None,
             setup: first_run.then(|| super::onboard::Setup::new(super::onboard::saved_step())),
             perm_watch: Default::default(),
@@ -578,6 +581,29 @@ impl eframe::App for App {
             let r = if self.mode == Mode::Panel { m::CARD_RADIUS as f64 + 6.0 } else { 16.0 };
             if self.screenshot.is_none() {
                 crate::kit::native::apply_glass(r);
+            }
+        }
+        // CMDMEOW_SELF_SHOT=<dir>: open the panel, then let screencapture
+        // (run by the app, so with its Screen Recording permission) save the
+        // screen, to check how the panel looks over the desktop
+        if let Some(dir) = std::env::var_os("CMDMEOW_SELF_SHOT") {
+            if self.frame == 60 {
+                self.open_panel(&ctx);
+            }
+            if self.frame == 150 {
+                let out = std::path::Path::new(&dir).join("panel.png");
+                let ok = std::process::Command::new("/usr/sbin/screencapture").arg("-x").arg(&out).status().map(|s| s.success()).unwrap_or(false);
+                eprintln!("[self-shot] {} {}", out.display(), if ok { "saved" } else { "failed" });
+            }
+            ctx.request_repaint();
+        }
+        if std::env::var_os("CMDMEOW_SCALE_LOG").is_some() {
+            // the scale egui renders at, logged when it changes (the panel
+            // shown on another display)
+            let scale = (ctx.pixels_per_point(), ctx.input(|i| i.viewport().native_pixels_per_point));
+            if self.debug_scale != Some(scale) {
+                self.debug_scale = Some(scale);
+                eprintln!("[scale] ppp {} native {:?} frame {}\n{}", scale.0, scale.1, self.frame, crate::kit::native::debug_windows());
             }
         }
         if std::env::var("CMDMEOW_DEBUG").is_ok() {
