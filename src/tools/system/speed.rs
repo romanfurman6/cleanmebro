@@ -8,7 +8,7 @@ use egui::{Align2, Color32, CornerRadius, FontFamily, FontId, Id, Key, Order, Po
 use std::f32::consts::PI;
 
 fn id() -> Id {
-    Id::new("cmdmeow-speed-modal")
+    Id::unique("cmdmeow-speed-modal")
 }
 
 pub fn open(ctx: &egui::Context) {
@@ -113,6 +113,16 @@ fn card_bg(p: &egui::Painter, m: Rect) {
     p.rect_stroke(m, 16.0, Stroke::new(1.0, CARD_EDGE()), StrokeKind::Inside);
 }
 
+/// One cell of the ping · download · upload row.
+struct Col {
+    label: &'static str,
+    value: Option<f64>,
+    unit: &'static str,
+    color: Color32,
+    phase: SpeedPhase,
+    glyph: Option<Icon>,
+}
+
 /// Returns (run again, close).
 fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
     let ctx = ui.ctx().clone();
@@ -137,7 +147,9 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
         _ => (down_color(), 0.0),
     };
     let frac = ctx.animate_value_with_time(id().with("dial"), dial(target), 0.35);
-    let shown = ctx.animate_value_with_time(id().with("num"), target as f32, 0.35) as f64;
+    // the finished number lands at once; only live readings glide
+    let glide = ctx.animate_value_with_time(id().with("num"), target as f32, 0.35) as f64;
+    let shown = if s.phase == SpeedPhase::Done { target } else { glide };
     // track and stops
     p.add(PathShape::line(arc_points(c, DIAL_R, A0, A0 + SPAN, 96), PathStroke::new(DIAL_W, white(18))));
     for end in [A0, A0 + SPAN] {
@@ -200,6 +212,7 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
         SpeedPhase::Download => (Some(Icon::Down), "Download", down_color()),
         SpeedPhase::Upload => (Some(Icon::Up), "Upload", up_color()),
         SpeedPhase::Done if s.error.is_some() => (None, "", TEXT_DIM()),
+        SpeedPhase::Done if s.down_mbps.is_none() || s.up_mbps.is_none() => (None, "Stopped", TEXT_DIM()),
         _ => (Some(Icon::Down), "Download", down_color()),
     };
     if !label.is_empty() {
@@ -219,12 +232,12 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
     let row = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 56.0));
     glass_card(&p, row, R_CARD, 0.0, false);
     let cw = row.width() / 3.0;
-    let cols: [(&str, Option<f64>, &str, Color32, SpeedPhase, Option<Icon>); 3] = [
-        ("Ping", s.latency_ms, "ms", TEXT(), SpeedPhase::Ping, None),
-        ("Download", s.down_mbps, "Mbps", down_color(), SpeedPhase::Download, Some(Icon::Down)),
-        ("Upload", s.up_mbps, "Mbps", up_color(), SpeedPhase::Upload, Some(Icon::Up)),
+    let cols = [
+        Col { label: "Ping", value: s.latency_ms, unit: "ms", color: TEXT(), phase: SpeedPhase::Ping, glyph: None },
+        Col { label: "Download", value: s.down_mbps, unit: "Mbps", color: down_color(), phase: SpeedPhase::Download, glyph: Some(Icon::Down) },
+        Col { label: "Upload", value: s.up_mbps, unit: "Mbps", color: up_color(), phase: SpeedPhase::Upload, glyph: Some(Icon::Up) },
     ];
-    for (k, (label, v, unit, vc, ph, gl)) in cols.into_iter().enumerate() {
+    for (k, Col { label, value: v, unit, color: vc, phase: ph, glyph: gl }) in cols.into_iter().enumerate() {
         let cx = row.left() + k as f32 * cw + 14.0;
         if k > 0 {
             let lx = row.left() + k as f32 * cw;
