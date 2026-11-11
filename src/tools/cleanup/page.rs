@@ -37,7 +37,7 @@ fn claude_note(ui: &mut Ui, pos: Pos2, width: f32, a: Availability, cx: &mut Cx)
     let p = ui.painter().clone();
     let x = pos.x + 40.0;
     let w = width - 54.0;
-    let body = format!("Cleanup still works with its built-in rules. {} Then Claude double-checks each path too.", a.how());
+    let body = a.how().to_string();
     let text_h = p.layout(body.clone(), font(12.0), TEXT_DIM, w).size().y;
     let r = Rect::from_min_size(pos, Vec2::new(width, 32.0 + text_h + 12.0 + 26.0 + 14.0));
     glass_card(&p, r, R_CARD, 0.0, false);
@@ -99,35 +99,48 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     let p = ui.painter().clone();
     page_header(&p, r, "Cleanup", "Caches, logs and leftovers", TEXT_DIM);
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
-    let cw = (body.width() - sp::L) / 2.0;
-    let left = Rect::from_min_size(body.min, Vec2::new(cw, body.height()));
-    let right = Rect::from_min_max(Pos2::new(left.right() + sp::L, body.top()), body.max);
-    glass_card(&p, left, R_CARD, 0.0, false);
-    glass_card(&p, right, R_CARD, 0.0, false);
 
-    // left: the disk, how it works, Scan
-    let li = left.shrink(sp::L);
+    // the disk, with Scan on the right
+    let top = Rect::from_min_size(body.min, Vec2::new(body.width(), 128.0));
+    glass_card(&p, top, R_CARD, 0.0, false);
+    let ti = top.shrink(sp::L);
     let (total, free) = crate::kit::fs::volume_space("/");
-    p.text(li.left_top(), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT);
-    p.text(li.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, "Startup disk", ty::caption(), ty::caption_color());
-    let mut y = li.top() + 34.0 + sp::M;
+    p.text(ti.left_top(), Align2::LEFT_TOP, "Macintosh HD", ty::title(), TEXT);
+    let y = ti.top() + 16.0 + sp::M;
     let g = p.layout_no_wrap(human_bytes(free), ty::hero(), TEXT);
     let gw = g.size().x;
-    p.galley(Pos2::new(li.left(), y), g, TEXT);
+    p.galley(Pos2::new(ti.left(), y), g, TEXT);
     if total > 0 {
-        p.text(Pos2::new(li.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
+        p.text(Pos2::new(ti.left() + gw + 6.0, y + 26.0), Align2::LEFT_BOTTOM, format!("free of {}", human_bytes(total)), ty::body(), ty::caption_color());
     }
-    y += 34.0 + sp::M;
+    let bw = 200.0;
+    let bar_w = (ti.width() - bw - sp::XL * 2.0).max(120.0);
     let used = if total > 0 { 1.0 - free as f32 / total as f32 } else { 0.0 };
-    bar(&p, Rect::from_min_size(Pos2::new(li.left(), y), Vec2::new(li.width(), 8.0)), used, BLUE);
-    y += 8.0;
-    // what is never touched (the hard-kept places in kit::fs), at the bottom
+    bar(&p, Rect::from_min_size(Pos2::new(ti.left(), ti.bottom() - 8.0), Vec2::new(bar_w, 8.0)), used, BLUE);
+    let scan_h = if has_claude { 44.0 + sp::M + 18.0 } else { 44.0 };
+    let br = Rect::from_min_size(Pos2::new(ti.right() - bw, ti.center().y - scan_h / 2.0), Vec2::new(bw, 44.0));
+    if pill_button(ui, br, "Scan", BTN_PRIMARY, true).clicked() {
+        cleanup::start_scan(app.clean.clone(), ctx, app.use_ai && has_claude);
+    }
+    if has_claude {
+        let sw = Rect::from_min_size(Pos2::new(br.left(), br.bottom() + sp::M), Vec2::new(30.0, 18.0));
+        if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
+            app.use_ai = !app.use_ai;
+        }
+        text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Ask Claude what's safe", ty::body(), TEXT, bw - 40.0);
+    }
+
+    // where it looks | never touched, one height
+    let cw = (body.width() - sp::L) / 2.0;
+    let row_h = 32.0;
+    let per_col = Group::ALL.len().div_ceil(2);
     let names = ["Documents", "Desktop", "Pictures", "Projects", "iCloud Drive", "Mail", "Messages", "Keychains", ".ssh", "Claude settings", "Folders with .git"];
+    let inner = cw - 2.0 * sp::L;
     let mut lines: Vec<Vec<(&str, f32)>> = vec![Vec::new()];
     let mut lw = 0.0;
     for name in names {
         let w = p.layout_no_wrap(name.to_string(), ty::label(), TEXT_SOFT).size().x + 2.0 * sp::S + 4.0;
-        if lw + w > li.width() && !lines.last().unwrap().is_empty() {
+        if lw + w > inner && !lines.last().unwrap().is_empty() {
             lines.push(Vec::new());
             lw = 0.0;
         }
@@ -135,12 +148,29 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
         lw += w + sp::S;
     }
     let chips_h = lines.len() as f32 * (24.0 + sp::S) - sp::S;
-    let chips_top = li.bottom() - chips_h;
-    let label_y = chips_top - sp::M - 16.0;
-    p.text(Pos2::new(li.left(), label_y), Align2::LEFT_TOP, "Never touched", ty::title(), TEXT);
-    let mut cy = chips_top;
+    let head = 16.0 + sp::M;
+    let h = 2.0 * sp::L + head + (per_col as f32 * row_h).max(chips_h);
+    let left = Rect::from_min_size(Pos2::new(body.left(), top.bottom() + sp::L), Vec2::new(cw, h));
+    let right = Rect::from_min_size(Pos2::new(left.right() + sp::L, left.top()), Vec2::new(cw, h));
+    glass_card(&p, left, R_CARD, 0.0, false);
+    glass_card(&p, right, R_CARD, 0.0, false);
+
+    let li = left.shrink(sp::L);
+    p.text(li.left_top(), Align2::LEFT_TOP, "Where it looks", ty::title(), TEXT);
+    let colw = li.width() / 2.0;
+    for (k, g) in Group::ALL.iter().enumerate() {
+        let (c, rw) = (k / per_col, k % per_col);
+        let row = Rect::from_min_size(Pos2::new(li.left() + c as f32 * colw, li.top() + head + rw as f32 * row_h), Vec2::new(colw - sp::S, row_h));
+        icon(&p, Icon::Check, Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(12.0)), TEXT_FAINT);
+        text_fit(&p, Pos2::new(row.left() + 20.0, row.center().y), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT, row.width() - 20.0);
+        ui.interact(row, ui.scope_id().with(("look", k)), Sense::hover()).on_hover_text(g.blurb());
+    }
+
+    let ri = right.shrink(sp::L);
+    p.text(ri.left_top(), Align2::LEFT_TOP, "Never touched", ty::title(), TEXT);
+    let mut cy = ri.top() + head;
     for line in &lines {
-        let mut cx = li.left();
+        let mut cx = ri.left();
         for (name, w) in line {
             let gl = p.layout_no_wrap(name.to_string(), ty::label(), TEXT_SOFT);
             let pr = Rect::from_min_size(Pos2::new(cx, cy), Vec2::new(*w, 24.0));
@@ -150,43 +180,9 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
         }
         cy += 24.0 + sp::S;
     }
-    // Scan in the middle of the space between the disk and the list
-    let bw = 220.0f32.min(li.width());
-    let mid = (y + label_y - sp::XL) / 2.0;
-    let br = Rect::from_center_size(Pos2::new(li.center().x, mid), Vec2::new(bw, 44.0));
-    if pill_button(ui, br, "Scan", BTN_PRIMARY, true).clicked() {
-        cleanup::start_scan(app.clean.clone(), ctx, app.use_ai && has_claude);
-    }
 
-    // right: where it looks, and Claude
-    let ri = right.shrink(sp::L);
-    p.text(ri.left_top(), Align2::LEFT_TOP, "Where it looks", ty::title(), TEXT);
-    let foot_h = if has_claude {
-        18.0 + sp::M
-    } else {
-        let w = ri.width();
-        let body = format!("Cleanup still works with its built-in rules. {} Then Claude double-checks each path too.", avail.how());
-        p.layout(body, font(12.0), TEXT_DIM, w - 54.0).size().y + 32.0 + 12.0 + 26.0 + 14.0 + sp::M
-    };
-    let list_top = ri.top() + 16.0 + sp::M;
-    let list_bottom = ri.bottom() - foot_h;
-    let rh = ((list_bottom - list_top) / Group::ALL.len() as f32).min(sp::ROW_H);
-    for (k, g) in Group::ALL.iter().enumerate() {
-        let row = Rect::from_min_size(Pos2::new(ri.left(), list_top + k as f32 * rh), Vec2::new(ri.width(), rh));
-        if k > 0 {
-            p.line_segment([row.left_top(), row.right_top()], Stroke::new(1.0, white(15)));
-        }
-        text_fit(&p, Pos2::new(row.left(), row.center().y), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT, row.width());
-        ui.interact(row, ui.scope_id().with(("look", k)), Sense::hover()).on_hover_text(g.blurb());
-    }
-    if has_claude {
-        let sw = Rect::from_min_size(Pos2::new(ri.left(), ri.bottom() - 18.0), Vec2::new(30.0, 18.0));
-        if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
-            app.use_ai = !app.use_ai;
-        }
-        text_fit(&p, Pos2::new(sw.right() + sp::S, sw.center().y), Align2::LEFT_CENTER, "Ask Claude what's safe", ty::body(), TEXT, ri.width() - 40.0);
-    } else {
-        claude_note(ui, Pos2::new(right.left(), ri.bottom() - foot_h + sp::M), right.width(), avail, tcx);
+    if !has_claude {
+        claude_note(ui, Pos2::new(body.left(), left.bottom() + sp::L), body.width(), avail, tcx);
     }
 }
 

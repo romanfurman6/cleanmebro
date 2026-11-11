@@ -260,6 +260,7 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     let slide = (1.0 - ease(t * 2.2)) * 18.0;
     let body = body.translate(Vec2::new(slide, 0.0));
     let mut next = false;
+    let mut restart_now = false;
     match step {
         0 => next = welcome(app, ui, body, t),
         1 => tools(app, ui, body, t),
@@ -267,11 +268,11 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
             let r = Rect::from_min_max(body.min, body.max);
             permissions_step(app, ui, r, t, now)
         }
-        _ => ready(app, ui, body, t),
+        _ => restart_now = ready(app, ui, body, t),
     }
     // bottom bar
     let bar = Rect::from_min_max(Pos2::new(full.left() + 24.0, full.bottom() - BOTTOM_H), Pos2::new(full.right() - 24.0, full.bottom()));
-    let mut finish = Finish::No;
+    let mut finish = if restart_now { Finish::Restart } else { Finish::No };
     if step > 0 {
         let r = Rect::from_min_size(Pos2::new(bar.left(), bar.center().y - 16.0), Vec2::new(70.0, 32.0));
         if ghost_button(ui, r, "Back").clicked() {
@@ -614,7 +615,9 @@ fn keycaps(p: &egui::Painter, right: Pos2, keys: &str) {
     }
 }
 
-fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
+/// Returns true when "Restart" next to Screen Recording was clicked.
+fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
+    let mut restart = false;
     let p = ui.painter().clone();
     let left = Rect::from_min_max(body.min, Pos2::new(body.right() - 340.0, body.bottom()));
     let mut y = body.center().y - 120.0;
@@ -635,7 +638,7 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     // shortcuts of the enabled tools
     let keys: Vec<(Icon, &'static str, String)> = (0..app.tools.len()).filter(|&i| app.tool_on(i)).flat_map(|i| {
         let ic = app.tools[i].badge().icon;
-        app.tools[i].setup_shortcuts().into_iter().map(move |(l, k)| (ic, l, k))
+        app.tools[i].setup_shortcuts().into_iter().map(move |(l, k)| (if l.starts_with("Record") { Icon::ScreenRec } else { ic }, l, k))
     }).collect();
     for (k, (ic, label, keys)) in keys.iter().enumerate() {
         let a = ease((t - 0.08 * (k + 1) as f32) / 0.4);
@@ -647,8 +650,15 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
         y += 52.0;
     }
     if needs_restart(app) {
-        icon(&p, Icon::Refresh, Rect::from_min_size(Pos2::new(left.left(), y + 4.0), Vec2::splat(14.0)), Color32::from_rgb(0xFF, 0x9F, 0x0A));
-        p.text(Pos2::new(left.left() + 22.0, y + 11.0), Align2::LEFT_CENTER, "Screen Recording needs a quick restart", font(12.0), Color32::from_rgb(0xFF, 0x9F, 0x0A));
+        let row = Rect::from_min_size(Pos2::new(left.left(), y), Vec2::new(left.width(), 44.0));
+        p.rect_filled(row, 10.0, CARD);
+        icon(&p, Icon::ScreenRec, Rect::from_min_size(Pos2::new(row.left() + 14.0, row.center().y - 9.0), Vec2::splat(18.0)), Color32::from_rgb(0xFF, 0x9F, 0x0A));
+        p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, "Screen Recording needs a restart", font(13.0), TEXT);
+        let bw = button_width(&p, "Restart", BTN_PRIMARY);
+        let br = Rect::from_min_size(Pos2::new(row.right() - 10.0 - bw, row.center().y - 13.0), Vec2::new(bw, 26.0));
+        if pill_button(ui, br, "Restart", BTN_PRIMARY, true).clicked() {
+            restart = true;
+        }
     }
     // a little panel builds itself from the chosen tools, under the menu bar icon
     let pw = 300.0;
@@ -711,6 +721,7 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
         icon(&p, app.tools[i].badge().icon, Rect::from_center_size(r.center() - Vec2::new(0.0, 8.0), Vec2::splat(18.0 * a)), fg);
         text_fit(&p, Pos2::new(r.center().x, r.bottom() - 9.0), Align2::CENTER_BOTTOM, app.tools[i].name(), font(10.0), fg.gamma_multiply(0.85 * a.min(1.0)), r.width() - 8.0);
     }
+    restart
 }
 
 // ---------------------------------------------------------------- Full Disk Access helper
