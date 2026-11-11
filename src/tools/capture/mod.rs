@@ -157,6 +157,9 @@ pub struct Capture {
     uploads: share::Uploads,
     /// The secret key as it's being typed in settings (never shown back).
     share_secret: String,
+    /// Whether a secret key is in the Keychain: read once, off the frame loop
+    /// (and never in demo mode, where a Keychain prompt would block).
+    pub(crate) has_secret: Option<bool>,
 }
 
 impl Capture {
@@ -206,6 +209,7 @@ impl Capture {
             video: None,
             uploads: share::Uploads::default(),
             share_secret: String::new(),
+            has_secret: if env.demo { Some(false) } else { None },
         };
         c.apply_keys();
         c

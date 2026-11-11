@@ -430,7 +430,6 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let head = body.top() + 6.0;
     let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Tools", bold(22.0), TEXT);
     p.text(Pos2::new(g.right() + 10.0, g.bottom() - 4.0), Align2::LEFT_BOTTOM, format!("{on}/{}", app.tools.len()), mono(13.0), TEXT_FAINT);
-    p.text(Pos2::new(body.right(), g.bottom() - 4.0), Align2::RIGHT_BOTTOM, "Change any time in Settings", font(11.0), TEXT_MUTED);
     let secs = sections(app);
     let cols = secs.len().max(1) as f32;
     let gap = 12.0;
@@ -514,7 +513,6 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
     }
     p.text(c, Align2::CENTER_CENTER, format!("{done}/{}", req.len()), mono(11.0), TEXT);
     p.text(Pos2::new(c.x + 36.0, c.y), Align2::LEFT_CENTER, "Permissions", bold(22.0), TEXT);
-    p.text(Pos2::new(body.right(), c.y), Align2::RIGHT_CENTER, "Live from System Settings", font(11.0), TEXT_MUTED);
     let area = Rect::from_min_max(Pos2::new(body.left(), body.top() + 56.0), body.max);
     perm_list(app, ui, area, &list, t, now);
 }
@@ -530,7 +528,7 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         if r.optional && !opt_head {
             opt_head = true;
             y += 6.0;
-            p.text(Pos2::new(area.left() + 2.0, y), Align2::LEFT_TOP, "OPTIONAL", font(11.0), TEXT_FAINT);
+            p.text(Pos2::new(area.left() + 2.0, y), Align2::LEFT_TOP, "Optional", font(11.0), TEXT_FAINT);
             y += 20.0;
         }
         let a = ease((t - 0.05 * k as f32) / 0.4);

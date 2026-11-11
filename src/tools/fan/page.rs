@@ -75,7 +75,6 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
         let title = if s.has_smc { "This Mac has no fans" } else { "Fan speed isn't available" };
         p.text(Pos2::new(fr.left() + 104.0, c.y - 10.0), Align2::LEFT_CENTER, title, bold(15.0), TEXT);
         p.text(Pos2::new(fr.left() + 104.0, c.y + 10.0), Align2::LEFT_CENTER, "Cools passively", font(12.0), TEXT_DIM);
-        paragraph(&p, Pos2::new(fr.left() + 20.0, fr.top() + 118.0), "Nothing to control: it slows down a little when it gets hot. The temperatures on the right still show how warm it runs and what heats it up.", font(13.0), TEXT_DIM, fr.width() - 40.0);
         hx = fr.right() + GAP;
     }
     let hm = Rect::from_min_max(Pos2::new(hx, y), Pos2::new(x1, y + ROW1_H));
@@ -96,13 +95,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
     cmds
 }
 
-const MODE_HINTS: [&str; 5] = [
-    "macOS decides. Fans speed up when the chip gets warm.",
-    "Fans may stop when cool and stay at their minimum when warm. If any sensor passes 95 °C, they go back to Auto.",
-    "The fans hold one speed, whatever the temperature.",
-    "",
-    "Full speed. Good before a long export or a game.",
-];
+const MODE_HINTS: [&str; 5] = ["Set by macOS", "Stops when cool", "One speed", "", "Full speed"];
 const INSTALL_H: f32 = 52.0;
 const FIXED_H: f32 = 40.0;
 const CURVE_H: f32 = 222.0;
@@ -164,11 +157,11 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
     let mut y = mr.top() + 56.0;
     let temp = st.curve.source.read(s);
     let hint = if st.mode != Mode::Auto && l.guard.tripped {
-        format!("Fans are on Auto: a sensor reached {:.0} °C. {} resumes once everything is below 80 °C.", l.guard.peak, st.mode.label())
+        format!("Back on Auto: a sensor hit {:.0} °C", l.guard.peak)
     } else if st.mode == Mode::Curve {
         match temp {
-            Some(t) => format!("Speed follows the {} temperature: {t:.0} °C now, so {} rpm.", source_word(st.curve.source), rpm_text(speed(&fan0, st.curve.at(t)))),
-            None => "Speed follows a temperature.".into(),
+            Some(t) => format!("{t:.0} °C · {} rpm", rpm_text(speed(&fan0, st.curve.at(t)))),
+            None => "No temperature".into(),
         }
     } else {
         MODE_HINTS[st.mode.index()].into()
@@ -183,9 +176,9 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
         p.rect_filled(ir, 10.0, with_alpha(tint::FAN, 0.12));
         p.rect_stroke(ir, 10.0, Stroke::new(1.0, with_alpha(tint::FAN, 0.35)), egui::StrokeKind::Inside);
         let (label, msg) = match l.helper {
-            _ if l.busy => ("Waiting…", "macOS is asking for your password."),
-            HelperState::Outdated => ("Update helper…", "Cmd+Meow was updated. Approve the new helper once."),
-            _ => ("Install helper…", "To change fan speed, Cmd+Meow adds a small helper that runs with admin rights. macOS asks for your password once."),
+            _ if l.busy => ("Waiting…", "Enter your password"),
+            HelperState::Outdated => ("Update helper…", "The fan helper needs an update"),
+            _ => ("Install helper…", "Fan control needs a helper with admin rights"),
         };
         let bw = button_width(&p, label, BTN_PRIMARY);
         let br = Rect::from_min_size(Pos2::new(ir.right() - 8.0 - bw, ir.center().y - 14.0), Vec2::new(bw, 28.0));
@@ -212,17 +205,8 @@ fn mode_card(ui: &mut Ui, mr: Rect, s: &Snapshot, l: &Live, cmds: &mut Vec<Cmd>)
     // footer: the safety promise, and a way to take the helper out
     let fy = y + 8.0;
     hairline(&p, Pos2::new(lx, y - 4.0), Pos2::new(rx, y - 4.0));
-    text_fit(&p, Pos2::new(lx, fy), Align2::LEFT_CENTER, "Fans go back to Auto when you quit, when the Mac sleeps, or if any sensor passes 95 °C.", font(11.0), TEXT_FAINT, mr.width() - 140.0);
     if matches!(l.helper, HelperState::Ready | HelperState::Outdated) && !l.busy && link(ui, Pos2::new(rx, fy), Align2::RIGHT_CENTER, "Remove helper", 11.0).clicked() {
         cmds.push(Cmd::Uninstall);
-    }
-}
-
-fn source_word(s: Source) -> &'static str {
-    match s {
-        Source::Hottest => "hottest sensor's",
-        Source::Cpu => "CPU",
-        Source::Gpu => "GPU",
     }
 }
 
@@ -361,9 +345,6 @@ fn curve_editor(ui: &mut Ui, r: Rect, st: &Settings, fan: &Fan, temp: Option<f32
     }
     sy += 44.0;
     p.text(Pos2::new(sx, sy), Align2::LEFT_TOP, "Auto above 95 °C", font(12.0), TEXT_SOFT);
-    p.text(Pos2::new(sx, sy + 17.0), Align2::LEFT_TOP, "Safety. Can't be turned off.", font(11.0), TEXT_FAINT);
-    sy += 44.0;
-    paragraph(&p, Pos2::new(sx, sy), "Drag the points. Below the first one the fans stay at its speed.", font(11.0), TEXT_FAINT, side_w);
     if changed || done {
         cmds.push(Cmd::Set(n, done));
     }

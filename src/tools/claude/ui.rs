@@ -84,7 +84,7 @@ pub fn card(p: &egui::Painter, r: Rect, cl: &UsageInfo, t: f64) {
             Some(l) => {
                 bar(p, bar_r, (l.pct / 100.0).max(0.01), super::page::usage_color(l.pct));
                 p.text(Pos2::new(x1 - 92.0 - 8.0, yy), Align2::RIGHT_CENTER, format!("{:.0}%", l.pct), font(12.0), TEXT);
-                text_fit(p, Pos2::new(x1, yy), Align2::RIGHT_CENTER, &short_reset(&l.resets), font(12.0), TEXT_FAINT, 92.0);
+                text_fit(p, Pos2::new(x1, yy), Align2::RIGHT_CENTER, short_reset(&l.resets).trim_start_matches("resets "), font(12.0), TEXT_FAINT, 92.0);
             }
             None => bar(p, bar_r, 0.0, TEXT_DIM),
         }

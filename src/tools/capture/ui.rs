@@ -147,7 +147,7 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     // the newest images in the screenshot folder; history when it has none
     c.refresh_files();
     let items: Vec<Item> = if c.files.is_empty() { c.store.shots.iter().take(4).map(Item::from_shot).collect() } else { c.files.iter().take(4).map(|f| Item::from_file(c, f)).collect() };
-    let label = if c.files.is_empty() { "RECENT".to_string() } else { format!("RECENT IN {}", c.folder_name().to_uppercase()) };
+    let label = if c.files.is_empty() { "Recent".to_string() } else { format!("Recent in {}", c.folder_name()) };
     let ch = link(ui, Pos2::new(x1, y + 6.0), Align2::RIGHT_CENTER, "Change folder…", 11.0);
     let ch_left = ch.rect.left();
     if ch.on_hover_text(format!("Screenshots go to {}", c.shown_folder())).clicked() {
@@ -164,7 +164,7 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let r = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 48.0));
         dashed_rect(&p, r, 6.0, white(40));
         let hint = match c.settings.shortcut(Command::Area) {
-            Some(s) => format!("No captures yet. Press {} to capture an area.", s.display()),
+            Some(s) => format!("Press {} to capture an area", s.display()),
             None => "No captures yet.".into(),
         };
         text_fit(&p, r.center(), Align2::CENTER_CENTER, &hint, font(12.0), TEXT_FAINT, r.width() - 16.0);
@@ -220,7 +220,7 @@ pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             let more = if n >= super::folder::LIMIT { " (newest)" } else { "" };
             format!("{n} image{}{more} in {}", if n == 1 { "" } else { "s" }, c.shown_folder())
         }
-        Tab::Settings => "Shortcuts work everywhere, even when the panel is closed.".into(),
+        Tab::Settings => "".into(),
     };
     let btns = page_header(&p, r, "Capture", &sub, TEXT_DIM);
     let mut right = btns.right();
@@ -266,11 +266,11 @@ fn passes(filter: usize, s: &Shot) -> bool {
 fn day_label(d: chrono::NaiveDate) -> String {
     let today = chrono::Local::now().date_naive();
     if d == today {
-        "TODAY".into()
+        "Today".into()
     } else if Some(d) == today.pred_opt() {
-        "YESTERDAY".into()
+        "Yesterday".into()
     } else {
-        d.format("%A, %b %-d").to_string().to_uppercase()
+        d.format("%A, %b %-d").to_string()
     }
 }
 
@@ -538,7 +538,7 @@ fn history(c: &mut Capture, ui: &mut Ui, body: Rect) {
         p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT);
         if c.store.shots.is_empty() {
             let hint = match c.settings.shortcut(Command::Area) {
-                Some(s) => format!("Press {} anywhere to capture an area. Captures land here.", s.display()),
+                Some(s) => format!("Press {} to capture an area", s.display()),
                 None => "Captures land here.".into(),
             };
             p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM);
@@ -578,7 +578,7 @@ fn folder_tab(c: &mut Capture, ui: &mut Ui, body: Rect) {
         } else if !c.settings.save {
             ("No images in this folder", "Turn on \"Save to folder\" in Settings to put every capture here.".to_string())
         } else {
-            ("No images in this folder", "Captures you take are saved here as PNG or JPG.".to_string())
+            ("No images in this folder", "".to_string())
         };
         p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT);
         p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM);
@@ -654,7 +654,7 @@ fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect)
     if let Some(i) = seg(ui, 6, 200.0, &["5 s", "8 s", "15 s", "Never"], secs_index(s.card_secs, &CARD_SECS)) {
         s.card_secs = CARD_SECS.get(i).copied();
     }
-    p.text(Pos2::new(x0, card.bottom() + 10.0), Align2::LEFT_TOP, "Recordings are saved as mp4 to the same folder as captures.", font(12.0), TEXT_FAINT);
+    p.text(Pos2::new(x0, card.bottom() + 10.0), Align2::LEFT_TOP, "", font(12.0), TEXT_FAINT);
     if s != c.settings.rec {
         c.settings.rec = s;
         c.save_settings();
@@ -719,12 +719,15 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     field(ui, frect(5), &mut s.folder, "recordings/", false);
     field(ui, frect(6), &mut s.access_key, "Access key", false);
     // the secret goes straight to the Keychain and is never shown back
-    let has_secret = secret::get().is_some();
+    let has_secret = *c.has_secret.get_or_insert_with(|| secret::get().is_some());
     let resp = field(ui, frect(7), &mut c.share_secret, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
     if resp.lost_focus() && !c.share_secret.is_empty() {
         let v = std::mem::take(&mut c.share_secret);
         match secret::set(v.trim()) {
-            Ok(()) => c.hud("Secret key saved in the Keychain"),
+            Ok(()) => {
+                c.has_secret = Some(true);
+                c.hud("Secret key saved in the Keychain")
+            }
             Err(e) => c.hud(format!("Couldn't save to the Keychain: {e}")),
         }
     }
@@ -733,7 +736,7 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
         let b = s.bucket();
         format!("Links look like https://{}/{}…", b.bucket_host(), s.folder.trim_start_matches('/'))
     } else {
-        "Your own S3-compatible storage, e.g. Hetzner Object Storage. For Public links, the files are made public-read; their names are random.".into()
+        "S3-compatible storage".into()
     };
     paragraph(p, Pos2::new(x0, card.bottom() + 10.0), &note, font(12.0), TEXT_FAINT, col.width());
     if s != c.settings.share {
@@ -993,7 +996,7 @@ fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     let ok = mac::can_record_screen();
     p.circle_filled(Pos2::new(card.left() + 18.0, card.top() + 19.0), 4.0, if ok { GREEN } else { AMBER });
     p.text(Pos2::new(card.left() + 30.0, card.top() + 19.0), Align2::LEFT_CENTER, "Screen Recording", font(13.0), TEXT);
-    let status = if ok { "Allowed. Needed to see other apps' windows." } else { "Not allowed yet: captures show only the desktop." };
+    let status = if ok { "Allowed" } else { "Not allowed: captures show only the desktop" };
     let bw = button_width(p, "Open System Settings", BTN_SECONDARY) - 6.0;
     let br = Rect::from_min_max(Pos2::new(card.right() - 12.0 - bw, card.center().y - 13.0), Pos2::new(card.right() - 12.0, card.center().y + 13.0));
     text_fit(p, Pos2::new(card.left() + 30.0, card.top() + 38.0), Align2::LEFT_CENTER, status, font(12.0), TEXT_DIM, br.left() - card.left() - 40.0);

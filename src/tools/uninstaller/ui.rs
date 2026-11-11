@@ -243,7 +243,6 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         dashed_rect(&p, pr, 16.0, with_alpha(Color32::from_rgb(0x6F, 0xCF, 0x7A), 0.9));
         tool_chip(&p, Rect::from_center_size(pr.center() - Vec2::new(0.0, 30.0), Vec2::splat(56.0)), Icon::AppRemove, TINT);
         p.text(pr.center() + Vec2::new(0.0, 22.0), Align2::CENTER_CENTER, "Drop to uninstall", bold(20.0), TEXT);
-        p.text(pr.center() + Vec2::new(0.0, 48.0), Align2::CENTER_CENTER, "You'll see everything that goes before it moves.", font(13.0), TEXT_DIM);
     }
 }
 
@@ -339,9 +338,9 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let c_size = list.right() - 14.0;
     let c_used = c_size - 70.0 - 12.0;
     let c_name = list.left() + 14.0 + 16.0 + 10.0 + 26.0 + 10.0;
-    section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_CENTER, "NAME");
-    section_header(&p, Pos2::new(c_used, hy), Align2::RIGHT_CENTER, "LAST USED");
-    section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_CENTER, "SIZE");
+    section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_CENTER, "Name");
+    section_header(&p, Pos2::new(c_used, hy), Align2::RIGHT_CENTER, "Last used");
+    section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_CENTER, "Size");
     hairline(&p, Pos2::new(list.left(), list.top() + 30.0), Pos2::new(list.right(), list.top() + 30.0));
     let rows = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - 2.0));
     if ids.is_empty() {
@@ -467,7 +466,7 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
     if let Some(why) = a.locked {
         icon(&p, Icon::Lock, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(16.0)), TEXT_FAINT);
         p.text(Pos2::new(x0 + 24.0, y + 8.0), Align2::LEFT_CENTER, why, bold(13.0), TEXT_SOFT);
-        paragraph(&p, Pos2::new(x0, y + 26.0), "It can't be removed here. Apple's own apps are part of macOS and come back with updates.", font(12.0), TEXT_DIM, x1 - x0);
+        paragraph(&p, Pos2::new(x0, y + 26.0), "Part of macOS", font(12.0), TEXT_DIM, x1 - x0);
         return;
     }
     if !a.sized {
@@ -492,15 +491,13 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
 
     // files
     let n_sel = a.items.iter().filter(|i| i.selected).count();
-    section_header(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &format!("WILL BE MOVED TO TRASH · {n_sel} OF {}", a.items.len()));
+    section_header(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &format!("Moves to Trash · {n_sel} of {}", a.items.len()));
     if link(ui, Pos2::new(x1, y), Align2::RIGHT_TOP, "Show in Finder", 11.0).clicked() {
         mac::reveal(&a.path);
     }
     y += 20.0;
-    let note = if running { format!("{} is open. It will be asked to quit first. Everything goes to the Trash, so you can put it back.", a.name) } else { "Everything goes to the Trash, so you can put it back.".to_string() };
-    let note_h = p.layout(note.clone(), font(11.0), TEXT_FAINT, x1 - x0).size().y;
     let btn_top = r.bottom() - 14.0 - 30.0;
-    let files = Rect::from_min_max(Pos2::new(x0 - 6.0, y), Pos2::new(x1 + 6.0, btn_top - note_h - 18.0));
+    let files = Rect::from_min_max(Pos2::new(x0 - 6.0, y), Pos2::new(x1 + 6.0, btn_top - 10.0));
     let mut child = ui.new_child(UiBuilder::new().max_rect(files));
     child.set_clip_rect(files);
     let lib = u.roots.user_library.clone();
@@ -530,7 +527,6 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
             }
         }
     });
-    paragraph(&p, Pos2::new(x0, btn_top - note_h - 10.0), &note, font(11.0), TEXT_FAINT, x1 - x0);
     let gap = 6.0;
     let w = x1 - x0;
     let rw = (w - gap) * 0.42;
@@ -585,7 +581,7 @@ fn review(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
     let title = if rv.targets.iter().all(|t| t.app.is_none()) && !reset { if n == 1 { format!("Remove what {} left?", rv.targets[0].name) } else { format!("Remove what {n} apps left?") } } else { title };
     p.text(Pos2::new(x0, y), Align2::LEFT_TOP, title, bold(16.0), TEXT);
     y += 30.0;
-    let sub = if reset { "Its settings, caches and data go to the Trash. The app stays and starts fresh next time." } else { "Everything goes to the Trash. You can put it back with Undo or from the Trash." };
+    let sub = if reset { "Settings, caches and data go to the Trash. The app stays" } else { "Everything goes to the Trash" };
     paragraph(&p, Pos2::new(x0, y), sub, font(13.0), TEXT_DIM, x1 - x0);
     y += 36.0 + 8.0;
     let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, list_h));
@@ -800,8 +796,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let label = format!("Move {} to Trash", sel.len());
     let bw = button_width(&p, &label, BTN_PRIMARY);
     let br = Rect::from_min_size(Pos2::new(hero.right() - 16.0 - bw, hero.center().y - 15.0), Vec2::new(bw, 30.0));
-    p.text(Pos2::new(hero.left() + 70.0, hero.center().y - 9.0), Align2::LEFT_CENTER, title, bold(15.0), TEXT);
-    text_fit(&p, Pos2::new(hero.left() + 70.0, hero.center().y + 11.0), Align2::LEFT_CENTER, "Matched by app id. Anything used in the last 7 days, or shared with an installed app, is never listed.", font(12.0), TEXT_DIM, br.left() - hero.left() - 86.0);
+    p.text(Pos2::new(hero.left() + 70.0, hero.center().y), Align2::LEFT_CENTER, title, bold(15.0), TEXT);
     if !orphans.is_empty() && pill_button(ui, br, &label, BTN_PRIMARY, !sel.is_empty()).on_hover_text(format!("{} selected", human_bytes(sel_bytes))).clicked() {
         let targets: Vec<Target> = sel.iter().map(|o| o.target()).collect();
         u.review = Some(Review { targets, open: Default::default() });
@@ -809,23 +804,22 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     y = hero.bottom() + 14.0;
 
     // settings card at the bottom
-    let sc = Rect::from_min_max(Pos2::new(x0, body.bottom() - 20.0 - 2.0 * 54.0), Pos2::new(x1, body.bottom() - 20.0));
+    let sc = Rect::from_min_max(Pos2::new(x0, body.bottom() - 20.0 - 2.0 * 44.0), Pos2::new(x1, body.bottom() - 20.0));
     glass_card(&p, sc, R_CARD, 0.0, false);
     let (watch, zone) = {
         let g = u.st.lock().unwrap();
         (g.settings.watch_removed, g.settings.drop_zone)
     };
     let rows = [
-        ("Watch for removed apps", "When an app is thrown away in Finder, offer to remove what it left too.", watch),
-        ("Drop zone while dragging an app", "Start dragging an app out of Applications and a drop target appears at the top of the screen.", zone),
+        ("Offer cleanup when an app goes to the Trash", watch),
+        ("Show a drop zone while dragging an app", zone),
     ];
-    for (k, (t, s, on)) in rows.iter().enumerate() {
-        let rr = Rect::from_min_size(Pos2::new(sc.left(), sc.top() + k as f32 * 54.0), Vec2::new(sc.width(), 54.0));
+    for (k, (t, on)) in rows.iter().enumerate() {
+        let rr = Rect::from_min_size(Pos2::new(sc.left(), sc.top() + k as f32 * 44.0), Vec2::new(sc.width(), 44.0));
         if k > 0 {
             hairline(&p, Pos2::new(rr.left() + 14.0, rr.top()), Pos2::new(rr.right() - 14.0, rr.top()));
         }
-        p.text(Pos2::new(rr.left() + 16.0, rr.center().y - 9.0), Align2::LEFT_CENTER, *t, bold(13.0), TEXT);
-        text_fit(&p, Pos2::new(rr.left() + 16.0, rr.center().y + 10.0), Align2::LEFT_CENTER, s, font(12.0), TEXT_DIM, rr.width() - 90.0);
+        p.text(Pos2::new(rr.left() + 16.0, rr.center().y), Align2::LEFT_CENTER, *t, font(13.0), TEXT);
         let sw = Rect::from_center_size(Pos2::new(rr.right() - 34.0, rr.center().y), Vec2::new(36.0, 20.0));
         if switch(ui, sw, ui.scope_id().with(("un-set", k)), *on, true).clicked() {
             let mut g = u.st.lock().unwrap();
@@ -848,10 +842,10 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let c_where = c_when - 90.0 - 16.0 - 250.0;
     let c_name = list.left() + 14.0 + 16.0 + 12.0;
     let hy = list.top() + 15.0;
-    section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_CENTER, "REMOVED APP");
-    section_header(&p, Pos2::new(c_where, hy), Align2::LEFT_CENTER, "WHERE");
-    section_header(&p, Pos2::new(c_when, hy), Align2::RIGHT_CENTER, "LAST TOUCHED");
-    section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_CENTER, "SIZE");
+    section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_CENTER, "Removed app");
+    section_header(&p, Pos2::new(c_where, hy), Align2::LEFT_CENTER, "Where");
+    section_header(&p, Pos2::new(c_when, hy), Align2::RIGHT_CENTER, "Last touched");
+    section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_CENTER, "Size");
     hairline(&p, Pos2::new(list.left(), list.top() + 30.0), Pos2::new(list.right(), list.top() + 30.0));
     let rows_r = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - 2.0));
     if orphans.is_empty() {
