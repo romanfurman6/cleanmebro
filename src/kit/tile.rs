@@ -53,9 +53,12 @@ pub fn small_text(p: &egui::Painter, rect: Rect, title: &str, sub: &str, sub_col
 pub fn small_ring(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, frac: f32, color: Color32, caption: &str, selected: bool) -> Response {
     let resp = card(ui, rect, id, selected);
     let p = ui.painter();
-    let c = Pos2::new(rect.center().x, rect.top() + 32.0);
-    ring(p, c, 20.0, 4.0, frac, color);
-    icon(p, glyph, Rect::from_center_size(c, Vec2::splat(15.0)), TEXT_SOFT());
+    // the ring fills the tile above its caption
+    let rr = ((rect.height() - 34.0) / 2.0).min(rect.width() / 2.0 - 12.0).clamp(20.0, 30.0);
+    let c = Pos2::new(rect.center().x, rect.top() + 10.0 + rr);
+    let w = (rr * 0.2).clamp(4.0, 6.0);
+    ring(p, c, rr - w / 2.0, w, frac, color);
+    icon(p, glyph, Rect::from_center_size(c, Vec2::splat(rr * 0.75)), TEXT_SOFT());
     text_fit(p, Pos2::new(rect.center().x, rect.bottom() - 10.0), Align2::CENTER_BOTTOM, caption, ty::title(), TEXT(), rect.width() - 10.0);
     resp
 }
@@ -67,20 +70,23 @@ pub fn wide(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, 
     let resp = card(ui, rect, id, selected);
     let p = ui.painter();
     let cy = rect.center().y;
-    let c = Pos2::new(rect.left() + PAD + 17.0, cy);
+    // the ring takes the tile's height, less a margin
+    let rr = (rect.height() / 2.0 - 11.0).clamp(17.0, 27.0);
+    let c = Pos2::new(rect.left() + PAD + rr, cy);
     let caption = match bar_or_caption {
         Ok((f, col)) => {
-            ring(p, c, 15.0, 4.0, f, col);
-            icon(p, glyph, Rect::from_center_size(c, Vec2::splat(13.0)), TEXT_SOFT());
+            let w = (rr * 0.2).clamp(4.0, 5.5);
+            ring(p, c, rr - w / 2.0, w, f, col);
+            icon(p, glyph, Rect::from_center_size(c, Vec2::splat(rr * 0.8)), TEXT_SOFT());
             ""
         }
         Err(cap) => {
-            p.circle_filled(c, 17.0, white(14));
-            icon(p, glyph, Rect::from_center_size(c, Vec2::splat(16.0)), lift(color));
+            p.circle_filled(c, rr, white(14));
+            icon(p, glyph, Rect::from_center_size(c, Vec2::splat(rr * 0.9)), lift(color));
             cap
         }
     };
-    let x0 = c.x + 17.0 + sp::M;
+    let x0 = c.x + rr + sp::M;
     let w = rect.right() - PAD - x0;
     let lines: Vec<(&str, egui::FontId, Color32)> = [(label, ty::caption(), ty::caption_color()), (value, ty::title(), TEXT()), (caption, ty::caption(), ty::caption_color())]
         .into_iter()
@@ -105,12 +111,18 @@ pub fn row_chip(rect: Rect) -> Rect {
 /// sparkline…), so the row shows as much as a Medium's first lines.
 #[allow(clippy::too_many_arguments)]
 pub fn row_split(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, label: &str, value: &str, caption: &str, selected: bool) -> (Response, Rect) {
+    row_split_at(ui, rect, id, glyph, color, label, value, caption, selected, 0.47)
+}
+
+/// [`row_split`] with the left part `ratio` of the width.
+#[allow(clippy::too_many_arguments)]
+pub fn row_split_at(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, label: &str, value: &str, caption: &str, selected: bool, ratio: f32) -> (Response, Rect) {
     let resp = card(ui, rect, id, selected);
     let p = ui.painter();
     let chip = row_chip(rect);
     p.circle_filled(chip.center(), 17.0, white(14));
     icon(p, glyph, Rect::from_center_size(chip.center(), Vec2::splat(18.0)), lift(color));
-    let split = rect.left() + (rect.width() * 0.47).round();
+    let split = rect.left() + (rect.width() * ratio).round();
     let (x0, x1) = (chip.right() + sp::M, split - sp::M);
     let cy = rect.center().y;
     text_fit(p, Pos2::new(x0, cy - 20.0), Align2::LEFT_CENTER, label, ty::caption(), ty::caption_color(), x1 - x0);

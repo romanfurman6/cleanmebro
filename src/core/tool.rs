@@ -83,9 +83,16 @@ pub struct WidgetSpec {
 }
 
 impl WidgetSpec {
-    /// `want` if this widget offers it, else its default size.
+    /// `want` if this widget offers it; a dropped Medium becomes its Row
+    /// when it has one; else the default size.
     pub fn fit(&self, want: Size) -> Size {
-        if self.sizes.contains(&want) { want } else { self.size }
+        if self.sizes.contains(&want) {
+            want
+        } else if want == Size::S24 && self.sizes.contains(&Size::S14) {
+            Size::S14
+        } else {
+            self.size
+        }
     }
 }
 

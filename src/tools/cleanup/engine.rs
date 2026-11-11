@@ -14,48 +14,30 @@ use std::time::SystemTime;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Group {
-    UserCache,
-    Logs,
-    AppCaches,
-    Xcode,
-    Developer,
-    Claude,
     AiTools,
+    AppCaches,
+    Developer,
+    Logs,
     Trash,
 }
 
 impl Group {
-    pub const ALL: [Group; 8] = [
-        Group::Claude,
-        Group::UserCache,
-        Group::AppCaches,
-        Group::Logs,
-        Group::Xcode,
-        Group::Developer,
-        Group::AiTools,
-        Group::Trash,
-    ];
+    pub const ALL: [Group; 5] = [Group::AiTools, Group::AppCaches, Group::Developer, Group::Logs, Group::Trash];
     pub fn title(self) -> &'static str {
         match self {
-            Group::UserCache => "User Cache Files",
-            Group::Logs => "Log Files",
+            Group::AiTools => "AI Tools",
             Group::AppCaches => "App Caches",
-            Group::Xcode => "Xcode Junk",
-            Group::Developer => "Developer Caches",
-            Group::Claude => "Claude",
-            Group::AiTools => "Other AI Tools",
-            Group::Trash => "Trash Bins",
+            Group::Developer => "Developer Tools",
+            Group::Logs => "Logs",
+            Group::Trash => "Trash",
         }
     }
     pub fn blurb(self) -> &'static str {
         match self {
-            Group::UserCache => "Apps keep cache files to start faster. They pile up over time and are rebuilt when needed.",
+            Group::AiTools => "Caches, logs, temp files and old versions of AI tools: Claude, Codex, Gemini, Cursor. Projects you use are never touched.",
+            Group::AppCaches => "Cache files apps keep to start faster. They pile up over time and are rebuilt when needed.",
+            Group::Developer => "Xcode build data, simulator caches and package manager downloads, fetched again when needed.",
             Group::Logs => "Activity logs from apps and macOS. Useful only for debugging, especially when old.",
-            Group::AppCaches => "Known caches of popular apps: Adobe media cache, Spotify, Electron and Chromium apps, sandboxed apps.",
-            Group::Xcode => "Intermediate build data, device support files, simulator caches and archives created by Xcode.",
-            Group::Developer => "Package manager downloads (npm, Gradle, pip, Go, Bun, CocoaPods) that are fetched again when needed.",
-            Group::Claude => "Claude Code and Claude Desktop caches, logs, temp files and old versions. Projects you use are never touched.",
-            Group::AiTools => "Caches and logs of other AI tools such as Codex, Gemini, Cursor and Chrome DevTools MCP.",
             Group::Trash => "Items you already deleted still take space until the Trash is emptied.",
         }
     }
@@ -156,7 +138,7 @@ impl State {
     }
     /// Claude junk safe to clean (for the panel's recommendation).
     pub fn claude_safe_bytes(&self) -> u64 {
-        self.items.iter().filter(|i| i.group == Group::Claude && i.verdict == Verdict::Safe).map(|i| i.bytes).sum()
+        self.items.iter().filter(|i| i.group == Group::AiTools && i.verdict == Verdict::Safe).map(|i| i.bytes).sum()
     }
 }
 
@@ -380,18 +362,18 @@ fn scan_claude(c: &mut Ctx) {
     let cl = h.join(".claude");
     let claude_running = c.running_names.iter().any(|n| n == "claude") || process_running("claude");
     // AIToolScanning sub_7118: Claude Code catalog
-    c.add(Group::Claude, "Claude Code debug logs", cl.join("debug"), "Logs", Verdict::Safe, "Debug logs; Claude Code writes new ones as needed");
-    c.add(Group::Claude, "Claude Code cache", cl.join("cache"), "Caches", Verdict::Safe, "Cache; rebuilt automatically");
-    c.add(Group::Claude, "Claude Code telemetry", cl.join("telemetry"), "Caches", Verdict::Safe, "Usage telemetry waiting to be sent");
-    c.add(Group::Claude, "Stats cache", cl.join("stats-cache.json"), "Caches", Verdict::Safe, "Cached statistics; recalculated");
-    c.add(Group::Claude, "MCP sign-in cache", cl.join("mcp-needs-auth-cache.json"), "Caches", Verdict::Safe, "Cached MCP sign-in state");
-    c.add(Group::Claude, "Plugin install counts", cl.join("plugins/install-counts-cache.json"), "Caches", Verdict::Safe, "Cached plugin popularity counts");
+    c.add(Group::AiTools, "Claude Code debug logs", cl.join("debug"), "Logs", Verdict::Safe, "Debug logs; Claude Code writes new ones as needed");
+    c.add(Group::AiTools, "Claude Code cache", cl.join("cache"), "Caches", Verdict::Safe, "Cache; rebuilt automatically");
+    c.add(Group::AiTools, "Claude Code telemetry", cl.join("telemetry"), "Caches", Verdict::Safe, "Usage telemetry waiting to be sent");
+    c.add(Group::AiTools, "Stats cache", cl.join("stats-cache.json"), "Caches", Verdict::Safe, "Cached statistics; recalculated");
+    c.add(Group::AiTools, "MCP sign-in cache", cl.join("mcp-needs-auth-cache.json"), "Caches", Verdict::Safe, "Cached MCP sign-in state");
+    c.add(Group::AiTools, "Plugin install counts", cl.join("plugins/install-counts-cache.json"), "Caches", Verdict::Safe, "Cached plugin popularity counts");
     // shell snapshots: only the old ones (a running session uses the newest)
     let snaps = cl.join("shell-snapshots");
     for f in children(&snaps) {
         let age = age_days(&f);
         if age >= m::SHELL_SNAPSHOT_MIN_AGE_DAYS {
-            c.add(Group::Claude, "Old shell snapshot", f, "Temp Files", Verdict::Safe, "Temporary shell snapshot from a finished session");
+            c.add(Group::AiTools, "Old shell snapshot", f, "Temp Files", Verdict::Safe, "Temporary shell snapshot from a finished session");
         }
     }
     // stale versions: keep the one ~/.local/bin/claude points to (ActiveVersionResolver)
@@ -400,51 +382,51 @@ fn scan_claude(c: &mut Ctx) {
     for v in children(&versions) {
         let is_active = active.as_ref().map(|a| a.starts_with(&v) || a == &v).unwrap_or(false);
         if !is_active {
-            c.add(Group::Claude, &format!("Claude Code {}", fname(&v)), v, "Stale Versions", Verdict::Safe, "Old Claude Code version; the one you run is kept");
+            c.add(Group::AiTools, &format!("Claude Code {}", fname(&v)), v, "Stale Versions", Verdict::Safe, "Old Claude Code version; the one you run is kept");
         }
     }
-    c.add(Group::Claude, "Claude CLI logs", h.join("Library/Caches/claude-cli-nodejs"), "Logs", Verdict::Safe, "Claude Code's own error/MCP logs");
+    c.add(Group::AiTools, "Claude CLI logs", h.join("Library/Caches/claude-cli-nodejs"), "Logs", Verdict::Safe, "Claude Code's own error/MCP logs");
     // AIToolScanning sub_7308: Claude Desktop
-    c.add(Group::Claude, "Claude Desktop logs", h.join("Library/Logs/Claude"), "Logs", Verdict::Safe, "Claude Desktop logs");
-    c.add(Group::Claude, "Claude Desktop cache", h.join("Library/Caches/com.anthropic.claudefordesktop"), "Caches", Verdict::Safe, "App cache; rebuilt automatically");
-    c.add(Group::Claude, "Claude updater cache", h.join("Library/Caches/com.anthropic.claudefordesktop.ShipIt"), "Caches", Verdict::Safe, "Leftover update download");
+    c.add(Group::AiTools, "Claude Desktop logs", h.join("Library/Logs/Claude"), "Logs", Verdict::Safe, "Claude Desktop logs");
+    c.add(Group::AiTools, "Claude Desktop cache", h.join("Library/Caches/com.anthropic.claudefordesktop"), "Caches", Verdict::Safe, "App cache; rebuilt automatically");
+    c.add(Group::AiTools, "Claude updater cache", h.join("Library/Caches/com.anthropic.claudefordesktop.ShipIt"), "Caches", Verdict::Safe, "Leftover update download");
     let desk = h.join("Library/Application Support/Claude");
     let desktop_running = c.running_ids.contains("com.anthropic.claudefordesktop");
     for sub in CHROMIUM_CACHES {
         let p = desk.join(sub);
         let (v, r) = if desktop_running { (Verdict::Ask, "Claude Desktop is open — its web cache is in use") } else { (Verdict::Safe, "Web view cache; rebuilt automatically") };
-        c.add(Group::Claude, &format!("Claude Desktop {}", sub), p, "Caches", v, r);
+        c.add(Group::AiTools, &format!("Claude Desktop {}", sub), p, "Caches", v, r);
     }
-    c.add(Group::Claude, "Claude Desktop VM image", desk.join("vm_bundles"), "Downloads", Verdict::Ask, "Sandbox VM image for agent mode; downloaded again if removed");
-    c.add(Group::Claude, "Claude Desktop Code VM", desk.join("claude-code-vm"), "Downloads", Verdict::Ask, "Runtime for Claude Code inside the desktop app; re-downloaded if removed");
+    c.add(Group::AiTools, "Claude Desktop VM image", desk.join("vm_bundles"), "Downloads", Verdict::Ask, "Sandbox VM image for agent mode; downloaded again if removed");
+    c.add(Group::AiTools, "Claude Desktop Code VM", desk.join("claude-code-vm"), "Downloads", Verdict::Ask, "Runtime for Claude Code inside the desktop app; re-downloaded if removed");
     // projects: the ones you use are kept, old ones are offered for review
     for p in claude_code::scan_projects() {
         let idle = p.days_idle();
         let name = p.display_name();
         if p.in_use() {
-            c.add(Group::Claude, &format!("Project · {name}"), p.folder.clone(), "Projects", Verdict::Keep, &format!("You used this project {} — kept", ago(idle)));
+            c.add(Group::AiTools, &format!("Project · {name}"), p.folder.clone(), "Projects", Verdict::Keep, &format!("You used this project {} — kept", ago(idle)));
             if let Some(it) = c.items.last_mut() {
                 if it.path == p.folder {
                     it.hard_keep = true;
                 }
             }
         } else if !p.cwd_exists {
-            c.add(Group::Claude, &format!("Project · {name}"), p.folder.clone(), "Old Sessions", Verdict::Ask, &format!("Chat history for a folder that no longer exists; last used {}", ago(idle)));
+            c.add(Group::AiTools, &format!("Project · {name}"), p.folder.clone(), "Old Sessions", Verdict::Ask, &format!("Chat history for a folder that no longer exists; last used {}", ago(idle)));
         } else {
-            c.add(Group::Claude, &format!("Project · {name}"), p.folder.clone(), "Old Sessions", Verdict::Ask, &format!("Chat history not used for {} days (the project folder itself is never touched)", idle as u64));
+            c.add(Group::AiTools, &format!("Project · {name}"), p.folder.clone(), "Old Sessions", Verdict::Ask, &format!("Chat history not used for {} days (the project folder itself is never touched)", idle as u64));
         }
     }
     // old file-history snapshots and uploads
     for (sub, label, kind) in [("file-history", "Edit history", "Old Sessions"), ("uploads", "Uploaded files", "Temp Files")] {
         for f in children(&cl.join(sub)) {
             if age_days(&f) > m::CLAUDE_OLD_DATA_DAYS as f64 {
-                c.add(Group::Claude, &format!("{label} · {}", short_id(&fname(&f))), f, kind, Verdict::Ask, &format!("{label} older than {} days", m::CLAUDE_OLD_DATA_DAYS));
+                c.add(Group::AiTools, &format!("{label} · {}", short_id(&fname(&f))), f, kind, Verdict::Ask, &format!("{label} older than {} days", m::CLAUDE_OLD_DATA_DAYS));
             }
         }
     }
     if claude_running {
         // a live session may hold files in these folders
-        for it in c.items.iter_mut().filter(|i| i.group == Group::Claude && i.kind == "Temp Files" && i.verdict == Verdict::Safe) {
+        for it in c.items.iter_mut().filter(|i| i.group == Group::AiTools && i.kind == "Temp Files" && i.verdict == Verdict::Safe) {
             if it.age_days < 1.0 {
                 it.verdict = Verdict::Ask;
                 it.reason = "Claude is running — this may belong to an open session".into();
@@ -525,7 +507,7 @@ fn scan_user_caches(c: &mut Ctx) {
             continue;
         }
         if let Some((_, why)) = keep.iter().find(|(k, _)| *k == n) {
-            c.add(Group::UserCache, &pretty(&n), p, "Caches", Verdict::Keep, why);
+            c.add(Group::AppCaches, &pretty(&n), p, "Caches", Verdict::Keep, why);
             continue;
         }
         let (v, why) = if n.starts_with("com.apple.") {
@@ -535,7 +517,7 @@ fn scan_user_caches(c: &mut Ctx) {
         } else {
             (Verdict::Safe, "App cache; the app rebuilds it")
         };
-        c.add(Group::UserCache, &pretty(&n), p, "Caches", v, why);
+        c.add(Group::AppCaches, &pretty(&n), p, "Caches", v, why);
     }
 }
 
@@ -616,13 +598,13 @@ fn scan_logs(c: &mut Ctx) {
 fn scan_xcode(c: &mut Ctx) {
     let x = home().join("Library/Developer");
     for p in children(&x.join("Xcode/DerivedData")) {
-        c.add(Group::Xcode, &format!("Derived Data · {}", fname(&p).split('-').next().unwrap_or("")), p, "Build Data", Verdict::Safe, "Build products and index; Xcode rebuilds them");
+        c.add(Group::Developer, &format!("Derived Data · {}", fname(&p).split('-').next().unwrap_or("")), p, "Build Data", Verdict::Safe, "Build products and index; Xcode rebuilds them");
     }
-    c.add(Group::Xcode, "Xcode Caches", x.join("Xcode/DocumentationCache"), "Caches", Verdict::Safe, "Documentation cache");
-    c.add(Group::Xcode, "Swift module cache", x.join("Xcode/ModuleCache.noindex"), "Caches", Verdict::Safe, "Precompiled module cache");
-    c.add(Group::Xcode, "SwiftUI Previews", x.join("Xcode/UserData/Previews"), "Caches", Verdict::Safe, "Preview simulator data");
-    c.add(Group::Xcode, "iOS Device Logs", x.join("Xcode/iOS Device Logs"), "Logs", Verdict::Safe, "Device logs collected by Xcode");
-    c.add(Group::Xcode, "Simulator caches", x.join("CoreSimulator/Caches"), "Caches", Verdict::Safe, "Simulator dyld caches; rebuilt on boot");
+    c.add(Group::Developer, "Xcode Caches", x.join("Xcode/DocumentationCache"), "Caches", Verdict::Safe, "Documentation cache");
+    c.add(Group::Developer, "Swift module cache", x.join("Xcode/ModuleCache.noindex"), "Caches", Verdict::Safe, "Precompiled module cache");
+    c.add(Group::Developer, "SwiftUI Previews", x.join("Xcode/UserData/Previews"), "Caches", Verdict::Safe, "Preview simulator data");
+    c.add(Group::Developer, "iOS Device Logs", x.join("Xcode/iOS Device Logs"), "Logs", Verdict::Safe, "Device logs collected by Xcode");
+    c.add(Group::Developer, "Simulator caches", x.join("CoreSimulator/Caches"), "Caches", Verdict::Safe, "Simulator dyld caches; rebuilt on boot");
     for os in ["iOS DeviceSupport", "watchOS DeviceSupport", "macOS DeviceSupport", "tvOS DeviceSupport", "visionOS DeviceSupport"] {
         let mut vers = children(&x.join("Xcode").join(os));
         vers.sort_by_key(|v| version_key(&fname(v)));
@@ -630,11 +612,11 @@ fn scan_xcode(c: &mut Ctx) {
         for v in vers {
             let latest = Some(&v) == newest.as_ref();
             let (verdict, why) = if latest { (Verdict::Ask, "Newest device support — needed to debug on that device") } else { (Verdict::Safe, "Support files for an older OS version; recreated when you connect that device") };
-            c.add(Group::Xcode, &format!("{} {}", os.replace(" DeviceSupport", ""), fname(&v)), v, "Device Support", verdict, why);
+            c.add(Group::Developer, &format!("{} {}", os.replace(" DeviceSupport", ""), fname(&v)), v, "Device Support", verdict, why);
         }
     }
     for a in children(&x.join("Xcode/Archives")) {
-        c.add(Group::Xcode, &format!("Archives {}", fname(&a)), a, "Archives", Verdict::Ask, "App archives hold debug symbols for builds you shipped");
+        c.add(Group::Developer, &format!("Archives {}", fname(&a)), a, "Archives", Verdict::Ask, "App archives hold debug symbols for builds you shipped");
     }
 }
 
@@ -1027,8 +1009,8 @@ mod tests {
         };
         let s = State {
             items: vec![
-                item(Group::Claude, 10, Verdict::Safe, true),
-                item(Group::Claude, 20, Verdict::Ask, false),
+                item(Group::AiTools, 10, Verdict::Safe, true),
+                item(Group::AiTools, 20, Verdict::Ask, false),
                 item(Group::Logs, 40, Verdict::Keep, false),
                 item(Group::Logs, 80, Verdict::Safe, true),
             ],
