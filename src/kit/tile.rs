@@ -54,13 +54,26 @@ pub fn small_ring(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, frac: f32,
     let resp = card(ui, rect, id, selected);
     let p = ui.painter();
     // the ring fills the tile above its caption
-    let rr = ((rect.height() - 34.0) / 2.0).min(rect.width() / 2.0 - 12.0).clamp(20.0, 30.0);
-    let c = Pos2::new(rect.center().x, rect.top() + 10.0 + rr);
+    let (c, rr) = small_ring_at(rect);
     let w = (rr * 0.2).clamp(4.0, 6.0);
     ring(p, c, rr - w / 2.0, w, frac, color);
     icon(p, glyph, Rect::from_center_size(c, Vec2::splat(rr * 0.75)), TEXT_SOFT());
     text_fit(p, Pos2::new(rect.center().x, rect.bottom() - 10.0), Align2::CENTER_BOTTOM, caption, ty::title(), TEXT(), rect.width() - 10.0);
     resp
+}
+
+/// Where a Wide tile's ring sits, and its radius: it takes the tile's
+/// height, less a margin.
+pub fn wide_ring(rect: Rect) -> (Pos2, f32) {
+    let rr = (rect.height() / 2.0 - 11.0).clamp(17.0, 27.0);
+    (Pos2::new(rect.left() + PAD + rr, rect.center().y), rr)
+}
+
+/// Where a Small tile's ring sits, and its radius: it fills the tile above
+/// a one-line caption.
+pub fn small_ring_at(rect: Rect) -> (Pos2, f32) {
+    let rr = ((rect.height() - 34.0) / 2.0).min(rect.width() / 2.0 - 12.0).clamp(20.0, 30.0);
+    (Pos2::new(rect.center().x, rect.top() + 10.0 + rr), rr)
 }
 
 /// Wide (1:2): a ring (or the glyph) on the left; label, value and caption
@@ -70,9 +83,7 @@ pub fn wide(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, 
     let resp = card(ui, rect, id, selected);
     let p = ui.painter();
     let cy = rect.center().y;
-    // the ring takes the tile's height, less a margin
-    let rr = (rect.height() / 2.0 - 11.0).clamp(17.0, 27.0);
-    let c = Pos2::new(rect.left() + PAD + rr, cy);
+    let (c, rr) = wide_ring(rect);
     let caption = match bar_or_caption {
         Ok((f, col)) => {
             let w = (rr * 0.2).clamp(4.0, 5.5);

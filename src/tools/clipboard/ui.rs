@@ -248,8 +248,8 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
 
     // as many clips as fit; rows shrink a little rather than leave a gap
     let avail = rect.bottom() - 6.0 - y;
-    let fit = (avail / 30.0).floor().max(1.0) as usize;
-    let rh = (avail / fit as f32).min(34.0);
+    let fit = (avail / 28.0).floor().max(1.0) as usize;
+    let rh = (avail / fit as f32).min(32.0);
     let ids: Vec<u64> = c.visible(Filter::All, "").into_iter().take(fit.min(PANEL_ROWS)).collect();
     if ids.is_empty() {
         let r = Rect::from_min_max(Pos2::new(x0, y + 4.0), Pos2::new(x1, rect.bottom() - 12.0));
@@ -265,17 +265,17 @@ pub fn card(c: &mut Clipboard, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         if resp.hovered() {
             p.rect_filled(r, 7.0, white(15));
         }
-        let th = Rect::from_min_size(Pos2::new(x0, r.center().y - 13.0), Vec2::splat(26.0));
-        entry_thumb(c, &p, th, &e, 6.0);
-        let mut right = x1;
+        // one line per clip: thumb, text, then when (and a pin) on the right
+        let th = Rect::from_min_size(Pos2::new(x0, r.center().y - 11.0), Vec2::splat(22.0));
+        entry_thumb(c, &p, th, &e, 5.0);
+        let mut right = p.text(Pos2::new(x1, r.center().y), Align2::RIGHT_CENTER, ago(&e), font(11.0), TEXT_FAINT()).left() - 8.0;
         if e.pinned {
-            pin_glyph(&p, Pos2::new(right - 6.0, r.center().y), TINT());
-            right -= 18.0;
+            pin_glyph(&p, Pos2::new(right - 5.0, r.center().y + 2.0), TINT());
+            right -= 16.0;
         }
         let tx = th.right() + 9.0;
         let title_font = if e.kind == Kind::Code { mono(11.5) } else { font(12.0) };
-        text_fit(&p, Pos2::new(tx, r.center().y - 7.0), Align2::LEFT_CENTER, &e.title(), title_font, TEXT(), right - tx);
-        text_fit(&p, Pos2::new(tx, r.center().y + 8.0), Align2::LEFT_CENTER, &format!("{} · {}", if e.app.is_empty() { "Unknown app" } else { &e.app }, ago(&e)), font(11.0), TEXT_FAINT(), right - tx);
+        text_fit(&p, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, &e.title(), title_font, TEXT(), right - tx - 4.0);
         if resp.on_hover_text("Click to copy").clicked() && c.copy(e.id, false) {
             cx.toast("Copied");
         }
