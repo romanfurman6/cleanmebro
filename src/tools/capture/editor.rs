@@ -836,7 +836,8 @@ impl Editor {
         let ctx = ctx.clone();
         self.ocr_busy = true;
         std::thread::spawn(move || {
-            let mut lines = mac::recognize_image(&crop);
+            // tests check the editor, not Vision, which can take many seconds to load
+            let mut lines = if cfg!(test) { Vec::new() } else { mac::recognize_image(&crop) };
             for l in lines.iter_mut() {
                 l.rect = l.rect.translate(Vec2::new(x as f32, y as f32));
             }
@@ -1145,6 +1146,7 @@ mod tests {
             e.poll_ocr(&ctx);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert!(!e.doc.marks.is_empty(), "recognition never answered");
         assert!(matches!(&e.doc.marks[0], Mark::Erase { boxes, .. } if boxes.is_empty()), "no OCR here: whole box");
     }
 }

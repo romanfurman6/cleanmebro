@@ -299,10 +299,14 @@ mod imp {
     /// (`count` no longer matches).
     pub fn restore(saved: Saved, count: isize) {
         let pb = NSPasteboard::generalPasteboard();
-        if pb.changeCount() != count || saved.items.is_empty() {
+        if pb.changeCount() != count {
             return;
         }
         pb.clearContents();
+        // it was empty before: leave it empty, not holding what was said
+        if saved.items.is_empty() {
+            return;
+        }
         let transient = NSString::from_str("org.nspasteboard.TransientType");
         let items: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = saved
             .items

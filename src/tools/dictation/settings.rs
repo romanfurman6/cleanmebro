@@ -88,15 +88,24 @@ pub struct Settings {
     /// Put back what was on the clipboard after pasting.
     pub restore_clipboard: bool,
     pub keep_history: bool,
+    /// Settings format; 1 moved the old default ⌥Space to ⌥D. Missing in
+    /// a file means 0, not today's.
+    #[serde(default)]
+    pub version: u32,
+}
+
+/// The default before version 1.
+fn old_default() -> Shortcut {
+    Shortcut { cmd: false, shift: false, alt: true, ctrl: false, key: "Space".into() }
 }
 
 pub fn default_shortcut() -> Shortcut {
-    Shortcut { cmd: false, shift: false, alt: true, ctrl: false, key: "Space".into() }
+    Shortcut { cmd: false, shift: false, alt: true, ctrl: false, key: "D".into() }
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, lang: Lang::Auto, restore_clipboard: true, keep_history: true }
+        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, lang: Lang::Auto, restore_clipboard: true, keep_history: true, version: VERSION }
     }
 }
 
@@ -104,8 +113,19 @@ pub fn data_dir() -> PathBuf {
     crate::kit::fs::data_path("dictation")
 }
 
+const VERSION: u32 = 1;
+
 pub fn load(dir: &Path) -> Settings {
-    crate::kit::fs::load_json(&dir.join("settings.json"))
+    upgrade(crate::kit::fs::load_json(&dir.join("settings.json")))
+}
+
+/// Bring settings saved by an older build up to date.
+fn upgrade(mut s: Settings) -> Settings {
+    if s.version < 1 && s.shortcut == Some(old_default()) {
+        s.shortcut = Some(default_shortcut());
+    }
+    s.version = VERSION;
+    s
 }
 
 pub fn save(dir: &Path, s: &Settings) {
@@ -164,6 +184,19 @@ mod tests {
         assert_eq!(h.items.len(), HISTORY_MAX);
         assert_eq!(h.items[0].at, (HISTORY_MAX + 4) as i64);
         assert_eq!(h.words_since((HISTORY_MAX + 3) as i64), 4);
+    }
+
+    #[test]
+    fn old_default_shortcut_moves_to_option_d_once() {
+        let s = upgrade(serde_json::from_str(r#"{"shortcut":{"cmd":false,"shift":false,"alt":true,"ctrl":false,"key":"Space"}}"#).unwrap());
+        assert_eq!(s.shortcut.as_ref().map(|k| k.display()), Some("⌥D".to_string()));
+        // chosen again after the upgrade: kept
+        let again = upgrade(Settings { shortcut: Some(old_default()), ..s });
+        assert_eq!(again.shortcut, Some(old_default()));
+        // someone's own pick is never touched
+        let mine = Shortcut { cmd: true, shift: true, alt: false, ctrl: false, key: "D".into() };
+        let s = upgrade(Settings { shortcut: Some(mine.clone()), version: 0, ..Settings::default() });
+        assert_eq!(s.shortcut, Some(mine));
     }
 
     #[test]

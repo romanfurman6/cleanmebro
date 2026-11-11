@@ -152,6 +152,10 @@ fn unpack(p: &Progress, tmp: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Shorter input than this (0.1 s at 16 kHz) is never handed to the model.
+#[cfg(target_os = "macos")]
+const MIN_SAMPLES: usize = 1_600;
+
 /// The model loaded and ready to run.
 pub struct Loaded {
     #[cfg(target_os = "macos")]
@@ -182,6 +186,11 @@ impl Loaded {
     /// The text of 16 kHz mono `pcm`. Blocks.
     #[cfg(target_os = "macos")]
     pub fn run(&self, pcm: &[f32]) -> Result<String, String> {
+        // under a tenth of a second the encoder gets no frames and aborts
+        // the process (an ONNX exception Rust can't catch)
+        if pcm.len() < MIN_SAMPLES {
+            return Ok(String::new());
+        }
         let stream = self.rec.create_stream();
         stream.accept_waveform(16_000, pcm);
         self.rec.decode(&stream);

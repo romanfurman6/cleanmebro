@@ -8,6 +8,7 @@
 
 mod audio;
 mod mac;
+pub mod probe;
 mod settings;
 mod ui;
 
@@ -658,7 +659,7 @@ mod tests {
         let d = demo();
         assert_eq!(d.history.items.len(), 4);
         assert!(d.words_today() <= d.history.items.iter().map(|s| s.text.split_whitespace().count()).sum());
-        assert_eq!(d.shortcut_label(), "⌥Space");
+        assert_eq!(d.shortcut_label(), "⌥D");
     }
 
     #[test]
