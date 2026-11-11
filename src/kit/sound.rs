@@ -12,7 +12,7 @@ pub const STORAGE_KEY: &str = "sounds_on";
 
 /// Bump when a sound changes, so the cached WAVs are written again.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const RATE: u32 = 44_100;
 /// Loudest sample of any cue (full scale is 1.0): quiet next to system sounds.
 const PEAK: f32 = 0.32;
@@ -93,20 +93,6 @@ fn file(cue: Cue) -> Option<std::path::PathBuf> {
 
 // ---------------------------------------------------------------- synthesis
 
-/// One struck note: a sine with a soft attack and an exponential tail, plus
-/// a faint, faster-dying overtone that gives it a glassy edge.
-fn note(out: &mut [f32], start: f32, freq: f32, amp: f32, decay: f32) {
-    let s0 = (start * RATE as f32) as usize;
-    for (i, o) in out.iter_mut().enumerate().skip(s0) {
-        let t = (i - s0) as f32 / RATE as f32;
-        let attack = (t / 0.006).min(1.0);
-        let body = (TAU * freq * t).sin() * (-t / decay).exp();
-        let edge = (TAU * freq * 2.76 * t).sin() * (-t / (decay * 0.25)).exp() * 0.18;
-        let shimmer = (TAU * freq * 4.0 * t).sin() * (-t / (decay * 0.12)).exp() * 0.06;
-        *o += amp * attack * (body + edge + shimmer);
-    }
-}
-
 /// A short pitch glide (a soft "pop"), `from` to `to` Hz over `glide` s.
 fn pop(out: &mut [f32], start: f32, from: f32, to: f32, glide: f32, amp: f32, decay: f32) {
     let s0 = (start * RATE as f32) as usize;
@@ -122,56 +108,32 @@ fn pop(out: &mut [f32], start: f32, from: f32, to: f32, glide: f32, amp: f32, de
     }
 }
 
-/// A breath of filtered noise that swells and fades, under the Done chord.
-fn air(out: &mut [f32], start: f32, len: f32, amp: f32) {
-    let s0 = (start * RATE as f32) as usize;
-    let n = (len * RATE as f32) as usize;
-    let mut seed: u32 = 0x9E37_79B9;
-    let (mut lp1, mut lp2) = (0.0f32, 0.0f32);
-    for (i, o) in out.iter_mut().enumerate().skip(s0).take(n) {
-        seed ^= seed << 13;
-        seed ^= seed >> 17;
-        seed ^= seed << 5;
-        let white = seed as f32 / u32::MAX as f32 * 2.0 - 1.0;
-        let k = (i - s0) as f32 / n as f32;
-        // the filter opens as it swells: a soft upward whoosh
-        let a = 0.02 + 0.10 * k;
-        lp1 += a * (white - lp1);
-        lp2 += a * (lp1 - lp2);
-        let band = lp1 - lp2;
-        let env = (k * std::f32::consts::PI).sin().powi(2);
-        *o += amp * env * band;
-    }
-}
-
 /// The samples of `cue`, mono at 44.1 kHz, peaking at [`PEAK`].
 pub fn synth(cue: Cue) -> Vec<f32> {
     let len = match cue {
-        Cue::Ready => 0.7,
-        Cue::Done => 1.2,
+        Cue::Ready | Cue::Oops => 0.4,
+        Cue::Done => 0.6,
         Cue::Awake | Cue::Asleep => 0.35,
-        Cue::Oops => 0.5,
     };
     let mut out = vec![0.0f32; (len * RATE as f32) as usize];
     match cue {
-        // two rising notes, a fifth apart (G5, D6)
+        // two pops stepping up
         Cue::Ready => {
-            note(&mut out, 0.0, 783.99, 0.8, 0.16);
-            note(&mut out, 0.09, 1174.66, 1.0, 0.22);
+            pop(&mut out, 0.0, 520.0, 700.0, 0.06, 0.8, 0.06);
+            pop(&mut out, 0.09, 700.0, 1040.0, 0.07, 1.0, 0.08);
         }
-        // a breath, then a bright major arpeggio settling (C5 E5 G5 C6)
+        // three pops climbing, the last one rings a little longer
         Cue::Done => {
-            air(&mut out, 0.0, 0.32, 3.0);
-            for (k, f) in [523.25, 659.25, 783.99, 1046.5].into_iter().enumerate() {
-                note(&mut out, 0.16 + k as f32 * 0.065, f, 0.55 + k as f32 * 0.12, 0.30);
-            }
+            pop(&mut out, 0.0, 440.0, 660.0, 0.06, 0.7, 0.06);
+            pop(&mut out, 0.085, 660.0, 880.0, 0.06, 0.85, 0.06);
+            pop(&mut out, 0.17, 880.0, 1320.0, 0.07, 1.0, 0.12);
         }
         Cue::Awake => pop(&mut out, 0.0, 520.0, 880.0, 0.07, 1.0, 0.07),
         Cue::Asleep => pop(&mut out, 0.0, 880.0, 520.0, 0.07, 1.0, 0.07),
-        // two soft low taps on the same note (A4)
+        // two low pops sliding down
         Cue::Oops => {
-            note(&mut out, 0.0, 440.0, 1.0, 0.07);
-            note(&mut out, 0.13, 415.3, 0.9, 0.09);
+            pop(&mut out, 0.0, 440.0, 330.0, 0.07, 1.0, 0.06);
+            pop(&mut out, 0.12, 400.0, 290.0, 0.08, 0.9, 0.07);
         }
     }
     // fade the last 20 ms so nothing clicks, then set the level
