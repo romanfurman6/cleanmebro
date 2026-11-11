@@ -230,6 +230,9 @@ mod imp {
         ($($a:tt)*) => { eprintln!("[rec {:.3}] {}", host_now(), format!($($a)*)) };
     }
 
+    /// The most audio held back for an input that isn't ready, in seconds.
+    const BACKLOG_SECS: usize = 4;
+
     /// Counters, printed about once a second while recording.
     #[derive(Default, Debug)]
     struct Stats {
@@ -264,6 +267,9 @@ mod imp {
         parts: Option<[Retained<AVAssetWriterInput>; 2]>,
         /// The format of the mixed audio we hand the writer.
         audio_fmt: *mut c_void,
+        /// Audio an input wasn't ready for yet, per input (by address), in
+        /// order: written as soon as it is, so a busy moment leaves no gap.
+        backlog: std::collections::HashMap<usize, std::collections::VecDeque<(i64, Vec<f32>)>>,
         clock: Clock,
         mixer: Mixer,
         last_video: f64,
@@ -395,14 +401,49 @@ mod imp {
                     }
                 }
             }
+            if flush {
+                // at the end, give each input a moment to take what it owes
+                let inputs: Vec<Retained<AVAssetWriterInput>> = self.audio.iter().cloned().chain(self.parts.iter().flat_map(|p| p.iter().cloned())).collect();
+                for _ in 0..50 {
+                    for input in &inputs {
+                        self.append_audio(input, 0, &[]);
+                    }
+                    if self.backlog.is_empty() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                self.stats.audio_not_ready += self.backlog.values().map(|q| q.len() as u64).sum::<u64>();
+                self.backlog.clear();
+            }
         }
 
+        /// Queue `stereo` behind what `input` still owes, then write as much
+        /// as it takes now. More than [`BACKLOG_SECS`] waiting drops the
+        /// oldest (counted as not ready).
         fn append_audio(&mut self, input: &AVAssetWriterInput, at: i64, stereo: &[f32]) {
-            if stereo.is_empty() {
-                return;
+            let key = input as *const AVAssetWriterInput as usize;
+            let mut q = self.backlog.remove(&key).unwrap_or_default();
+            if !stereo.is_empty() {
+                q.push_back((at, stereo.to_vec()));
             }
-            if !unsafe { input.isReadyForMoreMediaData() } {
+            let cap = BACKLOG_SECS * mixer::RATE as usize * 2;
+            while q.iter().map(|(_, s)| s.len()).sum::<usize>() > cap {
+                q.pop_front();
                 self.stats.audio_not_ready += 1;
+            }
+            while !q.is_empty() && unsafe { input.isReadyForMoreMediaData() } {
+                if let Some((at, chunk)) = q.pop_front() {
+                    self.write_audio(input, at, &chunk);
+                }
+            }
+            if !q.is_empty() {
+                self.backlog.insert(key, q);
+            }
+        }
+
+        fn write_audio(&mut self, input: &AVAssetWriterInput, at: i64, stereo: &[f32]) {
+            if stereo.is_empty() {
                 return;
             }
             unsafe {
@@ -874,6 +915,7 @@ mod imp {
                 audio,
                 parts,
                 audio_fmt: std::ptr::null_mut(),
+                backlog: std::collections::HashMap::new(),
                 clock: Clock::default(),
                 mixer: Mixer::new(cfg.system_audio, mic),
                 last_video: 0.0,
