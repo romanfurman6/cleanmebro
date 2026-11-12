@@ -53,6 +53,14 @@ Latest version: **0.1.1** ([release notes](https://github.com/romanfurman6/cmdme
 
 ![Disk Map](docs/images/lens.png)
 
+<p align="center">
+  <img src="docs/images/ai-usage.png" width="720" alt="AI Usage">
+</p>
+
+<p align="center">
+  <img src="docs/images/clipboard.png" width="720" alt="Clipboard history">
+</p>
+
 ## Requirements
 
 - macOS (uses AppKit for the glass material and menu bar behavior)
