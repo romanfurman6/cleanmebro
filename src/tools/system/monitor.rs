@@ -503,6 +503,9 @@ fn run(shared: Shared, ctx: egui::Context, demo: bool) {
     let (mut battery_at, mut health_at, mut hid_at, mut profile_at) = (Every::default(), Every::default(), Every::default(), Every::default());
     let (mut wifi_at, mut wifi_details_at, mut sizes_at) = (Every::default(), Every::default(), Every::default());
     let mut wifi_info = Wifi::default();
+    let started = Instant::now();
+    let wifi_slot: Arc<Mutex<Option<Wifi>>> = Arc::new(Mutex::new(None));
+    let wifi_busy = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut health_text = String::new();
     let mut psys = sysinfo::System::new();
     let mut procs_at = Every::default();
@@ -573,8 +576,22 @@ fn run(shared: Shared, ctx: egui::Context, demo: bool) {
             }
             b
         });
-        if WIFI_DETAILS_EVERY.due(&mut wifi_details_at) {
-            wifi_info = wifi_details();
+        // system_profiler takes ~9 s: on its own thread, so the first reading
+        // (and every widget waiting for it) doesn't wait for it
+        if WIFI_DETAILS_EVERY.due(&mut wifi_details_at) && !wifi_busy.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let (slot, busy) = (wifi_slot.clone(), wifi_busy.clone());
+            std::thread::Builder::new()
+                .name("wifi-details".into())
+                .spawn(move || {
+                    *slot.lock_ok() = Some(wifi_details());
+                    busy.store(false, std::sync::atomic::Ordering::Relaxed);
+                })
+                .ok();
+        }
+        let fresh = wifi_slot.lock_ok().take();
+        if let Some(w) = fresh {
+            wifi_info = w;
+            wifi_at.reset();
         }
         let wifi = WIFI_EVERY.due(&mut wifi_at).then(|| wifi_name(&wifi_info));
         // Bluetooth LE: starts once the panel has been opened (it may ask
@@ -603,6 +620,9 @@ fn run(shared: Shared, ctx: egui::Context, demo: bool) {
 
         {
             let mut s = shared.lock_ok();
+            if !s.ready {
+                eprintln!("[monitor] first reading after {} ms", started.elapsed().as_millis());
+            }
             s.ready = true;
             s.disk_total = total;
             s.disk_free = free;
