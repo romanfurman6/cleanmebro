@@ -8,6 +8,7 @@ mod devices_store;
 mod devices_ui;
 pub mod monitor;
 mod page;
+mod procs;
 mod sheets;
 mod speed;
 mod speedtest;

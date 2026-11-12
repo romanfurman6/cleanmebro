@@ -49,6 +49,7 @@ pub struct Battery {
 }
 
 pub use super::devices::Device;
+use crate::kit::charge;
 use super::devices;
 use super::devices_store::{History, Seen};
 
@@ -162,6 +163,14 @@ pub struct Snapshot {
     /// Device alert and menu bar settings (changed from the Devices sheet).
     pub bt_prefs: devices::Prefs,
     pub speed: SpeedTest,
+    /// Charge limit (held by the fan helper).
+    pub charge: charge::View,
+    /// Watts and clocks per part (Apple silicon), while on screen.
+    pub power: Option<crate::kit::ioreport::Reading>,
+    /// The whole Mac's draw in watts (SMC `PSTR`).
+    pub sys_watts: Option<f32>,
+    /// The busiest processes, busiest first.
+    pub procs: Vec<super::procs::Proc>,
     /// Busiest apps on the network, while the Network sheet shows.
     pub apps: Vec<super::traffic::AppRate>,
 }
@@ -227,6 +236,57 @@ impl Snapshot {
 }
 
 pub type Shared = Arc<Mutex<Snapshot>>;
+
+/// Change the charge policy, save it and hand it to the helper.
+pub fn change_charge(mon: &Shared, ctx: &egui::Context, f: impl FnOnce(&mut charge::Policy)) {
+    let p = {
+        let mut s = mon.lock_ok();
+        f(&mut s.charge.policy);
+        s.charge.policy = s.charge.policy.sanitize();
+        s.charge.policy
+    };
+    charge::save(&p);
+    let (mon, ctx) = (mon.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        sync_charge(&mon, &p);
+        ctx.request_repaint();
+    });
+}
+
+/// Install (or update) the helper from the Battery sheet, then hand it the policy.
+pub fn install_charge_helper(mon: &Shared, ctx: &egui::Context) {
+    {
+        let mut s = mon.lock_ok();
+        if s.charge.installing {
+            return;
+        }
+        s.charge.installing = true;
+    }
+    let (mon, ctx) = (mon.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        let _ = crate::kit::helper::install();
+        let p = {
+            let mut s = mon.lock_ok();
+            s.charge.installing = false;
+            s.charge.policy
+        };
+        sync_charge(&mon, &p);
+        ctx.request_repaint();
+    });
+}
+
+/// Send the policy to the helper and keep what it answers.
+fn sync_charge(mon: &Shared, p: &charge::Policy) {
+    let r = charge::send(p);
+    let mut s = mon.lock_ok();
+    match r {
+        Some(Some(st)) => {
+            s.charge.helper_ok = Some(true);
+            s.charge.status = st;
+        }
+        _ => s.charge.helper_ok = Some(false),
+    }
+}
 
 /// Change the device alert / menu bar settings and save them. Hiding or
 /// showing a device takes effect at once.
@@ -320,7 +380,9 @@ thread_local! {
 }
 
 pub fn start(ctx: egui::Context, demo: bool) -> Shared {
-    let shared: Shared = Arc::new(Mutex::new(Snapshot { bt_prefs: devices::Prefs::load(), ..Snapshot::default() }));
+    let policy = if demo { charge::Policy::default() } else { charge::load() };
+    let charge = charge::View { policy, ..Default::default() };
+    let shared: Shared = Arc::new(Mutex::new(Snapshot { bt_prefs: devices::Prefs::load(), charge, ..Snapshot::default() }));
     let s = shared.clone();
     std::thread::Builder::new()
         .name("monitor".into())
@@ -367,6 +429,8 @@ const WIFI_EVERY: Cadence = Cadence::secs(60, None);
 const WIFI_DETAILS_EVERY: Cadence = Cadence::secs(10 * 60, None);
 /// The Trash's size, for the "Empty Trash" nudge (one folder only).
 const TRASH_EVERY: Cadence = Cadence::secs(600, None);
+/// The process list (only while on screen).
+const PROCS_EVERY: Cadence = Cadence::secs(4, None);
 /// A folder walk is running (on its own thread).
 static SIZING: AtomicBool = AtomicBool::new(false);
 
@@ -424,7 +488,7 @@ pub fn measure_folders(shared: Shared, ctx: egui::Context) {
     });
 }
 
-fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
+fn run(shared: Shared, ctx: egui::Context, demo: bool) {
     let mut sys = sysinfo::System::new();
     let mut nets = sysinfo::Networks::new_with_refreshed_list();
     let mut last_ticks = cpu_ticks();
@@ -440,6 +504,12 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
     let (mut wifi_at, mut wifi_details_at, mut sizes_at) = (Every::default(), Every::default(), Every::default());
     let mut wifi_info = Wifi::default();
     let mut health_text = String::new();
+    let mut psys = sysinfo::System::new();
+    let mut procs_at = Every::default();
+    #[cfg(target_os = "macos")]
+    let mut sampler = if demo { None } else { crate::kit::ioreport::Sampler::open() };
+    #[cfg(target_os = "macos")]
+    let smc = if demo { None } else { crate::kit::smc::Smc::open() };
     // one-off facts
     {
         let (model, chip) = hardware();
@@ -476,7 +546,24 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
         let thermal = crate::kit::native::thermal_state();
         let uptime = sysinfo::System::uptime();
 
-        let battery = BATTERY_EVERY.due(&mut battery_at).then(|| {
+        let shown = activity::visible();
+        #[cfg(target_os = "macos")]
+        let (power, sys_watts) = if shown {
+            (sampler.as_mut().and_then(|s| s.read()), smc.as_ref().and_then(|s| s.read("PSTR")).filter(|w| w.is_finite() && *w > 0.0 && *w < 1000.0))
+        } else {
+            (None, None)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let (power, sys_watts) = (None, None);
+        let procs = (!demo && PROCS_EVERY.due(&mut procs_at)).then(|| super::procs::top(super::procs::read(&mut psys), std::process::id(), super::procs::TOP_N));
+        let battery_due = BATTERY_EVERY.due(&mut battery_at);
+        // keep the helper's charge state fresh (and hand it the policy
+        // again, in case it was reinstalled)
+        let policy = shared.lock_ok().charge.policy;
+        if battery_due && !demo && policy.active() {
+            sync_charge(&shared, &policy);
+        }
+        let battery = battery_due.then(|| {
             let mut b = parse_battery(&run_cmd("ioreg", &["-rn", "AppleSmartBattery"]));
             if b.present {
                 if health_text.is_empty() || health_at.due(BATTERY_HEALTH_EVERY) {
@@ -557,6 +644,13 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
             s.online = rx_total + tx_total > 0;
             if let Some(b) = battery {
                 s.battery = b;
+            }
+            if shown {
+                s.power = power;
+                s.sys_watts = sys_watts;
+            }
+            if let Some(p) = procs {
+                s.procs = p;
             }
             if let Some(d) = devices {
                 let notes = bt_alerts.check(&d, &s.bt_prefs);
@@ -921,6 +1015,26 @@ pub fn demo_snapshot() -> Snapshot {
         hidden_devices: vec![],
         bt_prefs: devices::Prefs::default(),
         speed: SpeedTest::default(),
+        charge: charge::View {
+            policy: charge::Policy { limit: 80, ..Default::default() },
+            helper_ok: Some(true),
+            status: charge::Status { supported: true, policy: None, state: charge::State { held: true, hot: false } },
+            installing: false,
+        },
+        power: Some(crate::kit::ioreport::Reading {
+            cpu_w: 3.4,
+            gpu_w: 0.8,
+            ane_w: 0.0,
+            ecpu: crate::kit::ioreport::Usage { busy: 0.31, mhz: 1420.0 },
+            pcpu: crate::kit::ioreport::Usage { busy: 0.12, mhz: 3180.0 },
+            gpu: crate::kit::ioreport::Usage { busy: 0.06, mhz: 440.0 },
+        }),
+        sys_watts: Some(11.6),
+        procs: vec![
+            super::procs::Proc { pid: 812, name: "Safari".into(), cpu: 24.0, mine: true },
+            super::procs::Proc { pid: 406, name: "WindowServer".into(), cpu: 11.5, mine: false },
+            super::procs::Proc { pid: 1290, name: "Xcode".into(), cpu: 6.2, mine: true },
+        ],
         apps: [("Safari", 2_400_000.0, 61_000.0), ("Slack", 180_000.0, 24_000.0), ("Music", 96_000.0, 2_000.0)]
             .iter()
             .map(|(n, d, u)| super::traffic::AppRate { name: n.to_string(), down: *d, up: *u })

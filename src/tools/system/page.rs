@@ -132,6 +132,13 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
         SheetAction::ToggleAlerts => monitor::change_bt_prefs(mon, |p| crate::kit::notify::flip(&mut p.alerts)),
         SheetAction::ToggleMenuBar => monitor::change_bt_prefs(mon, |p| p.menu_bar = !p.menu_bar),
         SheetAction::OpenBluetooth => super::devices::open_bluetooth_settings(),
+        SheetAction::SetLimit(l) => monitor::change_charge(mon, ui.ctx(), |p| p.limit = l),
+        SheetAction::ToggleSailing => monitor::change_charge(mon, ui.ctx(), |p| p.sailing = !p.sailing),
+        SheetAction::ToggleHeat => monitor::change_charge(mon, ui.ctx(), |p| p.heat = !p.heat),
+        SheetAction::InstallHelper => monitor::install_charge_helper(mon, ui.ctx()),
+        SheetAction::Quit(pid) => {
+            super::procs::quit(pid);
+        }
         SheetAction::None | SheetAction::Close => {}
     }
     if let Some(a) = dev_action {
