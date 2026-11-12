@@ -472,6 +472,10 @@ pub struct Extra {
     pub name: String,
     pub pct: u8,
     pub charging: Option<bool>,
+    /// Bluetooth address ("aa-bb-…") when the source knows it: matched
+    /// first, since IOBluetooth's name ("AirPods Max") can differ from the
+    /// system report's ("Roman's AirPods Max").
+    pub address: String,
 }
 
 /// Adverts this weak are someone else's AirPods.
@@ -508,7 +512,8 @@ pub fn merge_extra(list: &mut Vec<Device>, paired_pods: &[Device], adverts: &[Po
         }
     }
     for e in extra {
-        match list.iter_mut().find(|d| d.name.eq_ignore_ascii_case(&e.name)) {
+        let at = list.iter().position(|d| !e.address.is_empty() && d.address == e.address).or_else(|| list.iter().position(|d| d.name.eq_ignore_ascii_case(&e.name)));
+        match at.map(|i| &mut list[i]) {
             Some(d) => {
                 if d.battery().is_none() {
                     d.main = Some(e.pct);
@@ -882,7 +887,7 @@ mod tests {
             near(0x2024, 0x99, 0x0a, -40), // not ours
             near(0x200f, 0x11, 0x01, -80), // someone else's, far away
         ];
-        let extra = [Extra { name: "Alex's iPhone".into(), pct: 64, charging: Some(true) }, Extra { name: "MX Master 3S".into(), pct: 33, charging: None }];
+        let extra = [Extra { name: "Alex's iPhone".into(), pct: 64, charging: Some(true), address: String::new() }, Extra { name: "MX Master 3S".into(), pct: 33, charging: None, address: String::new() }];
         merge_extra(&mut v, &p.paired_pods, &ads, &extra);
         let pods = &v[0];
         assert_eq!((pods.left, pods.right, pods.case), (Some(42), Some(38), Some(71)), "exact levels stay");
