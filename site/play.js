@@ -426,6 +426,14 @@
 
   document.querySelectorAll('[data-go]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); window.cmShow && window.cmShow(a.dataset.go); app.scrollIntoView({ behavior: 'smooth', block: 'center' }); }));
 
+  // Ten menu bar icons fold into one while the bars are in view
+  const bars = document.getElementById('bars');
+  if (bars && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    let seen = false, t = null;
+    const loop = () => { bars.classList.add('merge'); t = setTimeout(() => { bars.classList.remove('merge'); t = setTimeout(loop, 2600); }, 3400); };
+    new IntersectionObserver(es => { const on = es[0].isIntersecting; if (on && !seen) { seen = true; t = setTimeout(loop, 600); } if (!on && seen) { seen = false; clearTimeout(t); bars.classList.remove('merge'); } }, { threshold: 0.6 }).observe(bars);
+  }
+
   // Hero panel: a widget opens its tool in the window
   const go = { Clean: 'cleanup', Screenshot: 'capture', Claude: 'awake', Clipboard: 'clipboard', 'Macintosh HD': 'diskmap', Memory: 'health', CPU: 'health', Battery: 'health', 'Home Wi-Fi': 'health', 'Claude Max': 'claude', Fans: 'fans' };
   document.querySelectorAll('.app.pnl .wd').forEach(w => {
