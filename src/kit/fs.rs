@@ -59,6 +59,51 @@ fn walk_size(path: &Path, max: usize) -> u64 {
     }
 }
 
+/// One entry of a folder, as [`list_dir`] reads it.
+#[derive(Debug, Clone)]
+pub struct Listed {
+    pub name: std::ffi::OsString,
+    pub dir: bool,
+    /// File id, to count a file with several hard links once.
+    pub id: u64,
+    pub links: u32,
+    /// Allocated bytes on disk (0 for folders).
+    pub bytes: u64,
+    /// APFS: bytes no other file shares (less than `bytes` for a clone).
+    pub private: Option<u64>,
+    /// APFS: the clone family, the same for files cloned from one another.
+    pub clone: Option<u64>,
+}
+
+/// The device a folder is on and every entry in it, not following links.
+/// macOS reads a whole batch of entries per call (`getattrlistbulk`);
+/// elsewhere it's one `lstat` per entry. `None` when it can't be read.
+pub fn list_dir(dir: &Path) -> Option<(u64, Vec<Listed>)> {
+    #[cfg(target_os = "macos")]
+    if let Some(v) = bulk::list_path(dir) {
+        return Some(v);
+    }
+    list_portable(dir)
+}
+
+fn list_portable(dir: &Path) -> Option<(u64, Vec<Listed>)> {
+    use std::os::unix::fs::MetadataExt;
+    let dev = dir.symlink_metadata().ok().filter(|m| m.is_dir())?.dev();
+    let rd = std::fs::read_dir(dir).ok()?;
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let Ok(md) = e.path().symlink_metadata() else { continue };
+        let is_dir = md.is_dir();
+        out.push(Listed { name: e.file_name(), dir: is_dir, id: md.ino(), links: md.nlink() as u32, bytes: if is_dir { 0 } else { md.blocks() * 512 }, private: None, clone: None });
+    }
+    Some((dev, out))
+}
+
+/// Free space as `df` shows it, without what macOS can purge on its own.
+pub fn df_free(path: &str) -> u64 {
+    statvfs_space(path).1
+}
+
 /// macOS: `getattrlistbulk` reads a whole batch of entries (type, id, link
 /// count, size) in one call, instead of an `lstat` per file, and asks APFS
 /// for each file's private size, the part not shared with clones.
@@ -91,6 +136,7 @@ mod bulk {
         pub links: u32,
         pub alloc: Option<u64>,
         pub private: Option<u64>,
+        pub clone: Option<u64>,
         pub error: u32,
     }
 
@@ -115,7 +161,7 @@ mod bulk {
             volattr: 0,
             dirattr: 0,
             fileattr: libc::ATTR_FILE_LINKCOUNT | libc::ATTR_FILE_ALLOCSIZE,
-            forkattr: libc::ATTR_CMNEXT_PRIVATESIZE,
+            forkattr: libc::ATTR_CMNEXT_PRIVATESIZE | libc::ATTR_CMNEXT_CLONEID,
         }
     }
 
@@ -171,6 +217,10 @@ mod bulk {
         }
         if ext & libc::ATTR_CMNEXT_PRIVATESIZE != 0 {
             e.private = Some(u64_at(rec, at)?);
+            at += 8;
+        }
+        if ext & libc::ATTR_CMNEXT_CLONEID != 0 {
+            e.clone = Some(u64_at(rec, at)?).filter(|c| *c != 0);
         }
         Some(e)
     }
@@ -233,6 +283,31 @@ mod bulk {
             }
         }
         Some(total)
+    }
+
+    /// A folder's device and entries, read in bulk. `None` when it can't be
+    /// opened or listed that way.
+    pub fn list_path(path: &Path) -> Option<(u64, Vec<super::Listed>)> {
+        thread_local! {
+            static BUF: std::cell::RefCell<Vec<u64>> = std::cell::RefCell::new(vec![0u64; 16 * 1024]);
+        }
+        let c = CString::new(path.as_os_str().as_bytes()).ok()?;
+        let fd = open_dir(libc::AT_FDCWD, &c)?;
+        let dev = dev_of(fd.0)?;
+        let mut entries = Vec::new();
+        let ok = BUF.with(|b| list(fd.0, &mut b.borrow_mut(), &mut entries));
+        if !ok && entries.is_empty() {
+            return None;
+        }
+        let out = entries
+            .into_iter()
+            .filter(|e| e.error == 0 && !e.name.is_empty())
+            .map(|e| {
+                let dir = e.kind == VDIR;
+                super::Listed { name: std::ffi::OsStr::from_bytes(&e.name).to_os_string(), dir, id: e.id, links: e.links, bytes: if dir { 0 } else { e.alloc.unwrap_or(0) }, private: if dir { None } else { e.private }, clone: e.clone }
+            })
+            .collect();
+        Some((dev as u64, out))
     }
 
     /// `None` when the path isn't a folder that can be listed in bulk; the

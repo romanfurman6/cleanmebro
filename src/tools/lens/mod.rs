@@ -2,6 +2,7 @@
 //! treemap; selected items go to the Trash after review. Lives in the full
 //! window.
 
+mod history;
 mod page;
 pub mod scan;
 
@@ -39,6 +40,30 @@ pub struct Lens {
     /// Top-level folders in the order they got their colour, so a folder
     /// keeps its colour while the map grows.
     pub(crate) lens_hues: Vec<PathBuf>,
+    /// Show rings around the folder instead of bubbles.
+    pub(crate) lens_rings: bool,
+    /// Folders visited before / after the shown one (Back, Forward).
+    pub(crate) lens_back: Vec<PathBuf>,
+    pub(crate) lens_fwd: Vec<PathBuf>,
+    /// What was under the pointer on the map last frame.
+    pub(crate) lens_hover: Option<PathBuf>,
+    /// What the right-click menu on the map is for: (path, bytes).
+    pub(crate) lens_menu: Option<(PathBuf, u64)>,
+}
+
+/// Disk Map choices kept between runs.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Prefs {
+    #[serde(default)]
+    rings: bool,
+}
+
+fn prefs_path() -> PathBuf {
+    crate::kit::fs::data_path("diskmap-prefs.json")
+}
+
+pub(crate) fn save_prefs(app: &Lens) {
+    crate::kit::fs::save_json_later(&prefs_path(), &Prefs { rings: app.lens_rings }, false);
 }
 
 impl Lens {
@@ -59,6 +84,11 @@ impl Lens {
             lens_order_at: 0.0,
             lens_rows: Default::default(),
             lens_hues: vec![],
+            lens_rings: crate::kit::fs::load_json::<Prefs>(&prefs_path()).rings,
+            lens_back: vec![],
+            lens_fwd: vec![],
+            lens_hover: None,
+            lens_menu: None,
         }
     }
 }
@@ -99,8 +129,9 @@ impl Tool for Lens {
         }
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {
-        if view == "lens" || view == "sizes" {
+        if view == "lens" || view == "sizes" || view == "lens-rings" {
             page::demo_tree(self);
+            self.lens_rings = view == "lens-rings";
             if view == "sizes" {
                 return None;
             }
