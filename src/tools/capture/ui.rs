@@ -782,7 +782,13 @@ pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     field(ui, frect(card, 1), &mut s.bucket, "my-bucket", false);
     field(ui, frect(card, 2), &mut s.access_key, "Access key", false);
     // the secret goes straight to the Keychain and is never shown back
+    // only here (the user opened Sharing) is the Keychain asked whether a
+    // key exists; settings remember the answer for everywhere else
     let has_secret = *c.has_secret.get_or_insert_with(|| secret::exists(VIDEO_ACCOUNT));
+    if has_secret != c.settings.share.secret_saved {
+        c.settings.share.secret_saved = has_secret;
+        c.save_settings();
+    }
     let resp = field(ui, frect(card, 3), &mut c.share_secret, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
     if resp.lost_focus() && !c.share_secret.is_empty() {
         let v = std::mem::take(&mut c.share_secret);
@@ -791,6 +797,8 @@ pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
             Ok(()) if v.is_empty() => c.has_secret = Some(false),
             Ok(()) => {
                 c.has_secret = Some(true);
+                c.settings.share.secret_saved = true;
+                c.save_settings();
                 c.hud("Secret key saved in the Keychain")
             }
             Err(e) => c.hud(format!("Couldn't save to the Keychain: {e}")),

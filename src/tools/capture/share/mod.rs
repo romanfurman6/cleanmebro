@@ -46,11 +46,15 @@ pub struct Settings {
     /// Folder inside the bucket ("cmdmeow/videos/"); may be empty.
     pub folder: String,
     pub link: LinkKind,
+    /// A secret key was saved to the Keychain from here: lets the UI say
+    /// "set up" without touching the Keychain at all.
+    #[serde(default)]
+    pub secret_saved: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { auto: false, copy_link: true, endpoint: String::new(), region: String::new(), bucket: String::new(), access_key: String::new(), folder: VIDEO_FOLDER.into(), link: LinkKind::Public }
+        Settings { auto: false, copy_link: true, endpoint: String::new(), region: String::new(), bucket: String::new(), access_key: String::new(), folder: VIDEO_FOLDER.into(), link: LinkKind::Public, secret_saved: false }
     }
 }
 
@@ -68,10 +72,10 @@ impl Settings {
     pub fn ready(&self, account: &str) -> bool {
         self.bucket(account).ready()
     }
-    /// Filled in, with a secret saved, without reading the secret: safe to
-    /// call for the UI (no Keychain question).
-    pub fn set_up(&self, account: &str) -> bool {
-        !self.endpoint.trim().is_empty() && !self.bucket.trim().is_empty() && !self.access_key.trim().is_empty() && secret::exists(account)
+    /// Filled in, with a secret saved, from our own settings only: no
+    /// Keychain call, so it's safe anywhere (the sidebar, every launch).
+    pub fn set_up(&self, _account: &str) -> bool {
+        !self.endpoint.trim().is_empty() && !self.bucket.trim().is_empty() && !self.access_key.trim().is_empty() && self.secret_saved
     }
 }
 
