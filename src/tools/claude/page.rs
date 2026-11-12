@@ -117,6 +117,11 @@ pub fn page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         sub.push_str(&format!(" · {fresh}"));
     }
     let left = header(ui, r, &sub, if cl.stale { AMBER() } else { TEXT_DIM() }, cl.loading, demo, cx);
+    // nothing to show at all: one empty state instead of cards of zeros
+    if !cl.loading && cl.limits.is_empty() && cl.local.days.iter().all(|d| d.tokens == 0) && cl.local.models.is_empty() {
+        no_usage(&cl, ui, r);
+        return;
+    }
     parts::incident_chip(&p, Pos2::new(left - sp::M, r.top() + PAGE_HEADER_H / 2.0), Align2::RIGHT_CENTER, &cl);
     let _ = fresh_col;
 
@@ -178,7 +183,7 @@ pub fn page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         p.text(inner.right_top(), Align2::RIGHT_TOP, "30 days", ty::caption(), ty::caption_color());
         let list = Rect::from_min_max(Pos2::new(inner.left(), inner.top() + 16.0 + sp::M), inner.max);
         if rows.is_empty() {
-            p.text(list.left_top(), Align2::LEFT_TOP, "–", ty::body(), TEXT_FAINT());
+            empty_note(&p, list, &format!("No {} in the last 30 days", title.to_lowercase()));
         }
         parts::share_rows(&p, list, rows, show_usd, &home);
     }
@@ -194,6 +199,33 @@ pub fn page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         if pill_button(ui, br, bl, BTN_PRIMARY, true).clicked() {
             cx.open_page(CLEANUP, "claude");
         }
+    }
+}
+
+/// A card's body with nothing in it: one quiet line in the middle.
+fn empty_note(p: &egui::Painter, r: Rect, msg: &str) {
+    text_fit(p, Pos2::new(r.center().x, r.center().y - 8.0), Align2::CENTER_CENTER, msg, ty::body(), TEXT_FAINT(), r.width());
+}
+
+/// A provider that's set up but hasn't been used on this Mac yet.
+fn no_usage(cl: &UsageInfo, ui: &mut Ui, r: Rect) {
+    let p = ui.painter().clone();
+    let m = ai::meta(cl.provider);
+    let c = Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + (r.height() - PAGE_HEADER_H) * 0.36);
+    tool_chip(&p, Rect::from_center_size(c, Vec2::splat(56.0)), Icon::Gauge, tint::CLAUDE());
+    p.text(c + Vec2::new(0.0, 52.0), Align2::CENTER_CENTER, format!("No {} usage yet", m.name), bold(17.0), TEXT());
+    let w = (r.width() - 48.0).min(400.0);
+    let msg = format!("Use {} on this Mac and its tokens, cost, models and projects show up here. Nothing in the last 30 days so far.", m.name);
+    let mut job = egui::text::LayoutJob::simple(msg, ty::body(), TEXT_DIM(), w);
+    job.halign = egui::Align::Center;
+    let g = p.layout_job(job);
+    let h = g.size().y;
+    p.galley(c + Vec2::new(0.0, 74.0), g, TEXT_DIM());
+    let label = "Check again";
+    let bw = button_width(&p, label, BTN_SECONDARY);
+    let br = Rect::from_center_size(Pos2::new(c.x, c.y + 74.0 + h + 30.0), Vec2::new(bw, 30.0));
+    if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
+        backend::request_refresh();
     }
 }
 
@@ -395,10 +427,16 @@ fn chart_card(ui: &mut Ui, r: Rect, cl: &UsageInfo, id: &str, show_usd: bool, de
         "Spend" => {
             let pace = budget(cl).map(|b| b / days_in_month() as f64);
             let days: Vec<Day> = cl.local.month().to_vec();
+            if days.iter().all(|d| d.tokens == 0) {
+                return empty_note(&p, body, "No spend this month yet");
+            }
             parts::day_chart(ui, body, &days, Measure::Usd, pace, id);
         }
         other => {
             let days: Vec<Day> = cl.local.days.iter().rev().take(30).rev().copied().collect();
+            if days.iter().all(|d| d.tokens == 0) {
+                return empty_note(&p, body, "No usage in the last 30 days");
+            }
             let m = if other == "Tokens" { Measure::Tokens } else { Measure::Usd };
             parts::day_chart(ui, body, &days, m, None, id);
         }
@@ -425,7 +463,8 @@ fn demo_samples(l: &ai::Limit) -> Vec<(i64, f32)> {
 
 /// Every provider that's on, side by side, and the dollars of all of them.
 fn all_page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
-    let infos = backend::enabled(all);
+    // tools that aren't installed get no card, only a line at the bottom
+    let (infos, missing): (Vec<_>, Vec<_>) = backend::enabled(all).into_iter().partition(|i| i.unavailable() != Some(Availability::NotInstalled));
     let p = ui.painter().clone();
     let show_usd = settings::get().show_cost;
     let today: f64 = infos.iter().map(|i| i.local.usd_today).sum();
@@ -444,6 +483,11 @@ fn all_page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         provider_card(ui, cr, info, menu == Some(info.provider), show_usd);
     }
     y += infos.len().div_ceil(cols) as f32 * (ch + GAP);
+    if !missing.is_empty() {
+        let names: Vec<&str> = missing.iter().map(|i| ai::meta(i.provider).name).collect();
+        text_fit(&p, Pos2::new(x0, y - GAP + sp::M), Align2::LEFT_TOP, &format!("Not installed on this Mac: {}. Their cards show up once they're used here.", names.join(", ")), ty::label(), TEXT_FAINT(), x1 - x0);
+        y += sp::M + 16.0;
+    }
     // dollars of every provider per day
     let bottom = r.bottom() - sp::L;
     if bottom - y < 120.0 || !show_usd {
@@ -482,7 +526,10 @@ fn provider_card(ui: &mut Ui, cr: Rect, info: &UsageInfo, menu: bool, show_usd: 
     let tr = text_fit(&p, i.left_top(), Align2::LEFT_TOP, &info.plan_title(), ty::title(), TEXT(), i.width() * 0.5);
     let mut x = tr.right() + sp::S;
     if menu {
-        x = chip(&p, Pos2::new(x, tr.center().y), Align2::LEFT_CENTER, "Menu bar", (with_alpha(BLUE(), 0.16), ACCENT())).right() + sp::S;
+        // this one's limit is the number next to the icon in the menu bar
+        let cr = chip(&p, Pos2::new(x, tr.center().y), Align2::LEFT_CENTER, "In menu bar", (with_alpha(BLUE(), 0.16), ACCENT()));
+        ui.interact(cr, ui.scope_id().with(("ai-menu-chip", info.provider)), egui::Sense::hover()).on_hover_text("Its usage is the number shown next to the Cmd+Meow icon in the menu bar. Change it in Settings › AI Usage.");
+        x = cr.right() + sp::S;
     }
     if let Some(c) = parts::incident_chip(&p, Pos2::new(x, tr.center().y), Align2::LEFT_CENTER, info) {
         let _ = c;

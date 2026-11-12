@@ -157,7 +157,12 @@ pub fn day_chart(ui: &mut Ui, r: Rect, days: &[Day], m: Measure, pace: Option<f6
     let d = &days[sel];
     let today = days.last().map(|l| l.date) == Some(d.date);
     let date = if today { "Today".to_string() } else { d.date.format("%a %b %-d").to_string() };
-    let mut x = r.left();
+    // one line in two sizes on one baseline: laid out as a single job, so
+    // the small grey parts don't ride up next to the bold ones
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = r.width();
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
     for (s, f, c) in [
         (date, ty::title(), TEXT()),
         (usd(d.usd), ty::title(), TEXT()),
@@ -167,9 +172,12 @@ pub fn day_chart(ui: &mut Ui, r: Rect, days: &[Day], m: Measure, pace: Option<f6
         if s.is_empty() {
             continue;
         }
-        let w = text_fit(&p, Pos2::new(x, r.top() + head / 2.0), Align2::LEFT_CENTER, &s, f, c, (r.right() - x).max(0.0)).width();
-        x += w + sp::M;
+        let lead = if job.sections.is_empty() { 0.0 } else { sp::M };
+        job.append(&s, lead, egui::TextFormat { font_id: f, color: c, valign: egui::Align::BOTTOM, ..Default::default() });
     }
+    let g = p.layout_job(job);
+    let h = g.size().y;
+    p.galley(Pos2::new(r.left(), r.top() + (head - h) / 2.0), g, TEXT());
     // first and last day under the bars
     let lab = |d: &Day| d.date.format("%b %-d").to_string();
     p.text(Pos2::new(plot.left(), r.bottom()), Align2::LEFT_BOTTOM, lab(&days[0]), ty::caption(), ty::caption_color());
@@ -216,7 +224,11 @@ pub fn limit_chart(ui: &mut Ui, r: Rect, l: &Limit, samples: &[(i64, f32)]) {
 /// Rows of name, a bar of its share, tokens and dollars.
 pub fn share_rows(p: &egui::Painter, r: Rect, rows: &[crate::kit::ai::Share], show_usd: bool, home: &str) {
     let rh = 26.0;
-    let top = rows.iter().map(|s| if show_usd && s.usd > 0.0 { s.usd } else { s.tokens as f64 }).fold(0.0, f64::max).max(1e-9);
+    // one measure for every bar: dollars when shown (a model without a price
+    // is 0), else tokens; mixing them made the priced bars look empty
+    let usd_bars = show_usd && rows.iter().any(|s| s.usd > 0.0);
+    let value = |s: &crate::kit::ai::Share| if usd_bars { s.usd } else { s.tokens as f64 };
+    let top = rows.iter().map(value).fold(0.0, f64::max).max(1e-9);
     for (k, s) in rows.iter().enumerate() {
         let y = r.top() + k as f32 * rh;
         if y + rh > r.bottom() + 1.0 {
@@ -232,7 +244,7 @@ pub fn share_rows(p: &egui::Painter, r: Rect, rows: &[crate::kit::ai::Share], sh
         }
         let name = s.name.replacen(home, "~", 1);
         text_fit(p, Pos2::new(row.left(), row.center().y - 3.0), Align2::LEFT_CENTER, &name, ty::label(), TEXT_SOFT(), x1 - row.left());
-        let v = if show_usd && s.usd > 0.0 { s.usd } else { s.tokens as f64 };
+        let v = value(s);
         bar(p, Rect::from_min_size(Pos2::new(row.left(), row.bottom() - 6.0), Vec2::new(row.width(), 3.0)), (v / top) as f32, with_alpha(CLAUDE(), 0.7));
     }
 }
