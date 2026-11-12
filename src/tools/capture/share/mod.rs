@@ -1,12 +1,12 @@
 //! Sharing a recording or a screenshot: upload it to the person's own
 //! S3-compatible storage (Hetzner Object Storage and the like) and copy the
-//! link. Videos and screenshots each have their settings and folder
-//! (cmdmeow/videos/, cmdmeow/screenshots/); screenshots can reuse the
-//! videos' storage. Secret keys are kept in the Keychain, one per storage.
+//! link. One storage, set up on the Sharing page; screenshots and videos
+//! each have their folder (cmdmeow/screenshots/, cmdmeow/videos/) and their
+//! own "upload each" and "copy the link" switches. The secret key is kept
+//! in the Keychain.
 
-/// Keychain accounts: the videos' storage and the screenshots' own one.
+/// The Keychain account of the storage's secret key.
 pub const VIDEO_ACCOUNT: &str = "secret-key";
-pub const SHOT_ACCOUNT: &str = "secret-key-screenshots";
 /// Folders new storage settings start with.
 pub const VIDEO_FOLDER: &str = "cmdmeow/videos/";
 pub const SHOT_FOLDER: &str = "cmdmeow/screenshots/";
@@ -141,6 +141,24 @@ pub mod secret {
 pub struct Shared {
     pub key: String,
     pub link: String,
+    /// When it was uploaded (unix seconds); 0 for uploads from before.
+    #[serde(default)]
+    pub at: i64,
+}
+
+/// Everything shared, newest first: the local file and where it went.
+pub fn all() -> Vec<(PathBuf, Shared)> {
+    let mut v: Vec<(PathBuf, Shared)> = load_store().into_iter().map(|(p, s)| (PathBuf::from(p), s)).collect();
+    v.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| b.0.cmp(&a.0)));
+    v
+}
+
+/// Forget `path`'s upload here (the file in the bucket stays).
+pub fn forget(path: &Path) {
+    let mut all = load_store();
+    if all.remove(&path.display().to_string()).is_some() {
+        crate::kit::fs::save_json(&store_path(), &all, true);
+    }
 }
 
 fn store_path() -> PathBuf {
@@ -224,7 +242,7 @@ impl Uploads {
                         LinkKind::Public => b.url(&key),
                         LinkKind::Week => s3::presign_get(&b, &key, 7 * 24 * 3600, chrono::Utc::now()),
                     };
-                    remember(&path2, Shared { key, link: url.clone() });
+                    remember(&path2, Shared { key, link: url.clone(), at: chrono::Utc::now().timestamp() });
                     url
                 });
                 let _ = tx.send(r);

@@ -42,6 +42,8 @@ const CARD: &str = "capture";
 /// The Video tool's id and its widget: recording lives in the same state
 /// as screenshots (one engine, one settings file), shown as its own tool.
 pub const VIDEO_ID: ToolId = "video";
+/// The Sharing page: the storage both use, and what's been shared.
+pub const SHARING_ID: ToolId = "sharing";
 const VIDEO_CARD: &str = "record";
 pub use tools::tools;
 
@@ -176,9 +178,6 @@ pub struct Capture {
     uploads: share::Uploads,
     /// The secret key as it's being typed in settings (never shown back).
     share_secret: String,
-    /// The same for the screenshots' own storage.
-    shot_secret: String,
-    pub(crate) has_shot_secret: Option<bool>,
     /// Whether a secret key is in the Keychain: read once, off the frame loop
     /// (and never in demo mode, where a Keychain prompt would block).
     pub(crate) has_secret: Option<bool>,
@@ -235,8 +234,6 @@ impl Capture {
             video: None,
             uploads: share::Uploads::default(),
             share_secret: String::new(),
-            shot_secret: String::new(),
-            has_shot_secret: if env.demo { Some(false) } else { None },
             has_secret: if env.demo { Some(false) } else { None },
         };
         c.apply_keys();
@@ -407,19 +404,27 @@ impl Capture {
         }
     }
 
-    /// The sharing settings for `path`: a video's, or a screenshot's (on the
-    /// videos' storage when it reuses it, in its own folder either way).
+    /// The sharing settings for `path`: the one storage, with the video's
+    /// or the screenshot's folder and switches.
     fn share_for(&self, path: &std::path::Path) -> (share::Settings, &'static str) {
         if !share::is_image(path) {
             return (self.settings.share.clone(), share::VIDEO_ACCOUNT);
         }
         let own = &self.settings.shot_share;
-        if self.settings.shot_share_reuse {
-            let s = share::Settings { auto: own.auto, copy_link: own.copy_link, folder: own.folder.clone(), link: own.link, ..self.settings.share.clone() };
-            (s, share::VIDEO_ACCOUNT)
-        } else {
-            (own.clone(), share::SHOT_ACCOUNT)
-        }
+        let s = share::Settings { auto: own.auto, copy_link: own.copy_link, folder: own.folder.clone(), ..self.settings.share.clone() };
+        (s, share::VIDEO_ACCOUNT)
+    }
+
+    /// Remove a shared file from the storage, then forget it here.
+    fn delete_shared(&mut self, path: PathBuf, key: String) {
+        let b = self.settings.share.bucket(share::VIDEO_ACCOUNT);
+        self.in_background(move || match share::s3::delete(&b, &key) {
+            Ok(()) => {
+                share::forget(&path);
+                Some(Done::Note("Deleted from your storage".into()))
+            }
+            Err(e) => Some(Done::Note(e)),
+        });
     }
 
     /// Copy the link of `path`: shared already, or upload it first.

@@ -5,7 +5,7 @@ use super::icons::{self, Ico};
 use super::settings::{After, Command, Format, Shortcut, KEEP_MAX, KEEP_MIN};
 use super::folder::{self, FileShot};
 use super::store::{Kind, Shot};
-use super::{mac, record, Capture, Tab, VTab, ID, VIDEO_ID};
+use super::{mac, record, Capture, Tab, VTab, ID, SHARING_ID, VIDEO_ID};
 use crate::core::tool::{Cx, Size};
 use crate::kit::tile;
 use crate::kit::glass::*;
@@ -705,32 +705,19 @@ fn field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, secret: bool) -> e
 
 /// Sharing: upload recordings to the person's S3-compatible storage
 /// (Hetzner Object Storage…) and copy the link.
-/// Uploading for a link: the videos' storage, or (`shots`) the screenshots'
-/// settings, which can reuse the videos' storage in their own folder.
-/// Returns the bottom of what it drew.
-fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect, shots: bool) -> f32 {
-    use super::share::{secret, LinkKind, SHOT_ACCOUNT, SHOT_FOLDER, VIDEO_ACCOUNT, VIDEO_FOLDER};
+/// Sharing in Screenshot or Video settings: the two switches, and where
+/// the storage is set up (the Sharing page). Returns the bottom.
+fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect, shots: bool, cx: &mut Cx) -> f32 {
+    use super::share::VIDEO_ACCOUNT;
     let x0 = col.left();
     let id = ui.scope_id().with(("share", shots));
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Sharing", bold(15.0), TEXT());
     let mut s = if shots { c.settings.shot_share.clone() } else { c.settings.share.clone() };
-    let reuse = shots && c.settings.shot_share_reuse;
-    let mut new_reuse = reuse;
-    // rows: switches, (storage), link, folder, then the storage fields
-    let mut labels: Vec<&str> = vec![if shots { "Upload each screenshot" } else { "Upload each recording" }, "Copy the link when done"];
-    if shots {
-        labels.push("Storage");
-    }
-    labels.extend(["Link", "Folder"]);
-    let own = !reuse;
-    if own {
-        labels.extend(["Endpoint", "Bucket", "Access key", "Secret key", "Region"]);
-    }
+    let labels = [if shots { "Upload each screenshot" } else { "Upload each recording" }, "Copy the link when done", "Storage"];
     let card = card_rows(p, x0, col.top() + 28.0, col.width(), labels.len());
     for (k, l) in labels.iter().enumerate() {
         p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT());
     }
-    let row = |l: &str| labels.iter().position(|x| *x == l).unwrap_or(0);
     for (k, on) in [(0usize, s.auto), (1, s.copy_link)] {
         let y = row_y(card, k);
         if switch(ui, Rect::from_min_size(Pos2::new(card.right() - 12.0 - 30.0, y - 9.0), Vec2::new(30.0, 18.0)), id.with(("sw", k)), on, true).clicked() {
@@ -741,73 +728,150 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect, shots: bo
             }
         }
     }
-    let seg = |ui: &mut Ui, k: usize, w: f32, salt: &str, labels: &[&str], cur: usize| {
-        let y = row_y(card, k);
-        segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - w, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0)), id.with(salt), labels, cur)
-    };
-    if shots {
-        if let Some(i) = seg(ui, row("Storage"), 210.0, "storage", &["Same as videos", "Its own"], (!reuse) as usize) {
-            new_reuse = i == 0;
-        }
+    // where it goes, and the way to change it
+    let y = row_y(card, 2);
+    let lr = link(ui, Pos2::new(card.right() - 14.0, y), Align2::RIGHT_CENTER, "Sharing ›", 12.0);
+    if lr.clicked() {
+        cx.open_page(SHARING_ID, "");
     }
-    if let Some(i) = seg(ui, row("Link"), 210.0, "link", &["Public", "Expires in 7 days"], (s.link == LinkKind::Week) as usize) {
-        s.link = if i == 1 { LinkKind::Week } else { LinkKind::Public };
-    }
-    let fw = (card.width() * 0.6).min(260.0);
-    let frect = |k: usize| {
-        let y = row_y(card, k);
-        Rect::from_min_max(Pos2::new(card.right() - 12.0 - fw, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0))
-    };
-    field(ui, frect(row("Folder")), &mut s.folder, if shots { SHOT_FOLDER } else { VIDEO_FOLDER }, false);
-    let account = if shots { SHOT_ACCOUNT } else { VIDEO_ACCOUNT };
-    if own {
-        field(ui, frect(row("Endpoint")), &mut s.endpoint, "fsn1.your-objectstorage.com", false);
-        field(ui, frect(row("Bucket")), &mut s.bucket, "my-bucket", false);
-        field(ui, frect(row("Access key")), &mut s.access_key, "Access key", false);
-        // the secret goes straight to the Keychain and is never shown back
-        let has = if shots { &mut c.has_shot_secret } else { &mut c.has_secret };
-        let has_secret = *has.get_or_insert_with(|| secret::get(account).is_some());
-        let mut typed = std::mem::take(if shots { &mut c.shot_secret } else { &mut c.share_secret });
-        let resp = field(ui, frect(row("Secret key")), &mut typed, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
-        if resp.lost_focus() && !typed.is_empty() {
-            let v = std::mem::take(&mut typed);
-            let v = v.trim();
-            let saved = secret::set(account, v);
-            let has = if shots { &mut c.has_shot_secret } else { &mut c.has_secret };
-            match saved {
-                Ok(()) if v.is_empty() => *has = Some(false),
-                Ok(()) => {
-                    *has = Some(true);
-                    c.hud("Secret key saved in the Keychain")
-                }
-                Err(e) => c.hud(format!("Couldn't save to the Keychain: {e}")),
-            }
-        }
-        *(if shots { &mut c.shot_secret } else { &mut c.share_secret }) = typed;
-        field(ui, frect(row("Region")), &mut s.region, "From the endpoint", false);
-    }
-    // where links point
-    let (eff, acc) = if reuse { (super::share::Settings { folder: s.folder.clone(), ..c.settings.share.clone() }, VIDEO_ACCOUNT) } else { (s.clone(), account) };
-    let note = if eff.ready(acc) {
-        let b = eff.bucket(acc);
-        format!("Links look like https://{}/{}…", b.bucket_host(), eff.folder.trim_start_matches('/'))
-    } else if reuse {
-        "Uses the storage set up in Video settings".into()
-    } else {
-        "S3-compatible storage".into()
-    };
-    let h = paragraph(p, Pos2::new(x0, card.bottom() + 10.0), &note, font(12.0), TEXT_FAINT(), col.width());
-    let changed = if shots { s != c.settings.shot_share || new_reuse != c.settings.shot_share_reuse } else { s != c.settings.share };
-    if changed {
+    let st = &c.settings.share;
+    let (where_, col_) = if st.ready(VIDEO_ACCOUNT) { (format!("{}/{}", st.bucket(VIDEO_ACCOUNT).bucket_host(), s.folder.trim_start_matches('/')), TEXT_DIM()) } else { ("Not set up".to_string(), AMBER()) };
+    text_fit(p, Pos2::new(lr.rect.left() - 10.0, y), Align2::RIGHT_CENTER, &where_, font(12.0), col_, card.width() * 0.55);
+    if (shots && s != c.settings.shot_share) || (!shots && s != c.settings.share) {
         if shots {
             c.settings.shot_share = s;
-            c.settings.shot_share_reuse = new_reuse;
         } else {
             c.settings.share = s;
         }
         c.save_settings();
     }
-    card.bottom() + 10.0 + h
+    card.bottom()
+}
+
+/// The Sharing page: the one storage, a folder for screenshots and one for
+/// videos, and everything shared so far.
+pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
+    use super::share::{secret, LinkKind, SHOT_FOLDER, VIDEO_ACCOUNT, VIDEO_FOLDER};
+    let p = ui.painter().clone();
+    let shared = super::share::all();
+    let ready = c.settings.share.ready(VIDEO_ACCOUNT);
+    let sub = if ready { format!("{} shared · {}", shared.len(), c.settings.share.bucket(VIDEO_ACCOUNT).bucket_host()) } else { "Set up your storage to get links for screenshots and recordings".into() };
+    page_header(&p, r, "Sharing", &sub, if ready { TEXT_DIM() } else { AMBER() });
+    let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
+    let gap = 20.0;
+    let x0 = body.left() + 24.0;
+    let colw = ((body.width() - 48.0 - gap) / 2.0).max(300.0);
+    let id = ui.scope_id().with("sharing-page");
+
+    // left: the storage and the folders
+    let mut s = c.settings.share.clone();
+    let mut shot = c.settings.shot_share.clone();
+    let mut y = body.top() + 16.0;
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Storage", bold(15.0), TEXT());
+    let labels = ["Endpoint", "Bucket", "Access key", "Secret key", "Region", "Link"];
+    let card = card_rows(&p, x0, y + 28.0, colw, labels.len());
+    for (k, l) in labels.iter().enumerate() {
+        p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT());
+    }
+    let fw = (card.width() * 0.6).min(280.0);
+    let frect = |card: Rect, k: usize| {
+        let y = row_y(card, k);
+        Rect::from_min_max(Pos2::new(card.right() - 12.0 - fw, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0))
+    };
+    field(ui, frect(card, 0), &mut s.endpoint, "fsn1.your-objectstorage.com", false);
+    field(ui, frect(card, 1), &mut s.bucket, "my-bucket", false);
+    field(ui, frect(card, 2), &mut s.access_key, "Access key", false);
+    // the secret goes straight to the Keychain and is never shown back
+    let has_secret = *c.has_secret.get_or_insert_with(|| secret::get(VIDEO_ACCOUNT).is_some());
+    let resp = field(ui, frect(card, 3), &mut c.share_secret, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
+    if resp.lost_focus() && !c.share_secret.is_empty() {
+        let v = std::mem::take(&mut c.share_secret);
+        let v = v.trim();
+        match secret::set(VIDEO_ACCOUNT, v) {
+            Ok(()) if v.is_empty() => c.has_secret = Some(false),
+            Ok(()) => {
+                c.has_secret = Some(true);
+                c.hud("Secret key saved in the Keychain")
+            }
+            Err(e) => c.hud(format!("Couldn't save to the Keychain: {e}")),
+        }
+    }
+    field(ui, frect(card, 4), &mut s.region, "From the endpoint", false);
+    let ly = row_y(card, 5);
+    if let Some(i) = segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - 210.0, ly - 12.0), Pos2::new(card.right() - 12.0, ly + 12.0)), id.with("link"), &["Public", "Expires in 7 days"], (s.link == LinkKind::Week) as usize) {
+        s.link = if i == 1 { LinkKind::Week } else { LinkKind::Public };
+    }
+    let h = paragraph(&p, Pos2::new(x0, card.bottom() + 10.0), "Any S3-compatible storage: Hetzner, Cloudflare R2, AWS, MinIO. Public links never expire; their names are random.", font(12.0), TEXT_FAINT(), colw);
+    y = card.bottom() + 10.0 + h + 24.0;
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Folders", bold(15.0), TEXT());
+    let fcard = card_rows(&p, x0, y + 28.0, colw, 2);
+    for (k, (ico, l)) in [(Icon::Crop, "Screenshots"), (Icon::Camera, "Videos")].into_iter().enumerate() {
+        let ry = row_y(fcard, k);
+        icon(&p, ico, Rect::from_center_size(Pos2::new(fcard.left() + 21.0, ry), Vec2::splat(15.0)), TEXT_DIM());
+        p.text(Pos2::new(fcard.left() + 38.0, ry), Align2::LEFT_CENTER, l, font(13.0), TEXT());
+    }
+    field(ui, frect(fcard, 0), &mut shot.folder, SHOT_FOLDER, false);
+    field(ui, frect(fcard, 1), &mut s.folder, VIDEO_FOLDER, false);
+    paragraph(&p, Pos2::new(x0, fcard.bottom() + 10.0), "Upload on save and copying the link are switched in Screenshot and Video settings.", font(12.0), TEXT_FAINT(), colw);
+    if s != c.settings.share || shot != c.settings.shot_share {
+        c.settings.share = s;
+        c.settings.shot_share = shot;
+        c.save_settings();
+    }
+
+    // right: what's been shared
+    let rx = x0 + colw + gap;
+    let rw = body.right() - 24.0 - rx;
+    let ty = body.top() + 16.0;
+    p.text(Pos2::new(rx, ty), Align2::LEFT_TOP, "Shared", bold(15.0), TEXT());
+    let list = Rect::from_min_max(Pos2::new(rx, ty + 28.0), Pos2::new(rx + rw, body.bottom() - 16.0));
+    if shared.is_empty() {
+        let er = Rect::from_min_size(list.min, Vec2::new(rw, 90.0));
+        glass_card(&p, er, R_CARD, 0.0, false);
+        p.text(er.center() - Vec2::new(0.0, 9.0), Align2::CENTER_CENTER, "Nothing shared yet", bold(13.0), TEXT_SOFT());
+        p.text(er.center() + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, "Copy link on a screenshot or recording uploads it", font(12.0), TEXT_FAINT());
+        return;
+    }
+    let row_h = 54.0;
+    let mut act: Option<(usize, u8)> = None;
+    let mut child = ui.new_child(UiBuilder::new().max_rect(list));
+    ScrollArea::vertical().id_salt("shared-list").auto_shrink([false, false]).show(&mut child, |ui| {
+        let (area, _) = ui.allocate_exact_size(Vec2::new(rw, shared.len() as f32 * (row_h + 6.0)), Sense::hover());
+        let p = ui.painter().clone();
+        for (k, (path, sh)) in shared.iter().enumerate() {
+            let rr = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * (row_h + 6.0)), Vec2::new(rw, row_h));
+            glass_card(&p, rr, R_CARD, 0.0, false);
+            let img = super::share::is_image(path);
+            icon(&p, if img { Icon::Crop } else { Icon::Camera }, Rect::from_center_size(Pos2::new(rr.left() + 22.0, rr.center().y), Vec2::splat(16.0)), TEXT_DIM());
+            // buttons on the right: copy link, open, delete
+            let mut bx = rr.right() - 10.0;
+            for (j, (ico, tip)) in [(Icon::Trash, "Delete from your storage"), (Icon::Forward, "Open in the browser"), (Icon::Link, "Copy link")].into_iter().enumerate() {
+                let br = Rect::from_min_size(Pos2::new(bx - 28.0, rr.center().y - 14.0), Vec2::splat(28.0));
+                if round_button(ui, br, ico, tip).clicked() {
+                    act = Some((k, j as u8));
+                }
+                bx = br.left() - 4.0;
+            }
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let tw = bx - 10.0 - (rr.left() + 42.0);
+            text_fit(&p, Pos2::new(rr.left() + 42.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, &name, font(13.0), if path.exists() { TEXT() } else { TEXT_DIM() }, tw);
+            let when = if sh.at > 0 { chrono::DateTime::from_timestamp(sh.at, 0).map(|t| t.with_timezone(&chrono::Local).format("%b %-d, %H:%M · ").to_string()).unwrap_or_default() } else { String::new() };
+            text_fit(&p, Pos2::new(rr.left() + 42.0, rr.center().y + 2.0), Align2::LEFT_TOP, &format!("{when}{}", sh.link), mono(11.0), TEXT_FAINT(), tw);
+        }
+    });
+    if let Some((k, j)) = act {
+        let (path, sh) = shared[k].clone();
+        match j {
+            2 => {
+                c.copy_text(&sh.link);
+                c.hud("Link copied");
+            }
+            1 => {
+                let _ = std::process::Command::new("open").arg(&sh.link).spawn();
+            }
+            _ => c.delete_shared(path, sh.key),
+        }
+    }
 }
 
 fn row_y(card: Rect, k: usize) -> f32 {
@@ -825,7 +889,7 @@ fn settings_page(c: &mut Capture, ui: &mut Ui, body: Rect, cx: &mut Cx) {
         let colw = (area.width() - 48.0 - gap) / 2.0;
         let below = shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())), &SHOT_KEYS);
         let sy = below + 28.0;
-        sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0, sy), Vec2::new(colw, area.bottom() - sy)), true);
+        sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0, sy), Vec2::new(colw, area.bottom() - sy)), true, cx);
         options(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())));
     });
 }
@@ -1242,7 +1306,7 @@ pub fn video_page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 let below = shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())), &VIDEO_KEYS);
                 let ry = below + 28.0;
                 recording_options(c, ui, &p, Rect::from_min_size(Pos2::new(x0, ry), Vec2::new(colw, area.bottom() - ry)));
-                sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())), false);
+                sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())), false, cx);
             });
         }
     }

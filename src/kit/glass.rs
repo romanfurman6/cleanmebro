@@ -844,6 +844,8 @@ pub enum Icon {
     Heart,
     Thermo,
     Clock,
+    /// Sharing: a chain link.
+    Link,
     Up,
     Down,
     Back,
@@ -928,6 +930,7 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Heart => "heart",
         Icon::Thermo => "thermometer.medium",
         Icon::Clock => "clock",
+        Icon::Link => "link",
         Icon::Up => "arrow.up",
         Icon::Down => "arrow.down",
         Icon::Back => "chevron.left",
@@ -1130,6 +1133,12 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
         Icon::Clock => {
             stroke_circle(&p, pt(12.0, 12.0), 9.0 * u, st);
             open(&[(12.0, 7.0), (12.0, 12.0), (15.5, 14.0)]);
+        }
+        Icon::Link => {
+            // two links at 45°, as two short open loops
+            open(&[(10.5, 13.5), (13.5, 10.5)]);
+            open(&[(9.0, 11.0), (6.5, 13.5), (6.5, 17.5), (10.5, 17.5), (13.0, 15.0)]);
+            open(&[(15.0, 13.0), (17.5, 10.5), (17.5, 6.5), (13.5, 6.5), (11.0, 9.0)]);
         }
         Icon::Up => {
             open(&[(12.0, 20.0), (12.0, 4.5)]);

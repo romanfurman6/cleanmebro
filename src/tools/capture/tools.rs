@@ -1,9 +1,10 @@
-//! Capture shows as two tools in the Create section: Screenshot and Video.
+//! Capture shows as three tools in the Create section: Screenshot, Video
+//! and Sharing (the storage both upload to).
 //! Both are views of one [`Capture`]: one engine, one settings file, one
 //! set of windows. Whichever is on drives the shared ticks and windows
 //! (Screenshot when it's on), so nothing runs twice.
 
-use super::{settings::Command, ui, Capture, VTab, CARD, ID, VIDEO_CARD, VIDEO_ID};
+use super::{settings::Command, ui, Capture, VTab, CARD, ID, SHARING_ID, VIDEO_CARD, VIDEO_ID};
 use crate::core::tool::{Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::glass::{tint, Icon};
 use egui::{Rect, Ui};
@@ -12,11 +13,43 @@ use std::rc::Rc;
 
 pub struct Screenshot(Rc<RefCell<Capture>>);
 pub struct Video(Rc<RefCell<Capture>>);
+pub struct Sharing(Rc<RefCell<Capture>>);
 
-/// The two tools over one shared Capture.
-pub fn tools(env: &ToolEnv) -> (Screenshot, Video) {
+/// The three tools over one shared Capture.
+pub fn tools(env: &ToolEnv) -> (Screenshot, Video, Sharing) {
     let c = Rc::new(RefCell::new(Capture::new(env)));
-    (Screenshot(c.clone()), Video(c))
+    (Screenshot(c.clone()), Video(c.clone()), Sharing(c))
+}
+
+impl Tool for Sharing {
+    fn id(&self) -> ToolId {
+        SHARING_ID
+    }
+    fn name(&self) -> &'static str {
+        "Sharing"
+    }
+    fn badge(&self) -> Badge {
+        Badge { icon: Icon::Link, color: tint::CAPTURE() }
+    }
+    fn section(&self) -> &'static str {
+        "Create"
+    }
+    fn about(&self) -> &'static str {
+        "Your storage for links to screenshots and recordings"
+    }
+    fn sidebar_meta(&self) -> String {
+        let c = self.0.borrow();
+        if c.settings.share.ready(super::share::VIDEO_ACCOUNT) { String::new() } else { "Set up".into() }
+    }
+    fn has_page(&self) -> bool {
+        true
+    }
+    fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+        ui::sharing_page(&mut self.0.borrow_mut(), ui, rect, cx);
+    }
+    fn demo_view(&mut self, view: &str) -> Option<View> {
+        (view == "sharing").then_some(View::Page)
+    }
 }
 
 fn key(c: &Capture, cmd: Command) -> String {

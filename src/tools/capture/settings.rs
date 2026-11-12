@@ -139,13 +139,12 @@ pub struct Settings {
     pub frame: super::render::Frame,
     /// Screen recording.
     pub rec: RecSettings,
-    /// Uploading recordings for a link.
+    /// The storage (set up on the Sharing page), and the videos' folder
+    /// and switches.
     pub share: super::share::Settings,
-    /// Uploading screenshots: their own switches, folder and link kind,
-    /// and (unless `shot_share_reuse`) their own storage.
+    /// Screenshots: only their folder and switches are used; the storage
+    /// is `share`'s.
     pub shot_share: super::share::Settings,
-    /// Screenshots go to the videos' storage (in their own folder).
-    pub shot_share_reuse: bool,
 }
 
 /// Frame rates the recorder offers.
@@ -243,7 +242,6 @@ impl Default for Settings {
             rec: RecSettings::default(),
             share: Default::default(),
             shot_share: super::share::Settings::shots(),
-            shot_share_reuse: true,
         }
     }
 }
