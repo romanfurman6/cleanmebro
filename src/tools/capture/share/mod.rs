@@ -63,9 +63,15 @@ impl Settings {
     pub fn bucket(&self, account: &str) -> s3::Bucket {
         s3::Bucket::new(&self.endpoint, &self.region, &self.bucket, &self.access_key, &secret::get(account).unwrap_or_default())
     }
-    /// Everything filled in (the secret included).
+    /// Everything filled in (the secret included). Reads the secret, which
+    /// can make macOS ask for the Keychain password: only when uploading.
     pub fn ready(&self, account: &str) -> bool {
         self.bucket(account).ready()
+    }
+    /// Filled in, with a secret saved, without reading the secret: safe to
+    /// call for the UI (no Keychain question).
+    pub fn set_up(&self, account: &str) -> bool {
+        !self.endpoint.trim().is_empty() && !self.bucket.trim().is_empty() && !self.access_key.trim().is_empty() && secret::exists(account)
     }
 }
 
@@ -77,6 +83,17 @@ pub mod secret {
 
     /// Per account: read once, then kept.
     static CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
+
+    /// Is a secret saved under `account`? Asks the Keychain for the item's
+    /// attributes only, never its data, so macOS doesn't ask for a password.
+    pub fn exists(account: &str) -> bool {
+        if let Some(Some(v)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(account)) {
+            return !v.is_empty();
+        }
+        static SEEN: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+        let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+        *seen.get_or_insert_with(HashMap::new).entry(account.to_string()).or_insert_with(|| keychain::exists(account))
+    }
 
     pub fn get(account: &str) -> Option<String> {
         let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -115,6 +132,13 @@ pub mod secret {
                 Some(v)
             })
         }
+        pub fn exists(account: &str) -> bool {
+            use security_framework::item::{ItemClass, ItemSearchOptions, Limit};
+            let found = |service: &str| {
+                ItemSearchOptions::new().class(ItemClass::generic_password()).service(service).account(account).load_attributes(true).limit(Limit::Max(1)).search().is_ok_and(|r| !r.is_empty())
+            };
+            found(service()) || (!crate::kit::fs::is_dev() && account == OLD_ACCOUNT && found(OLD_SERVICE))
+        }
         pub fn set(account: &str, v: &str) -> Result<(), String> {
             if v.is_empty() {
                 let _ = security_framework::passwords::delete_generic_password(service(), account);
@@ -129,6 +153,9 @@ pub mod secret {
     mod keychain {
         pub fn get(_account: &str) -> Option<String> {
             None
+        }
+        pub fn exists(_account: &str) -> bool {
+            false
         }
         pub fn set(_account: &str, _v: &str) -> Result<(), String> {
             Ok(())

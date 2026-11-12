@@ -735,7 +735,7 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect, shots: bo
         cx.open_page(SHARING_ID, "");
     }
     let st = &c.settings.share;
-    let (where_, col_) = if st.ready(VIDEO_ACCOUNT) { (format!("{}/{}", st.bucket(VIDEO_ACCOUNT).bucket_host(), s.folder.trim_start_matches('/')), TEXT_DIM()) } else { ("Not set up".to_string(), AMBER()) };
+    let (where_, col_) = if st.set_up(VIDEO_ACCOUNT) { (format!("{}.{}/{}", st.bucket.trim(), st.endpoint.trim(), s.folder.trim_start_matches('/')), TEXT_DIM()) } else { ("Not set up".to_string(), AMBER()) };
     text_fit(p, Pos2::new(lr.rect.left() - 10.0, y), Align2::RIGHT_CENTER, &where_, font(12.0), col_, card.width() * 0.55);
     if (shots && s != c.settings.shot_share) || (!shots && s != c.settings.share) {
         if shots {
@@ -754,8 +754,8 @@ pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     use super::share::{secret, LinkKind, SHOT_FOLDER, VIDEO_ACCOUNT, VIDEO_FOLDER};
     let p = ui.painter().clone();
     let shared = super::share::all();
-    let ready = c.settings.share.ready(VIDEO_ACCOUNT);
-    let sub = if ready { format!("{} shared · {}", shared.len(), c.settings.share.bucket(VIDEO_ACCOUNT).bucket_host()) } else { "Set up your storage to get links for screenshots and recordings".into() };
+    let ready = c.settings.share.set_up(VIDEO_ACCOUNT);
+    let sub = if ready { format!("{} shared · {}.{}", shared.len(), c.settings.share.bucket.trim(), c.settings.share.endpoint.trim()) } else { "Set up your storage to get links for screenshots and recordings".into() };
     page_header(&p, r, "Sharing", &sub, if ready { TEXT_DIM() } else { AMBER() });
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     let gap = 20.0;
@@ -782,7 +782,7 @@ pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     field(ui, frect(card, 1), &mut s.bucket, "my-bucket", false);
     field(ui, frect(card, 2), &mut s.access_key, "Access key", false);
     // the secret goes straight to the Keychain and is never shown back
-    let has_secret = *c.has_secret.get_or_insert_with(|| secret::get(VIDEO_ACCOUNT).is_some());
+    let has_secret = *c.has_secret.get_or_insert_with(|| secret::exists(VIDEO_ACCOUNT));
     let resp = field(ui, frect(card, 3), &mut c.share_secret, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
     if resp.lost_focus() && !c.share_secret.is_empty() {
         let v = std::mem::take(&mut c.share_secret);

@@ -39,7 +39,7 @@ impl Tool for Sharing {
     }
     fn sidebar_meta(&self) -> String {
         let c = self.0.borrow();
-        if c.settings.share.ready(super::share::VIDEO_ACCOUNT) { String::new() } else { "Set up".into() }
+        if c.settings.share.set_up(super::share::VIDEO_ACCOUNT) { String::new() } else { "Set up".into() }
     }
     fn has_page(&self) -> bool {
         true
