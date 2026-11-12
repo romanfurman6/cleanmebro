@@ -40,22 +40,17 @@
     new IntersectionObserver(es => { inView = es[0].isIntersecting; }, { threshold: 0.4 }).observe(app);
     if (!still) setInterval(() => { if (!held && inView && !document.hidden) show((sel + 1) % navs.length); }, 4000);
     // Live numbers inside the window
-    const hb = $('hc-bars'), hc = $('hc-cpu'), fr = $('fc-rpm');
-    const leg = $('hc-leg'), sbr = $('sb-rpm'), fp = $('fc-pct'), fl = $('fc-l'), frr = $('fc-r'), flb = $('fc-lb'), frb = $('fc-rb');
+    const hb = $('hc-bars'), hc = $('hc-cpu'), leg = $('hc-leg'), sbr = $('sb-rpm');
     let hl = 16;
-    const fanTick = () => {
-      const fmt = n => n.toLocaleString('en-US').replace(',', ' '), MAX = 6000;
-      const avg = window.cmFanTarget ? Math.round(window.cmFanTarget + (Math.random() - 0.5) * 60) : 1900 + Math.round(hl * 20);
-      if (fr) fr.textContent = fmt(avg);
-      if (sbr) sbr.textContent = fmt(avg);
-      if (fp) fp.textContent = Math.round(avg / MAX * 100) + '%';
-      [[fl, flb, avg - 85], [frr, frb, avg + 85]].forEach(([t, b, v]) => { if (t) t.textContent = fmt(v) + ' rpm'; if (b) b.style.width = (v / MAX * 100).toFixed(1) + '%'; });
+    const fanTick = still => {
+      const avg = window.cmFanDraw ? window.cmFanDraw(hl, still) : 1900 + hl * 20;
+      if (sbr) sbr.textContent = Math.round(avg).toLocaleString('en-US').replace(',', ' ');
     };
-    window.cmFanTick = fanTick;
+    window.cmFanTick = () => fanTick(true);
     if (!still) setInterval(() => {
       hl = Math.max(6, Math.min(70, hl + (Math.random() - 0.5) * 12));
       if (hb) { const b = hb.firstElementChild; hb.appendChild(b); const h = 30 + hl; b.style.height = h + '%'; b.className = h > 90 ? 'hot' : ''; }
-      if (hc) hc.innerHTML = Math.round(hl) + '<small>%</small>';
+      if (hc) hc.textContent = Math.round(hl);
       fanTick();
       if (leg) { const u = Math.round(hl * 0.7); leg.innerHTML = `User ${u}%&nbsp;&nbsp; System ${Math.round(hl) - u}%&nbsp;&nbsp; Idle ${100 - Math.round(hl)}%`; }
     }, 900);
