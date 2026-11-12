@@ -733,7 +733,7 @@
     w.addEventListener('click', open); w.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
   });
   // Keyboard: span controls in the window act like buttons
-  const CTL = '.rb, .act, .btn2, .gch, .seg > i, .tg, .fc, .stb, .fr .ck, .rbt, .tha i, .lk, .dots, .dwl i, .pv, .cbk';
+  const CTL = '.rb, .act, .btn2, .gch, .seg > i, .tg, .fc, .stb, .fr .ck, .rbt, .tha i, .lk, .dots, .dwl i, .pv, .cbk, .smn span, .cdel, .akey, .usort, .cpr, .th, [role=button]';
   const arm = () => $$(CTL, app).forEach(c => {
     if (c.tabIndex < 0) { c.tabIndex = 0; c.setAttribute('role', c.classList.contains('tg') ? 'switch' : 'button'); }
     if (c.classList.contains('tg')) c.setAttribute('aria-checked', String(!c.classList.contains('off')));
