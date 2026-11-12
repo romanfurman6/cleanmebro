@@ -157,7 +157,12 @@ pub fn day_chart(ui: &mut Ui, r: Rect, days: &[Day], m: Measure, pace: Option<f6
     let d = &days[sel];
     let today = days.last().map(|l| l.date) == Some(d.date);
     let date = if today { "Today".to_string() } else { d.date.format("%a %b %-d").to_string() };
-    let mut x = r.left();
+    // one line in two sizes on one baseline: laid out as a single job, so
+    // the small grey parts don't ride up next to the bold ones
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = r.width();
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
     for (s, f, c) in [
         (date, ty::title(), TEXT()),
         (usd(d.usd), ty::title(), TEXT()),
@@ -167,9 +172,12 @@ pub fn day_chart(ui: &mut Ui, r: Rect, days: &[Day], m: Measure, pace: Option<f6
         if s.is_empty() {
             continue;
         }
-        let w = text_fit(&p, Pos2::new(x, r.top() + head / 2.0), Align2::LEFT_CENTER, &s, f, c, (r.right() - x).max(0.0)).width();
-        x += w + sp::M;
+        let lead = if job.sections.is_empty() { 0.0 } else { sp::M };
+        job.append(&s, lead, egui::TextFormat { font_id: f, color: c, valign: egui::Align::BOTTOM, ..Default::default() });
     }
+    let g = p.layout_job(job);
+    let h = g.size().y;
+    p.galley(Pos2::new(r.left(), r.top() + (head - h) / 2.0), g, TEXT());
     // first and last day under the bars
     let lab = |d: &Day| d.date.format("%b %-d").to_string();
     p.text(Pos2::new(plot.left(), r.bottom()), Align2::LEFT_BOTTOM, lab(&days[0]), ty::caption(), ty::caption_color());
