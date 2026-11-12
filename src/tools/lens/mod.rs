@@ -49,6 +49,12 @@ pub struct Lens {
     pub(crate) lens_hover: Option<PathBuf>,
     /// What the right-click menu on the map is for: (path, bytes).
     pub(crate) lens_menu: Option<(PathBuf, u64)>,
+    /// Browsing a finished folder while the rest is still being measured.
+    pub(crate) lens_peek: bool,
+    /// A folder chosen in the folder dialog, waiting to be mapped.
+    pub(crate) lens_pick: std::sync::Arc<std::sync::Mutex<Option<PathBuf>>>,
+    /// Items moved to the Trash while mapping, to take off the finished map.
+    pub(crate) lens_trashed: Vec<PathBuf>,
 }
 
 /// Disk Map choices kept between runs.
@@ -89,6 +95,9 @@ impl Lens {
             lens_fwd: vec![],
             lens_hover: None,
             lens_menu: None,
+            lens_peek: false,
+            lens_pick: Default::default(),
+            lens_trashed: vec![],
         }
     }
 }
@@ -143,6 +152,11 @@ impl Tool for Lens {
             Some(View::Page)
         } else if view == "lens-live" {
             page::demo_live(self);
+            Some(View::Page)
+        } else if view == "lens-peek" {
+            page::demo_live(self);
+            self.lens_peek = true;
+            self.lens_path = self.lens_root.join("Projects");
             Some(View::Page)
         } else {
             None

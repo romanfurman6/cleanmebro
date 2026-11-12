@@ -25,6 +25,9 @@ pub struct LiveChild {
     pub path: PathBuf,
     pub bytes: Arc<AtomicU64>,
     pub done: bool,
+    /// The folder's finished map, so it can be browsed while the rest is
+    /// still being measured.
+    pub node: Option<Arc<Node>>,
 }
 
 /// One row of the live list while mapping (cheap to copy: no subtree).
@@ -34,6 +37,7 @@ pub struct LiveRow {
     pub path: PathBuf,
     pub bytes: u64,
     pub done: bool,
+    pub node: Option<Arc<Node>>,
 }
 
 #[derive(Default)]
@@ -74,7 +78,7 @@ pub fn partial(s: &Scan) -> Option<(PathBuf, Vec<LiveRow>)> {
     let (root, kids) = g.as_ref()?;
     let rows = kids
         .iter()
-        .map(|k| LiveRow { name: k.name.clone(), path: k.path.clone(), bytes: k.bytes.load(Ordering::Relaxed), done: k.done })
+        .map(|k| LiveRow { name: k.name.clone(), path: k.path.clone(), bytes: k.bytes.load(Ordering::Relaxed), done: k.done, node: k.node.clone() })
         .filter(|r| r.bytes > 0)
         .collect();
     Some((root.clone(), rows))
@@ -108,6 +112,10 @@ pub fn is_essential(p: &Path) -> bool {
     let home = dirs::home_dir().unwrap_or_default();
     let fixed = ["/System", "/usr", "/bin", "/sbin", "/private", "/Library", "/Applications", "/opt", "/cores", "/dev", "/etc", "/var", "/tmp", "/Volumes", "/Users"];
     if fixed.iter().any(|f| p == Path::new(f)) {
+        return true;
+    }
+    // a whole volume
+    if p.parent() == Some(Path::new("/Volumes")) {
         return true;
     }
     if p.starts_with("/System") || p.starts_with("/usr") || p.starts_with("/bin") || p.starts_with("/sbin") || p.starts_with("/private/var/db") {
@@ -388,14 +396,13 @@ impl<'a> Walker<'a> {
         self.add_files(&mut node, files, None, true);
         let live: Vec<LiveChild> = dirs
             .iter()
-            .map(|d| LiveChild { name: d.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(), path: d.clone(), bytes: Arc::new(AtomicU64::new(0)), done: false })
+            .map(|d| LiveChild { name: d.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(), path: d.clone(), bytes: Arc::new(AtomicU64::new(0)), done: false, node: None })
             .collect();
         let counters: Vec<Arc<AtomicU64>> = live.iter().map(|l| l.bytes.clone()).collect();
         *self.s.live.lock_ok() = Some((root.to_path_buf(), live));
         let next = AtomicU64::new(0);
         // every core pulls the next top-level folder; inside one, free threads help
         let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).saturating_sub(1).max(1).min(dirs.len().max(1));
-        let results: Mutex<Vec<Node>> = Mutex::new(Vec::new());
         std::thread::scope(|sc| {
             for _ in 0..workers {
                 sc.spawn(|| loop {
@@ -408,13 +415,16 @@ impl<'a> Walker<'a> {
                     counters[k].store(child.as_ref().map(|c| c.bytes).unwrap_or(0), Ordering::Relaxed);
                     if let Some((_, live)) = self.s.live.lock_ok().as_mut() {
                         live[k].done = true;
+                        live[k].node = child.map(Arc::new);
                     }
                     self.ctx.request_repaint();
-                    results.lock_ok().extend(child);
                 });
             }
         });
-        for child in results.into_inner().unwrap_or_default() {
+        // the finished folders back out of the live list (the window may
+        // still hold one for a moment: then it's copied)
+        let done: Vec<Arc<Node>> = self.s.live.lock_ok().as_mut().map(|(_, live)| live.iter_mut().filter_map(|l| l.node.take()).collect()).unwrap_or_default();
+        for child in done.into_iter().map(|a| Arc::try_unwrap(a).unwrap_or_else(|a| (*a).clone())) {
             node.bytes += child.bytes;
             node.items += child.items + 1;
             node.children.push(child);
@@ -804,6 +814,8 @@ mod tests {
         assert_eq!(root.bytes, sum);
         assert_eq!(shared.bytes.load(Ordering::SeqCst), root.bytes);
         assert!(shared.live.lock_ok().is_none());
+        // every folder's subtree came back from the live list
+        assert!(root.children.iter().all(|c| c.children.len() >= 5));
         let _ = std::fs::remove_dir_all(&base);
     }
 

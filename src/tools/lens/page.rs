@@ -16,11 +16,46 @@ const INFO_H: f32 = 28.0;
 pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let shared = app.lens.clone();
     let now = ui.ctx().input(|i| i.time);
+    let running = shared.running.load(Ordering::SeqCst);
+    // a folder picked in the folder dialog, or dropped on the window
+    let picked = app.lens_pick.lock_ok().take();
+    let dropped = ui.ctx().input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).find(|p| p.is_dir()));
+    if let Some(dir) = picked.or(dropped).filter(|_| !running) {
+        begin_at(app, ui.ctx(), dir);
+        return;
+    }
+    if !running && ui.ctx().input(|i| !i.raw.hovered_files.is_empty()) {
+        drop_hint(ui, r);
+    }
     if shared.running.load(Ordering::SeqCst) && !shared.updating.load(Ordering::SeqCst) {
         // while mapping: a calm list of folders that grows in place; the
         // treemap is drawn once, when the sizes are final
         if app.lens_live.as_ref().is_none_or(|l| now - l.0 > 0.25) {
             app.lens_live = scan::partial(&shared).map(|(root, rows)| (now, root, rows));
+        }
+        // a finished folder opened while the rest is still being measured
+        if app.lens_peek {
+            let found = app.lens_live.as_ref().and_then(|l| {
+                let done = l.2.iter().filter(|x| x.done).count();
+                l.2.iter().find(|x| app.lens_path.starts_with(&x.path)).and_then(|x| x.node.clone()).map(|n| (n, done, l.2.len()))
+            });
+            if let Some((sub, done, all)) = found {
+                match results(app, ui, r, &sub, Some((done, all))) {
+                    Act::Stop => shared.stop.store(true, Ordering::SeqCst),
+                    Act::Overview => {
+                        app.lens_peek = false;
+                        app.lens_path = app.lens_root.clone();
+                        app.lens_back.clear();
+                        app.lens_fwd.clear();
+                    }
+                    _ => {}
+                }
+                if app.lens_review {
+                    review(app, ui, r, cx);
+                }
+                return;
+            }
+            app.lens_peek = false;
         }
         match app.lens_live.take() {
             Some(live) => {
@@ -40,6 +75,15 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         app.lens_rows.clear();
     }
     app.lens_live = None;
+    app.lens_peek = false;
+    // items moved to the Trash while the map was still being made
+    if !app.lens_trashed.is_empty() && !running {
+        if let Some(root) = shared.result.lock_ok().as_mut() {
+            scan::prune(root, &app.lens_trashed);
+        }
+        app.lens_trashed.clear();
+        scan::save_later(&shared);
+    }
     let guard = shared.result.lock_ok();
     let Some(root) = guard.as_ref() else {
         drop(guard);
@@ -52,8 +96,12 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         }
         // nothing mapped yet: mapping walks the whole disk, so it waits
         // for a click
-        if shared.result.lock_ok().is_none() && intro(ui, r) {
-            begin(app, ui.ctx());
+        if shared.result.lock_ok().is_none() {
+            match intro(ui, r, &root_label(&app.lens_root)) {
+                Some(true) => begin(app, ui.ctx()),
+                Some(false) => choose_folder(app, ui.ctx()),
+                None => {}
+            }
         }
         return;
     };
@@ -72,6 +120,8 @@ enum Act {
     None,
     Update,
     Stop,
+    /// Leave a finished folder for the live overview of the whole map.
+    Overview,
 }
 
 fn home() -> PathBuf {
@@ -90,16 +140,79 @@ fn tilde(p: &Path) -> String {
 
 // ---------------------------------------------------------------- start
 
-/// Before the first map: what it does, and the button that starts it.
-fn intro(ui: &mut Ui, r: Rect) -> bool {
+/// Before the first map: the button that maps the disk, and one to pick a
+/// folder instead. Some(true): map the disk; Some(false): choose a folder.
+fn intro(ui: &mut Ui, r: Rect, name: &str) -> Option<bool> {
     let p = ui.painter().clone();
-    page_header(&p, r, "Disk Map", "Macintosh HD", TEXT_DIM());
+    page_header(&p, r, "Disk Map", name, TEXT_DIM());
     let w = (r.width() - 48.0).min(520.0);
     let pr = Rect::from_center_size(Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + 28.0 + 50.0), Vec2::new(w, 100.0));
     glass_card(&p, pr, R_CARD, 0.0, false);
-    p.text(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), Align2::LEFT_TOP, "Map Macintosh HD", bold(15.0), TEXT());
+    p.text(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), Align2::LEFT_TOP, format!("Map {name}"), bold(15.0), TEXT());
     let bw = button_width(&p, "Map disk", BTN_PRIMARY) + 28.0;
-    pill_button(ui, Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 48.0), Vec2::new(bw, 32.0)), "Map disk", BTN_PRIMARY, true).clicked()
+    let map = Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 48.0), Vec2::new(bw, 32.0));
+    let cw = button_width(&p, "Choose Folder…", BTN_SECONDARY) + 12.0;
+    let pick = Rect::from_min_size(Pos2::new(map.right() + 8.0, map.top()), Vec2::new(cw, 32.0));
+    if pill_button(ui, map, "Map disk", BTN_PRIMARY, true).clicked() {
+        return Some(true);
+    }
+    pill_button(ui, pick, "Choose Folder…", BTN_SECONDARY, true).clicked().then_some(false)
+}
+
+/// A folder dragged over the window: an outline says it can be dropped.
+fn drop_hint(ui: &mut Ui, r: Rect) {
+    let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("diskmap-drop")));
+    let a = r.shrink(10.0);
+    p.rect_filled(a, 14.0, with_alpha(ACCENT(), 0.06));
+    dashed_rect(&p, a, 14.0, with_alpha(ACCENT(), 0.8));
+}
+
+/// What a mapped location is called: "Macintosh HD", "Home", a volume or
+/// folder name.
+fn root_label(p: &Path) -> String {
+    if p == home() {
+        "Home".into()
+    } else {
+        scan::display_name(p)
+    }
+}
+
+/// The volume a map is on, by name.
+fn volume_label(p: &Path) -> String {
+    match p.strip_prefix("/Volumes").ok().and_then(|r| r.components().next()) {
+        Some(v) => v.as_os_str().to_string_lossy().into_owned(),
+        None => "Macintosh HD".into(),
+    }
+}
+
+/// Places to map: the disk, Home, every other mounted volume.
+fn locations() -> Vec<(String, PathBuf)> {
+    let mut out = vec![("Macintosh HD".to_string(), PathBuf::from("/")), ("Home".to_string(), home())];
+    if let Ok(rd) = std::fs::read_dir("/Volumes") {
+        let mut vols: Vec<(String, PathBuf)> = rd
+            .flatten()
+            // the startup disk shows up here as a link to "/"
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+            .filter(|(n, _)| !n.starts_with('.') && !n.starts_with("com.apple."))
+            .collect();
+        vols.sort();
+        out.extend(vols);
+    }
+    out
+}
+
+/// Ask for a folder to map (the system folder dialog, off the UI thread).
+fn choose_folder(app: &mut App, ctx: &egui::Context) {
+    let (slot, ctx) = (app.lens_pick.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        let out = std::process::Command::new("osascript").args(["-e", "POSIX path of (choose folder with prompt \"Map a folder\")"]).output();
+        let path = out.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().trim_end_matches('/').to_string()).filter(|s| !s.is_empty()).map(PathBuf::from);
+        if let Some(p) = path {
+            *slot.lock_ok() = Some(p);
+            ctx.request_repaint();
+        }
+    });
 }
 
 /// The first moments of a map, before the disk's top folders are listed:
@@ -108,13 +221,14 @@ fn intro(ui: &mut Ui, r: Rect) -> bool {
 fn start(app: &mut App, ui: &mut Ui, r: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
-    page_header(&p, r, "Disk Map", "Macintosh HD", TEXT_DIM());
+    let name = root_label(&app.lens_root);
+    page_header(&p, r, "Disk Map", &name, TEXT_DIM());
     let w = (r.width() - 48.0).min(520.0);
     let pr = Rect::from_center_size(Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + 28.0 + 90.0), Vec2::new(w, 180.0));
     glass_card(&p, pr, R_CARD, 0.0, false);
     let bytes = app.lens.bytes.load(Ordering::Relaxed);
     let files = app.lens.files.load(Ordering::Relaxed);
-    p.text(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), Align2::LEFT_TOP, "Mapping Macintosh HD", bold(13.0), TEXT_DIM());
+    p.text(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), Align2::LEFT_TOP, format!("Mapping {name}"), bold(13.0), TEXT_DIM());
     let g = p.layout_no_wrap(human_bytes(bytes), bold(26.0), TEXT());
     let gw = g.size().x;
     p.galley(Pos2::new(pr.left() + 16.0, pr.top() + 36.0), g, TEXT());
@@ -137,14 +251,41 @@ fn start(app: &mut App, ui: &mut Ui, r: Rect) {
 
 /// Map the whole startup disk from scratch.
 fn begin(app: &mut App, ctx: &egui::Context) {
-    app.lens_root = PathBuf::from("/");
-    app.lens_path = app.lens_root.clone();
+    begin_at(app, ctx, PathBuf::from("/"));
+}
+
+/// Map `root` from scratch.
+fn begin_at(app: &mut App, ctx: &egui::Context, root: PathBuf) {
+    if app.lens.running.load(Ordering::SeqCst) {
+        return;
+    }
+    show_root(app, root.clone());
+    scan::start(app.lens.clone(), root, ctx.clone());
+}
+
+/// Point the page at a new place to map; nothing is measured yet.
+fn show_root(app: &mut App, root: PathBuf) {
+    app.lens_root = root.clone();
+    app.lens_path = root;
     app.lens_selected.clear();
     app.lens_msg = None;
     app.lens_morph = None;
     app.lens_hues.clear();
     app.lens_skip = 0;
-    scan::start(app.lens.clone(), app.lens_root.clone(), ctx.clone());
+    app.lens_back.clear();
+    app.lens_fwd.clear();
+    app.lens_peek = false;
+}
+
+/// Back to the startup disk: its last map opens again if there is one.
+fn open_disk(app: &mut App) {
+    if app.lens.running.load(Ordering::SeqCst) {
+        return;
+    }
+    show_root(app, PathBuf::from("/"));
+    *app.lens.result.lock_ok() = None;
+    *app.lens.event.lock_ok() = None;
+    app.lens.loaded.store(false, Ordering::SeqCst);
 }
 
 /// "just now", "5 min ago", "3 h ago", "2 days ago".
@@ -300,6 +441,7 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     let mut drawn = std::collections::HashMap::new();
     let pointer = ctx.pointer_hover_pos();
     let mut hovered: Option<(&scan::LiveRow, Color32)> = None;
+    let mut hovered_at: Option<Rect> = None;
     let bp = p.with_clip_rect(area.expand(4.0));
     for (n, key) in keys.iter().enumerate() {
         let Some(&target) = targets.get(n) else { continue };
@@ -317,10 +459,25 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
             continue;
         }
         let row = shown_rows[n];
-        let hov = pointer.is_some_and(|q| (q - c).length() <= rad);
+        let hov = pointer.is_some_and(|q| (q - c).length() <= rad && area.contains(q));
         live_bubble(&bp, c, rad, &row.name, row.bytes, BLUE(), !row.done, hov, now);
         if hov {
             hovered = Some((row, BLUE()));
+            hovered_at = Some(Rect::from_center_size(c, Vec2::splat(rad * 2.0)));
+        }
+    }
+    // a finished folder can be opened while the rest is still measured
+    let click = ui.interact(area, ui.scope_id().with("live-area"), Sense::click());
+    if let (Some((row, _)), Some(at)) = (hovered, hovered_at) {
+        if row.node.as_ref().is_some_and(|n| !n.children.is_empty()) {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            if click.clicked() {
+                app.lens_peek = true;
+                app.lens_path = row.path.clone();
+                app.lens_back.clear();
+                app.lens_fwd.clear();
+                app.lens_morph = Some((Some(at), row.path.clone(), now));
+            }
         }
     }
     if rows.is_empty() {
@@ -813,7 +970,9 @@ fn rings(app: &mut App, ui: &mut Ui, pa: Rect, root: &Node, node: &Node, here: &
     out
 }
 
-fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[PathBuf]>) -> Act {
+/// The finished map (or, with `peek`, one finished folder while the rest is
+/// still measured: `peek` is how many top folders are done, of how many).
+fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize, usize)>) -> Act {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let mut act = Act::None;
@@ -822,16 +981,17 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
     }
     let node = scan::find(root, &app.lens_path).unwrap_or(root);
     let mut go_to: Option<(PathBuf, Option<Rect>)> = None;
-    let root_label = if root.path == home() { "Home".to_string() } else { root.name.clone() };
-    let depth = node.path.strip_prefix(&root.path).map(|x| x.components().count()).unwrap_or(0);
-    let here = if depth == 0 { root_label.clone() } else { node.name.clone() };
+    // breadcrumbs start at what was mapped (in a peek, above `root`)
+    let base = if peek.is_some() { app.lens_root.clone() } else { root.path.clone() };
+    let root_label = root_label(&base);
+    let here = if node.path == base { root_label.clone() } else { node.name.clone() };
 
     // header: back, forward, breadcrumbs, view, when it was mapped, Update
     let hr = Rect::from_min_size(r.min, Vec2::new(r.width(), HEADER_H));
     hairline(&p, hr.left_bottom(), hr.right_bottom());
-    let can_up = node.path != root.path;
+    let can_up = node.path != root.path || peek.is_some();
     let mut nav: Option<Nav> = None;
-    for (k, (ic, on, tip, go)) in [(Icon::Back, !app.lens_back.is_empty(), "Back", Nav::Back), (Icon::Forward, !app.lens_fwd.is_empty(), "Forward", Nav::Forward)].into_iter().enumerate() {
+    for (k, (ic, on, tip, go)) in [(Icon::Back, !app.lens_back.is_empty() || peek.is_some(), "Back", Nav::Back), (Icon::Forward, !app.lens_fwd.is_empty(), "Forward", Nav::Forward)].into_iter().enumerate() {
         let br = Rect::from_min_size(Pos2::new(hr.left() + 20.0 + k as f32 * 32.0, hr.center().y - 14.0), Vec2::splat(28.0));
         let resp = ui.interact(br, ui.scope_id().with(("map-nav", k)), if on { Sense::click() } else { Sense::hover() });
         p.rect_filled(br, R_SMALL, white(if !on { 8 } else if resp.hovered() { 32 } else { 20 }));
@@ -850,24 +1010,43 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
             nav = Some(Nav::Up);
         }
     });
-    let mut crumbs: Vec<(String, PathBuf)> = vec![(root_label.clone(), root.path.clone())];
-    if let Ok(rel) = node.path.strip_prefix(&root.path) {
-        let mut acc = root.path.clone();
+    // where to map: the disk, Home, other volumes, any folder
+    let loc = Rect::from_min_size(Pos2::new(hr.left() + 20.0 + 64.0, hr.center().y - 14.0), Vec2::splat(28.0));
+    let lr_resp = ui.interact(loc, ui.scope_id().with("map-where"), if peek.is_none() { Sense::click() } else { Sense::hover() });
+    p.rect_filled(loc, R_SMALL, white(if peek.is_some() { 8 } else if lr_resp.hovered() { 32 } else { 20 }));
+    icon(&p, Icon::Disk, loc.shrink(6.0), if peek.is_none() { TEXT_SOFT() } else { TEXT_MUTED() });
+    let mut pick_root: Option<Option<PathBuf>> = None;
+    egui::Popup::menu(&lr_resp).show(|ui| {
+        for (name, path) in locations() {
+            if ui.button(name).clicked() {
+                pick_root = Some(Some(path));
+            }
+        }
+        ui.separator();
+        if ui.button("Choose Folder…").clicked() {
+            pick_root = Some(None);
+        }
+    });
+    let mut crumbs: Vec<(String, PathBuf)> = vec![(root_label.clone(), base.clone())];
+    if let Ok(rel) = node.path.strip_prefix(&base) {
+        let mut acc = base.clone();
         for c in rel.components() {
             acc.push(c);
             crumbs.push((c.as_os_str().to_string_lossy().into_owned(), acc.clone()));
         }
     }
     let updating = app.lens.updating.load(Ordering::SeqCst);
-    let nb = button_width(&p, "Update", BTN_SECONDARY);
+    let btn = if peek.is_some() { "Stop" } else { "Update" };
+    let nb = button_width(&p, btn, BTN_SECONDARY);
     let new_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
-    let when = match (*app.lens.when.lock_ok(), updating) {
-        (_, true) => "Updating…".to_string(),
-        (Some(w), _) => format!("Mapped {}", ago(w)),
-        (None, _) => String::new(),
+    let when = match (*app.lens.when.lock_ok(), updating, peek) {
+        (_, _, Some((done, all))) => format!("{done} / {all}"),
+        (_, true, _) => "Updating…".to_string(),
+        (Some(w), _, _) => format!("Mapped {}", ago(w)),
+        (None, _, _) => String::new(),
     };
     let hint = p.text(Pos2::new(new_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, when, font(12.0), TEXT_FAINT());
-    if updating {
+    if updating || peek.is_some() {
         spinner(&p, Pos2::new(hint.left() - 12.0, hr.center().y), 5.0, ctx.input(|i| i.time), tint::DISK_MAP());
         crate::kit::glass::animate(&ctx);
     }
@@ -877,7 +1056,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
         super::save_prefs(app);
         app.lens_morph = Some((None, node.path.clone(), ctx.input(|i| i.time)));
     }
-    let mut x = hr.left() + 20.0 + 64.0 + 8.0;
+    let mut x = loc.right() + 8.0;
     let n_crumbs = crumbs.len();
     for (k, (label, path)) in crumbs.iter().enumerate() {
         let last = k + 1 == n_crumbs;
@@ -902,8 +1081,18 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
             x += 10.0;
         }
     }
-    if pill_button(ui, new_r, "Update", BTN_SECONDARY, !updating).clicked() {
-        act = Act::Update;
+    if pill_button(ui, new_r, btn, BTN_SECONDARY, !updating).clicked() {
+        act = if peek.is_some() { Act::Stop } else { Act::Update };
+    }
+    let picked = pick_root.is_some();
+    match pick_root {
+        Some(Some(path)) if path == Path::new("/") => open_disk(app),
+        Some(Some(path)) => begin_at(app, &ctx, path),
+        Some(None) => choose_folder(app, &ctx),
+        None => {}
+    }
+    if picked {
+        return Act::None;
     }
 
     let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, r.bottom() - 16.0));
@@ -982,7 +1171,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
         let used = disk_total.saturating_sub(disk_free);
         let dy = lr.bottom() - disk_h;
         hairline(&p, Pos2::new(lr.left(), dy), Pos2::new(lr.right(), dy));
-        p.text(Pos2::new(x0, dy + 16.0), Align2::LEFT_CENTER, "Macintosh HD", font(12.0), TEXT_DIM());
+        p.text(Pos2::new(x0, dy + 16.0), Align2::LEFT_CENTER, volume_label(&root.path), font(12.0), TEXT_DIM());
         p.text(Pos2::new(x1, dy + 16.0), Align2::RIGHT_CENTER, format!("{} of {} used", human_bytes(used), human_bytes(disk_total)), font(12.0), TEXT_DIM());
         bar(&p, Rect::from_min_size(Pos2::new(x0, dy + 28.0), Vec2::new(x1 - x0, 4.0)), (used as f32 / disk_total as f32).clamp(0.01, 1.0), ACCENT());
     }
@@ -992,7 +1181,8 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
     let sel_h = if app.lens_selected.is_empty() { 0.0 } else { 46.0 };
     let pa = Rect::from_min_max(area.min, Pos2::new(area.right(), area.bottom() - sel_h));
     // on the disk's own level, its free space is part of the map
-    let free = if node.path == root.path && root.path == Path::new("/") { disk_space(&root.path) } else { None };
+    let volume_root = root.path == Path::new("/") || root.path.parent() == Some(Path::new("/Volumes"));
+    let free = if node.path == root.path && volume_root && peek.is_none() { disk_space(&root.path) } else { None };
     if app.lens_morph.as_ref().is_none_or(|m| m.1 != node.path) {
         app.lens_morph = Some((None, node.path.clone(), now));
     }
@@ -1075,6 +1265,8 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
     }
     let here_path = node.path.clone();
     match nav {
+        Some(Nav::Back) if app.lens_back.is_empty() && peek.is_some() => return Act::Overview,
+        Some(Nav::Up) if node.path == root.path && peek.is_some() => return Act::Overview,
         Some(Nav::Back) => {
             if let Some(t) = app.lens_back.pop() {
                 app.lens_fwd.push(here_path.clone());
@@ -1093,6 +1285,9 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, _pending: Option<&[
         None => {}
     }
     if let Some((target, from)) = go_to {
+        if peek.is_some() && !target.starts_with(&root.path) {
+            return Act::Overview;
+        }
         if target != here_path {
             app.lens_back.push(here_path);
             app.lens_fwd.clear();
@@ -1228,8 +1423,12 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 Err(_) => failed += 1,
             }
         }
-        if let Some(root) = app.lens.result.lock_ok().as_mut() {
-            scan::prune(root, &removed);
+        match app.lens.result.lock_ok().as_mut() {
+            Some(root) => {
+                scan::prune(root, &removed);
+            }
+            // still mapping: taken off the map once it's done
+            None => app.lens_trashed.extend(removed.iter().cloned()),
         }
         scan::save_later(&app.lens);
         app.lens_review = false;
@@ -1288,7 +1487,7 @@ pub fn demo_live(app: &mut App) {
         .map(|(k, c)| {
             let done = matches!(k, 1 | 3 | 5 | 7);
             let part = if done { c.bytes } else { (c.bytes as f64 * [0.55, 0.0, 0.8, 0.0, 0.35, 0.0, 0.6][k.min(6)]) as u64 };
-            scan::LiveChild { name: c.name.clone(), path: c.path.clone(), bytes: Arc::new(AtomicU64::new(part)), done }
+            scan::LiveChild { name: c.name.clone(), path: c.path.clone(), bytes: Arc::new(AtomicU64::new(part)), done, node: done.then(|| Arc::new(c.clone())) }
         })
         .collect();
     app.lens.bytes.store(live.iter().map(|l| l.bytes.load(Ordering::Relaxed)).sum(), Ordering::Relaxed);
