@@ -941,6 +941,29 @@ mod tests {
         assert_eq!(gone, vec!["b", "c", "old"]);
     }
 
+    /// On a real Mac: `cargo test reads_this_mac -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn reads_this_mac() {
+        let lib = crate::kit::fs::home().join("Library");
+        let mut raw = items::read_raw(&lib);
+        let t = Instant::now();
+        items::sign_jobs(&mut raw);
+        println!("signed {} jobs in {:?}", raw.len(), t.elapsed());
+        let hidden = raw.iter().filter(|j| j.apple()).count();
+        let jobs = items::shown(raw);
+        println!("{} shown, {hidden} Apple's own hidden", jobs.len());
+        for j in &jobs {
+            println!("{:<44} {:<9} {:?} {:?}", j.label, format!("{:?}", j.scope), j.sig.as_ref().map(|s| s.line()), j.flags());
+        }
+        for c in extra::cron_jobs() {
+            println!("cron: {} | {} | on={} {:?}", c.when, c.command, c.on, c.flags());
+        }
+        for x in extra::sysexts() {
+            println!("sysext: {} {} {} on={} active={} [{}]", x.name, x.bundle_id, x.kind, x.on, x.active, x.state);
+        }
+    }
+
     #[test]
     fn old_settings_move_to_seen() {
         let mut s: Settings = serde_json::from_str(r#"{"known":["/x.plist"],"seeded":true}"#).unwrap();
