@@ -10,9 +10,11 @@
 
 use crate::kit::sync::LockExt;
 mod apps;
+mod extra;
 mod leftovers;
 mod mac;
 mod remove;
+mod rules;
 mod ui;
 
 use crate::core::tool::{Badge, Cx, Tool, ToolEnv, ToolId, View};
@@ -59,6 +61,12 @@ pub struct AppRow {
     pub items: Vec<Item>,
     /// Sizes are known.
     pub sized: bool,
+    /// Other names it goes by.
+    pub alt: Vec<String>,
+    /// Its signature: team and app groups (read with the files).
+    pub sign: extra::Sign,
+    /// Installer packages that put it in place.
+    pub pkgs: Vec<String>,
 }
 
 impl AppRow {
@@ -74,6 +82,9 @@ impl AppRow {
             last_used: self.last_used,
             items: Vec::new(),
             sized: self.sized,
+            alt: self.alt.clone(),
+            sign: self.sign.clone(),
+            pkgs: self.pkgs.clone(),
         }
     }
 
@@ -84,10 +95,10 @@ impl AppRow {
         self.items.iter().filter(|i| i.kind == Kind::App).map(|i| i.bytes).sum()
     }
     pub fn owner(&self) -> Owner {
-        Owner { id: self.id.clone(), name: self.name.clone(), path: self.path.clone() }
+        Owner { id: self.id.clone(), name: self.name.clone(), path: self.path.clone(), alt: self.alt.clone(), groups: self.sign.groups.clone(), team: self.sign.team.clone() }
     }
     pub fn target(&self, reset: bool) -> Target {
-        Target { name: self.name.clone(), id: self.id.clone(), app: Some(self.path.clone()), items: self.items.clone(), reset }
+        Target { name: self.name.clone(), id: self.id.clone(), app: Some(self.path.clone()), items: self.items.clone(), reset, pkgs: self.pkgs.clone() }
     }
 }
 
@@ -107,7 +118,7 @@ impl Orphan {
         self.items.iter().map(|i| i.bytes).sum()
     }
     pub fn target(&self) -> Target {
-        Target { name: self.name.clone(), id: self.id.clone(), app: None, items: self.items.clone(), reset: false }
+        Target { name: self.name.clone(), id: self.id.clone(), app: None, items: self.items.clone(), reset: false, pkgs: Vec::new() }
     }
 }
 
@@ -410,9 +421,8 @@ impl Uninstaller {
         std::thread::Builder::new()
             .name("uninstaller-drop".into())
             .spawn(move || {
-                let casks = apps::cask_apps();
                 let others: Vec<Owner> = st.lock_ok().apps.iter().map(|a| a.owner()).collect();
-                let res = read_app(&path, &casks, &roots, &others, &app_roots);
+                let res = read_app(&path, &roots, &others, &app_roots);
                 let mut g = st.lock_ok();
                 if matches!(&g.drop, Drop::Reading(p) if *p == path) {
                     g.drop = match res {
@@ -460,9 +470,10 @@ impl Uninstaller {
 }
 
 /// Read one bundle: info, files, sizes.
-fn read_app(path: &Path, casks: &[String], roots: &Roots, others: &[Owner], _app_roots: &[PathBuf]) -> Option<AppRow> {
+fn read_app(path: &Path, roots: &Roots, others: &[Owner], app_roots: &[PathBuf]) -> Option<AppRow> {
     let info = apps::read_info(path)?;
-    let source = apps::source(path, &info.id, casks);
+    let casks = apps::casks(&roots.system);
+    let source = apps::source(path, &info.id, &apps::cask_apps(&casks));
     let mut row = AppRow {
         path: path.to_path_buf(),
         name: info.name,
@@ -473,23 +484,104 @@ fn read_app(path: &Path, casks: &[String], roots: &Roots, others: &[Owner], _app
         last_used: apps::last_used(&[path.to_path_buf()]).into_iter().next().flatten(),
         items: Vec::new(),
         sized: false,
+        alt: info.alt,
+        sign: extra::signing(path),
+        pkgs: Vec::new(),
     };
     let index = Index::build(roots);
     let mut all = others.to_vec();
     if !all.iter().any(|o| o.path == row.path) {
         all.push(row.owner());
     }
-    fill_items(&mut row, &index, &all);
+    let found = Found { casks, receipts: extra::receipts(&roots.system), spotlight: extra::spotlight(&[row.owner()], roots) };
+    fill_items(&mut row, &index, &all, roots, app_roots, &found);
     Some(row)
 }
 
-fn fill_items(row: &mut AppRow, index: &Index, all: &[Owner]) {
+/// What one scan learns once for all apps.
+struct Found {
+    casks: Vec<apps::Cask>,
+    receipts: Vec<String>,
+    /// Spotlight's finds named after any app.
+    spotlight: Vec<PathBuf>,
+}
+
+/// Everything that belongs to `row`: its folders, the rules' extras, what
+/// its Homebrew cask and installer packages put in place, and (unticked)
+/// Spotlight's finds. Only what removal may reach is offered.
+fn fill_items(row: &mut AppRow, index: &Index, all: &[Owner], roots: &Roots, app_roots: &[PathBuf], found: &Found) {
+    let owner = row.owner();
+    let home = roots.home();
+    let mut extra_items: Vec<Item> = index.for_app(&owner, all);
+    rules::apply(rules::RULES, &owner, &mut extra_items, roots);
+    let free = |p: &Path, have: &[Item]| p != row.path && !p.starts_with(&row.path) && p.symlink_metadata().is_ok() && crate::kit::fs::is_protected(p).is_none() && !index.claimed_by_other(p, &owner, all) && !have.iter().any(|i| p.starts_with(&i.path));
+    let admin_for = |p: &Path| !p.starts_with(&home) && remove::needs_root(p);
+    // Homebrew: the cask's record, and what its uninstall and zap stanzas name
+    let mut pkg_ids = extra::pkg_candidates(&owner, &found.receipts);
+    let file = row.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if let Some(cask) = extra::cask_for(&file, &found.casks) {
+        extra_items.push(Item { path: cask.dir.clone(), kind: Kind::Installed, bytes: 0, admin: admin_for(&cask.dir), selected: true });
+        if let Some(json) = extra::cask_json(cask) {
+            let plan = extra::cask_plan(&json, roots);
+            for p in plan.paths {
+                if free(&p, &extra_items) {
+                    // zap lists can name what a vendor's apps share: ticked
+                    // only when named after this app
+                    let selected = p.file_name().is_some_and(|n| leftovers::names_app(&n.to_string_lossy(), &owner));
+                    extra_items.push(Item { kind: leftovers::kind_of(&p, roots), admin: admin_for(&p), path: p, bytes: 0, selected });
+                }
+            }
+            for l in &plan.labels {
+                for it in index.jobs_labelled(l) {
+                    if !extra_items.iter().any(|i| i.path == it.path) {
+                        extra_items.push(it);
+                    }
+                }
+            }
+            pkg_ids.extend(plan.pkgs);
+        }
+    }
+    // installer packages that did install this app
+    pkg_ids.sort();
+    pkg_ids.dedup();
+    let mut pkgs = Vec::new();
+    for id in pkg_ids {
+        let Some((location, files)) = extra::pkg_payload(&id) else { continue };
+        let Some(paths) = extra::pkg_items(&row.path, &location, &files, &roots.system) else { continue };
+        pkgs.push(id);
+        for p in paths {
+            if !free(&p, &extra_items) {
+                continue;
+            }
+            let kind = match leftovers::kind_of(&p, roots) {
+                Kind::Other => Kind::Installed,
+                k => k,
+            };
+            let named = p.file_name().is_some_and(|n| leftovers::names_app(&n.to_string_lossy(), &owner));
+            // a package may drop files into a vendor folder its other apps
+            // share ("Application Support/Microsoft"): data folders only
+            // when named after the app
+            if matches!(kind, Kind::Support | Kind::Caches | Kind::Logs | Kind::Preferences) && !named {
+                continue;
+            }
+            // command-line tools, frameworks and extra apps may be shared
+            // with other installs: offered, not ticked
+            let shared = p.starts_with(roots.system.join("usr/local")) || p.starts_with(roots.system.join("Library/Frameworks")) || p.starts_with(roots.system.join("Applications"));
+            extra_items.push(Item { kind, admin: admin_for(&p), path: p, bytes: 0, selected: named || !shared });
+        }
+    }
+    // Spotlight: named after the app, somewhere else in the home folder
+    let picks: Vec<PathBuf> = extra::spotlight_pick(&found.spotlight, &owner, roots, &extra_items).into_iter().filter(|p| free(p, &extra_items)).collect();
+    extra_items.extend(extra::spotlight_items(picks, roots));
+    extra_items.retain(|i| remove::movable(&i.path, roots, app_roots));
+    leftovers::tidy(&mut extra_items);
     let mut items = vec![Item { path: row.path.clone(), kind: Kind::App, bytes: dir_size(&row.path), admin: remove::needs_root(&row.path), selected: true }];
-    for mut it in index.for_app(&row.owner(), all) {
+    for mut it in extra_items {
         it.bytes = dir_size(&it.path);
         items.push(it);
     }
     row.items = items;
+    row.pkgs = pkgs;
     row.sized = true;
 }
 
@@ -526,13 +618,14 @@ fn start_scan(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Cont
 fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) -> bool {
     let full = st.lock_ok().page_seen;
     let bundles = apps::find_bundles(app_roots);
-    let casks = apps::cask_apps();
+    let casks = apps::casks(&roots.system);
+    let cask_names = apps::cask_apps(&casks);
     let used = apps::last_used(&bundles);
     let mut rows: Vec<AppRow> = Vec::new();
     for (k, b) in bundles.iter().enumerate() {
         let Some(info) = apps::read_info(b) else { continue };
-        let source = apps::source(b, &info.id, &casks);
-        rows.push(AppRow { path: b.clone(), name: info.name, id: info.id.clone(), version: info.version, source, locked: apps::locked(b, &info.id, source), last_used: used[k], items: Vec::new(), sized: false });
+        let source = apps::source(b, &info.id, &cask_names);
+        rows.push(AppRow { path: b.clone(), name: info.name, id: info.id.clone(), version: info.version, source, locked: apps::locked(b, &info.id, source), last_used: used[k], items: Vec::new(), sized: false, alt: info.alt, sign: Default::default(), pkgs: Vec::new() });
     }
     {
         let mut g = st.lock_ok();
@@ -540,6 +633,8 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
         for r in rows.iter_mut() {
             if let Some(old) = g.apps.iter().find(|a| a.path == r.path && a.id == r.id) {
                 r.items = old.items.clone();
+                r.sign = old.sign.clone();
+                r.pkgs = old.pkgs.clone();
             }
         }
         for r in &rows {
@@ -553,14 +648,20 @@ fn scan(st: &Shared, app_roots: &[PathBuf], roots: &Roots, ctx: &egui::Context) 
         g.phase = Phase::Sizing { done: 0, total: rows.len() };
     }
     ctx.request_repaint();
+    // signatures (team, app groups) before matching: groups decide whose a
+    // group container is
+    for r in rows.iter_mut() {
+        r.sign = extra::signing(&r.path);
+    }
     let index = Index::build(roots);
     let owners: Vec<Owner> = rows.iter().map(|r| r.owner()).collect();
+    let found = Found { casks, receipts: extra::receipts(&roots.system), spotlight: extra::spotlight(&owners, roots) };
     // small apps first so most of the list is complete quickly
     let mut order: Vec<usize> = (0..rows.len()).collect();
     order.sort_by_key(|&i| rows[i].items.first().map(|x| x.bytes).unwrap_or(0));
     for (n, i) in order.into_iter().enumerate() {
         let mut row = rows[i].clone();
-        fill_items(&mut row, &index, &owners);
+        fill_items(&mut row, &index, &owners, roots, app_roots, &found);
         let mut g = st.lock_ok();
         if let Some(slot) = g.apps.iter_mut().find(|a| a.path == row.path) {
             // keep the user's ticks on files
@@ -662,7 +763,7 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
                         if items.iter().map(|i| i.bytes).sum::<u64>() < 100_000 {
                             continue;
                         }
-                        st.lock_ok().notice = Some(Notice { target: Target { name: row.name.clone(), id: row.id.clone(), app: None, items, reset: false }, at: Instant::now() });
+                        st.lock_ok().notice = Some(Notice { target: Target { name: row.name.clone(), id: row.id.clone(), app: None, items, reset: false, pkgs: Vec::new() }, at: Instant::now() });
                         ctx.request_repaint();
                     }
                 }

@@ -2,6 +2,7 @@
 //! treemap; selected items go to the Trash after review. Lives in the full
 //! window.
 
+mod history;
 mod page;
 pub mod scan;
 
@@ -39,6 +40,54 @@ pub struct Lens {
     /// Top-level folders in the order they got their colour, so a folder
     /// keeps its colour while the map grows.
     pub(crate) lens_hues: Vec<PathBuf>,
+    /// How the map is shown: 0 bubbles, 1 rings around the folder, 2 the
+    /// biggest files as a list.
+    pub(crate) lens_view: u8,
+    /// Folders visited before / after the shown one (Back, Forward).
+    pub(crate) lens_back: Vec<PathBuf>,
+    pub(crate) lens_fwd: Vec<PathBuf>,
+    /// What was under the pointer on the map last frame.
+    pub(crate) lens_hover: Option<PathBuf>,
+    /// What the right-click menu on the map is for: (path, bytes).
+    pub(crate) lens_menu: Option<(PathBuf, u64)>,
+    /// Browsing a finished folder while the rest is still being measured.
+    pub(crate) lens_peek: bool,
+    /// A folder chosen in the folder dialog, waiting to be mapped.
+    pub(crate) lens_pick: std::sync::Arc<std::sync::Mutex<Option<PathBuf>>>,
+    /// Items moved to the Trash while mapping, to take off the finished map.
+    pub(crate) lens_trashed: Vec<PathBuf>,
+    /// The sheet of everything in the folder is open ("Other").
+    pub(crate) lens_other: bool,
+    /// The list row the keyboard is on.
+    pub(crate) lens_cursor: Option<usize>,
+    /// Bytes moved to the Trash from the map since the app started.
+    pub(crate) lens_freed: u64,
+    /// Review: the first click on Move to Trash with app data picked.
+    pub(crate) lens_confirm: bool,
+    /// A menu action picked in a view's own list (files, the Other sheet).
+    pub(crate) lens_menu_act: Option<(page::MenuAct, PathBuf, u64)>,
+    /// Automatic updates while the page is open: when the disk last changed,
+    /// and when the map was last brought up to date.
+    pub(crate) lens_dirty: Option<f64>,
+    pub(crate) lens_auto_at: f64,
+}
+
+/// Disk Map choices kept between runs.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Prefs {
+    /// Before there were three views: rings or bubbles.
+    #[serde(default)]
+    rings: bool,
+    #[serde(default)]
+    view: Option<u8>,
+}
+
+fn prefs_path() -> PathBuf {
+    crate::kit::fs::data_path("diskmap-prefs.json")
+}
+
+pub(crate) fn save_prefs(app: &Lens) {
+    crate::kit::fs::save_json_later(&prefs_path(), &Prefs { rings: app.lens_view == 1, view: Some(app.lens_view) }, false);
 }
 
 impl Lens {
@@ -59,6 +108,24 @@ impl Lens {
             lens_order_at: 0.0,
             lens_rows: Default::default(),
             lens_hues: vec![],
+            lens_view: {
+                let p = crate::kit::fs::load_json::<Prefs>(&prefs_path());
+                p.view.unwrap_or(p.rings as u8).min(2)
+            },
+            lens_back: vec![],
+            lens_fwd: vec![],
+            lens_hover: None,
+            lens_menu: None,
+            lens_peek: false,
+            lens_pick: Default::default(),
+            lens_trashed: vec![],
+            lens_other: false,
+            lens_cursor: None,
+            lens_freed: 0,
+            lens_confirm: false,
+            lens_menu_act: None,
+            lens_dirty: None,
+            lens_auto_at: 0.0,
         }
     }
 }
@@ -99,8 +166,13 @@ impl Tool for Lens {
         }
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {
-        if view == "lens" || view == "sizes" {
+        if view == "lens" || view == "sizes" || view == "lens-rings" || view == "lens-files" {
             page::demo_tree(self);
+            self.lens_view = match view {
+                "lens-rings" => 1,
+                "lens-files" => 2,
+                _ => 0,
+            };
             if view == "sizes" {
                 return None;
             }
@@ -112,6 +184,11 @@ impl Tool for Lens {
             Some(View::Page)
         } else if view == "lens-live" {
             page::demo_live(self);
+            Some(View::Page)
+        } else if view == "lens-peek" {
+            page::demo_live(self);
+            self.lens_peek = true;
+            self.lens_path = self.lens_root.join("Projects");
             Some(View::Page)
         } else {
             None

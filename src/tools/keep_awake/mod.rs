@@ -42,6 +42,7 @@ impl KeepAwake {
             return KeepAwake { engine: Arc::new(Mutex::new(engine)), demo_now: Some(t) };
         }
         let engine: Shared = Arc::new(Mutex::new(Engine::new(Some(engine::data_dir()))));
+        url_routes(&engine, &env.ctx);
         let shared = engine.clone();
         let ctx = env.ctx.clone();
         std::thread::Builder::new()
@@ -65,6 +66,25 @@ impl KeepAwake {
         let on = e.manual_since.is_none();
         e.set_manual(on, t);
     }
+}
+
+/// `cmdmeow://awake/on`, `/off` and `/toggle` work the switch.
+fn url_routes(engine: &Shared, ctx: &egui::Context) {
+    let (engine, ctx) = (engine.clone(), ctx.clone());
+    crate::kit::url_scheme::route("awake", move |action| {
+        let t = now();
+        let mut e = engine.lock_ok();
+        let on = match action {
+            "on" => true,
+            "off" => false,
+            "toggle" => e.manual_since.is_none(),
+            _ => return false,
+        };
+        e.set_manual(on, t);
+        drop(e);
+        crate::kit::activity::repaint(&ctx);
+        true
+    });
 }
 
 /// The background loop: read Claude Code's logs and keep the assertions in

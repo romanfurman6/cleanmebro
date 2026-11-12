@@ -106,5 +106,7 @@ fn main() -> eframe::Result {
         .with_resizable(false)
         .with_has_shadow(true);
     let options = eframe::NativeOptions { viewport, ..Default::default() };
+    // before the run loop, so the link that launched the app is caught
+    kit::url_scheme::install();
     eframe::run_native("Cmd+Meow", options, Box::new(move |cc| Ok(Box::new(core::shell::App::new(cc, opts)))))
 }
