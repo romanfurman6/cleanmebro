@@ -198,8 +198,13 @@ impl Loaded {
     /// Whisper's raw segments (start s, end s, text) for 16 kHz mono `pcm`.
     /// `lang` is a code like "uk", None to detect it. With `p`, progress is
     /// in percent and its cancel flag stops the run. Blocks.
-    #[cfg(target_os = "macos")]
     pub fn run(&self, pcm: &[f32], lang: Option<&str>, p: Option<&std::sync::Arc<Progress>>) -> Result<Vec<(f64, f64, String)>, String> {
+        Ok(self.run_timed(pcm, lang, p)?.into_iter().map(|s| (s.start, s.end, s.text)).collect())
+    }
+
+    /// [`Loaded::run`] with each segment's words and their times.
+    #[cfg(target_os = "macos")]
+    pub fn run_timed(&self, pcm: &[f32], lang: Option<&str>, p: Option<&std::sync::Arc<Progress>>) -> Result<Vec<Segment>, String> {
         use whisper_rs::{FullParams, SamplingStrategy};
         let mut state = self.ctx.create_state().map_err(|e| e.to_string())?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
@@ -210,6 +215,7 @@ impl Loaded {
         params.set_print_special(false);
         params.set_print_timestamps(false);
         params.set_no_context(true);
+        params.set_token_timestamps(true);
         if let Some(p) = p {
             let pa = p.clone();
             params.set_progress_callback_safe(move |pct: i32| pa.done.store(pct.clamp(0, 100) as u64, Ordering::Relaxed));
@@ -228,12 +234,79 @@ impl Loaded {
         state.full(params, pcm).map_err(|e| if cancelled() { "Stopped".to_string() } else { format!("Transcribing failed: {e}") })?;
         Ok((0..state.full_n_segments())
             .filter_map(|i| state.get_segment(i))
-            .map(|s| (s.start_timestamp() as f64 / 100.0, s.end_timestamp() as f64 / 100.0, s.to_str_lossy().map(|t| t.to_string()).unwrap_or_default()))
+            .map(|s| {
+                let tokens: Vec<(f64, f64, Vec<u8>)> = (0..s.n_tokens())
+                    .filter_map(|j| s.get_token(j))
+                    .map(|t| {
+                        let d = t.token_data();
+                        (d.t0 as f64 / 100.0, d.t1 as f64 / 100.0, t.to_bytes().map(|b| b.to_vec()).unwrap_or_default())
+                    })
+                    .collect();
+                Segment {
+                    start: s.start_timestamp() as f64 / 100.0,
+                    end: s.end_timestamp() as f64 / 100.0,
+                    text: s.to_str_lossy().map(|t| t.to_string()).unwrap_or_default(),
+                    words: group_words(&tokens),
+                }
+            })
             .collect())
     }
 
     #[cfg(not(target_os = "macos"))]
-    pub fn run(&self, _pcm: &[f32], _lang: Option<&str>, _p: Option<&std::sync::Arc<Progress>>) -> Result<Vec<(f64, f64, String)>, String> {
+    pub fn run_timed(&self, _pcm: &[f32], _lang: Option<&str>, _p: Option<&std::sync::Arc<Progress>>) -> Result<Vec<Segment>, String> {
         Err("Speech to text needs macOS".into())
+    }
+}
+
+/// One stretch of speech whisper found, with its words (start s, end s, text).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Segment {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+    pub words: Vec<(f64, f64, String)>,
+}
+
+/// Whisper's tokens (start s, end s, raw bytes) → words. A token starting
+/// with a space starts a word; the others continue it. Bytes are joined
+/// before decoding, since tokens can split a letter (Cyrillic does).
+/// Special tokens ("[_BEG_]", "<|endoftext|>") are skipped.
+pub fn group_words(tokens: &[(f64, f64, Vec<u8>)]) -> Vec<(f64, f64, String)> {
+    let mut words: Vec<(f64, f64, Vec<u8>)> = Vec::new();
+    for (t0, t1, b) in tokens {
+        if b.starts_with(b"[_") || b.starts_with(b"<|") || b.is_empty() {
+            continue;
+        }
+        match words.last_mut() {
+            Some(w) if !b.starts_with(b" ") => {
+                w.1 = w.1.max(*t1);
+                w.2.extend_from_slice(b);
+            }
+            _ => words.push((*t0, *t1, b.clone())),
+        }
+    }
+    words
+        .into_iter()
+        .map(|(a, b, t)| (a, b, String::from_utf8_lossy(&t).trim().to_string()))
+        .filter(|w| !w.2.is_empty())
+        .collect()
+}
+
+#[cfg(test)]
+mod word_tests {
+    use super::group_words;
+
+    #[test]
+    fn tokens_join_into_words_even_mid_letter() {
+        let pryvit = "Привіт".as_bytes();
+        let toks = vec![
+            (0.0, 0.0, b"[_BEG_]".to_vec()),
+            (0.0, 0.3, [b" ", &pryvit[..3]].concat()),
+            (0.3, 0.6, pryvit[3..].to_vec()),
+            (0.7, 0.9, b" all".to_vec()),
+            (0.9, 1.0, b"!".to_vec()),
+            (1.0, 1.0, b"<|endoftext|>".to_vec()),
+        ];
+        assert_eq!(group_words(&toks), vec![(0.0, 0.6, "Привіт".to_string()), (0.7, 1.0, "all!".to_string())]);
     }
 }

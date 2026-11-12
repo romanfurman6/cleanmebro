@@ -454,6 +454,28 @@ impl Viewer {
         }
     }
 
+    /// Cut every pause and filler the transcript shows. One undo step.
+    pub fn cut_pauses(&mut self) {
+        let cuts = speech::pauses(&self.lines, self.edl.duration);
+        let before = self.edl.length();
+        let mut n = 0;
+        let ok = self.change(|e| {
+            for (a, b) in &cuts {
+                if e.cut(*a, *b) {
+                    n += 1;
+                }
+            }
+            n > 0
+        });
+        if ok {
+            let t = self.edl.playable(self.time()).unwrap_or(self.edl.start());
+            self.seek(t);
+            self.flash(format!("Cut {n} pause{} · {:.0} s shorter", if n == 1 { "" } else { "s" }, before - self.edl.length()));
+        } else {
+            self.flash("No pauses to cut");
+        }
+    }
+
     /// Keep only the selection.
     pub fn keep_selection(&mut self) {
         let Some((a, b)) = self.sel else { return };
