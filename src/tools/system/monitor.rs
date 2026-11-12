@@ -82,6 +82,9 @@ pub struct SpeedTest {
     pub down_mbps: Option<f64>,
     pub up_mbps: Option<f64>,
     pub latency_ms: Option<f64>,
+    pub jitter_ms: Option<f64>,
+    /// The provider and the test server's city, when the server says.
+    pub server: Option<super::speedtest::ServerInfo>,
     pub error: Option<String>,
     /// Set by [`SpeedTest::stop`]; the test thread checks it between reads.
     pub cancel: Arc<AtomicBool>,
@@ -136,6 +139,8 @@ pub struct Snapshot {
     /// Device alert and menu bar settings (changed from the Devices sheet).
     pub bt_prefs: devices::Prefs,
     pub speed: SpeedTest,
+    /// Busiest apps on the network, while the Network sheet shows.
+    pub apps: Vec<super::traffic::AppRate>,
 }
 
 impl Snapshot {
@@ -718,165 +723,7 @@ fn apply_ipconfig(w: &mut Wifi, out: &str) {
 
 // ---------------------------------------------------------------- speed test
 
-pub fn start_speed_test(shared: Shared, ctx: egui::Context) {
-    {
-        let mut s = shared.lock_ok();
-        if s.speed.running {
-            return;
-        }
-        s.speed = SpeedTest { running: true, phase: SpeedPhase::Ping, ..Default::default() };
-    }
-    let cancel = shared.lock_ok().speed.cancel.clone();
-    let stopped = move || cancel.load(Ordering::Relaxed);
-    std::thread::spawn(move || {
-        let set = |f: &dyn Fn(&mut SpeedTest)| {
-            let mut s = shared.lock_ok();
-            f(&mut s.speed);
-            ctx.request_repaint();
-        };
-        // a stop ends the test quietly with what it has so far
-        let fail = |msg: String| {
-            let quiet = stopped();
-            set(&|s| {
-                s.running = false;
-                s.phase = SpeedPhase::Done;
-                s.live_mbps = 0.0;
-                s.error = if quiet { None } else { Some(msg.clone()) };
-            })
-        };
-        let agent = ureq::Agent::new_with_config(
-            ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build(),
-        );
-        // latency: the first call opens the connection, the median of the
-        // next few is the round trip
-        let ping_url = format!("{}?bytes=0", m::SPEED_TEST_DOWN_URL);
-        if let Err(e) = agent.get(&ping_url).call() {
-            fail(format!("No internet connection ({e})"));
-            return;
-        }
-        let mut rtts = Vec::new();
-        for _ in 0..5 {
-            if stopped() {
-                fail(String::new());
-                return;
-            }
-            let t0 = Instant::now();
-            if agent.get(&ping_url).call().is_ok() {
-                rtts.push(t0.elapsed().as_secs_f64() * 1000.0);
-            }
-        }
-        rtts.sort_by(|a, b| a.total_cmp(b));
-        let latency = rtts.get(rtts.len() / 2).copied().unwrap_or(0.0);
-        set(&|s| {
-            s.latency_ms = Some(latency);
-            s.progress = 0.1;
-            s.phase = SpeedPhase::Download;
-        });
-        // download, reporting the rate as it goes
-        let t0 = Instant::now();
-        let url = format!("{}?bytes={}", m::SPEED_TEST_DOWN_URL, m::SPEED_TEST_BYTES);
-        let down = agent.get(&url).call().and_then(|r| {
-            let mut reader = r.into_body().into_reader();
-            let mut buf = vec![0u8; 64 * 1024];
-            let mut got = 0u64;
-            let mut last = Instant::now();
-            loop {
-                use std::io::Read;
-                if stopped() {
-                    return Err(ureq::Error::Io(std::io::Error::other("stopped")));
-                }
-                let n = reader.read(&mut buf).map_err(ureq::Error::Io)?;
-                if n == 0 {
-                    break;
-                }
-                got += n as u64;
-                if last.elapsed() >= Duration::from_millis(80) {
-                    last = Instant::now();
-                    let mbps = got as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6;
-                    let frac = got as f32 / m::SPEED_TEST_BYTES as f32;
-                    set(&|s| {
-                        s.live_mbps = mbps;
-                        s.progress = 0.1 + 0.5 * frac.min(1.0);
-                    });
-                }
-            }
-            Ok(got)
-        });
-        match down {
-            Ok(bytes) => {
-                let mbps = bytes as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6;
-                set(&|s| {
-                    s.down_mbps = Some(mbps);
-                    s.live_mbps = 0.0;
-                    s.progress = 0.6;
-                    s.phase = SpeedPhase::Upload;
-                });
-            }
-            Err(e) => {
-                fail(format!("Network error: {e}"));
-                return;
-            }
-        }
-        // upload, streamed from a counting reader so the gauge can follow
-        let total = m::SPEED_TEST_UPLOAD_BYTES;
-        let t0 = Instant::now();
-        let report = |sent: u64| {
-            let secs = t0.elapsed().as_secs_f64().max(1e-3);
-            let mbps = sent as f64 * 8.0 / secs / 1e6;
-            let frac = sent as f32 / total as f32;
-            set(&|s| {
-                s.live_mbps = mbps;
-                s.progress = 0.6 + 0.4 * frac.min(1.0);
-            });
-        };
-        let mut reader = Zeros { left: total, sent: 0, last: Instant::now(), report: &report, stopped: &stopped };
-        let up = agent
-            .post(m::SPEED_TEST_UP_URL)
-            .header("Content-Type", "application/octet-stream")
-            .header("Content-Length", &total.to_string())
-            .send(ureq::SendBody::from_reader(&mut reader));
-        let secs = t0.elapsed().as_secs_f64();
-        let quiet = stopped();
-        set(&|s| {
-            match &up {
-                Ok(_) => s.up_mbps = Some(total as f64 * 8.0 / secs / 1e6),
-                Err(_) if quiet => {}
-                Err(e) => s.error = Some(format!("Upload test failed: {e}")),
-            }
-            s.progress = 1.0;
-            s.live_mbps = 0.0;
-            s.phase = SpeedPhase::Done;
-            s.running = false;
-        });
-    });
-}
-
-/// `left` zero bytes for an upload body; calls `report` with the bytes
-/// handed out so far every ~80 ms.
-struct Zeros<'a> {
-    left: u64,
-    sent: u64,
-    last: Instant,
-    report: &'a dyn Fn(u64),
-    stopped: &'a dyn Fn() -> bool,
-}
-
-impl std::io::Read for Zeros<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if (self.stopped)() {
-            return Err(std::io::Error::other("stopped"));
-        }
-        let n = (buf.len() as u64).min(self.left).min(64 * 1024) as usize;
-        buf[..n].fill(0);
-        self.left -= n as u64;
-        self.sent += n as u64;
-        if self.last.elapsed() >= Duration::from_millis(80) {
-            self.last = Instant::now();
-            (self.report)(self.sent);
-        }
-        Ok(n)
-    }
-}
+pub use super::speedtest::start as start_speed_test;
 
 /// "Good for" activities, by download speed in Mbps.
 pub fn good_for(mbps: f64) -> Vec<&'static str> {
@@ -947,6 +794,10 @@ pub fn demo_snapshot() -> Snapshot {
         devices: devices::demo(),
         bt_prefs: devices::Prefs::default(),
         speed: SpeedTest::default(),
+        apps: [("Safari", 2_400_000.0, 61_000.0), ("Slack", 180_000.0, 24_000.0), ("Music", 96_000.0, 2_000.0)]
+            .iter()
+            .map(|(n, d, u)| super::traffic::AppRate { name: n.to_string(), down: *d, up: *u })
+            .collect(),
     }
 }
 

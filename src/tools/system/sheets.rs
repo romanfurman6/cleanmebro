@@ -82,6 +82,8 @@ struct Spec {
     legend: Vec<Legend>,
     speed: bool,
     facts: Vec<Fact>,
+    /// Busiest apps on the network (a card of their own, over the facts).
+    apps: Vec<Fact>,
     /// On/off rows under the cards: label, hint, state, what a click does.
     switches: Vec<(&'static str, String, bool, Action)>,
     buttons: Vec<(&'static str, u8, Action)>,
@@ -89,7 +91,7 @@ struct Spec {
 
 impl Spec {
     fn new(icon: Icon, chip: Color32, title: impl Into<String>, sub: impl Into<String>) -> Self {
-        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], switches: vec![], buttons: vec![] }
+        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], apps: vec![], switches: vec![], buttons: vec![] }
     }
 }
 
@@ -248,6 +250,9 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             sp.hero = Some((n, u, format!("up · {} down", human_rate(s.net_down))));
             sp.speed = true;
             let dash = |v: &str| if v.is_empty() { "—".to_string() } else { v.to_string() };
+            for a in &s.apps {
+                sp.apps.push(fact(&a.name, format!("{} ↓  {} ↑", human_rate(a.down), human_rate(a.up)), TEXT(), ""));
+            }
             sp.facts.push(fact("Security", dash(&s.wifi.security), TEXT(), ""));
             sp.facts.push(fact("Channel", dash(&s.wifi.channel), TEXT(), ""));
             sp.facts.push(fact("Signal / noise", dash(&s.wifi.signal), TEXT(), ""));
@@ -437,7 +442,10 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
         glass_card(p, lr, R_CARD, 0.0, false);
         p.text(lr.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "Speed test", bold(13.0), TEXT());
         if let Some(l) = sp_.latency_ms {
-            p.text(Pos2::new(lr.right() - 12.0, lr.top() + 13.0), Align2::RIGHT_TOP, format!("Latency {l:.0} ms"), font(12.0), TEXT_FAINT());
+            p.text(Pos2::new(lr.right() - 12.0, lr.top() + 13.0), Align2::RIGHT_TOP, match sp_.jitter_ms {
+                Some(j) => format!("Ping {l:.0} ms ±{j:.0}"),
+                None => format!("Ping {l:.0} ms"),
+            }, font(12.0), TEXT_FAINT());
         }
         for (k, (label, v)) in [("Download", sp_.down_mbps), ("Upload", sp_.up_mbps)].iter().enumerate() {
             let x = lr.left() + 12.0 + k as f32 * (w / 2.0);
@@ -464,19 +472,27 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
         y += 120.0 + 14.0;
     }
 
-    // facts card (measure first, then draw)
+    // busiest apps, then the facts
+    if !sp.apps.is_empty() {
+        y += facts_card(p, &sp.apps, x0, w, y) + 14.0;
+    }
     if !sp.facts.is_empty() {
-        let measure = |f: &Fact| if f.hint.is_empty() { 32.0 } else { 27.0 + p.layout(f.hint.clone(), font(12.0), TEXT_FAINT(), w - 24.0).size().y + 8.0 };
-        let h: f32 = 8.0 + sp.facts.iter().map(measure).sum::<f32>();
-        let fr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h));
-        glass_card(p, fr, R_CARD, 0.0, false);
-        let mut fy = y + 4.0;
-        for f in &sp.facts {
-            fy += fact_row(p, Rect::from_min_size(Pos2::new(x0, fy), Vec2::new(w, 40.0)), &f.label, &f.value, f.col, &f.hint);
-        }
-        y += h;
+        y += facts_card(p, &sp.facts, x0, w, y);
     }
     y - top
+}
+
+/// A card of fact rows (measured first, then drawn). Returns its height.
+fn facts_card(p: &egui::Painter, facts: &[Fact], x0: f32, w: f32, y: f32) -> f32 {
+    let measure = |f: &Fact| if f.hint.is_empty() { 32.0 } else { 27.0 + p.layout(f.hint.clone(), font(12.0), TEXT_FAINT(), w - 24.0).size().y + 8.0 };
+    let h: f32 = 8.0 + facts.iter().map(measure).sum::<f32>();
+    let fr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h));
+    glass_card(p, fr, R_CARD, 0.0, false);
+    let mut fy = y + 4.0;
+    for f in facts {
+        fy += fact_row(p, Rect::from_min_size(Pos2::new(x0, fy), Vec2::new(w, 40.0)), &f.label, &f.value, f.col, &f.hint);
+    }
+    h
 }
 
 const SWITCH_ROW_H: f32 = 48.0;
