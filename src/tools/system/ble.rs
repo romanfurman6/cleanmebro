@@ -41,6 +41,7 @@ pub fn extra() -> Vec<Extra> {
     {
         let mut v = mac::gatt();
         v.extend(mac::controllers());
+        v.extend(mac::classic());
         v
     }
     #[cfg(not(target_os = "macos"))]
@@ -414,5 +415,30 @@ mod mac {
             .collect();
         v.sort();
         Some(v)
+    }
+
+    /// Single-battery headphones over classic Bluetooth (AirPods Max, some
+    /// Beats): the system report and ioreg leave their charge out, but
+    /// IOBluetoothDevice knows it (`batteryPercentSingle`, 0 when unknown).
+    pub fn classic() -> Vec<Extra> {
+        if !has_usage_text() || authorization() != ALLOWED {
+            return Vec::new();
+        }
+        let list: Option<Retained<NSArray<AnyObject>>> = unsafe { msg_send![class!(IOBluetoothDevice), pairedDevices] };
+        let single = objc2::sel!(batteryPercentSingle);
+        list.iter()
+            .flat_map(|a| a.iter())
+            .filter(|d| unsafe { msg_send![&**d, isConnected] })
+            .filter(|d| unsafe { msg_send![&**d, respondsToSelector: single] })
+            .filter_map(|d| {
+                let pct: u8 = unsafe { msg_send![&*d, batteryPercentSingle] };
+                let name = string(unsafe { msg_send![&*d, name] })?;
+                static LOGGED: AtomicBool = AtomicBool::new(false);
+                if !LOGGED.swap(true, Ordering::Relaxed) {
+                    eprintln!("[bt] classic battery: {name} {pct}%");
+                }
+                (1..=100).contains(&pct).then_some(Extra { name, pct, charging: None })
+            })
+            .collect()
     }
 }
