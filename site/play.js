@@ -435,6 +435,31 @@
   new MutationObserver(paint).observe($('.main'), { subtree: true, attributes: true, attributeFilter: ['hidden'] });
   paint();
 
+  // One bar: eleven menu bar icons fly into the Cmd+Meow panel
+  (() => {
+    const bars = document.getElementById('bars'); if (!bars) return;
+    const n = document.getElementById('bars-n'), ap = $$('.mi2.ap', bars), tiles = $$('.mt', bars);
+    const reset = () => { bars.className = 'bars'; tiles.forEach(t => t.classList.remove('in')); n.textContent = '11 apps'; };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { bars.classList.add('b-one', 'b-open', 'b-gone'); tiles.forEach(t => t.classList.add('in')); n.textContent = '1 app'; return; }
+    let gen = 0, on = false;
+    const play = async id => {
+      reset(); await sleep(1800); if (id !== gen) return;
+      bars.classList.add('b-one'); await sleep(450); bars.classList.add('b-open'); await sleep(350); if (id !== gen) return;
+      ap.forEach((ic, i) => {
+        const t = tiles[i], a = ic.getBoundingClientRect(), b = $('.mti', t).getBoundingClientRect();
+        const f = ic.cloneNode(true); f.classList.add('fly'); f.style.left = a.left + 'px'; f.style.top = a.top + 'px'; document.body.append(f);
+        ic.style.opacity = 0;
+        const an = f.animate([{ transform: 'none' }, { transform: `translate(${b.left - a.left + 1}px, ${b.top - a.top + 2}px)` }], { duration: 650, delay: i * 70, easing: 'cubic-bezier(.5,0,.2,1)', fill: 'forwards' });
+        an.onfinish = () => { f.remove(); t.classList.add('in'); };
+      });
+      await sleep(650 + ap.length * 70 + 100); if (id !== gen) return;
+      ap.forEach(ic => { ic.style.opacity = ''; }); bars.classList.add('b-gone'); n.textContent = '1 app';
+      await sleep(3200); if (id !== gen) return;
+      bars.classList.remove('b-open'); await sleep(2200); if (id === gen) play(id);
+    };
+    new IntersectionObserver(es => { if (es[0].isIntersecting) { if (!on) { on = true; play(++gen); } } else { on = false; gen++; $$('.mi2.fly').forEach(f => f.remove()); ap.forEach(ic => { ic.style.opacity = ''; }); reset(); } }, { threshold: 0.5 }).observe(bars);
+  })();
+
   document.querySelectorAll('[data-go]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); window.cmShow && window.cmShow(a.dataset.go); app.scrollIntoView({ behavior: 'smooth', block: 'center' }); }));
 
 
