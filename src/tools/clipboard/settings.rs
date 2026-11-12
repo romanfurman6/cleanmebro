@@ -28,6 +28,10 @@ pub struct Settings {
     pub dedupe: bool,
     /// Also record passwords (concealed clips), in memory only.
     pub record_concealed: bool,
+    /// Also record API tokens, private keys and card numbers.
+    pub record_secrets: bool,
+    /// Record what arrives from an iPhone or another Mac (Universal Clipboard).
+    pub record_remote: bool,
     pub ignore: Vec<Ignored>,
 }
 
@@ -53,6 +57,8 @@ impl Default for Settings {
             keep_images: true,
             dedupe: true,
             record_concealed: false,
+            record_secrets: false,
+            record_remote: true,
             ignore: default_ignored(),
         }
     }
@@ -98,6 +104,8 @@ mod tests {
     fn defaults() {
         let s = Settings::default();
         assert!(!s.record_concealed, "passwords stay out unless turned on");
+        assert!(!s.record_secrets, "tokens stay out unless turned on");
+        assert!(s.record_remote);
         assert!(s.ignores("com.1password.1password"));
         assert!(!s.ignores(""));
     }

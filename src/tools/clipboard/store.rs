@@ -53,6 +53,10 @@ pub struct Clip {
     pub concealed: bool,
     /// Marked as temporary or auto-generated: never kept.
     pub transient: bool,
+    /// Came from another device over Universal Clipboard.
+    pub remote: bool,
+    /// Copied while the app in front had a password field focused (secure input).
+    pub secure: bool,
     /// The app in front when it was copied.
     pub app: String,
     pub bundle: String,
@@ -100,6 +104,11 @@ pub struct Entry {
 
 /// Characters of a clip a list row needs at most.
 const TITLE_MAX: usize = 300;
+/// Longer text isn't kept: one huge log would bloat the index, which is
+/// rewritten on every copy.
+pub const MAX_TEXT: usize = 1024 * 1024;
+/// Rich text (RTF, HTML) above this keeps only its plain text.
+pub const MAX_RICH: usize = 4 * 1024 * 1024;
 
 impl Entry {
     pub fn time(&self) -> chrono::DateTime<chrono::Local> {
@@ -174,18 +183,18 @@ impl Entry {
 
     /// Whether the search words all appear in the entry.
     #[cfg(test)]
+    #[cfg(test)]
     pub fn matches(&self, query: &str) -> bool {
-        let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
-        self.matches_words(&words)
+        let q = super::search::Query::new(query);
+        q.is_empty() || super::search::exact(&self.haystack(), &q)
     }
 
-    /// [`Entry::matches`] with the query already lowercased and split.
-    pub fn matches_words(&self, words: &[String]) -> bool {
-        if words.is_empty() {
-            return true;
-        }
-        let hay = format!("{} {}", self.text, self.app).to_lowercase();
-        words.iter().all(|w| hay.contains(w.as_str()))
+    /// What search looks in: the text and the app's name, folded.
+    pub fn haystack(&self) -> Vec<char> {
+        let mut h = super::search::fold(&self.text);
+        h.push(' ');
+        h.extend(super::search::fold(&self.app));
+        h
     }
 
     /// Facts for the detail view: "2 lines · 92 characters".
@@ -425,6 +434,9 @@ impl Store {
             }
             _ => {
                 let t = clip.text.clone().unwrap_or_default();
+                if t.len() > MAX_TEXT {
+                    return None;
+                }
                 let h = hash(&[b"text", t.as_bytes()]);
                 (t, h, 0, 0)
             }
@@ -460,11 +472,11 @@ impl Store {
                 bytes = png.len() as u64;
             }
             if kind != Kind::Image && kind != Kind::File {
-                if let Some(r) = &clip.rtf {
+                if let Some(r) = clip.rtf.as_ref().filter(|r| r.len() <= MAX_RICH) {
                     e.rtf = std::fs::write(self.blob(id, "rtf"), r).is_ok();
                     bytes += r.len() as u64;
                 }
-                if let Some(hh) = &clip.html {
+                if let Some(hh) = clip.html.as_ref().filter(|h| h.len() <= MAX_RICH) {
                     e.html = std::fs::write(self.blob(id, "html"), hh).is_ok();
                     bytes += hh.len() as u64;
                 }
@@ -563,7 +575,7 @@ mod tests {
     fn long_clips_stay_cheap_to_draw() {
         let mut st = Store::open(std::env::temp_dir().join(format!("cmb-clip-long-{}", std::process::id())));
         st.entries.clear();
-        let id = st.add(&text(&"lorem ipsum\n".repeat(100_000)), 0, LIM).unwrap();
+        let id = st.add(&text(&"lorem ipsum\n".repeat(80_000)), 0, LIM).unwrap();
         let e = st.get(id).unwrap();
         assert!(e.title().len() <= TITLE_MAX && e.title().starts_with("lorem ipsum lorem"));
         let l = e.light();
@@ -691,5 +703,25 @@ mod tests {
         assert_eq!(s.entries[0].title(), "github.com/romanfurman6");
         s.add(&text("line one\nline two"), 3, LIM);
         assert_eq!(s.entries[0].summary(), "2 lines · 17 characters");
+    }
+
+    #[test]
+    fn huge_text_is_not_kept() {
+        let mut s = Store::memory(std::env::temp_dir());
+        assert!(s.add(&text(&"a".repeat(MAX_TEXT + 1)), 1, LIM).is_none());
+        assert!(s.entries.is_empty());
+        assert!(s.add(&text(&"a".repeat(MAX_TEXT)), 2, LIM).is_some());
+    }
+
+    #[test]
+    fn huge_rich_text_keeps_plain_text() {
+        let dir = std::env::temp_dir().join(format!("cmb-clip-rich-{}", std::process::id()));
+        let mut s = Store::open(dir.clone());
+        let big = Clip { text: Some("hello".into()), html: Some(vec![b'x'; MAX_RICH + 1]), rtf: Some(b"{\\rtf1 hello}".to_vec()), ..Default::default() };
+        let id = s.add(&big, 1, LIM).unwrap();
+        assert!(s.html(id).is_none());
+        assert!(s.rtf(id).is_some());
+        assert_eq!(s.entries[0].text, "hello");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
