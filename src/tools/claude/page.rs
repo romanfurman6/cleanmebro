@@ -330,13 +330,11 @@ fn budget_card(ui: &mut Ui, r: Rect, cl: &UsageInfo) {
     let b = budget(cl);
     p.text(i.left_top(), Align2::LEFT_TOP, format!("{} budget", today.format("%B")), ty::title(), TEXT());
     // the budget field, top right
-    let fr = Rect::from_min_size(Pos2::new(i.right() - 84.0, i.top() - 4.0), Vec2::new(84.0, 22.0));
+    let fr = Rect::from_min_max(Pos2::new(i.right() - 84.0, i.top() + 8.0 - sp::CONTROL_H / 2.0), Pos2::new(i.right(), i.top() + 8.0 + sp::CONTROL_H / 2.0));
     let id = ui.scope_id().with(("ai-budget", cl.provider));
     let mut text = ui.ctx().data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| b.map(|v| format!("{v:.0}")).unwrap_or_default());
-    p.rect_filled(fr, R_SMALL, white(15));
-    p.text(Pos2::new(fr.left() + sp::S, fr.center().y), Align2::LEFT_CENTER, "$", ty::label(), TEXT_DIM());
-    let edit = egui::TextEdit::singleline(&mut text).hint_text("Budget").frame(egui::Frame::NONE).align(egui::Align2::RIGHT_CENTER).font(ty::label()).text_color(TEXT());
-    let resp = ui.put(fr.shrink2(Vec2::new(sp::S, 2.0)), edit);
+    let resp = text_input(ui, fr, id.with("field"), &mut text, "Budget", FieldStyle { right: true, ..Default::default() });
+    p.text(Pos2::new(fr.left() + 10.0, fr.center().y), Align2::LEFT_CENTER, "$", ty::body(), TEXT_DIM());
     if resp.changed() {
         ui.ctx().data_mut(|d| d.insert_temp(id, text.clone()));
     }

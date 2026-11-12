@@ -378,7 +378,7 @@ fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     let fy = body.top() + 12.0;
     let sr = Rect::from_min_size(Pos2::new(x0, fy - 1.0), Vec2::new(220.0, 28.0));
     let mut q = std::mem::take(&mut c.search);
-    search_field(ui, sr, &mut q, "Search", false, 13.0);
+    search_field(ui, sr, &mut q, "Search", false);
     c.search = q;
     let mut f = c.filter;
     chips(ui, &p, sr.right() + 12.0, fy, &mut f, "clip-filter");

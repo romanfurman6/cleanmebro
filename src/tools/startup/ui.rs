@@ -170,7 +170,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     }
     let sr = Rect::from_min_max(Pos2::new(tr.left() - 12.0 - 190.0, tr.top()), Pos2::new(tr.left() - 12.0, tr.bottom()));
     let mut q = std::mem::take(&mut s.search);
-    search_field(ui, sr, &mut q, "Search", false, 13.0);
+    search_field(ui, sr, &mut q, "Search", false);
     s.search = q;
 
     let body = Rect::from_min_max(Pos2::new(r.left() + 24.0, r.top() + PAGE_HEADER_H + 1.0), Pos2::new(r.right() - 24.0, r.bottom()));
