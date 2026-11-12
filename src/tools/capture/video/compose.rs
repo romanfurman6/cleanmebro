@@ -110,11 +110,18 @@ pub fn frame_count(secs: f64, fps: u32) -> u64 {
 }
 
 #[cfg(target_os = "macos")]
-pub use imp::{cursor_pictures, render};
+pub use imp::{cursor_pictures, render, still};
 
 #[cfg(not(target_os = "macos"))]
 pub fn cursor_pictures() -> Pictures {
     Pictures::default()
+}
+
+/// One frame of `job` at `t` (seconds of the raw video), RGBA, for a
+/// preview. Slow-ish: off the UI thread.
+#[cfg(not(target_os = "macos"))]
+pub fn still(_job: &Job, _t: f64) -> Result<image::RgbaImage, String> {
+    Err("Needs macOS".into())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -299,8 +306,9 @@ mod imp {
                 return Err("The recording is empty".into());
             }
             let videos: Vec<Retained<AVAssetTrack>> = asset.tracksWithMediaType(vm).iter().collect();
-            let screen = videos.iter().find(|t| t.isEnabled()).or(videos.first()).ok_or("No picture in the recording")?.clone();
-            let camera = if job.meta.recorded.camera { videos.iter().find(|t| !t.isEnabled()).cloned() } else { None };
+            // the recorder writes the screen first, the camera second
+            let screen = videos.first().ok_or("No picture in the recording")?.clone();
+            let camera = if job.meta.recorded.camera { videos.get(1).cloned() } else { None };
             let ns = screen.naturalSize();
             let src = ((ns.width.round() as u32).max(2), (ns.height.round() as u32).max(2));
 
@@ -483,6 +491,50 @@ mod imp {
             } else {
                 Err(writer.error().map(|e| ns_err(&e)).unwrap_or_else(|| "The video couldn't be finished".into()))
             }
+        }
+    }
+
+    /// One frame of `job` at `t`, RGBA.
+    #[allow(deprecated)]
+    pub fn still(job: &Job, t: f64) -> Result<image::RgbaImage, String> {
+        unsafe {
+            let asset = AVURLAsset::URLAssetWithURL_options(&NSURL::fileURLWithPath(&NSString::from_str(&job.raw.to_string_lossy())), None);
+            let vm = AVMediaTypeVideo.ok_or("no video")?;
+            let videos: Vec<Retained<AVAssetTrack>> = asset.tracksWithMediaType(vm).iter().collect();
+            let screen = videos.first().ok_or("No picture in the recording")?.clone();
+            let camera = if job.meta.recorded.camera { videos.get(1).cloned() } else { None };
+            let ns = screen.naturalSize();
+            let src = ((ns.width.round() as u32).max(2), (ns.height.round() as u32).max(2));
+            let comp = Compositor::new(job.meta.style, src, job.meta.ppp, job.meta.recorded.clone(), job.pictures.sprites(), job.lines.clone());
+            let (ow, oh) = comp.out_size();
+            let fmt = NSNumber::new_u32(BGRA);
+            let bgra = dict(&[("PixelFormatType", any(&*fmt))]);
+            // a frame or two before t, so a still screen still has one
+            let from = (t - 1.0).max(0.0);
+            let grab = |track: &AVAssetTrack| -> Option<(Vec<u8>, (u32, u32))> {
+                let reader = AVAssetReader::assetReaderWithAsset_error(&asset).ok()?;
+                reader.setTimeRange(objc2_core_media::CMTimeRange { start: cm(from), duration: cm(t - from + 0.05) });
+                let o = AVAssetReaderTrackOutput::assetReaderTrackOutputWithTrack_outputSettings(track, Some(&bgra));
+                if !reader.canAddOutput(&o) {
+                    return None;
+                }
+                reader.addOutput(&o);
+                if !reader.startReading() {
+                    return None;
+                }
+                let mut f = Frames { out: o, next: None, cur: Vec::new(), size: (0, 0), ended: false };
+                f.seek(t);
+                reader.cancelReading();
+                (!f.cur.is_empty()).then(|| (f.cur, f.size))
+            };
+            let (scr, size) = grab(&screen).ok_or("No frame there")?;
+            let cam = camera.as_ref().and_then(|c| grab(c));
+            let mut out = vec![0u8; (ow * oh * 4) as usize];
+            comp.draw(&FrameIn { screen: &scr, screen_size: size, camera: cam.as_ref().map(|(b, s)| (&b[..], *s)), t, source_t: t }, &mut out);
+            for p in out.chunks_exact_mut(4) {
+                p.swap(0, 2);
+            }
+            image::RgbaImage::from_raw(ow, oh, out).ok_or_else(|| "No frame".into())
         }
     }
 
