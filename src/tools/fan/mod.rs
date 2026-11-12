@@ -297,6 +297,9 @@ impl Tool for FanControl {
     fn widgets(&self) -> Vec<WidgetSpec> {
         vec![WidgetSpec { id: CARD, title: "Fans", about: "Fan speed and the hottest part, live.", sizes: UP_TO_MEDIUM, size: Size::S14, default_on: true }]
     }
+    fn widget_loading(&self, _widget: &str) -> bool {
+        !self.snap.lock_ok().loaded
+    }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let s = self.snap.lock_ok().clone();
         ui::widget(&s, size, ui, rect, cx);

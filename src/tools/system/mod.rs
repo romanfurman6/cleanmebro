@@ -72,6 +72,9 @@ impl Tool for System {
     fn widgets(&self) -> Vec<WidgetSpec> {
         WIDGETS.to_vec()
     }
+    fn widget_loading(&self, _widget: &str) -> bool {
+        !self.mon.lock_ok().ready
+    }
     fn widget_ui(&mut self, widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(&self.mon, widget, size, ui, rect, cx);
     }

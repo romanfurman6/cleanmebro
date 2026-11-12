@@ -250,3 +250,49 @@ pub fn empty_note(p: &egui::Painter, r: Rect, msg: &str) {
     dashed_rect(p, r, 8.0, white(40));
     text_fit(p, r.center(), Align2::CENTER_CENTER, msg, font(12.0), TEXT_FAINT(), r.width() - 16.0);
 }
+
+/// A widget whose data hasn't arrived yet: its glyph and name, and soft
+/// pulsing bars where the numbers will be. Keeps repainting while shown.
+pub fn loading(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, title: &str) -> Response {
+    let resp = card(ui, rect, id, false);
+    let p = ui.painter();
+    let t = ui.input(|i| i.time) as f32;
+    // a slow breath, 0..1
+    let pulse = 0.5 - 0.5 * (t * 3.0).cos();
+    let bar = |r: Rect, k: f32| {
+        let a = 10.0 + 14.0 * (0.5 - 0.5 * (t * 3.0 - k * 0.6).cos());
+        p.rect_filled(r, r.height() / 2.0, white(a as u8));
+    };
+    let inner = rect.shrink(PAD);
+    let glyph_col = with_alpha(lift(color), 0.55 + 0.35 * pulse);
+    if rect.height() <= 130.0 && rect.width() <= 130.0 {
+        // Small: glyph on top, name at the bottom, a bar for the value
+        icon(p, glyph, Rect::from_min_size(inner.min, Vec2::splat(18.0)), glyph_col);
+        text_fit(p, Pos2::new(inner.left(), rect.bottom() - 26.0), Align2::LEFT_BOTTOM, title, ty::title(), TEXT_DIM(), inner.width());
+        bar(Rect::from_min_size(Pos2::new(inner.left(), rect.bottom() - 20.0), Vec2::new(inner.width() * 0.6, 8.0)), 0.0);
+    } else if rect.height() <= 130.0 {
+        // Wide / Row: the ring's place on the left, name and a bar beside it
+        let (c, rr) = wide_ring(rect);
+        stroke_circle(p, c, rr - 3.0, Stroke::new(5.0, white((12.0 + 12.0 * pulse) as u8)));
+        icon(p, glyph, Rect::from_center_size(c, Vec2::splat(rr * 0.75)), glyph_col);
+        let x = c.x + rr + 12.0;
+        let w = rect.right() - PAD - x;
+        text_fit(p, Pos2::new(x, rect.center().y - 4.0), Align2::LEFT_BOTTOM, title, ty::caption(), ty::caption_color(), w);
+        bar(Rect::from_min_size(Pos2::new(x, rect.center().y + 2.0), Vec2::new(w * 0.75, 10.0)), 0.0);
+    } else {
+        // Medium and up: glyph and name, then bars down the card
+        icon(p, glyph, Rect::from_min_size(inner.min, Vec2::splat(18.0)), glyph_col);
+        let note = if inner.width() >= 220.0 { p.text(Pos2::new(inner.right(), inner.top() + 9.0), Align2::RIGHT_CENTER, "Loading…", ty::caption(), TEXT_FAINT()).width() + 10.0 } else { 0.0 };
+        text_fit(p, Pos2::new(inner.left() + 26.0, inner.top() + 9.0), Align2::LEFT_CENTER, title, ty::title(), TEXT_DIM(), inner.width() - 26.0 - note);
+        let mut y = inner.top() + 32.0;
+        let widths = [0.7, 0.45, 0.85, 0.55, 0.65, 0.4];
+        let mut k = 0;
+        while y + 10.0 <= inner.bottom() + 0.5 && k < widths.len() {
+            bar(Rect::from_min_size(Pos2::new(inner.left(), y), Vec2::new(inner.width() * widths[k], 10.0)), k as f32);
+            y += 22.0;
+            k += 1;
+        }
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+    resp
+}

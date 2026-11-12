@@ -87,7 +87,16 @@ pub fn draw_at(app: &mut App, ui: &mut Ui, owner: Option<usize>, id: &'static st
                 child.disable();
                 child.multiply_opacity(0.45);
             }
-            app.tools[i].widget_ui(id, size, &mut child, r, cx);
+            // screenshots only: CMB_DEMO_LOADING shows every tool that can load as loading
+            let demo = std::env::var_os("CMB_DEMO_LOADING").is_some() && matches!(app.tools[i].id(), "system" | "startup" | "fan");
+            if lock.is_none() && (demo || app.tools[i].widget_loading(id)) {
+                let b = app.tools[i].badge();
+                let title = app.tools[i].widgets().into_iter().find(|w| w.id == id).map(|w| w.title).unwrap_or_else(|| app.tools[i].name());
+                let lid = child.scope_id().with("loading");
+                crate::kit::tile::loading(&mut child, r, lid, b.icon, b.color, title);
+            } else {
+                app.tools[i].widget_ui(id, size, &mut child, r, cx);
+            }
             if let Some(perm) = lock {
                 super::gate::widget_cover(app, ui, r, perm, ui.scope_id().with(salt));
             }
