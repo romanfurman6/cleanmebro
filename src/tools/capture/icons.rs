@@ -14,6 +14,9 @@ pub enum Ico {
     Select,
     Arrow,
     Rect,
+    Ellipse,
+    Pen,
+    Frame,
     Text,
     Highlight,
     Blur,
@@ -57,6 +60,9 @@ fn symbol(i: Ico) -> &'static str {
         Ico::Select => "cursorarrow",
         Ico::Arrow => "arrow.up.right",
         Ico::Rect => "rectangle",
+        Ico::Ellipse => "circle",
+        Ico::Pen => "scribble",
+        Ico::Frame => "photo.artframe",
         Ico::Text => "textformat",
         Ico::Highlight => "highlighter",
         Ico::Blur => "square.grid.3x3",
@@ -143,6 +149,12 @@ pub fn draw(p: &Painter, i: Ico, rect: Rect, color: Color32) {
             line(&[(10.0, 5.0), (19.0, 5.0), (19.0, 14.0)]);
         }
         Ico::Rect => boxr(4.0, 6.0, 20.0, 18.0),
+        Ico::Ellipse => circle(12.0, 12.0, 8.0),
+        Ico::Pen => line(&[(3.0, 17.0), (6.0, 11.0), (9.0, 15.0), (13.0, 7.0), (16.0, 14.0), (21.0, 6.0)]),
+        Ico::Frame => {
+            boxr(3.0, 3.0, 21.0, 21.0);
+            boxr(7.5, 7.5, 16.5, 16.5);
+        }
         Ico::Text => {
             line(&[(5.0, 6.0), (5.0, 4.0), (19.0, 4.0), (19.0, 6.0)]);
             line(&[(12.0, 4.0), (12.0, 20.0)]);

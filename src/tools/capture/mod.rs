@@ -633,7 +633,7 @@ impl Capture {
         }
         let title = self.title_for(id);
         let s = &self.settings;
-        let ed = Editor::new(id, title, img, self.ppp, s.blur, s.cover, s.keep_breaks);
+        let ed = Editor::new(id, title, img, self.ppp, s.blur, s.cover, s.keep_breaks, s.frame);
         mac::warm_ocr();
         self.editor = Some(windows::EditorWin::new(ed));
     }
@@ -961,7 +961,7 @@ impl Tool for Capture {
                 Some(View::Page)
             }
             "capture-editor" => {
-                let mut ed = Editor::new(None, "Capture from 5:41 pm".into(), grab::sample(1588, 892), 2.0, self.settings.blur, self.settings.cover, true);
+                let mut ed = Editor::new(None, "Capture from 5:41 pm".into(), grab::sample(1588, 892), 2.0, self.settings.blur, self.settings.cover, true, self.settings.frame);
                 ed.demo_marks();
                 // screenshots only: CMB_DEMO_EDITOR_TOOL picks the tool shown
                 ed.tool = match std::env::var("CMB_DEMO_EDITOR_TOOL").unwrap_or_default().as_str() {
@@ -997,7 +997,7 @@ mod tests {
         let mut c = demo();
         let before = c.store.shots.len();
         let first = c.store.shots[0].id;
-        let mut ed = Editor::new(Some(first), "t".into(), grab::sample(200, 100), 2.0, c.settings.blur, c.settings.cover, true);
+        let mut ed = Editor::new(Some(first), "t".into(), grab::sample(200, 100), 2.0, c.settings.blur, c.settings.cover, true, c.settings.frame);
         assert_eq!(c.commit_edit(&mut ed), Some(first), "no changes, nothing new");
         ed.edited = true;
         let id = c.commit_edit(&mut ed).expect("kept");

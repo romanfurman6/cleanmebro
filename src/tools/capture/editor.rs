@@ -6,7 +6,7 @@
 
 use super::icons::{self, Ico};
 use super::mac::{self, TextLine};
-use super::render::{self, Doc, Mark, Rgba8};
+use super::render::{self, Doc, Frame, Mark, Ratio, Rgba8};
 use super::settings::{BlurStyle, Cover};
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -19,6 +19,8 @@ pub enum Tool {
     Select,
     Arrow,
     Rect,
+    Ellipse,
+    Pen,
     Text,
     Highlight,
     Blur,
@@ -28,17 +30,21 @@ pub enum Tool {
     CopyText,
     Picker,
     Ruler,
+    Frame,
 }
 
 impl Tool {
-    const DRAW: [Tool; 10] = [Tool::Select, Tool::Arrow, Tool::Rect, Tool::Text, Tool::Highlight, Tool::Blur, Tool::Eraser, Tool::Steps, Tool::Crop, Tool::CopyText];
+    const DRAW: [Tool; 12] = [Tool::Select, Tool::Arrow, Tool::Rect, Tool::Ellipse, Tool::Pen, Tool::Text, Tool::Highlight, Tool::Blur, Tool::Eraser, Tool::Steps, Tool::Crop, Tool::CopyText];
     const MEASURE: [Tool; 2] = [Tool::Picker, Tool::Ruler];
+    const LOOK: [Tool; 1] = [Tool::Frame];
 
     fn icon(self) -> Ico {
         match self {
             Tool::Select => Ico::Select,
             Tool::Arrow => Ico::Arrow,
             Tool::Rect => Ico::Rect,
+            Tool::Ellipse => Ico::Ellipse,
+            Tool::Pen => Ico::Pen,
             Tool::Text => Ico::Text,
             Tool::Highlight => Ico::Highlight,
             Tool::Blur => Ico::Blur,
@@ -48,6 +54,7 @@ impl Tool {
             Tool::CopyText => Ico::ScanText,
             Tool::Picker => Ico::Eyedropper,
             Tool::Ruler => Ico::Ruler,
+            Tool::Frame => Ico::Frame,
         }
     }
 
@@ -57,6 +64,8 @@ impl Tool {
             Tool::Select => "Select and move (V)",
             Tool::Arrow => "Arrow (A)",
             Tool::Rect => "Box (R)",
+            Tool::Ellipse => "Circle (L)",
+            Tool::Pen => "Pen (P)",
             Tool::Text => "Label (T)",
             Tool::Highlight => "Highlighter (H)",
             Tool::Blur => "Blur (B)",
@@ -66,6 +75,7 @@ impl Tool {
             Tool::CopyText => "Copy text: drag a box (O)",
             Tool::Picker => "Pick a color (I)",
             Tool::Ruler => "Ruler (M)",
+            Tool::Frame => "Frame (F)",
         }
     }
 
@@ -74,6 +84,8 @@ impl Tool {
             Tool::Select => Key::V,
             Tool::Arrow => Key::A,
             Tool::Rect => Key::R,
+            Tool::Ellipse => Key::L,
+            Tool::Pen => Key::P,
             Tool::Text => Key::T,
             Tool::Highlight => Key::H,
             Tool::Blur => Key::B,
@@ -83,12 +95,13 @@ impl Tool {
             Tool::CopyText => Key::O,
             Tool::Picker => Key::I,
             Tool::Ruler => Key::M,
+            Tool::Frame => Key::F,
         }
     }
 
     /// Tools that drag out a box or a line.
     fn drags(self) -> bool {
-        matches!(self, Tool::Arrow | Tool::Rect | Tool::Highlight | Tool::Blur | Tool::Eraser | Tool::Crop | Tool::CopyText)
+        matches!(self, Tool::Arrow | Tool::Rect | Tool::Ellipse | Tool::Highlight | Tool::Blur | Tool::Eraser | Tool::Crop | Tool::CopyText)
     }
 }
 
@@ -111,13 +124,29 @@ const UNDO_GAP: f32 = 12.0;
 const RIGHT_ICONS_W: f32 = 3.0 * 34.0 + 2.0 * 8.0;
 const SUB_BAR_H: f32 = 36.0;
 
-/// Width of the two tool plates (10 drawing tools, 2 measuring tools).
+/// Width of the three tool plates (drawing, measuring, frame).
 const fn tools_w(button: f32, gap: f32) -> f32 {
-    (10.0 * button + 4.0) + gap + (2.0 * button + 4.0)
+    (Tool::DRAW.len() as f32 * button + 4.0) + gap + (Tool::MEASURE.len() as f32 * button + 4.0) + gap + (Tool::LOOK.len() as f32 * button + 4.0)
 }
 
-/// Narrowest editor window: tight tool buttons and icon-only right buttons.
-pub const EDITOR_MIN_WIDTH: f32 = BAR_PAD + tools_w(28.0, 6.0) + BAR_GAP + UNDO_W + UNDO_GAP + RIGHT_ICONS_W + BAR_PAD;
+/// The Frame tool's sub bar: name, backdrops, padding, Round, Shadow, ratio.
+const FRAME_SWATCH: f32 = 26.0;
+const FRAME_PAD_W: f32 = 96.0;
+const FRAME_CHIP_W: f32 = 70.0;
+const FRAME_RATIO_W: f32 = 176.0;
+const FRAME_BAR_W: f32 = BAR_PAD + 56.0 + (render::BACKDROPS.len() + 1) as f32 * FRAME_SWATCH + 14.0 + 56.0 + FRAME_PAD_W + 16.0 + 2.0 * FRAME_CHIP_W + 8.0 + 16.0 + FRAME_RATIO_W + BAR_PAD;
+
+const fn max_f(a: f32, b: f32) -> f32 {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+/// Narrowest editor window: tight tool buttons and icon-only right buttons,
+/// and room for the Frame options.
+pub const EDITOR_MIN_WIDTH: f32 = max_f(BAR_PAD + tools_w(28.0, 6.0) + BAR_GAP + UNDO_W + UNDO_GAP + RIGHT_ICONS_W + BAR_PAD, FRAME_BAR_W);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BarLayout {
@@ -200,6 +229,12 @@ pub struct Editor {
     px_per_pt: f32,
     drag: Option<(Pos2, Pos2)>,
     moving: Option<(usize, Pos2, Mark)>,
+    /// A handle being dragged: mark, handle, the mark before.
+    resizing: Option<(usize, usize, Mark)>,
+    /// The freehand line being drawn.
+    pen: Option<Vec<Pos2>>,
+    /// The frame Frame turns on with; the last one picked.
+    pub frame_style: Frame,
     selected: Option<usize>,
     text: Option<(Pos2, String)>,
     tex: Option<egui::TextureHandle>,
@@ -217,13 +252,14 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new(shot: Option<u64>, title: String, base: RgbaImage, px_per_pt: f32, blur: BlurStyle, cover: Cover, keep_breaks: bool) -> Editor {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(shot: Option<u64>, title: String, base: RgbaImage, px_per_pt: f32, blur: BlurStyle, cover: Cover, keep_breaks: bool, frame_style: Frame) -> Editor {
         let (ocr_tx, ocr_rx) = channel();
         Editor {
             shot,
             title,
             base,
-            doc: Doc::default(),
+            doc: Doc { ppp: px_per_pt.max(1.0), ..Doc::default() },
             undo: Vec::new(),
             redo: Vec::new(),
             tool: Tool::Crop,
@@ -235,6 +271,9 @@ impl Editor {
             px_per_pt: px_per_pt.max(1.0),
             drag: None,
             moving: None,
+            resizing: None,
+            pen: None,
+            frame_style,
             selected: None,
             text: None,
             tex: None,
@@ -414,6 +453,7 @@ impl Editor {
         let mut tool = self.tool;
         group(ui, &mut x, &Tool::DRAW, &mut tool);
         group(ui, &mut x, &Tool::MEASURE, &mut tool);
+        group(ui, &mut x, &Tool::LOOK, &mut tool);
         if tool != self.tool {
             self.set_tool(tool);
         }
@@ -461,6 +501,8 @@ impl Editor {
             Tool::Select => "Select",
             Tool::Arrow => "Arrow",
             Tool::Rect => "Box",
+            Tool::Ellipse => "Circle",
+            Tool::Pen => "Pen",
             Tool::Text => "Label",
             Tool::Highlight => "Highlighter",
             Tool::Blur => "Blur",
@@ -470,10 +512,15 @@ impl Editor {
             Tool::CopyText => "Copy text",
             Tool::Picker => "Pick a color",
             Tool::Ruler => "Ruler",
+            Tool::Frame => "Frame",
         };
         x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, name, bold(12.0), TEXT()).right() + 16.0;
         let hint: String = match self.tool {
-            Tool::Arrow | Tool::Rect | Tool::Highlight | Tool::Steps | Tool::Text => {
+            Tool::Frame => {
+                self.frame_options(ui, x, y);
+                String::new()
+            }
+            Tool::Arrow | Tool::Rect | Tool::Ellipse | Tool::Pen | Tool::Highlight | Tool::Steps | Tool::Text => {
                 for (k, (cname, c)) in COLORS.iter().enumerate() {
                     let r = Rect::from_center_size(Pos2::new(x + 9.0, y), Vec2::splat(18.0));
                     let resp = ui.interact(r.expand(3.0), ui.scope_id().with(("color", k)), Sense::click()).on_hover_text(*cname);
@@ -546,12 +593,99 @@ impl Editor {
         }
     }
 
+    /// Backdrops (the first swatch turns the frame off), padding, Round,
+    /// Shadow and ratio. Any pick turns the frame on.
+    fn frame_options(&mut self, ui: &mut Ui, mut x: f32, y: f32) {
+        let p = ui.painter().clone();
+        let cur = self.doc.frame;
+        let mut next = cur;
+        let mut style = cur.unwrap_or(self.frame_style);
+        for k in 0..=render::BACKDROPS.len() {
+            let r = Rect::from_center_size(Pos2::new(x + FRAME_SWATCH / 2.0 - 4.0, y), Vec2::splat(18.0));
+            let name = if k == 0 { "None" } else { render::BACKDROPS[k - 1].0 };
+            let resp = ui.interact(r.expand(3.0), ui.scope_id().with(("bg", k)), Sense::click()).on_hover_text(name);
+            let on = match cur {
+                None => k == 0,
+                Some(f) => f.bg + 1 == k,
+            };
+            if on {
+                crate::kit::glass::stroke_circle(&p, r.center(), 11.5, Stroke::new(2.0, BLUE()));
+            }
+            if k == 0 {
+                crate::kit::glass::stroke_circle(&p, r.center(), 8.5, Stroke::new(1.5, TEXT_SOFT()));
+                let d = Vec2::splat(8.5 * std::f32::consts::FRAC_1_SQRT_2);
+                p.line_segment([r.center() - d, r.center() + d], Stroke::new(1.5, TEXT_SOFT()));
+            } else {
+                let (_, c0, c1) = render::BACKDROPS[k - 1];
+                gradient_disc(&p, r.center(), 9.0, c32(c0), c32(c1));
+                crate::kit::glass::stroke_circle(&p, r.center(), 9.0, Stroke::new(1.0, white(64)));
+            }
+            if resp.clicked() {
+                if k == 0 {
+                    next = None;
+                } else {
+                    style.bg = k - 1;
+                    next = Some(style);
+                }
+            }
+            x += FRAME_SWATCH;
+        }
+        p.line_segment([Pos2::new(x + 2.0, y - 9.0), Pos2::new(x + 2.0, y + 9.0)], Stroke::new(1.0, white(26)));
+        x += 14.0;
+        x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, "Padding", font(12.0), TEXT_DIM()).right() + 8.0;
+        let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(FRAME_PAD_W, 26.0));
+        if let Some(i) = segmented(ui, r, ui.scope_id().with("pad"), &["S", "M", "L"], style.pad) {
+            style.pad = i;
+            next = Some(style);
+        }
+        x = r.right() + 16.0;
+        for (k, (label, on)) in [("Round", style.round), ("Shadow", style.shadow)].into_iter().enumerate() {
+            let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(FRAME_CHIP_W, 26.0));
+            if chip(ui, r, label, on && cur.is_some()).clicked() {
+                if k == 0 {
+                    style.round = !on || cur.is_none();
+                } else {
+                    style.shadow = !on || cur.is_none();
+                }
+                next = Some(style);
+            }
+            x = r.right() + 8.0;
+        }
+        x += 8.0;
+        let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(FRAME_RATIO_W, 26.0));
+        let labels: Vec<&str> = Ratio::ALL.iter().map(|r| r.label()).collect();
+        let at = Ratio::ALL.iter().position(|r| *r == style.ratio).unwrap_or(0);
+        if let Some(i) = segmented(ui, r, ui.scope_id().with("ratio"), &labels, at) {
+            style.ratio = Ratio::ALL[i];
+            next = Some(style);
+        }
+        if next != cur {
+            self.set_frame(next);
+        }
+    }
+
+    fn set_frame(&mut self, f: Option<Frame>) {
+        if f == self.doc.frame {
+            return;
+        }
+        self.push_undo();
+        self.doc.frame = f;
+        if let Some(f) = f {
+            self.frame_style = f;
+        }
+    }
+
     fn set_tool(&mut self, t: Tool) {
         self.commit_text();
         self.tool = t;
         self.selected = None;
         self.drag = None;
+        self.pen = None;
         self.crop_pending = None;
+        // picking Frame shows it at once, with the last style
+        if t == Tool::Frame && self.doc.frame.is_none() {
+            self.set_frame(Some(self.frame_style));
+        }
     }
 
     /// Crop to the picked area (Enter).
@@ -568,7 +702,7 @@ impl Editor {
         let c = self.color();
         let mut m = self.doc.marks[i].clone();
         match &mut m {
-            Mark::Arrow { color, .. } | Mark::Rect { color, .. } | Mark::Text { color, .. } | Mark::Highlight { color, .. } | Mark::Step { color, .. } => *color = c,
+            Mark::Arrow { color, .. } | Mark::Rect { color, .. } | Mark::Ellipse { color, .. } | Mark::Pen { color, .. } | Mark::Text { color, .. } | Mark::Highlight { color, .. } | Mark::Step { color, .. } => *color = c,
             _ => return,
         }
         self.push_undo();
@@ -594,25 +728,56 @@ impl Editor {
         let view = self.view();
         let pad = 24.0;
         let avail = area.shrink(pad);
+        // the frame shows around the picture, except while cropping
+        let frame = self.doc.frame.filter(|_| self.tool != Tool::Crop);
+        let geom = frame.map(|f| render::frame_geom(view.width(), view.height(), &f, self.px_per_pt));
+        let outer = geom.map(|g| g.size).unwrap_or(view.size());
         // fit, but never larger than true size (px_per_pt image pixels per point)
-        let scale = (avail.width() / view.width()).min(avail.height() / view.height()).min(1.0 / self.px_per_pt).max(0.01);
-        let shown = Rect::from_center_size(avail.center(), view.size() * scale);
+        let scale = (avail.width() / outer.x).min(avail.height() / outer.y).min(1.0 / self.px_per_pt).max(0.01);
+        let outer_r = Rect::from_center_size(avail.center(), outer * scale);
+        let shown = match geom {
+            Some(g) => Rect::from_min_size(outer_r.min + g.inner.min.to_vec2() * scale, view.size() * scale),
+            None => outer_r,
+        };
         let to_screen = |q: Pos2| shown.min + (q - view.min) * scale;
         let to_img = |s: Pos2| view.min + (s - shown.min) / scale;
         let p = ui.painter_at(area);
-        p.rect_filled(shown.expand(1.0), 4.0, Color32::from_black_alpha(90));
+        let radius = geom.map(|g| g.radius * scale).unwrap_or(0.0);
+        match (frame, geom) {
+            (Some(f), Some(g)) => {
+                let (_, c0, c1) = render::BACKDROPS[f.bg.min(render::BACKDROPS.len() - 1)];
+                gradient_rect(&p, outer_r, c32(c0), c32(c1));
+                if let Some((blur, dy)) = g.shadow {
+                    let sh = egui::epaint::Shadow { offset: [0, (dy * scale).round().min(127.0) as i8], blur: (blur * scale).round().min(255.0) as u8, spread: 0, color: Color32::from_black_alpha(110) };
+                    p.add(sh.as_shape(shown, radius));
+                }
+            }
+            _ => {
+                p.rect_filled(shown.expand(1.0), 4.0, Color32::from_black_alpha(90));
+            }
+        }
         if let Some(t) = &self.tex {
             let (w, h) = (self.base.width() as f32, self.base.height() as f32);
             let uv = Rect::from_min_max(Pos2::new(view.min.x / w, view.min.y / h), Pos2::new(view.max.x / w, view.max.y / h));
-            p.image(t.id(), shown, uv, Color32::WHITE);
+            p.add(egui::epaint::RectShape::filled(shown, radius, Color32::WHITE).with_texture(t.id(), uv));
         }
-        // shapes
+        // shapes; with a frame they stop at the picture's edge, as in the export
+        let mp = if geom.is_some() { p.with_clip_rect(shown.intersect(area)) } else { p.clone() };
         for (i, m) in self.doc.marks.iter().enumerate() {
-            draw_mark(&p, m, &to_screen, scale);
+            draw_mark(&mp, m, &to_screen, scale);
             if self.selected == Some(i) {
                 let b = m.bounds();
-                p.rect_stroke(Rect::from_min_max(to_screen(b.min), to_screen(b.max)).expand(3.0), 3.0, Stroke::new(1.5, ACCENT()), StrokeKind::Outside);
+                p.rect_stroke(Rect::from_min_max(to_screen(b.min), to_screen(b.max)).expand(3.0), 3.0, Stroke::new(1.0, with_alpha(ACCENT(), 0.6)), StrokeKind::Outside);
+                for h in m.handles() {
+                    let hr = Rect::from_center_size(to_screen(h), Vec2::splat(8.0));
+                    p.rect_filled(hr, 2.0, Color32::WHITE);
+                    p.rect_stroke(hr, 2.0, Stroke::new(1.5, ACCENT()), StrokeKind::Middle);
+                }
             }
+        }
+        if let Some(pts) = &self.pen {
+            let m = Mark::Pen { pts: pts.clone(), color: self.color(), width: self.width_px() };
+            draw_mark(&mp, &m, &to_screen, scale);
         }
         if self.tool == Tool::Crop && self.drag.is_none() {
             if let Some(c) = self.crop_pending {
@@ -673,6 +838,28 @@ impl Editor {
         }
         match self.tool {
             Tool::Select => self.select_tool(&resp, &at_img, ui.ctx(), scale),
+            Tool::Pen => {
+                if resp.drag_started() {
+                    if let Some(s) = resp.interact_pointer_pos() {
+                        self.pen = Some(vec![at_img(s)]);
+                    }
+                }
+                if let (Some(pts), Some(s)) = (self.pen.as_mut(), resp.interact_pointer_pos()) {
+                    let q = at_img(s);
+                    // a point every 2 screen points keeps the line smooth and light
+                    if resp.dragged() && pts.last().is_none_or(|l| (q - *l).length() * scale >= 2.0) {
+                        pts.push(q);
+                    }
+                }
+                if resp.drag_stopped() {
+                    if let Some(pts) = self.pen.take() {
+                        self.add(Mark::Pen { pts, color: self.color(), width: self.width_px() });
+                    }
+                }
+                if hover.is_some() {
+                    ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+                }
+            }
             Tool::Text => {
                 if resp.clicked() {
                     if let Some(s) = resp.interact_pointer_pos() {
@@ -796,6 +983,7 @@ impl Editor {
         Some(match self.tool {
             Tool::Arrow => Mark::Arrow { a, b, color: c, width: self.width_px() },
             Tool::Rect => Mark::Rect { r, color: c, width: self.width_px() },
+            Tool::Ellipse => Mark::Ellipse { r, color: c, width: self.width_px() },
             Tool::Highlight => Mark::Highlight { r, color: c },
             _ => return None,
         })
@@ -808,7 +996,7 @@ impl Editor {
             return;
         }
         match self.tool {
-            Tool::Arrow | Tool::Rect | Tool::Highlight => {
+            Tool::Arrow | Tool::Rect | Tool::Ellipse | Tool::Highlight => {
                 if let Some(m) = self.mark_from_drag(a, b) {
                     self.add(m);
                 }
@@ -876,8 +1064,49 @@ impl Editor {
         }
     }
 
-    fn select_tool(&mut self, resp: &egui::Response, at_img: &dyn Fn(Pos2) -> Pos2, _ctx: &egui::Context, scale: f32) {
+    /// The selected mark's handle under `q` (image px), if any.
+    fn handle_at(&self, q: Pos2, scale: f32) -> Option<(usize, usize)> {
+        let i = self.selected?;
+        let k = self.doc.marks.get(i)?.handles().iter().position(|h| (*h - q).length() * scale <= 7.0)?;
+        Some((i, k))
+    }
+
+    fn select_tool(&mut self, resp: &egui::Response, at_img: &dyn Fn(Pos2) -> Pos2, ctx: &egui::Context, scale: f32) {
         let slack = 6.0 / scale;
+        // handles first: they sit on or outside the mark's edge
+        if let Some(h) = resp.hover_pos() {
+            if let Some((i, k)) = self.resizing.as_ref().map(|r| (r.0, r.1)).or_else(|| self.handle_at(at_img(h), scale)) {
+                let corner = matches!(self.doc.marks[i], Mark::Arrow { .. });
+                ctx.set_cursor_icon(match (corner, k) {
+                    (true, _) => egui::CursorIcon::Crosshair,
+                    (_, 0 | 4) => egui::CursorIcon::ResizeNwSe,
+                    (_, 2 | 6) => egui::CursorIcon::ResizeNeSw,
+                    (_, 1 | 5) => egui::CursorIcon::ResizeVertical,
+                    _ => egui::CursorIcon::ResizeHorizontal,
+                });
+            }
+        }
+        if resp.drag_started() {
+            if let Some((i, k)) = resp.interact_pointer_pos().and_then(|s| self.handle_at(at_img(s), scale)) {
+                self.resizing = Some((i, k, self.doc.marks[i].clone()));
+            }
+        }
+        if let Some((i, k, orig)) = self.resizing.clone() {
+            if let (true, Some(s)) = (resp.dragged(), resp.interact_pointer_pos()) {
+                let mut m = orig.clone();
+                m.drag_handle(k, at_img(s));
+                self.doc.marks[i] = m;
+            }
+            if resp.drag_stopped() {
+                self.resizing = None;
+                if self.doc.marks[i] != orig {
+                    let resized = std::mem::replace(&mut self.doc.marks[i], orig);
+                    self.push_undo();
+                    self.doc.marks[i] = resized;
+                }
+            }
+            return;
+        }
         if resp.drag_started() || resp.clicked() {
             if let Some(s) = resp.interact_pointer_pos() {
                 let q = at_img(s);
@@ -984,6 +1213,22 @@ fn draw_mark(p: &egui::Painter, m: &Mark, to_screen: &dyn Fn(Pos2) -> Pos2, scal
             let sr = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
             p.rect_stroke(sr, width * 1.5 * scale, Stroke::new(width * scale, c32(*color)), StrokeKind::Middle);
         }
+        Mark::Ellipse { r, color, width } => {
+            let sr = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
+            p.add(egui::Shape::ellipse_stroke(sr.center(), sr.size() / 2.0, Stroke::new(width * scale, c32(*color))));
+        }
+        Mark::Pen { pts, color, width } => {
+            let w = width * scale;
+            let sp: Vec<Pos2> = pts.iter().map(|q| to_screen(*q)).collect();
+            if let (Some(a), Some(b)) = (sp.first(), sp.last()) {
+                // round ends, as in the export
+                p.circle_filled(*a, w / 2.0, c32(*color));
+                p.circle_filled(*b, w / 2.0, c32(*color));
+            }
+            if sp.len() > 1 {
+                p.add(egui::Shape::line(sp, Stroke::new(w, c32(*color))));
+            }
+        }
         Mark::Highlight { r, color } => {
             let sr = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
             p.rect_filled(sr, 2.0 * scale, Color32::from_rgba_unmultiplied(color[0], color[1], color[2], 110));
@@ -1002,6 +1247,46 @@ fn draw_mark(p: &egui::Painter, m: &Mark, to_screen: &dyn Fn(Pos2) -> Pos2, scal
         }
         Mark::Blur { .. } | Mark::Erase { .. } => {}
     }
+}
+
+/// A rect filled with a top-left → bottom-right gradient (as the export draws it).
+fn gradient_rect(p: &egui::Painter, r: Rect, c0: Color32, c1: Color32) {
+    let d = r.max - r.min;
+    let t = |q: Pos2| ((q - r.min).dot(d) / d.length_sq().max(1.0)).clamp(0.0, 1.0);
+    let mut mesh = egui::Mesh::default();
+    for q in [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()] {
+        mesh.colored_vertex(q, lerp_color(c0, c1, t(q)));
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    p.add(egui::Shape::mesh(mesh));
+}
+
+/// A round swatch of a backdrop's gradient.
+fn gradient_disc(p: &egui::Painter, c: Pos2, radius: f32, c0: Color32, c1: Color32) {
+    let mut mesh = egui::Mesh::default();
+    let t = |v: Vec2| ((v.x + v.y) / (2.0 * radius) * std::f32::consts::FRAC_1_SQRT_2 + 0.5).clamp(0.0, 1.0);
+    mesh.colored_vertex(c, lerp_color(c0, c1, 0.5));
+    let n = 32;
+    for k in 0..=n {
+        let a = k as f32 / n as f32 * std::f32::consts::TAU;
+        let v = Vec2::new(a.cos(), a.sin()) * radius;
+        mesh.colored_vertex(c + v, lerp_color(c0, c1, t(v)));
+        if k > 0 {
+            mesh.add_triangle(0, k, k + 1);
+        }
+    }
+    p.add(egui::Shape::mesh(mesh));
+}
+
+/// A small on/off chip with its label inside.
+fn chip(ui: &mut Ui, r: Rect, label: &str, on: bool) -> egui::Response {
+    let resp = ui.interact(r, ui.scope_id().with(("chip", label)), Sense::click());
+    let p = ui.painter();
+    let fill = if on { BLUE() } else if resp.hovered() { white(26) } else { white(15) };
+    p.rect_filled(r, R_SMALL, fill);
+    p.text(r.center(), Align2::CENTER_CENTER, label, font(12.0), if on { ON_ACTION } else { TEXT_DIM() });
+    resp
 }
 
 fn shade_outside(p: &egui::Painter, shown: Rect, keep: Rect) {
@@ -1090,7 +1375,7 @@ mod tests {
     use super::*;
 
     fn ed() -> Editor {
-        Editor::new(None, "t".into(), RgbaImage::from_pixel(200, 100, image::Rgba([255, 255, 255, 255])), 2.0, BlurStyle::Pixelate, Cover::Box, true)
+        Editor::new(None, "t".into(), RgbaImage::from_pixel(200, 100, image::Rgba([255, 255, 255, 255])), 2.0, BlurStyle::Pixelate, Cover::Box, true, Frame::default())
     }
 
     #[test]
@@ -1131,6 +1416,31 @@ mod tests {
         e.tool = Tool::Rect;
         e.finish_drag(Pos2::new(5.0, 5.0), Pos2::new(6.0, 6.0), &ctx);
         assert_eq!(e.doc.marks.len(), n);
+    }
+
+    #[test]
+    fn frame_tool_turns_the_frame_on_and_undo_takes_it_off() {
+        let mut e = ed();
+        let plain = e.rendered().dimensions();
+        e.set_tool(Tool::Frame);
+        assert_eq!(e.doc.frame, Some(Frame::default()));
+        let framed = e.rendered().dimensions();
+        assert!(framed.0 > plain.0 && framed.1 > plain.1);
+        e.set_frame(Some(Frame { bg: 3, ..Frame::default() }));
+        assert_eq!(e.frame_style.bg, 3, "the last pick is remembered");
+        e.undo();
+        e.undo();
+        assert_eq!(e.doc.frame, None);
+        assert_eq!(e.rendered().dimensions(), plain);
+    }
+
+    #[test]
+    fn ellipse_drag_makes_an_ellipse() {
+        let mut e = ed();
+        let ctx = egui::Context::default();
+        e.tool = Tool::Ellipse;
+        e.finish_drag(Pos2::new(10.0, 10.0), Pos2::new(100.0, 50.0), &ctx);
+        assert!(matches!(e.doc.marks[0], Mark::Ellipse { .. }));
     }
 
     #[test]

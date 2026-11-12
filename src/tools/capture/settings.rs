@@ -116,6 +116,8 @@ pub struct Settings {
     pub blur: BlurStyle,
     pub cover: Cover,
     pub keep_breaks: bool,
+    /// The editor's last frame (backdrop, padding, corners, shadow, ratio).
+    pub frame: super::render::Frame,
     /// Screen recording.
     pub rec: RecSettings,
     /// Uploading recordings for a link.
@@ -210,6 +212,7 @@ impl Default for Settings {
             blur: BlurStyle::Pixelate,
             cover: Cover::Box,
             keep_breaks: true,
+            frame: Default::default(),
             rec: RecSettings::default(),
             share: Default::default(),
         }
