@@ -2,13 +2,15 @@
 //! outside the home folder after one admin password prompt), and Undo, which
 //! moves everything back. Nothing is ever deleted outright.
 
-use super::leftovers::{Item, Kind, Roots};
+use super::leftovers::{Item, Kind, Roots, STANDARD_LIBRARY};
 use super::mac;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// How long an app gets to quit before we give up on it.
 const QUIT_WAIT: Duration = Duration::from_secs(20);
+/// How long helpers get to end before they are made to.
+const HELPER_WAIT: Duration = Duration::from_secs(3);
 
 /// One app (or the leftovers of one gone app) to remove or reset.
 #[derive(Clone, Debug)]
@@ -21,6 +23,9 @@ pub struct Target {
     pub items: Vec<Item>,
     /// Keep the app, remove its data.
     pub reset: bool,
+    /// Installer packages that put the app in place: their receipts are
+    /// dropped once the app is gone.
+    pub pkgs: Vec<String>,
 }
 
 /// Something that went to the Trash.
@@ -130,22 +135,106 @@ fn owner_of(_p: &Path) -> Option<(u32, u32)> {
     None
 }
 
-/// Where removal may ever reach: app folders, ~/Library and the system's
-/// launchd and helper folders. A last guard under the matching rules.
+/// Where removal may ever reach: app folders, below ~/Library, dot-folders
+/// and subfolders of the home folder, below the system folders apps install
+/// into, vendors' own folders in /Library, and Homebrew's cask records. A
+/// last guard under the matching rules.
 pub fn movable(p: &Path, roots: &Roots, app_roots: &[PathBuf]) -> bool {
     if crate::kit::fs::is_protected(p).is_some() {
         return false;
     }
-    let depth_under = |root: &Path| p.strip_prefix(root).ok().map(|r| r.components().count());
+    let parts = |root: &Path| -> Option<Vec<String>> { p.strip_prefix(root).ok().map(|r| r.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect()) };
     let is_app = p.extension().is_some_and(|e| e == "app");
-    if is_app && app_roots.iter().any(|r| matches!(depth_under(r), Some(1 | 2))) {
+    if is_app && app_roots.iter().any(|r| parts(r).is_some_and(|v| matches!(v.len(), 1 | 2))) {
         return true;
     }
-    // at least one folder below ~/Library (never ~/Library/Caches itself)
-    if matches!(depth_under(&roots.user_library), Some(n) if n >= 2) {
-        return true;
+    let standard = |name: &str| STANDARD_LIBRARY.iter().any(|s| s.eq_ignore_ascii_case(name));
+    // below ~/Library: one folder into a standard folder (never ~/Library/Caches
+    // itself), or a vendor's own folder
+    if let Some(v) = parts(&roots.user_library) {
+        return v.len() >= 2 || (v.len() == 1 && !standard(&v[0]));
     }
-    ["Library/LaunchAgents", "Library/LaunchDaemons", "Library/PrivilegedHelperTools"].iter().any(|d| matches!(depth_under(&roots.system.join(d)), Some(1)))
+    let home = roots.home();
+    if !home.as_os_str().is_empty() {
+        if let Some(v) = parts(&home) {
+            return match v.len() {
+                0 => false,
+                _ if v[0] == ".Trash" => false,
+                1 => v[0].starts_with('.') && !HOME_SHARED.contains(&v[0].as_str()),
+                _ => true,
+            };
+        }
+    }
+    let Some(v) = parts(&roots.system) else { return false };
+    for (parent, depth) in SYSTEM_PARENTS {
+        let pv: Vec<&str> = parent.split('/').collect();
+        if v.len() > pv.len() && v.iter().zip(&pv).all(|(a, b)| a == b) {
+            return v.len() - pv.len() <= *depth;
+        }
+    }
+    // a vendor's own folder in /Library, or one thing in it
+    v.len() >= 2 && v.len() <= 3 && v[0] == "Library" && !standard(&v[1]) && !v[1].to_lowercase().starts_with("com.apple")
+}
+
+/// Dot-folders of the home folder that hold many apps' things.
+const HOME_SHARED: &[&str] = &[".config", ".local", ".cache", ".ssh", ".gnupg", ".Trash", ".npm", ".cargo", ".rustup"];
+
+/// System folders apps install into, and how deep below them removal may
+/// reach (2 = inside a vendor folder there).
+const SYSTEM_PARENTS: &[(&str, usize)] = &[
+    ("Library/LaunchAgents", 1),
+    ("Library/LaunchDaemons", 1),
+    ("Library/PrivilegedHelperTools", 1),
+    ("Library/Application Support", 2),
+    ("Library/Caches", 2),
+    ("Library/Logs", 2),
+    ("Library/Preferences", 1),
+    ("Library/Extensions", 1),
+    ("Library/Frameworks", 1),
+    ("Library/PreferencePanes", 1),
+    ("Library/Internet Plug-Ins", 1),
+    ("Library/Audio/Plug-Ins/HAL", 1),
+    ("Library/Audio/Plug-Ins/Components", 1),
+    ("Library/QuickLook", 1),
+    ("Library/Spotlight", 1),
+    ("Library/Screen Savers", 1),
+    ("usr/local/bin", 1),
+    ("usr/local/sbin", 1),
+    ("usr/local/lib", 1),
+    ("usr/local/libexec", 1),
+    ("usr/local/share", 1),
+    ("usr/local/etc", 1),
+    ("opt/homebrew/Caskroom", 1),
+    ("usr/local/Caskroom", 1),
+];
+
+fn progress_name(name: &str) -> String {
+    format!("Stopping {name}…")
+}
+
+/// Stop what still runs from inside `app` (helpers, login items): ours are
+/// asked to end, then made to. Returns the ones that run as root, for the
+/// admin step.
+fn stop_inside(app: &Path, line: &str, progress: &mut impl FnMut(String)) -> Vec<i32> {
+    let procs = super::extra::procs_inside(app);
+    if procs.is_empty() {
+        return Vec::new();
+    }
+    progress(line.to_string());
+    let me = mac::uid();
+    let ours: Vec<i32> = procs.iter().filter(|(_, u)| *u == me).map(|(p, _)| *p).collect();
+    let alive = |pid: i32| unsafe { libc::kill(pid, 0) == 0 };
+    for &pid in &ours {
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+    let start = Instant::now();
+    while ours.iter().any(|&p| alive(p)) && start.elapsed() < HELPER_WAIT {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    for &pid in ours.iter().filter(|&&p| alive(p)) {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+    procs.iter().filter(|(_, u)| *u != me).map(|(p, _)| *p).collect()
 }
 
 /// A free name for `name` in the Trash folder.
@@ -171,6 +260,8 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
     let mut retry: Vec<Vec<Item>> = vec![Vec::new(); targets.len()];
     // items that need the admin password, done together at the end: (target, item)
     let mut admin: Vec<(usize, Item)> = Vec::new();
+    // helpers running as root from inside an app being removed
+    let mut root_pids: Vec<i32> = Vec::new();
     for (k, t) in targets.iter().enumerate() {
         rep.names.push(t.name.clone());
         let app_item = t.items.iter().find(|i| i.kind == Kind::App && i.selected && !t.reset);
@@ -190,10 +281,19 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
                 continue;
             }
         }
+        if let Some(app) = &t.app {
+            if !t.reset {
+                // agents first, or they start the helpers again
+                for it in t.items.iter().filter(|i| i.selected && i.kind == Kind::Launch && !i.admin && i.path.starts_with(&roots.user_library)) {
+                    let _ = std::process::Command::new("/bin/launchctl").arg("bootout").arg(format!("gui/{}", mac::uid())).arg(&it.path).output();
+                }
+            }
+            root_pids.extend(stop_inside(app, &progress_name(&t.name), &mut progress).into_iter().filter(|_| !t.reset));
+        }
         progress(format!("Moving {} to the Trash…", t.name));
         let mut prefs = false;
         for it in t.items.iter().filter(|i| i.selected) {
-            if t.reset && matches!(it.kind, Kind::App | Kind::Launch) {
+            if t.reset && it.kind.is_part() {
                 continue;
             }
             if !it.path.exists() && it.path.symlink_metadata().is_err() {
@@ -232,6 +332,10 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
     if !admin.is_empty() {
         progress("Waiting for your password…".into());
         let mut cmd = String::new();
+        if !root_pids.is_empty() {
+            let pids: Vec<String> = root_pids.iter().map(|p| p.to_string()).collect();
+            cmd.push_str(&format!("/bin/kill -9 {} 2>/dev/null; ", pids.join(" ")));
+        }
         let mut planned = Vec::new();
         let mut taken: Vec<PathBuf> = Vec::new();
         for (k, it) in &admin {
@@ -255,6 +359,13 @@ pub fn run(targets: &[Target], roots: &Roots, app_roots: &[PathBuf], mut progres
                 uid = mac::uid()
             ));
             planned.push((*k, it.clone(), Moved { from: p.clone(), to: dest, admin: true, bytes: it.bytes, owner: owner_of(p) }));
+        }
+        // the installer's receipts, once its app is gone
+        for t in targets.iter().filter(|t| !t.reset) {
+            let Some(app) = &t.app else { continue };
+            for id in t.pkgs.iter().filter(|id| id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))) {
+                cmd.push_str(&format!("[ -e {app} ] || /usr/sbin/pkgutil --forget {id} >/dev/null 2>&1; ", app = mac::sh_quote(&app.to_string_lossy())));
+            }
         }
         cmd.push_str("true");
         let res = mac::run_admin(&cmd, "Cmd+Meow wants to move apps and their files to your Trash.");
@@ -354,8 +465,31 @@ mod tests {
         assert!(!movable(Path::new("/Users/a/Library"), &roots, &apps));
         assert!(movable(Path::new("/Library/LaunchDaemons/com.x.plist"), &roots, &apps));
         assert!(!movable(Path::new("/Library/LaunchDaemons"), &roots, &apps));
-        assert!(!movable(Path::new("/Library/Application Support/x"), &roots, &apps));
+        assert!(movable(Path::new("/Library/Application Support/x"), &roots, &apps));
+        assert!(movable(Path::new("/Library/Application Support/Vendor/x"), &roots, &apps));
+        assert!(!movable(Path::new("/Library/Application Support/Vendor/x/y"), &roots, &apps));
+        assert!(!movable(Path::new("/Library/Application Support"), &roots, &apps));
+        assert!(movable(Path::new("/Library/Objective-See"), &roots, &apps));
+        assert!(movable(Path::new("/Library/Objective-See/LuLu"), &roots, &apps));
+        assert!(!movable(Path::new("/Library/Fonts"), &roots, &apps));
+        assert!(!movable(Path::new("/Library/Fonts/x.ttf"), &roots, &apps));
+        assert!(!movable(Path::new("/Library/Apple/x"), &roots, &apps));
+        assert!(movable(Path::new("/usr/local/bin/clearvpn"), &roots, &apps));
+        assert!(!movable(Path::new("/usr/local/bin"), &roots, &apps));
         assert!(!movable(Path::new("/usr/bin/x.app"), &roots, &apps));
+        assert!(!movable(Path::new("/usr/bin/x"), &roots, &apps));
+        assert!(!movable(Path::new("/System/Library/x"), &roots, &apps));
+        assert!(movable(Path::new("/opt/homebrew/Caskroom/zoom"), &roots, &apps));
+        assert!(!movable(Path::new("/opt/homebrew/Caskroom"), &roots, &apps));
+        assert!(!movable(Path::new("/opt/homebrew/bin/x"), &roots, &apps));
+        assert!(movable(Path::new("/Users/a/Library/Objective-See"), &roots, &apps));
+        assert!(!movable(Path::new("/Users/a/Library/Fonts"), &roots, &apps));
+        assert!(movable(Path::new("/Users/a/.docker"), &roots, &apps));
+        assert!(!movable(Path::new("/Users/a/.config"), &roots, &apps));
+        assert!(movable(Path::new("/Users/a/.config/foo"), &roots, &apps));
+        assert!(!movable(Path::new("/Users/a/.Trash/x"), &roots, &apps));
+        assert!(!movable(Path::new("/Users/a/Downloads"), &roots, &apps));
+        assert!(!movable(Path::new("/Users/a"), &roots, &apps));
     }
 
     #[test]
@@ -383,6 +517,7 @@ mod tests {
             app: Some(app.clone()),
             items: vec![item(&app, Kind::App, true), item(&cache_dir, Kind::Caches, true), item(&prefs, Kind::Preferences, true), item(keep.parent().unwrap(), Kind::Logs, false)],
             reset: false,
+            pkgs: Vec::new(),
         };
         let mut lines = Vec::new();
         let rep = run(&[t], &f.roots, &[f.root.join("apps")], |l| lines.push(l));
@@ -410,6 +545,7 @@ mod tests {
             app: Some(app.clone()),
             items: vec![item(&app, Kind::App), item(support.parent().unwrap(), Kind::Support), item(&outside, Kind::Support)],
             reset: true,
+            pkgs: Vec::new(),
         };
         let rep = run(&[t], &f.roots, &[f.root.join("apps")], |_| {});
         assert!(app.exists(), "reset keeps the app");
@@ -452,7 +588,7 @@ mod tests {
         let app = f.file("apps/Thing.app/x", "x").parent().unwrap().to_path_buf();
         let outside = f.file("elsewhere/file", "x");
         let item = |p: &Path, kind| Item { path: p.to_path_buf(), kind, bytes: 1, admin: false, selected: true };
-        let t = Target { name: "Thing".into(), id: "com.retry.app".into(), app: Some(app.clone()), items: vec![item(&app, Kind::App), item(&outside, Kind::Support)], reset: false };
+        let t = Target { name: "Thing".into(), id: "com.retry.app".into(), app: Some(app.clone()), items: vec![item(&app, Kind::App), item(&outside, Kind::Support)], reset: false, pkgs: Vec::new() };
         let rep = run(&[t], &f.roots, &[f.root.join("apps")], |_| {});
         assert_eq!(rep.apps, vec!["Thing".to_string()]);
         assert!(rep.kept.is_empty(), "the app moved");

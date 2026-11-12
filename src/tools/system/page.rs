@@ -8,7 +8,7 @@
 
 use crate::kit::sync::LockExt;
 use super::monitor::{self, Level, Snapshot};
-use super::sheets::{Action as SheetAction, Section, Sheet};
+use super::sheets::Action as SheetAction;
 use crate::core::tool::{Cx, Recommendation};
 use crate::kit::glass::*;
 use crate::kit::tile;
@@ -69,16 +69,16 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     let inner = body.shrink2(Vec2::new(20.0, 0.0));
     let mut action = SheetAction::None;
 
+    let mut dev_action = None;
     if show_devices {
-        let sec = Section::new(Sheet::Devices, &s);
         let w = inner.width().min(640.0);
-        let h = sec.height(&p, ui.ctx(), &s, w);
+        let h = super::devices_ui::page_height(&s);
         let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-devices-page"));
         ScrollArea::vertical().id_salt("health-dev-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
             let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h + 2.0 * sp::L), Sense::hover());
             let sr = Rect::from_min_size(Pos2::new(area.left() + 20.0, area.top() + sp::L), Vec2::new(w, h));
             let mut sui = ui.new_child(UiBuilder::new().max_rect(sr).id_salt("health-dev-sec"));
-            action = sec.show(&mut sui, sr, &s);
+            dev_action = super::devices_ui::page(&mut sui, sr, &s);
         });
     } else {
         // 3 columns (1.4 : 1 : 1) × 2 rows; CPU spans the first two columns
@@ -138,6 +138,19 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
             super::procs::quit(pid);
         }
         SheetAction::None | SheetAction::Close => {}
+    }
+    if let Some(a) = dev_action {
+        use super::devices_ui::PageAction as P;
+        match a {
+            P::ToggleAlerts => monitor::change_bt_prefs(mon, |p| crate::kit::notify::flip(&mut p.alerts)),
+            P::ToggleCharged => monitor::change_bt_prefs(mon, |p| crate::kit::notify::flip(&mut p.charged)),
+            P::ChargedAt(v) => monitor::change_bt_prefs(mon, |p| p.charged_at = v),
+            P::ToggleMenuBar => monitor::change_bt_prefs(mon, |p| p.menu_bar = !p.menu_bar),
+            P::OpenBluetooth => super::devices::open_bluetooth_settings(),
+            P::AlertBelow(key, v) => monitor::change_bt_prefs(mon, |p| p.set_device(&key, |d| d.alert_below = Some(v))),
+            P::Hide(key, h) => monitor::change_bt_prefs(mon, |p| p.set_device(&key, |d| d.hidden = h)),
+            P::Forget(key) => monitor::forget_device(mon, &key),
+        }
     }
     if super::speed::modal(ui, &s.speed) {
         monitor::start_speed_test(mon.clone(), ui.ctx().clone());

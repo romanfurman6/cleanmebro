@@ -152,7 +152,7 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     let card = Rect::from_min_max(Pos2::new(body.left(), bar_card.bottom() + sp::M), Pos2::new(body.right(), chart_bottom));
     glass_card(&p, card, R_CARD, 0.0, false);
     let ci = card.shrink(sp::XL);
-    let last = if app.demo { Some(super::engine::LastScan { when: chrono::Utc::now().timestamp() - 2 * 86400, groups: vec![14_200_000_000, 9_800_000_000, 21_600_000_000, 1_300_000_000, 3_400_000_000] }) } else { super::engine::last_scan() };
+    let last = if app.demo { Some(super::engine::LastScan { when: chrono::Utc::now().timestamp() - 2 * 86400, groups: vec![14_200_000_000, 9_800_000_000, 21_600_000_000, 6_100_000_000, 2_200_000_000, 1_300_000_000, 3_400_000_000] }) } else { super::engine::last_scan() };
     let hist = super::engine::history();
     let sizes: Vec<u64> = Group::ALL.iter().enumerate().map(|(i, _)| last.as_ref().and_then(|l| l.groups.get(i).copied()).unwrap_or(0)).collect();
     let found: u64 = sizes.iter().sum();
@@ -205,6 +205,8 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
                 Group::AiTools => Icon::Gauge,
                 Group::AppCaches => Icon::Folder,
                 Group::Developer => Icon::Gear,
+                Group::Projects => Icon::Folder,
+                Group::Installers => Icon::Down,
                 Group::Logs => Icon::Doc,
                 Group::Trash => Icon::Trash,
             };
@@ -658,12 +660,14 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
     // block clicks to the page underneath
     let _ = ui.interact(r, ui.scope_id().with("confirm-scrim"), Sense::click());
     p.rect_filled(r, CornerRadius { nw: 0, sw: 0, ne: WIN_R as u8, se: WIN_R as u8 }, Color32::from_black_alpha(115));
-    let (n, bytes, perm, trashed, rebuilt) = {
+    let (n, bytes, perm, trashed, rebuilt, emptied, tools) = {
         let g = app.clean.lock_ok();
         let sel: Vec<&Item> = g.items.iter().filter(|i| i.selected).collect();
         let trashed = sel.iter().filter(|i| !i.permanent && !i.rebuilds()).count();
         let rebuilt = sel.iter().filter(|i| !i.permanent && i.rebuilds()).count();
-        (sel.len(), sel.iter().map(|i| i.bytes).sum::<u64>(), sel.iter().any(|i| i.permanent), trashed, rebuilt)
+        let emptied = sel.iter().any(|i| i.group == Group::Trash);
+        let tools = sel.iter().any(|i| i.by_command());
+        (sel.len(), sel.iter().map(|i| i.bytes).sum::<u64>(), sel.iter().any(|i| i.permanent), trashed, rebuilt, emptied, tools)
     };
     let mut body = if app.delete_now {
         "They'll be deleted right away. This can't be undone.".to_string()
@@ -675,8 +679,11 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
         if trashed > 0 {
             parts.push(if rebuilt == 0 { "They go to the Trash, so you can put anything back.".into() } else { format!("The other {trashed} go to the Trash.") });
         }
-        if perm {
+        if emptied {
             parts.push("Emptying the Trash is permanent.".into());
+        }
+        if tools {
+            parts.push("Simulators and Homebrew leftovers are removed by their own tools, for good.".into());
         }
         parts.join(" ")
     };
@@ -832,6 +839,7 @@ pub fn demo_results() -> cleanup::State {
         hard_keep: false,
         permanent: false,
         app_running: false,
+        action: cleanup::Action::Files,
     };
     let items = vec![
         mk(Group::AiTools, "Claude Desktop cache", "~/Library/Application Support/Claude/Cache", 678_000_000, "Caches", Verdict::Safe, "Web view cache, rebuilt automatically", Who::Ai),
@@ -845,6 +853,7 @@ pub fn demo_results() -> cleanup::State {
         mk(Group::Developer, "Derived Data · MyApp", "~/Library/Developer/Xcode/DerivedData/MyApp-abc", 3_400_000_000, "Build Data", Verdict::Safe, "Build products and index, Xcode rebuilds them", Who::Rule),
         mk(Group::AppCaches, "Adobe Media Cache", "~/Library/Application Support/Adobe/Common/Media Cache Files", 2_100_000_000, "Caches", Verdict::Safe, "Premiere/After Effects media cache", Who::Rule),
         mk(Group::Developer, "npm cache", "~/.npm/_cacache", 640_000_000, "Caches", Verdict::Safe, "npm downloads, fetched again when needed", Who::Ai),
+        mk(Group::Projects, "old-site · node_modules", "~/Code/old-site/node_modules", 870_000_000, "Build Data", Verdict::Safe, "Node build output, project untouched for 94 days; rebuilt on the next build", Who::Rule),
     ];
     cleanup::State { phase: Phase::Results, items, ai_used: true, ..Default::default() }
 }

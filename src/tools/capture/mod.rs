@@ -118,6 +118,8 @@ pub struct Capture {
     key_errors: Vec<(Command, String)>,
     /// Commands to run on the next ui pass, with their delay in seconds.
     queue: Vec<(Command, u32)>,
+    /// `cmdmeow://capture/<command>` links.
+    links: Option<crate::kit::url_scheme::Inbox<Command>>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
     /// A grab or text recognition is running.
@@ -180,6 +182,7 @@ impl Capture {
             keys: if env.demo { None } else { hotkeys::Keys::new(env.ctx.clone()) },
             key_errors: Vec::new(),
             queue: Vec::new(),
+            links: (!env.demo).then(|| crate::kit::url_scheme::Inbox::new("capture", Some(env.ctx.clone()), Command::from_slug)),
             tx,
             rx,
             busy: false,
@@ -630,10 +633,15 @@ impl Capture {
         // one editor at a time; the one open keeps its changes in history
         if let Some(mut old) = self.editor.take() {
             self.commit_edit(&mut old.ed);
+            // the next editor starts with the frame chosen in this one
+            if self.settings.frame != old.ed.frame_style {
+                self.settings.frame = old.ed.frame_style;
+                self.save_settings();
+            }
         }
         let title = self.title_for(id);
         let s = &self.settings;
-        let ed = Editor::new(id, title, img, self.ppp, s.blur, s.cover, s.keep_breaks);
+        let ed = Editor::new(id, title, img, self.ppp, s.blur, s.cover, s.keep_breaks, s.frame);
         mac::warm_ocr();
         self.editor = Some(windows::EditorWin::new(ed));
     }
@@ -821,6 +829,10 @@ impl Tool for Capture {
     }
     fn set_on(&mut self, on: bool) {
         if on {
+            // links that came while off aren't run late
+            if let Some(l) = &self.links {
+                l.take();
+            }
             self.apply_keys();
         } else {
             if let Some(k) = &mut self.keys {
@@ -837,7 +849,7 @@ impl Tool for Capture {
             self.video = None;
             if self.rec.live().is_some() {
                 self.rec.stop();
-            } else if !matches!(self.rec.phase, record::Phase::Saving) {
+            } else if !matches!(self.rec.phase, record::Phase::Saving | record::Phase::Rendering(_)) {
                 self.rec.cancel();
             }
             if let Some(mut ew) = self.editor.take() {
@@ -896,6 +908,11 @@ impl Tool for Capture {
                 for c in k.poll() {
                     self.queue.push((c, 0));
                 }
+            }
+        }
+        if let Some(l) = &self.links {
+            for c in l.take() {
+                self.queue.push((c, 0));
             }
         }
         while let Ok(d) = self.rx.try_recv() {
@@ -961,7 +978,7 @@ impl Tool for Capture {
                 Some(View::Page)
             }
             "capture-editor" => {
-                let mut ed = Editor::new(None, "Capture from 5:41 pm".into(), grab::sample(1588, 892), 2.0, self.settings.blur, self.settings.cover, true);
+                let mut ed = Editor::new(None, "Capture from 5:41 pm".into(), grab::sample(1588, 892), 2.0, self.settings.blur, self.settings.cover, true, self.settings.frame);
                 ed.demo_marks();
                 // screenshots only: CMB_DEMO_EDITOR_TOOL picks the tool shown
                 ed.tool = match std::env::var("CMB_DEMO_EDITOR_TOOL").unwrap_or_default().as_str() {
@@ -997,7 +1014,7 @@ mod tests {
         let mut c = demo();
         let before = c.store.shots.len();
         let first = c.store.shots[0].id;
-        let mut ed = Editor::new(Some(first), "t".into(), grab::sample(200, 100), 2.0, c.settings.blur, c.settings.cover, true);
+        let mut ed = Editor::new(Some(first), "t".into(), grab::sample(200, 100), 2.0, c.settings.blur, c.settings.cover, true, c.settings.frame);
         assert_eq!(c.commit_edit(&mut ed), Some(first), "no changes, nothing new");
         ed.edited = true;
         let id = c.commit_edit(&mut ed).expect("kept");

@@ -8,7 +8,8 @@
 
 use crate::kit::sync::LockExt;
 use super::engine::{Engine, Span, State, GRACE_CHOICES};
-use super::{KeepAwake, ID};
+use super::{KeepAwake, KeyRec, ID};
+use crate::kit::hotkeys::{listen, Heard};
 use crate::core::tool::Size;
 use crate::kit::glass::*;
 use crate::kit::tile;
@@ -486,11 +487,11 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     let lw = (x1 - x0 - gap) * 0.5;
     let left = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x0 + lw, r.bottom() - 20.0));
     let right = Rect::from_min_max(Pos2::new(left.right() + gap, y), Pos2::new(x1, r.bottom() - 20.0));
-    options(ui, &p, left, &mut e, now, id);
+    options(ui, &p, left, &mut e, &mut k.keys, now, id);
     sessions(&p, right, &e, now);
     // the rest of the page: the last 7 days
     let rows = e.sessions.len().clamp(1, 6) as f32;
-    let wy = y + 26.0 + (rows * 32.0 + 12.0).max(ROW * 4.0) + 20.0;
+    let wy = y + 26.0 + (rows * 32.0 + 12.0).max(ROW * OPTION_ROWS) + 20.0;
     if r.bottom() - 20.0 - wy > 100.0 {
         week(&p, Rect::from_min_max(Pos2::new(x0, wy), Pos2::new(x1, r.bottom() - 20.0)), &e.week(now));
     }
@@ -547,10 +548,12 @@ fn switch_row(ui: &mut Ui, p: &Painter, r: Rect, id: egui::Id, label: &str, on: 
 }
 
 const ROW: f32 = 44.0;
+const OPTION_ROWS: f32 = 5.0;
 
-fn options(ui: &mut Ui, p: &Painter, r: Rect, e: &mut Engine, now: i64, id: egui::Id) {
+#[allow(clippy::too_many_arguments)]
+fn options(ui: &mut Ui, p: &Painter, r: Rect, e: &mut Engine, keys: &mut KeyRec, now: i64, id: egui::Id) {
     p.text(r.min, Align2::LEFT_TOP, "Options", bold(15.0), TEXT());
-    let card = Rect::from_min_size(r.min + Vec2::new(0.0, 26.0), Vec2::new(r.width(), ROW * 4.0));
+    let card = Rect::from_min_size(r.min + Vec2::new(0.0, 26.0), Vec2::new(r.width(), ROW * OPTION_ROWS));
     section_card(p, card);
     let row = |i: usize| Rect::from_min_size(Pos2::new(card.left(), card.top() + ROW * i as f32), Vec2::new(card.width(), ROW));
     let line = |i: usize| {
@@ -580,13 +583,61 @@ fn options(ui: &mut Ui, p: &Painter, r: Rect, e: &mut Engine, now: i64, id: egui
     if switch_row(ui, p, row(3), id.with("cscreen"), "Keep the screen on for Claude", c) {
         e.change(now, |s| s.claude_screen = !c);
     }
+    line(4);
+    shortcut_row(ui, p, row(4), e, keys, now, id.with("key"));
+}
+
+/// The switch's shortcut: click, then press the keys. Esc keeps the old
+/// one, ⌫ removes it.
+fn shortcut_row(ui: &mut Ui, p: &Painter, r: Rect, e: &mut Engine, keys: &mut KeyRec, now: i64, id: egui::Id) {
+    if keys.recording {
+        keys.seen = Some(std::time::Instant::now());
+        match listen(ui.ctx()) {
+            Heard::Nothing => {}
+            Heard::Cancel => keys.recording = false,
+            Heard::Remove => {
+                e.change(now, |s| s.shortcut = None);
+                keys.recording = false;
+            }
+            Heard::Set(k) => {
+                e.change(now, |s| s.shortcut = Some(k));
+                keys.recording = false;
+            }
+        }
+        ui.ctx().request_repaint();
+    }
+    p.text(Pos2::new(r.left() + 12.0, r.center().y), Align2::LEFT_CENTER, "Shortcut", font(13.0), TEXT());
+    let rec = keys.recording;
+    let cur = e.settings.shortcut.clone();
+    let text = if rec { "Type a shortcut…".to_string() } else { cur.as_ref().map(|s| s.display()).unwrap_or_else(|| "Record".into()) };
+    let g = p.layout_no_wrap(text.clone(), font(12.0), TEXT());
+    let bw = (g.size().x + 20.0).max(76.0);
+    let br = Rect::from_min_max(Pos2::new(r.right() - 12.0 - bw, r.center().y - 12.0), Pos2::new(r.right() - 12.0, r.center().y + 12.0));
+    let resp = ui.interact(br, id, Sense::click());
+    if rec {
+        p.rect_filled(br, 6.0, with_alpha(BLUE(), 0.22));
+        p.rect_stroke(br, 6.0, Stroke::new(1.0, ACCENT()), egui::StrokeKind::Inside);
+    } else if cur.is_some() {
+        p.rect_filled(br, 6.0, white(if resp.hovered() { 30 } else { 20 }));
+        p.rect_stroke(br, 6.0, Stroke::new(1.0, white(26)), egui::StrokeKind::Inside);
+    } else {
+        dashed_rect(p, br, 6.0, white(60));
+    }
+    p.text(br.center(), Align2::CENTER_CENTER, text, font(12.0), if cur.is_some() || rec { TEXT() } else { TEXT_FAINT() });
+    if resp.on_hover_text("Click, then press the keys. Esc cancels, ⌫ removes it.").clicked() {
+        keys.recording = !rec;
+        keys.seen = Some(std::time::Instant::now());
+    }
+    if let Some(err) = &keys.error {
+        text_fit(p, Pos2::new(br.left() - 10.0, r.center().y), Align2::RIGHT_CENTER, err, font(11.0), AMBER(), br.left() - r.left() - 90.0);
+    }
 }
 
 fn sessions(p: &Painter, r: Rect, e: &Engine, now: i64) {
     p.text(r.min, Align2::LEFT_TOP, "Claude Code sessions", bold(15.0), TEXT());
     let shown: Vec<_> = e.sessions.iter().take(6).cloned().collect();
     let rows = shown.len().max(1) as f32;
-    let h = (rows * 32.0 + 12.0).max(ROW * 4.0);
+    let h = (rows * 32.0 + 12.0).max(ROW * OPTION_ROWS);
     let card = Rect::from_min_size(r.min + Vec2::new(0.0, 26.0), Vec2::new(r.width(), h));
     section_card(p, card);
     let mut y = card.top() + 6.0;

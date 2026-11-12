@@ -37,6 +37,25 @@ impl Command {
         }
     }
 
+    /// Its name in links: `cmdmeow://capture/<slug>`.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Command::Area => "area",
+            Command::Window => "window",
+            Command::Screen => "screen",
+            Command::Delayed => "delayed",
+            Command::Text => "text",
+            Command::Color => "color",
+            Command::Ruler => "ruler",
+            Command::History => "history",
+            Command::Record => "record",
+        }
+    }
+
+    pub fn from_slug(s: &str) -> Option<Command> {
+        Command::ALL.into_iter().find(|c| c.slug() == s)
+    }
+
     /// Shortcut on first launch. ⌘⇧3/4/5 belong to macOS, so they're avoided.
     pub fn default_shortcut(self) -> Option<Shortcut> {
         let key = match self {
@@ -116,6 +135,8 @@ pub struct Settings {
     pub blur: BlurStyle,
     pub cover: Cover,
     pub keep_breaks: bool,
+    /// The editor's last frame (backdrop, padding, corners, shadow, ratio).
+    pub frame: super::render::Frame,
     /// Screen recording.
     pub rec: RecSettings,
     /// Uploading recordings for a link.
@@ -172,6 +193,8 @@ pub struct RecSettings {
     pub open_editor: bool,
     /// Seconds the saved card stays up; None keeps it until closed.
     pub card_secs: Option<u32>,
+    /// How recordings are drawn after Stop (smooth cursor, frame…).
+    pub look: crate::tools::capture::video::scene::Style,
 }
 
 impl Default for RecSettings {
@@ -190,6 +213,7 @@ impl Default for RecSettings {
             countdown: 3,
             open_editor: false,
             card_secs: Some(8),
+            look: Default::default(),
         }
     }
 }
@@ -210,6 +234,7 @@ impl Default for Settings {
             blur: BlurStyle::Pixelate,
             cover: Cover::Box,
             keep_breaks: true,
+            frame: Default::default(),
             rec: RecSettings::default(),
             share: Default::default(),
         }

@@ -32,6 +32,9 @@ pub struct Info {
     pub id: String,
     pub name: String,
     pub version: String,
+    /// Other names it goes by: Info.plist name and display name, when they
+    /// differ from the file name.
+    pub alt: Vec<String>,
 }
 
 /// Read an app bundle's Info.plist. The display name falls back to the
@@ -45,7 +48,15 @@ pub fn read_info(app: &Path) -> Option<Info> {
     let file_name = app.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let name = if file_name.is_empty() { v.get_str("CFBundleDisplayName").or(v.get_str("CFBundleName")).unwrap_or("").to_string() } else { file_name };
     let version = v.get_str("CFBundleShortVersionString").or(v.get_str("CFBundleVersion")).unwrap_or("").trim().to_string();
-    Some(Info { id, name, version })
+    let mut alt: Vec<String> = Vec::new();
+    for k in ["CFBundleDisplayName", "CFBundleName"] {
+        if let Some(n) = v.get_str(k).map(|s| s.trim().to_string()) {
+            if !n.is_empty() && !n.eq_ignore_ascii_case(&name) && !alt.iter().any(|a| a.eq_ignore_ascii_case(&n)) {
+                alt.push(n);
+            }
+        }
+    }
+    Some(Info { id, name, version, alt })
 }
 
 /// Bundle ids of what an app carries inside it (extensions, login items,
@@ -113,22 +124,49 @@ pub fn find_bundles(roots: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
-/// App names Homebrew installed as casks ("Zoom.app").
-pub fn cask_apps() -> Vec<String> {
+/// A Homebrew cask: its token, its Caskroom folder and the apps it put in
+/// place ("Zoom.app").
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cask {
+    pub token: String,
+    pub dir: PathBuf,
+    pub apps: Vec<String>,
+}
+
+/// Where Homebrew keeps casks, under the system root.
+pub const CASKROOMS: &[&str] = &["opt/homebrew/Caskroom", "usr/local/Caskroom"];
+
+/// Every installed cask. The apps come from the version folders, where
+/// Homebrew leaves a link to each app it moved to /Applications.
+pub fn casks(system: &Path) -> Vec<Cask> {
     let mut out = Vec::new();
-    for root in ["/opt/homebrew/Caskroom", "/usr/local/Caskroom"] {
-        for cask in std::fs::read_dir(root).into_iter().flatten().flatten() {
+    for root in CASKROOMS {
+        for cask in std::fs::read_dir(system.join(root)).into_iter().flatten().flatten() {
+            let token = cask.file_name().to_string_lossy().into_owned();
+            if token.starts_with('.') || !cask.path().is_dir() {
+                continue;
+            }
+            let mut apps = Vec::new();
             for ver in std::fs::read_dir(cask.path()).into_iter().flatten().flatten() {
+                if ver.file_name().to_string_lossy().starts_with('.') {
+                    continue;
+                }
                 for f in std::fs::read_dir(ver.path()).into_iter().flatten().flatten() {
                     let n = f.file_name().to_string_lossy().into_owned();
-                    if n.ends_with(".app") {
-                        out.push(n);
+                    if n.ends_with(".app") && !apps.contains(&n) {
+                        apps.push(n);
                     }
                 }
             }
+            out.push(Cask { token, dir: cask.path(), apps });
         }
     }
     out
+}
+
+/// App names Homebrew installed as casks ("Zoom.app").
+pub fn cask_apps(casks: &[Cask]) -> Vec<String> {
+    casks.iter().flat_map(|c| c.apps.iter().cloned()).collect()
 }
 
 /// Where the app came from.
@@ -248,7 +286,7 @@ mod tests {
         let found = find_bundles(&[root.clone(), root.join("missing")]);
         assert_eq!(found, vec![a.clone(), b]);
         let info = read_info(&a).unwrap();
-        assert_eq!(info, Info { id: "com.docker.docker".into(), name: "Docker".into(), version: "1.2".into() });
+        assert_eq!(info, Info { id: "com.docker.docker".into(), name: "Docker".into(), version: "1.2".into(), alt: vec!["Inner".into()] });
         assert!(read_info(&root.join("Deep")).is_none());
         std::fs::remove_dir_all(&root).unwrap();
     }

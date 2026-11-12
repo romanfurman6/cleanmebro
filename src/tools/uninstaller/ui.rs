@@ -110,7 +110,7 @@ pub fn item_label(it: &Item, user_library: &Path) -> String {
 
 /// "App + 8 items · 17.3 GB".
 pub fn target_line(t: &Target) -> String {
-    let sel: Vec<&Item> = t.items.iter().filter(|i| i.selected && !(t.reset && matches!(i.kind, Kind::App | Kind::Launch))).collect();
+    let sel: Vec<&Item> = t.items.iter().filter(|i| i.selected && !(t.reset && i.kind.is_part())).collect();
     let bytes: u64 = sel.iter().map(|i| i.bytes).sum();
     let files = sel.iter().filter(|i| i.kind != Kind::App).count();
     let has_app = sel.iter().any(|i| i.kind == Kind::App);
@@ -123,7 +123,7 @@ pub fn target_line(t: &Target) -> String {
 }
 
 fn target_bytes(t: &Target) -> u64 {
-    t.items.iter().filter(|i| i.selected && !(t.reset && matches!(i.kind, Kind::App | Kind::Launch))).map(|i| i.bytes).sum()
+    t.items.iter().filter(|i| i.selected && !(t.reset && i.kind.is_part())).map(|i| i.bytes).sum()
 }
 
 fn is_running(u: &mut Uninstaller, id: &str) -> bool {
@@ -533,7 +533,7 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
     let rw = (w - gap) * 0.42;
     let reset_r = Rect::from_min_size(Pos2::new(x0, btn_top), Vec2::new(rw, 30.0));
     let main_r = Rect::from_min_max(Pos2::new(reset_r.right() + gap, btn_top), Pos2::new(x1, btn_top + 30.0));
-    let has_data = a.items.iter().any(|i| !matches!(i.kind, Kind::App | Kind::Launch));
+    let has_data = a.items.iter().any(|i| !i.kind.is_part());
     if pill_button(ui, reset_r, "Reset…", BTN_SECONDARY, has_data).on_hover_text("Remove its settings and data, keep the app").clicked() {
         u.review = Some(Review { targets: vec![a.target(true)], open: [0].into() });
     }
@@ -693,7 +693,7 @@ fn review(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
 
 /// The items a target will touch (a reset leaves the app and its jobs).
 fn visible_items(t: &Target) -> Vec<&Item> {
-    t.items.iter().filter(|i| !(t.reset && matches!(i.kind, Kind::App | Kind::Launch))).collect()
+    t.items.iter().filter(|i| !(t.reset && i.kind.is_part())).collect()
 }
 
 // ---------------------------------------------------------------- progress and result
@@ -1175,7 +1175,7 @@ pub mod demo {
             let p = if rel.starts_with('/') { PathBuf::from(rel) } else { lib.join(rel) };
             items.push(Item { path: p, kind: *kind, bytes: *b, admin: *admin, selected: true });
         }
-        AppRow { path, name: name.into(), id: id.into(), version: ver.into(), source: src, locked, last_used: used_days.map(|d| NOW - d * 86400 - 3600), items, sized: true }
+        AppRow { path, name: name.into(), id: id.into(), version: ver.into(), source: src, locked, last_used: used_days.map(|d| NOW - d * 86400 - 3600), items, sized: true, alt: Vec::new(), sign: Default::default(), pkgs: Vec::new() }
     }
 
     pub fn apps() -> Vec<AppRow> {

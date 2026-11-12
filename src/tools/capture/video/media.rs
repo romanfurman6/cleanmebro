@@ -157,8 +157,9 @@ mod imp {
                 t.setEnabled(on);
                 Ok(())
             };
+            // a recording's camera track stays off, as it was
             for v in orig.tracksWithMediaType(vm).iter() {
-                add(vm, &v, true)?;
+                add(vm, &v, v.isEnabled())?;
             }
             let (oa, sa) = (orig.tracksWithMediaType(am), snd.tracksWithMediaType(am));
             let mix = sa.firstObject().ok_or("the cleaned sound is empty")?;

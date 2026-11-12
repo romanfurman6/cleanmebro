@@ -16,6 +16,62 @@ pub struct Line {
     pub start: f64,
     pub end: f64,
     pub text: String,
+    /// The line's words with their times (older transcripts have none).
+    #[serde(default)]
+    pub words: Vec<Word>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Word {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+}
+
+/// Sounds that fill a pause, not words: cut along with the pauses.
+const FILLERS: [&str; 22] = ["um", "umm", "uh", "uhh", "uhm", "hmm", "hm", "mm", "mmm", "er", "erm", "ah", "eh", "е", "ее", "еее", "е-е", "ем", "емм", "мм", "ммм", "гм"];
+
+pub fn is_filler(word: &str) -> bool {
+    let w: String = word.chars().filter(|c| c.is_alphabetic() || *c == '-').collect::<String>().to_lowercase();
+    !w.is_empty() && (FILLERS.contains(&w.as_str()) || w.trim_matches('-').chars().all(|c| matches!(c, 'е' | 'e' | 'м' | 'm' | 'h' | 'г')) && w.chars().count() >= 3)
+}
+
+/// Pauses at least this long are cut.
+pub const MIN_PAUSE: f64 = 0.7;
+/// Silence kept on each side of a cut, so speech isn't clipped.
+pub const PAUSE_MARGIN: f64 = 0.15;
+
+/// The stretches to cut so the video jumps from word to word: pauses of
+/// `MIN_PAUSE` or more (fillers count as pause), the silence before the
+/// first word and after the last, each with `PAUSE_MARGIN` left around the
+/// speech. Uses the words' times, or the lines' for transcripts without them.
+pub fn pauses(lines: &[Line], duration: f64) -> Vec<(f64, f64)> {
+    let mut speech: Vec<(f64, f64)> = Vec::new();
+    for l in lines {
+        if l.words.is_empty() {
+            speech.push((l.start, l.end));
+        } else {
+            speech.extend(l.words.iter().filter(|w| !is_filler(&w.text)).map(|w| (w.start, w.end)));
+        }
+    }
+    speech.retain(|(a, b)| b > a);
+    speech.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out = Vec::new();
+    let mut last = 0.0f64;
+    let mut first = true;
+    for (a, b) in speech {
+        let gap_start = if first { 0.0 } else { last + PAUSE_MARGIN };
+        let gap_end = a - PAUSE_MARGIN;
+        if a - last >= MIN_PAUSE && gap_end - gap_start > 0.05 {
+            out.push((gap_start, gap_end));
+        }
+        last = last.max(b);
+        first = false;
+    }
+    if !first && duration - last >= MIN_PAUSE {
+        out.push((last + PAUSE_MARGIN, duration));
+    }
+    out
 }
 
 /// A transcript kept for a file (in the app's data, not beside the video).
@@ -63,7 +119,7 @@ pub fn edited_lines(lines: &[Line], edl: &Edl) -> Vec<Line> {
         .iter()
         .filter_map(|l| {
             let (s, e) = (edl.edited_at(l.start), edl.edited_at(l.end));
-            (e - s >= 0.2).then(|| Line { start: s, end: e, text: l.text.clone() })
+            (e - s >= 0.2).then(|| Line { start: s, end: e, text: l.text.clone(), words: Vec::new() })
         })
         .collect()
 }
@@ -97,12 +153,13 @@ pub fn txt(lines: &[Line]) -> String {
 
 /// Whisper's raw segments → clean lines (no blanks, no "[music]" asides).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn tidy(raw: Vec<(f64, f64, String)>) -> Vec<Line> {
+pub fn tidy(raw: Vec<crate::kit::whisper::Segment>) -> Vec<Line> {
     raw.into_iter()
-        .filter_map(|(start, end, text)| {
-            let t = text.trim().to_string();
+        .filter_map(|s| {
+            let t = s.text.trim().to_string();
             let aside = (t.starts_with('[') && t.ends_with(']')) || (t.starts_with('(') && t.ends_with(')'));
-            (!t.is_empty() && !aside && end > start).then_some(Line { start, end, text: t })
+            let words = s.words.into_iter().filter(|w| w.1 >= w.0).map(|(start, end, text)| Word { start, end, text }).collect();
+            (!t.is_empty() && !aside && s.end > s.start).then_some(Line { start: s.start, end: s.end, text: t, words })
         })
         .collect()
 }
@@ -121,7 +178,7 @@ pub fn transcribe(video: &Path, m: Model, p: &std::sync::Arc<Progress>) -> Resul
     if p.cancelled() {
         return Err("Stopped".into());
     }
-    let raw = crate::kit::whisper::Loaded::load(m)?.run(&pcm, None, Some(p))?;
+    let raw = crate::kit::whisper::Loaded::load(m)?.run_timed(&pcm, None, Some(p))?;
     p.done.store(100, Ordering::Relaxed);
     Ok(tidy(raw))
 }
@@ -136,7 +193,38 @@ mod tests {
     use super::*;
 
     fn line(s: f64, e: f64, t: &str) -> Line {
-        Line { start: s, end: e, text: t.into() }
+        Line { start: s, end: e, text: t.into(), words: Vec::new() }
+    }
+
+    fn word(s: f64, e: f64, t: &str) -> Word {
+        Word { start: s, end: e, text: t.into() }
+    }
+
+    #[test]
+    fn fillers_are_known() {
+        for w in ["um", "Uh,", "е-е", "Еее...", "ммм", "hmmm"] {
+            assert!(is_filler(w), "{w}");
+        }
+        for w in ["ну", "так", "and", "me", "hello", "мене"] {
+            assert!(!is_filler(w), "{w}");
+        }
+    }
+
+    #[test]
+    fn pauses_and_fillers_are_cut_with_air_left() {
+        let mut l = line(1.0, 9.0, "Hello um there. Bye");
+        l.words = vec![word(1.0, 1.4, "Hello"), word(1.5, 2.6, "um"), word(2.7, 3.0, "there."), word(3.2, 3.5, "Bye")];
+        let cuts = pauses(&[l], 10.0);
+        let r = |v: f64| (v * 100.0).round() / 100.0;
+        let cuts: Vec<(f64, f64)> = cuts.into_iter().map(|(a, b)| (r(a), r(b))).collect();
+        // before the first word, the "um" gap (1.4 → 2.7), and after the last
+        assert_eq!(cuts, vec![(0.0, 0.85), (1.55, 2.55), (3.65, 10.0)]);
+        // short gaps stay; lines without words use the line times
+        let a = line(0.0, 2.0, "a");
+        let b = line(2.3, 4.0, "b");
+        assert!(pauses(&[a.clone(), b.clone()], 4.0).is_empty());
+        let c = line(6.0, 7.0, "c");
+        assert_eq!(pauses(&[a, b, c], 7.0).len(), 1);
     }
 
     #[test]
@@ -159,7 +247,8 @@ mod tests {
 
     #[test]
     fn asides_and_blanks_are_dropped() {
-        let raw = vec![(0.0, 1.0, " [Music] ".to_string()), (1.0, 2.0, " Okay ".into()), (2.0, 2.0, "x".into()), (3.0, 4.0, "  ".into())];
+        let seg = |a: f64, b: f64, t: &str| crate::kit::whisper::Segment { start: a, end: b, text: t.into(), words: Vec::new() };
+        let raw = vec![seg(0.0, 1.0, " [Music] "), seg(1.0, 2.0, " Okay "), seg(2.0, 2.0, "x"), seg(3.0, 4.0, "  ")];
         assert_eq!(tidy(raw), vec![line(1.0, 2.0, "Okay")]);
     }
 

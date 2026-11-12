@@ -11,6 +11,8 @@
 
 pub mod edit;
 pub mod media;
+pub mod compose;
+pub mod scene;
 pub mod sound;
 pub mod speech;
 pub mod voice;
@@ -51,13 +53,23 @@ enum Event {
     Downloaded(Model, Result<(), String>),
     Transcribed(Result<Vec<Line>, String>),
     Cleaned(Result<(PathBuf, Vec<f32>), String>),
+    /// A re-render with the look, then like [`Event::Saved`].
+    Restyled(Result<(PathBuf, bool), String>, Option<ProjectUpdate>),
+    /// A preview frame for (time, look).
+    Preview(f64, scene::Style, Option<image::RgbaImage>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Transcript,
     Audio,
+    /// How a recording with a project is drawn (frame, cursor, camera).
+    Look,
 }
+
+/// After a re-render is saved over the file: the project's new raw video
+/// (when cuts or the voice changed it) and its log.
+type ProjectUpdate = (Option<PathBuf>, compose::Meta);
 
 /// Work running on a thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,6 +153,19 @@ pub struct Viewer {
     /// The cleaned sound, and whether it's what plays (and gets saved).
     pub voice: Option<PathBuf>,
     pub voice_on: bool,
+    /// The recording's raw video and log, when it has them: its look can
+    /// be changed and rendered again.
+    pub project: Option<(compose::Project, compose::Meta)>,
+    /// The look being chosen (Save renders it).
+    pub look: scene::Style,
+    after_save: Option<ProjectUpdate>,
+    /// The render running for Save.
+    pub rendering: Option<Arc<compose::Progress>>,
+    /// The look on the paused frame, and for which time and look.
+    pub preview: Option<(f64, scene::Style, egui::TextureHandle)>,
+    preview_busy: bool,
+    preview_img: Option<(f64, scene::Style, image::RgbaImage)>,
+    pictures: Option<compose::Pictures>,
     tx: Sender<Event>,
     rx: Receiver<Event>,
     ctx: egui::Context,
@@ -180,6 +205,14 @@ impl Viewer {
             clean_peaks: Vec::new(),
             voice: None,
             voice_on: false,
+            project: None,
+            look: scene::Style::default(),
+            after_save: None,
+            rendering: None,
+            preview: None,
+            preview_busy: false,
+            preview_img: None,
+            pictures: None,
             tx,
             rx,
             ctx: ctx.clone(),
@@ -203,6 +236,13 @@ impl Viewer {
         self.clean_peaks.clear();
         self.peaks.clear();
         self.lines = speech::load(&self.path).unwrap_or_default();
+        self.project = compose::Project::find(&crate::tools::capture::record::projects_dir(), &self.path);
+        self.look = self.project.as_ref().map(|p| p.1.style).unwrap_or_default();
+        self.preview = None;
+        self.preview_img = None;
+        if self.project.is_none() && self.tab == Tab::Look {
+            self.tab = Tab::Transcript;
+        }
         match Player::open(&self.path, None) {
             Ok(p) => {
                 self.edl = Edl::new(p.duration);
@@ -366,9 +406,47 @@ impl Viewer {
         !self.edl.untouched()
     }
 
-    /// Anything Save would write: cuts or the cleaned voice.
+    /// Anything Save would write: cuts, the cleaned voice or a new look.
     pub fn dirty(&self) -> bool {
-        self.edited() || (self.voice_on && self.voice.is_some())
+        self.edited() || (self.voice_on && self.voice.is_some()) || self.restyled()
+    }
+
+    /// The look differs from the one in the file.
+    pub fn restyled(&self) -> bool {
+        self.project.as_ref().is_some_and(|p| p.1.style != self.look)
+    }
+
+    /// The cursor pictures (taken once, on the main thread).
+    fn pictures(&mut self) -> compose::Pictures {
+        self.pictures.get_or_insert_with(compose::cursor_pictures).clone()
+    }
+
+    /// Ask for a preview of the look at the current frame, when the one
+    /// shown is for another time or look. Paused, Look tab only.
+    pub fn want_preview(&mut self) {
+        if self.preview_busy || self.playing() || self.tab != Tab::Look {
+            return;
+        }
+        let Some((proj, meta)) = &self.project else { return };
+        let t = self.time();
+        if self.preview.as_ref().is_some_and(|p| (p.0 - t).abs() < 1e-3 && p.1 == self.look) {
+            return;
+        }
+        let mut meta = meta.clone();
+        meta.style = self.look;
+        let job = compose::Job { raw: proj.raw(), out: PathBuf::new(), meta, lines: self.lines.clone(), pictures: self.pictures() };
+        let (tx, ctx, look) = (self.tx.clone(), self.ctx.clone(), self.look);
+        self.preview_busy = true;
+        std::thread::spawn(move || {
+            let img = compose::still(&job, t).ok();
+            let _ = tx.send(Event::Preview(t, look, img));
+            ctx.request_repaint();
+        });
+    }
+
+    /// The preview to show instead of the player's frame, if it's current.
+    pub fn take_preview_image(&mut self) -> Option<(f64, scene::Style, image::RgbaImage)> {
+        self.preview_img.take()
     }
 
     pub fn duration(&self) -> f64 {
@@ -454,6 +532,28 @@ impl Viewer {
         }
     }
 
+    /// Cut every pause and filler the transcript shows. One undo step.
+    pub fn cut_pauses(&mut self) {
+        let cuts = speech::pauses(&self.lines, self.edl.duration);
+        let before = self.edl.length();
+        let mut n = 0;
+        let ok = self.change(|e| {
+            for (a, b) in &cuts {
+                if e.cut(*a, *b) {
+                    n += 1;
+                }
+            }
+            n > 0
+        });
+        if ok {
+            let t = self.edl.playable(self.time()).unwrap_or(self.edl.start());
+            self.seek(t);
+            self.flash(format!("Cut {n} pause{} · {:.0} s shorter", if n == 1 { "" } else { "s" }, before - self.edl.length()));
+        } else {
+            self.flash("No pauses to cut");
+        }
+    }
+
     /// Keep only the selection.
     pub fn keep_selection(&mut self) {
         let Some((a, b)) = self.sel else { return };
@@ -516,6 +616,10 @@ impl Viewer {
         let dest = if copy { media::copy_name(&self.path) } else { media::temp_beside(&self.path) };
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         let voice = self.voice.clone().filter(|_| self.voice_on);
+        if let Some((proj, meta)) = &self.project {
+            self.render_save(proj.raw(), meta.clone(), dest, copy, voice);
+            return;
+        }
         media::export(
             &self.path,
             voice.as_deref(),
@@ -528,9 +632,75 @@ impl Viewer {
         );
     }
 
+    /// Save a recording with a project: make the cuts and the voice in the
+    /// raw video (no re-encoding), then render it with the look to `dest`.
+    fn render_save(&mut self, raw: PathBuf, meta: compose::Meta, dest: PathBuf, copy: bool, voice: Option<PathBuf>) {
+        let edl = self.edl.clone();
+        let edited = !edl.untouched() || voice.is_some();
+        let lines = if self.look.captions { self.edited_lines() } else { Vec::new() };
+        let meta = compose::Meta { style: self.look, recorded: if edl.untouched() { meta.recorded.clone() } else { meta.recorded.cut(&edl) }, ..meta };
+        let pictures = self.pictures();
+        let progress = Arc::new(compose::Progress::default());
+        self.rendering = Some(progress.clone());
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let r = (|| -> Result<Option<PathBuf>, String> {
+                if !edited {
+                    return Ok(None);
+                }
+                let next = raw.with_file_name("raw.next.mp4");
+                let (dtx, drx) = channel();
+                media::export(&raw, voice.as_deref(), &edl, next.clone(), Box::new(move |r| {
+                    let _ = dtx.send(r);
+                }));
+                drx.recv().map_err(|_| "The cut video didn't come back".to_string())?.map(Some)
+            })();
+            let r = r.and_then(|next| {
+                let job = compose::Job { raw: next.clone().unwrap_or_else(|| raw.clone()), out: dest.clone(), meta: meta.clone(), lines, pictures };
+                match compose::render(&job, &progress) {
+                    Ok(_) => Ok(next),
+                    Err(e) => {
+                        if let Some(n) = &next {
+                            let _ = std::fs::remove_file(n);
+                        }
+                        Err(e)
+                    }
+                }
+            });
+            let e = match r {
+                // a copy has no project: its cut raw video isn't needed
+                Ok(next) if copy => {
+                    if let Some(n) = next {
+                        let _ = std::fs::remove_file(n);
+                    }
+                    Event::Restyled(Ok((dest, true)), None)
+                }
+                Ok(next) => Event::Restyled(Ok((dest, false)), Some((next, meta))),
+                Err(e) => Event::Restyled(Err(e), None),
+            };
+            let _ = tx.send(e);
+            ctx.request_repaint();
+        });
+    }
+
     /// Background results; call once per pass.
     pub fn tick(&mut self) {
         while let Ok(e) = self.rx.try_recv() {
+            let e = match e {
+                Event::Restyled(r, upd) => {
+                    self.rendering = None;
+                    self.after_save = upd;
+                    Event::Saved(r)
+                }
+                Event::Preview(t, look, img) => {
+                    self.preview_busy = false;
+                    if let Some(img) = img {
+                        self.preview_img = Some((t, look, img));
+                    }
+                    continue;
+                }
+                e => e,
+            };
             match e {
                 Event::Strip(imgs) => {
                     self.strip_imgs = imgs;
@@ -554,6 +724,12 @@ impl Viewer {
                                 if let Some(v) = self.voice.take() {
                                     let _ = std::fs::remove_file(v);
                                 }
+                                if let (Some((next, meta)), Some((proj, _))) = (self.after_save.take(), &self.project) {
+                                    if let Some(next) = next {
+                                        let _ = std::fs::rename(next, proj.raw());
+                                    }
+                                    proj.save(&meta);
+                                }
                                 if !lines.is_empty() {
                                     speech::store(&self.path, &lines);
                                 }
@@ -569,8 +745,11 @@ impl Viewer {
                         }
                     }
                 }
+                // turned into Saved above
+                Event::Restyled(..) | Event::Preview(..) => {}
                 Event::Saved(Err(e)) => {
                     self.saving = false;
+                    self.after_save = None;
                     self.flash(format!("Couldn't save: {e}"));
                 }
                 Event::Peaks(n, p) => {

@@ -90,6 +90,8 @@ struct Spec {
     legend: Vec<Legend>,
     speed: bool,
     facts: Vec<Fact>,
+    /// Busiest apps on the network (a card of their own, over the facts).
+    apps: Vec<Fact>,
     /// On/off rows under the cards: label, hint, state, what a click does.
     switches: Vec<(&'static str, String, bool, Action)>,
     /// The charge limit row above the switches: the selected index in
@@ -102,7 +104,7 @@ struct Spec {
 
 impl Spec {
     fn new(icon: Icon, chip: Color32, title: impl Into<String>, sub: impl Into<String>) -> Self {
-        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], switches: vec![], limit: None, procs: vec![], buttons: vec![] }
+        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], apps: vec![], switches: vec![], limit: None, procs: vec![], buttons: vec![] }
     }
 }
 
@@ -292,6 +294,9 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             sp.hero = Some((n, u, format!("up · {} down", human_rate(s.net_down))));
             sp.speed = true;
             let dash = |v: &str| if v.is_empty() { "—".to_string() } else { v.to_string() };
+            for a in &s.apps {
+                sp.apps.push(fact(&a.name, format!("{} ↓  {} ↑", human_rate(a.down), human_rate(a.up)), TEXT(), ""));
+            }
             sp.facts.push(fact("Security", dash(&s.wifi.security), TEXT(), ""));
             sp.facts.push(fact("Channel", dash(&s.wifi.channel), TEXT(), ""));
             sp.facts.push(fact("Signal / noise", dash(&s.wifi.signal), TEXT(), ""));
@@ -303,21 +308,18 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             let devs = super::devices::lowest_first(&s.devices);
             let mut sp = Spec::new(Icon::Bluetooth, tint::NEUTRAL(), "Devices", super::devices_ui::note(&devs));
             for d in &devs {
-                match d.battery() {
-                    Some(b) => sp.legend.push(Legend { color: super::devices::color(b), label: format!("{} · {}", d.name, d.kind.label()), value: format!("{b}%"), value_col: super::devices::text_color(b) }),
-                    None => sp.legend.push(Legend { color: TEXT_FAINT(), label: d.name.clone(), value: "no battery data".into(), value_col: TEXT_FAINT() }),
+                let mut label = format!("{} · {}", d.name, d.detail());
+                if d.charging && d.live() {
+                    label.push_str(" · charging");
                 }
-                if d.split() {
-                    for (label, v) in d.parts() {
-                        if let Some(v) = v {
-                            sp.legend.push(Legend { color: with_alpha(super::devices::color(v), 0.55), label: format!("    {label}"), value: format!("{v}%"), value_col: TEXT_DIM() });
-                        }
-                    }
+                match d.battery() {
+                    Some(b) if d.live() => sp.legend.push(Legend { color: super::devices::color(b), label, value: format!("{b}%"), value_col: super::devices::text_color(b) }),
+                    Some(b) => sp.legend.push(Legend { color: with_alpha(super::devices::color(b), 0.4), label, value: format!("{b}%"), value_col: TEXT_FAINT() }),
+                    None => sp.legend.push(Legend { color: TEXT_FAINT(), label: d.name.clone(), value: "–".into(), value_col: TEXT_FAINT() }),
                 }
             }
-            let (low, crit) = (m::BT_LOW_BATTERY_MAX_PCT + 1, m::BT_CRITICAL_BATTERY_MAX_PCT + 1);
-            sp.switches.push(("Low battery alerts", format!("macOS notification below {low}% and {crit}%"), crate::kit::notify::shown(s.bt_prefs.alerts), Action::ToggleAlerts));
-            sp.switches.push(("Show in menu bar", format!("Only while a device is below {low}%"), s.bt_prefs.menu_bar, Action::ToggleMenuBar));
+            sp.switches.push(("Low battery alerts", String::new(), crate::kit::notify::shown(s.bt_prefs.alerts), Action::ToggleAlerts));
+            sp.switches.push(("Show in menu bar", String::new(), s.bt_prefs.menu_bar, Action::ToggleMenuBar));
             sp.buttons = vec![("Bluetooth Settings", BTN_SECONDARY, Action::OpenBluetooth)];
             sp
         }
@@ -386,61 +388,6 @@ pub fn sheet(ui: &mut Ui, rect: Rect, kind: Sheet, s: &Snapshot) -> Action {
     action
 }
 
-/// One section of the Mac Health page: the sheet's content without the
-/// sheet frame. Its header (chip, title, subtitle, buttons on the right)
-/// sits on one line above the cards.
-pub struct Section {
-    sp: Spec,
-    kind: Sheet,
-}
-
-/// Height of a section's header line on the page.
-pub const SECTION_HEAD_H: f32 = 46.0;
-
-impl Section {
-    pub fn new(kind: Sheet, s: &Snapshot) -> Self {
-        Section { sp: spec(kind, s), kind }
-    }
-
-    /// Total height at width `w` (header + content), measured off-screen.
-    pub fn height(&self, p: &egui::Painter, ctx: &egui::Context, s: &Snapshot, w: f32) -> f32 {
-        let hidden = p.with_clip_rect(Rect::NOTHING);
-        SECTION_HEAD_H + body(&hidden, ctx, &self.sp, self.kind, s, 0.0, w, 0.0) + switches_h(&self.sp) + procs_h(self.sp.procs.len())
-    }
-
-    /// Draw the section at `r` (its width and top; the height comes from
-    /// [`Section::height`]) and report what was clicked.
-    pub fn show(&self, ui: &mut Ui, r: Rect, s: &Snapshot) -> Action {
-        let p = ui.painter().clone();
-        tool_chip(&p, Rect::from_min_size(r.min + Vec2::new(0.0, 2.0), Vec2::splat(30.0)), self.sp.icon, self.sp.chip);
-        let right = r.right();
-        // buttons first so the titles can stop short of them
-        let mut bx = right;
-        let mut action = Action::None;
-        for (label, kind_, act) in self.sp.buttons.iter().rev() {
-            let bw = button_width(&p, label, *kind_);
-            let br = Rect::from_min_size(Pos2::new(bx - bw, r.top() + 2.0), Vec2::new(bw, 28.0));
-            let enabled = !busy(*act, s);
-            if pill_button(ui, br, if enabled { label } else { busy_label(*act) }, *kind_, enabled).clicked() {
-                action = *act;
-            }
-            bx -= bw + 8.0;
-        }
-        let tw = (bx - r.left() - 40.0 - 8.0).max(60.0);
-        text_fit(&p, r.min + Vec2::new(40.0, 0.0), Align2::LEFT_TOP, &self.sp.title, bold(15.0), TEXT(), tw);
-        text_fit(&p, r.min + Vec2::new(40.0, 19.0), Align2::LEFT_TOP, &self.sp.sub, font(12.0), TEXT_DIM(), tw);
-        let h = body(&p, ui.ctx(), &self.sp, self.kind, s, r.left(), r.width(), r.top() + SECTION_HEAD_H);
-        let sw = switches(ui, &self.sp, r.left(), r.width(), r.top() + SECTION_HEAD_H + h + 14.0);
-        if sw != Action::None {
-            action = sw;
-        }
-        let pa = procs_card(ui, &self.sp.procs, r.left(), r.width(), r.top() + SECTION_HEAD_H + h + switches_h(&self.sp) + 14.0);
-        if pa != Action::None {
-            action = pa;
-        }
-        action
-    }
-}
 
 /// Legends this wide get two columns.
 const LEGEND_TWO_COLUMNS_MIN: f32 = 400.0;
@@ -511,7 +458,10 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
         glass_card(p, lr, R_CARD, 0.0, false);
         p.text(lr.min + Vec2::new(12.0, 12.0), Align2::LEFT_TOP, "Speed test", bold(13.0), TEXT());
         if let Some(l) = sp_.latency_ms {
-            p.text(Pos2::new(lr.right() - 12.0, lr.top() + 13.0), Align2::RIGHT_TOP, format!("Latency {l:.0} ms"), font(12.0), TEXT_FAINT());
+            p.text(Pos2::new(lr.right() - 12.0, lr.top() + 13.0), Align2::RIGHT_TOP, match sp_.jitter_ms {
+                Some(j) => format!("Ping {l:.0} ms ±{j:.0}"),
+                None => format!("Ping {l:.0} ms"),
+            }, font(12.0), TEXT_FAINT());
         }
         for (k, (label, v)) in [("Download", sp_.down_mbps), ("Upload", sp_.up_mbps)].iter().enumerate() {
             let x = lr.left() + 12.0 + k as f32 * (w / 2.0);
@@ -538,19 +488,27 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
         y += 120.0 + 14.0;
     }
 
-    // facts card (measure first, then draw)
+    // busiest apps, then the facts
+    if !sp.apps.is_empty() {
+        y += facts_card(p, &sp.apps, x0, w, y) + 14.0;
+    }
     if !sp.facts.is_empty() {
-        let measure = |f: &Fact| if f.hint.is_empty() { 32.0 } else { 27.0 + p.layout(f.hint.clone(), font(12.0), TEXT_FAINT(), w - 24.0).size().y + 8.0 };
-        let h: f32 = 8.0 + sp.facts.iter().map(measure).sum::<f32>();
-        let fr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h));
-        glass_card(p, fr, R_CARD, 0.0, false);
-        let mut fy = y + 4.0;
-        for f in &sp.facts {
-            fy += fact_row(p, Rect::from_min_size(Pos2::new(x0, fy), Vec2::new(w, 40.0)), &f.label, &f.value, f.col, &f.hint);
-        }
-        y += h;
+        y += facts_card(p, &sp.facts, x0, w, y);
     }
     y - top
+}
+
+/// A card of fact rows (measured first, then drawn). Returns its height.
+fn facts_card(p: &egui::Painter, facts: &[Fact], x0: f32, w: f32, y: f32) -> f32 {
+    let measure = |f: &Fact| if f.hint.is_empty() { 32.0 } else { 27.0 + p.layout(f.hint.clone(), font(12.0), TEXT_FAINT(), w - 24.0).size().y + 8.0 };
+    let h: f32 = 8.0 + facts.iter().map(measure).sum::<f32>();
+    let fr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h));
+    glass_card(p, fr, R_CARD, 0.0, false);
+    let mut fy = y + 4.0;
+    for f in facts {
+        fy += fact_row(p, Rect::from_min_size(Pos2::new(x0, fy), Vec2::new(w, 40.0)), &f.label, &f.value, f.col, &f.hint);
+    }
+    h
 }
 
 const SWITCH_ROW_H: f32 = 48.0;
@@ -600,8 +558,12 @@ fn switches(ui: &mut Ui, sp: &Spec, x0: f32, w: f32, y: f32) -> Action {
             action = *act;
         }
         let tw = sr.left() - rr.left() - 24.0;
-        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, label, font(13.0), TEXT(), tw);
-        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y + 2.0), Align2::LEFT_TOP, hint, font(12.0), TEXT_FAINT(), tw);
+        if hint.is_empty() {
+            text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y), Align2::LEFT_CENTER, label, font(13.0), TEXT(), tw);
+        } else {
+            text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, label, font(13.0), TEXT(), tw);
+            text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y + 2.0), Align2::LEFT_TOP, hint, font(12.0), TEXT_FAINT(), tw);
+        }
     }
     action
 }

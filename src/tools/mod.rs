@@ -7,6 +7,7 @@ pub mod capture;
 pub mod claude;
 pub mod clipboard;
 pub mod dictation;
+pub mod displays;
 pub mod cleanup;
 pub mod keep_awake;
 pub mod fan;
@@ -31,6 +32,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
         Box::new(claude::Claude::new(env)),
         Box::new(keep_awake::KeepAwake::new(env)),
         Box::new(fan::FanControl::new(env)),
+        Box::new(displays::Displays::new(env)),
     ]
 }
 
@@ -51,6 +53,7 @@ pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "system/devices",
     "claude/limits",
     "fan/fans",
+    "displays/levels",
 ];
 
 #[cfg(test)]
