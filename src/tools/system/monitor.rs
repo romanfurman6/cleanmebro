@@ -538,10 +538,9 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
                 let notes = bt_alerts.check(&d, &s.bt_prefs);
                 // with alerts off, stay quiet but remember, so turning them
                 // on doesn't replay old ones
-                if s.bt_prefs.alerts {
-                    for (title, body) in notes {
-                        crate::kit::notify::send(&title, &body);
-                    }
+                // each kind goes out only while its own switch is on
+                for n in notes.into_iter().filter(|n| n.charged || s.bt_prefs.alerts) {
+                    crate::kit::notify::send(&n.title, &n.body);
                 }
                 let (shown, hidden) = s.bt_prefs.split(d);
                 s.devices = shown;

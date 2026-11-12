@@ -9,7 +9,7 @@ use crate::kit::mechanics as m;
 use egui::Color32;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,7 +124,10 @@ impl Device {
     }
     /// The same physical device (by address, or else by name).
     pub fn same(&self, o: &Device) -> bool {
-        (!self.address.is_empty() && self.address == o.address) || self.name.eq_ignore_ascii_case(&o.name)
+        if !self.address.is_empty() && !o.address.is_empty() {
+            return self.address == o.address;
+        }
+        self.name.eq_ignore_ascii_case(&o.name)
     }
     pub fn live(&self) -> bool {
         self.seen.is_none()
@@ -448,7 +451,8 @@ pub fn parse_proximity(data: &[u8], rssi: i16) -> Option<PodsAdvert> {
         return None;
     }
     let level = |n: u8| (n <= 10).then_some(n * 10);
-    let model = u16::from_be_bytes([d[3], d[4]]);
+    // little-endian: AirPods Pro 2 send 14 20 for product 0x2014
+    let model = u16::from_le_bytes([d[3], d[4]]);
     let status = d[5];
     // which nibble is the left pod flips with the pod that's sending
     let flipped = status & 0x20 == 0;
@@ -490,13 +494,14 @@ pub fn merge_extra(list: &mut Vec<Device>, paired_pods: &[Device], adverts: &[Po
     let mut models: Vec<_> = best.into_values().collect();
     models.sort_by_key(|a| a.model);
     for a in models {
-        if let Some(d) = list.iter_mut().find(|d| d.product == a.model && d.split()) {
+        if let Some(d) = list.iter_mut().find(|d| d.product == a.model && d.kind == Kind::Earbuds && d.main.is_none()) {
             d.left = d.left.or(a.left);
             d.right = d.right.or(a.right);
             d.case = d.case.or(a.case);
             d.charging = a.left_charging || a.right_charging;
             d.case_charging = a.case_charging;
-        } else if let Some(p) = paired_pods.iter().find(|p| p.product == a.model) {
+        } else if let [p] = paired_pods.iter().filter(|p| p.product == a.model).collect::<Vec<_>>()[..] {
+            // only when exactly one paired pair is that model
             if !list.iter().any(|d| d.same(p)) {
                 list.push(Device { left: a.left, right: a.right, case: a.case, charging: a.left_charging || a.right_charging, case_charging: a.case_charging, ..p.clone() });
             }
@@ -524,15 +529,24 @@ pub fn merge_extra(list: &mut Vec<Device>, paired_pods: &[Device], adverts: &[Po
 /// is charged past the reset line, so hovering around 20% doesn't nag.
 /// Charging devices never get a low alert; they get one "charged" alert
 /// when they reach the chosen level, if that's on.
+/// One notification: a low-battery one (sent while low alerts are on) or
+/// a charged one (sent while the charged alert is on).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Note {
+    pub charged: bool,
+    pub title: String,
+    pub body: String,
+}
+
 #[derive(Default)]
 pub struct Alerts {
     fired: HashMap<String, u8>, // device key -> 1 low, 2 critical
-    charged: HashSet<String>,
+    charged: HashMap<String, u8>, // device key -> the level it was announced at
 }
 
 impl Alerts {
-    /// The notifications to send now, as (title, body).
-    pub fn check(&mut self, devs: &[Device], prefs: &Prefs) -> Vec<(String, String)> {
+    /// The notifications to send now.
+    pub fn check(&mut self, devs: &[Device], prefs: &Prefs) -> Vec<Note> {
         let mut out = Vec::new();
         for d in devs.iter().filter(|d| d.live()) {
             let Some(b) = d.battery() else { continue };
@@ -542,8 +556,9 @@ impl Alerts {
             }
             // charged
             if d.charging {
-                if prefs.charged && b >= prefs.charged_at && self.charged.insert(key.clone()) {
-                    out.push((format!("{} charged", d.name), format!("At {b}%")));
+                if prefs.charged && b >= prefs.charged_at && self.charged.get(&key) != Some(&prefs.charged_at) {
+                    self.charged.insert(key.clone(), prefs.charged_at);
+                    out.push(Note { charged: true, title: format!("{} charged", d.name), body: format!("At {b}%") });
                 }
             } else {
                 self.charged.remove(&key);
@@ -581,7 +596,7 @@ impl Alerts {
                 } else {
                     "Charge it soon.".to_string()
                 };
-                out.push((title, body));
+                out.push(Note { charged: false, title, body });
             }
         }
         out
@@ -826,7 +841,7 @@ mod tests {
 
     /// manufacturer data: 4c 00 | 07 19 01 | model | status | pods | flags+case | ...
     fn advert(model: u16, status: u8, pods: u8, flags_case: u8) -> Vec<u8> {
-        let [a, b] = model.to_be_bytes();
+        let [a, b] = model.to_le_bytes();
         let mut v = vec![0x4c, 0x00, 0x07, 0x19, 0x01, a, b, status, pods, flags_case, 0x00, 0x00];
         v.resize(2 + 27, 0);
         v
@@ -891,7 +906,7 @@ mod tests {
         assert!(a.check(&mouse(40), &p).is_empty());
         let n = a.check(&mouse(19), &p);
         assert_eq!(n.len(), 1);
-        assert_eq!(n[0].0, "MX Master 3S is at 19%");
+        assert_eq!(n[0].title, "MX Master 3S is at 19%");
         assert!(a.check(&mouse(18), &p).is_empty());
         assert!(a.check(&mouse(22), &p).is_empty(), "no reset below the reset line");
         assert!(a.check(&mouse(19), &p).is_empty());
@@ -910,9 +925,13 @@ mod tests {
         assert!(a.check(&d, &p).is_empty());
         d[0].main = Some(91);
         let n = a.check(&d, &p);
-        assert_eq!(n, vec![("MX Master 3S charged".to_string(), "At 91%".to_string())]);
+        assert_eq!(n, vec![Note { charged: true, title: "MX Master 3S charged".into(), body: "At 91%".into() }]);
         d[0].main = Some(100);
         assert!(a.check(&d, &p).is_empty(), "once per charge");
+        p.charged_at = 100;
+        assert_eq!(a.check(&d, &p).len(), 1, "again at a new level");
+        p.charged_at = 90;
+        a.check(&d, &p);
         d[0].charging = false;
         a.check(&d, &p);
         d[0].charging = true;
