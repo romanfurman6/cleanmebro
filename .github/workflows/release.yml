@@ -92,8 +92,9 @@ jobs:
           LINE="$(security find-identity -v -p codesigning "$KC" | grep 'Developer ID Application:' | head -1)"
           if [[ -z "$LINE" ]]; then
             security find-identity -p codesigning "$KC" # names and why each is invalid
-            echo "::error::No valid 'Developer ID Application' identity in MACOS_CERT_P12"
-            exit 1
+            echo "::warning::No valid 'Developer ID Application' identity in MACOS_CERT_P12: release is ad-hoc signed, not notarized"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           echo "Signing as: ${LINE#*) }"
           # SHA-1 hash, not the name: the same cert may also be in the login keychain.
@@ -116,6 +117,7 @@ jobs:
           if [[ -n "${SIGN_ID:-}" ]]; then codesign --sign "$SIGN_ID" --keychain "$SIGN_KEYCHAIN" --timestamp CmdMeow.dmg; fi
 
       - name: Notarize and staple
+        id: notarize
         if: steps.sign.outputs.enabled == 'true'
         env:
           NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
@@ -125,12 +127,25 @@ jobs:
           cd target/bundle
           echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
           # Notarizing the dmg also covers the app inside it.
-          xcrun notarytool submit CmdMeow.dmg --wait --timeout 30m \
-            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+          set +e
+          OUT="$(xcrun notarytool submit CmdMeow.dmg --wait --timeout 30m \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" 2>&1)"
+          RC=$?
+          set -e
           rm "$RUNNER_TEMP/notary.p8"
+          echo "$OUT"
+          if [[ $RC -ne 0 ]]; then
+            # e.g. Apple refuses every submission while the team's agreement
+            # is pending. Ship Developer ID signed (same identity, so macOS
+            # permissions survive the later notarized update) instead of nothing.
+            echo "::warning::Notarization failed (exit $RC): release is Developer ID signed but not notarized. $(grep -m1 -i 'error' <<<"$OUT")"
+            echo "notarized=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           xcrun stapler staple CmdMeow.dmg
           xcrun stapler staple CmdMeow.app
           spctl -a -vv -t exec CmdMeow.app
+          echo "notarized=true" >> "$GITHUB_OUTPUT"
 
       - name: Make zip and checksums
         run: |
@@ -142,12 +157,12 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Cmd+Meow ${{ env.VERSION }}
+          name: Cmd+Meow ${{ env.VERSION }}${{ steps.sign.outputs.enabled != 'true' && ' (unsigned)' || steps.notarize.outputs.notarized != 'true' && ' (not notarized)' || '' }}
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
             Download **CmdMeow.dmg** (or CmdMeow.zip), move Cmd+Meow to Applications.
-            ${{ steps.sign.outputs.enabled != 'true' && 'This build is not notarized: open it the first time with right-click › Open, or run `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`.' || '' }}
+            ${{ steps.notarize.outputs.notarized != 'true' && 'This build is not notarized yet: the first time, open it, then System Settings › Privacy & Security › Open Anyway (or run `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`).' || '' }}
           files: |
             target/bundle/CmdMeow.zip
             target/bundle/CmdMeow.dmg
