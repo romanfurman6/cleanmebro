@@ -144,10 +144,20 @@ where
 
 /// One download stream: asks for big files back to back, counting bytes.
 fn download_stream(agent: &ureq::Agent, bytes: &AtomicU64, done: &(dyn Fn() -> bool + Sync)) {
-    let url = format!("{}?bytes={}", m::SPEED_TEST_DOWN_URL, m::SPEED_TEST_CHUNK_DOWN);
+    // the server refuses files over its cap (403 for 100 MB since 2026-11),
+    // so a refused size is halved and asked again
+    let mut chunk = m::SPEED_TEST_CHUNK_DOWN;
     let mut buf = vec![0u8; 64 * 1024];
     while !done() {
-        let Ok(r) = agent.get(&url).call() else { return };
+        let url = format!("{}?bytes={chunk}", m::SPEED_TEST_DOWN_URL);
+        let r = match agent.get(&url).call() {
+            Ok(r) => r,
+            Err(ureq::Error::StatusCode(c)) if (400..500).contains(&c) && chunk > 1_000_000 => {
+                chunk /= 2;
+                continue;
+            }
+            Err(_) => return,
+        };
         let mut reader = r.into_body().into_reader();
         loop {
             if done() {
