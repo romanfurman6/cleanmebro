@@ -11,6 +11,8 @@
 //!
 //! Unplugged, charging is always allowed again, so nothing is left stuck.
 
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use serde::{Deserialize, Serialize};
 
 /// The limits offered, 100 = off.

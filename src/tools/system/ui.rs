@@ -346,6 +346,9 @@ pub fn detail(mon: &monitor::Shared, d: &str, ui: &mut Ui, rect: Rect, cx: &mut 
         Action::ToggleSailing => monitor::change_charge(mon, ui.ctx(), |p| p.sailing = !p.sailing),
         Action::ToggleHeat => monitor::change_charge(mon, ui.ctx(), |p| p.heat = !p.heat),
         Action::InstallHelper => monitor::install_charge_helper(mon, ui.ctx()),
+        Action::Quit(pid) => {
+            super::procs::quit(pid);
+        }
         Action::None => {}
     }
 }

@@ -37,6 +37,8 @@ pub enum Action {
     ToggleSailing,
     ToggleHeat,
     InstallHelper,
+    /// Quit a process (asked twice in the row first).
+    Quit(u32),
 }
 
 fn level_color(l: Level) -> Color32 {
@@ -93,12 +95,14 @@ struct Spec {
     /// The charge limit row above the switches: the selected index in
     /// [`charge::LIMITS`].
     limit: Option<usize>,
+    /// Busiest processes (CPU sheet).
+    procs: Vec<super::procs::Proc>,
     buttons: Vec<(&'static str, u8, Action)>,
 }
 
 impl Spec {
     fn new(icon: Icon, chip: Color32, title: impl Into<String>, sub: impl Into<String>) -> Self {
-        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], switches: vec![], limit: None, buttons: vec![] }
+        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], switches: vec![], limit: None, procs: vec![], buttons: vec![] }
     }
 }
 
@@ -253,6 +257,11 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 leg(AMBER(), "System", format!("{:.0}%", s.cpu_system)),
                 leg_dim("Idle", format!("{:.0}%", (100.0 - s.cpu_load).max(0.0))),
             ];
+            if let Some(pw) = &s.power {
+                for (label, u, c) in [("E-cores", pw.ecpu, GREEN()), ("P-cores", pw.pcpu, tint::HEALTH()), ("GPU", pw.gpu, PURPLE())] {
+                    sp.legend.push(leg(c, label, usage_text(u)));
+                }
+            }
             let (th, tc) = match s.thermal {
                 0 => ("No thermal slowdown.", GREEN()),
                 1 => ("Warm", AMBER()),
@@ -260,6 +269,13 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 _ => ("Too hot", RED()),
             };
             sp.facts.push(fact("Temperature", s.thermal_word(), tc, th));
+            if let Some(pw) = &s.power {
+                let parts = pw.cpu_w + pw.gpu_w + pw.ane_w;
+                let total = s.sys_watts.unwrap_or(parts);
+                let split = format!("CPU {} · GPU {} · ANE {}", watts(pw.cpu_w), watts(pw.gpu_w), watts(pw.ane_w));
+                sp.facts.push(fact("Power", watts(total), TEXT(), &split));
+            }
+            sp.procs = s.procs.clone();
             let uh = if s.uptime_warning() { "Over a week" } else { "" };
             sp.facts.push(fact("Uptime", human_duration(s.uptime_secs), if s.uptime_warning() { AMBER() } else { TEXT() }, uh));
             sp
@@ -308,6 +324,27 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
     }
 }
 
+/// "31% · 1.4 GHz" (no clock while idle).
+fn usage_text(u: crate::kit::ioreport::Usage) -> String {
+    let pct = format!("{:.0}%", u.busy * 100.0);
+    if u.mhz <= 0.0 || u.busy < 0.005 {
+        pct
+    } else if u.mhz >= 1000.0 {
+        format!("{pct} · {:.1} GHz", u.mhz / 1000.0)
+    } else {
+        format!("{pct} · {:.0} MHz", u.mhz)
+    }
+}
+
+/// "3.4 W", "0.12 W".
+fn watts(w: f32) -> String {
+    if w < 1.0 {
+        format!("{w:.2} W")
+    } else {
+        format!("{w:.1} W")
+    }
+}
+
 /// Draw one sheet into `rect` and report what was clicked.
 /// A button whose work is already running.
 fn busy(act: Action, s: &Snapshot) -> bool {
@@ -337,6 +374,11 @@ pub fn sheet(ui: &mut Ui, rect: Rect, kind: Sheet, s: &Snapshot) -> Action {
     if sw != Action::None {
         action = sw;
     }
+    // the panel's sheet has room for fewer
+    let pa = procs_card(ui, &sp.procs[..sp.procs.len().min(SHEET_PROCS)], x0, x1 - x0, top + h + switches_h(&sp) + 14.0);
+    if pa != Action::None {
+        action = pa;
+    }
     let a = buttons(ui, &sp, s, x1, rect.bottom() - 16.0);
     if a != Action::None {
         action = a;
@@ -363,7 +405,7 @@ impl Section {
     /// Total height at width `w` (header + content), measured off-screen.
     pub fn height(&self, p: &egui::Painter, ctx: &egui::Context, s: &Snapshot, w: f32) -> f32 {
         let hidden = p.with_clip_rect(Rect::NOTHING);
-        SECTION_HEAD_H + body(&hidden, ctx, &self.sp, self.kind, s, 0.0, w, 0.0) + switches_h(&self.sp)
+        SECTION_HEAD_H + body(&hidden, ctx, &self.sp, self.kind, s, 0.0, w, 0.0) + switches_h(&self.sp) + procs_h(self.sp.procs.len())
     }
 
     /// Draw the section at `r` (its width and top; the height comes from
@@ -391,6 +433,10 @@ impl Section {
         let sw = switches(ui, &self.sp, r.left(), r.width(), r.top() + SECTION_HEAD_H + h + 14.0);
         if sw != Action::None {
             action = sw;
+        }
+        let pa = procs_card(ui, &self.sp.procs, r.left(), r.width(), r.top() + SECTION_HEAD_H + h + switches_h(&self.sp) + 14.0);
+        if pa != Action::None {
+            action = pa;
         }
         action
     }
@@ -556,6 +602,63 @@ fn switches(ui: &mut Ui, sp: &Spec, x0: f32, w: f32, y: f32) -> Action {
         let tw = sr.left() - rr.left() - 24.0;
         text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, label, font(13.0), TEXT(), tw);
         text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y + 2.0), Align2::LEFT_TOP, hint, font(12.0), TEXT_FAINT(), tw);
+    }
+    action
+}
+
+/// Processes the panel's sheet lists (the page lists all of them).
+const SHEET_PROCS: usize = 3;
+const PROC_ROW_H: f32 = 34.0;
+const PROC_HEAD_H: f32 = 32.0;
+/// How long a first click on Quit waits for the second.
+const QUIT_ARM_SECS: f64 = 4.0;
+
+/// Height of the processes card plus the gap above it.
+fn procs_h(n: usize) -> f32 {
+    if n == 0 { 0.0 } else { 14.0 + PROC_HEAD_H + n as f32 * PROC_ROW_H + 6.0 }
+}
+
+/// The busiest processes in one card at `y`; Quit (twice) on the user's own.
+fn procs_card(ui: &mut Ui, procs: &[super::procs::Proc], x0: f32, w: f32, y: f32) -> Action {
+    if procs.is_empty() {
+        return Action::None;
+    }
+    let p = ui.painter().clone();
+    let card = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, procs_h(procs.len()) - 14.0));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    p.text(Pos2::new(x0 + 12.0, y + 10.0), Align2::LEFT_TOP, "Top processes", bold(13.0), TEXT());
+    let now = ui.input(|i| i.time);
+    let arm_id = ui.scope_id().with("proc-quit-armed");
+    let armed: Option<(u32, f64)> = ui.data(|d| d.get_temp(arm_id)).filter(|(_, t): &(u32, f64)| now - t < QUIT_ARM_SECS);
+    let mut action = Action::None;
+    for (k, pr) in procs.iter().enumerate() {
+        let rr = Rect::from_min_size(Pos2::new(x0, y + PROC_HEAD_H + k as f32 * PROC_ROW_H), Vec2::new(w, PROC_ROW_H));
+        hairline(&p, Pos2::new(rr.left() + 12.0, rr.top()), Pos2::new(rr.right() - 12.0, rr.top()));
+        let hover = ui.rect_contains_pointer(rr);
+        let is_armed = armed.is_some_and(|(pid, _)| pid == pr.pid);
+        let mut right = rr.right() - 12.0;
+        if pr.mine && (hover || is_armed) {
+            let label = if is_armed { "Quit?" } else { "Quit" };
+            let kind = if is_armed { BTN_DANGER } else { BTN_SECONDARY };
+            let bw = button_width(&p, label, kind);
+            let br = Rect::from_min_size(Pos2::new(right - bw, rr.center().y - 12.0), Vec2::new(bw, 24.0));
+            if pill_button(ui, br, label, kind, true).clicked() {
+                if is_armed {
+                    action = Action::Quit(pr.pid);
+                    ui.data_mut(|d| d.remove::<(u32, f64)>(arm_id));
+                } else {
+                    ui.data_mut(|d| d.insert_temp(arm_id, (pr.pid, now)));
+                }
+            }
+            right = br.left() - 8.0;
+        } else {
+            let t = p.text(Pos2::new(right, rr.center().y), Align2::RIGHT_CENTER, format!("{:.0}%", pr.cpu), font(13.0), TEXT_DIM());
+            right = t.left() - 8.0;
+        }
+        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y), Align2::LEFT_CENTER, &pr.name, font(13.0), TEXT(), right - rr.left() - 12.0);
+    }
+    if armed.is_some() {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
     }
     action
 }

@@ -134,6 +134,9 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
         SheetAction::ToggleSailing => monitor::change_charge(mon, ui.ctx(), |p| p.sailing = !p.sailing),
         SheetAction::ToggleHeat => monitor::change_charge(mon, ui.ctx(), |p| p.heat = !p.heat),
         SheetAction::InstallHelper => monitor::install_charge_helper(mon, ui.ctx()),
+        SheetAction::Quit(pid) => {
+            super::procs::quit(pid);
+        }
         SheetAction::None | SheetAction::Close => {}
     }
     if super::speed::modal(ui, &s.speed) {

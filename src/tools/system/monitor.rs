@@ -139,6 +139,12 @@ pub struct Snapshot {
     pub speed: SpeedTest,
     /// Charge limit (held by the fan helper).
     pub charge: charge::View,
+    /// Watts and clocks per part (Apple silicon), while on screen.
+    pub power: Option<crate::kit::ioreport::Reading>,
+    /// The whole Mac's draw in watts (SMC `PSTR`).
+    pub sys_watts: Option<f32>,
+    /// The busiest processes, busiest first.
+    pub procs: Vec<super::procs::Proc>,
 }
 
 impl Snapshot {
@@ -311,6 +317,8 @@ const WIFI_EVERY: Cadence = Cadence::secs(60, None);
 const WIFI_DETAILS_EVERY: Cadence = Cadence::secs(10 * 60, None);
 /// The Trash's size, for the "Empty Trash" nudge (one folder only).
 const TRASH_EVERY: Cadence = Cadence::secs(600, None);
+/// The process list (only while on screen).
+const PROCS_EVERY: Cadence = Cadence::secs(4, None);
 /// A folder walk is running (on its own thread).
 static SIZING: AtomicBool = AtomicBool::new(false);
 
@@ -380,6 +388,12 @@ fn run(shared: Shared, ctx: egui::Context, demo: bool) {
     let (mut wifi_at, mut wifi_details_at, mut sizes_at) = (Every::default(), Every::default(), Every::default());
     let mut wifi_info = Wifi::default();
     let mut health_text = String::new();
+    let mut psys = sysinfo::System::new();
+    let mut procs_at = Every::default();
+    #[cfg(target_os = "macos")]
+    let mut sampler = if demo { None } else { crate::kit::ioreport::Sampler::open() };
+    #[cfg(target_os = "macos")]
+    let smc = if demo { None } else { crate::kit::smc::Smc::open() };
     // one-off facts
     {
         let (model, chip) = hardware();
@@ -416,6 +430,16 @@ fn run(shared: Shared, ctx: egui::Context, demo: bool) {
         let thermal = crate::kit::native::thermal_state();
         let uptime = sysinfo::System::uptime();
 
+        let shown = activity::visible();
+        #[cfg(target_os = "macos")]
+        let (power, sys_watts) = if shown {
+            (sampler.as_mut().and_then(|s| s.read()), smc.as_ref().and_then(|s| s.read("PSTR")).filter(|w| w.is_finite() && *w > 0.0 && *w < 1000.0))
+        } else {
+            (None, None)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let (power, sys_watts) = (None, None);
+        let procs = (!demo && PROCS_EVERY.due(&mut procs_at)).then(|| super::procs::top(super::procs::read(&mut psys), std::process::id(), super::procs::TOP_N));
         let battery_due = BATTERY_EVERY.due(&mut battery_at);
         // keep the helper's charge state fresh (and hand it the policy
         // again, in case it was reinstalled)
@@ -490,6 +514,13 @@ fn run(shared: Shared, ctx: egui::Context, demo: bool) {
             s.online = rx_total + tx_total > 0;
             if let Some(b) = battery {
                 s.battery = b;
+            }
+            if shown {
+                s.power = power;
+                s.sys_watts = sys_watts;
+            }
+            if let Some(p) = procs {
+                s.procs = p;
             }
             if let Some(d) = devices {
                 if s.bt_prefs.alerts {
@@ -1016,6 +1047,20 @@ pub fn demo_snapshot() -> Snapshot {
             status: charge::Status { supported: true, policy: None, state: charge::State { held: true, hot: false } },
             installing: false,
         },
+        power: Some(crate::kit::ioreport::Reading {
+            cpu_w: 3.4,
+            gpu_w: 0.8,
+            ane_w: 0.0,
+            ecpu: crate::kit::ioreport::Usage { busy: 0.31, mhz: 1420.0 },
+            pcpu: crate::kit::ioreport::Usage { busy: 0.12, mhz: 3180.0 },
+            gpu: crate::kit::ioreport::Usage { busy: 0.06, mhz: 440.0 },
+        }),
+        sys_watts: Some(11.6),
+        procs: vec![
+            super::procs::Proc { pid: 812, name: "Safari".into(), cpu: 24.0, mine: true },
+            super::procs::Proc { pid: 406, name: "WindowServer".into(), cpu: 11.5, mine: false },
+            super::procs::Proc { pid: 1290, name: "Xcode".into(), cpu: 6.2, mine: true },
+        ],
     }
 }
 
