@@ -103,7 +103,7 @@
     const h = Math.floor(secs / 3600), m = Math.floor(secs / 60) % 60, s = secs % 60;
     if (!awT) return;
     awT.textContent = `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    ring.setAttribute('stroke-dashoffset', (125.7 * (1 - (secs % 7200) / 7200)).toFixed(1));
+    ring.setAttribute('stroke-dashoffset', (119.4 * (1 - (secs % 7200) / 7200)).toFixed(1));
   }, 1000);
 
   // Clean Up: a scan counts up, then starts over

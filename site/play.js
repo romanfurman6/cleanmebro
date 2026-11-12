@@ -57,7 +57,7 @@
     const vis = r => !r.hidden;
     const sum = rows => rows.reduce((a, r) => a + parse($('.sz', r).textContent), 0);
     const upd = () => {
-      const safe = $$('.sfr', sfl), on = safe.filter(r => !$('.ck', r).classList.contains('off'));
+      const safe = $$('.sfr', sfl), on = safe.filter(r => vis(r) && !$('.ck', r).classList.contains('off'));
       const v = sum(on); sel.textContent = fmt(v) + ' selected'; go.textContent = v ? 'Clean ' + fmt(v) : 'Clean'; go.classList.toggle('dim', !v);
       $('#cu-safe', p).textContent = `${safe.filter(vis).length} · ${fmt(sum(safe.filter(vis)))}`;
       const kept = $$('.sfr', kpl); $('#cu-kept', p).textContent = `${kept.length} · ${fmt(sum(kept))}`;
@@ -189,6 +189,7 @@
     const det = $('.det', p), files = $$('.fi', det).map(f => f.outerHTML);
     const ver = { 'Android Studio': '2024.2 · com.google.android.studio', 'CleanShot X': '4.7 · pl.maketheweb.cleanshotx', Docker: '4.36.0 · com.docker.docker', Figma: '124.5 · com.figma.Desktop', 'Final Cut Pro': '11.0 · com.apple.FinalCut', Slack: '4.41 · com.tinyspeck.slackmacgap', Spotify: '1.2.50 · com.spotify.client', VLC: '3.0.21 · org.videolan.vlc', Xcode: '16.1 · com.apple.dt.Xcode', Zoom: '6.2.10 · us.zoom.xos' };
     const pick = r => {
+      det.style.visibility = '';
       $$('.arw', p).forEach(x => x.classList.toggle('on', x === r));
       const name = $('.an', r).firstChild.textContent.trim(), size = parse($('.num', r).textContent), ai = $('.ai', r);
       const id = (ver[name] || '1.0 · app').split(' · ')[1];
@@ -211,7 +212,7 @@
     det.addEventListener('click', e => { const c = e.target.closest('.fi .ck'); if (c) { c.classList.toggle('off'); c.innerHTML = c.classList.contains('off') ? '' : ICON('M5 12.5l4.5 4.5L19 7'); } });
     const sub = $('#un-sub', p), badge = $('.nv[data-p=uninstall] .bd');
     const count = () => { const rows = $$('.arw', p); sub.textContent = `${rows.length} apps · ${fmt(rows.reduce((a, r) => a + parse($('.num', r).textContent), 0))}`; badge.textContent = rows.length; };
-    const remove = rows => { rows.forEach(r => r.classList.add('out')); setTimeout(() => { const next = $$('.arw', p).find(x => !rows.includes(x)); rows.forEach(r => r.remove()); if (next) pick(next); count(); bar(); }, 260); };
+    const remove = rows => { rows.forEach(r => r.classList.add('out')); setTimeout(() => { const next = $$('.arw', p).find(x => !rows.includes(x) && !x.hidden); rows.forEach(r => r.remove()); det.style.visibility = next ? '' : 'hidden'; if (next) pick(next); count(); bar(); }, 260); };
     $('.db .act', det).addEventListener('click', () => { const r = $('.arw.on', p); if (r) remove([r]); });
     // Reset…: keeps the app, removes its data
     $('.db .btn2', det).addEventListener('click', () => {
@@ -431,7 +432,7 @@
       const o = e.target.closest('i'); if (!o) return; const cur = $('b', o.parentElement); cur.replaceWith(el('i', null, cur.innerHTML)); o.replaceWith(el('b', null, o.innerHTML));
       mode = o.textContent; fx.hidden = mode !== 'Fixed'; cv.hidden = mode !== 'Curve'; p.classList.toggle('fcurve', mode === 'Curve'); window.cmFanTick && window.cmFanTick();
     });
-    $('.fdel', p).addEventListener('click', e => { e.currentTarget.classList.add('rot'); setTimeout(() => e.currentTarget && e.currentTarget.classList.remove('rot'), 700); });
+    $('.fdel', p).addEventListener('click', e => { const b = e.currentTarget; b.classList.add('rot'); setTimeout(() => b.classList.remove('rot'), 700); });
     // live: dials, blades, history
     const hT = Array.from({ length: 60 }, (_, i) => 52 + Math.sin(i / 6) * 5), hF = Array.from({ length: 60 }, (_, i) => 2100 + Math.sin(i / 6 - 0.6) * 260);
     const ht = $('.ht', p), hf = $('.hf', p);
@@ -483,11 +484,11 @@
     const end = () => { if (cur) { count(); cur = null; } };
     shot.addEventListener('pointerup', end); shot.addEventListener('pointercancel', end);
     const btn = (t, f) => { const b = $$('.ctb .btn2, .ctb .act', p).find(x => x.textContent.includes(t)); if (b) b.addEventListener('click', f); };
-    const flash = async (b, t) => { const o = b.textContent; b.textContent = t; await sleep(1200); b.textContent = o; };
+    const flash = (b, t) => { const o = b.dataset.o || (b.dataset.o = b.textContent); b.textContent = t; clearTimeout(b._t); b._t = setTimeout(() => { b.textContent = o; }, 1200); };
     btn('Copy', e => flash(e.currentTarget, 'Copied'));
     btn('Save', e => flash(e.currentTarget, 'Saved'));
     btn('Pin', e => { shot.classList.toggle('pinned'); });
-    document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !pane('capture').hidden && ink.lastChild) { e.preventDefault(); ink.lastChild.remove(); marks--; status.textContent = status.textContent.replace(/\d+ marks/, marks + ' marks'); } });
+    document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !pane('capture').hidden && !ink.closest('[hidden]') && ink.lastChild) { e.preventDefault(); ink.lastChild.remove(); marks--; status.textContent = status.textContent.replace(/\d+ marks/, marks + ' marks'); } });
   })();
 
   // ---------- Screenshot page: History grid; Edit opens the editor; Capture area adds a shot ----------
@@ -533,12 +534,12 @@
     const rec = $('.vrec', p), lab = $('span', rec), grid = $('.vgr', p), sett = $('.vst', p), sub = $('#vd-sub', p);
     const count = () => { const n = $$('.th', p).length; sub.textContent = `${n} recording${n === 1 ? '' : 's'} · saving to Desktop`; $$('.thg', p).forEach(g => { g.previousElementSibling.hidden = g.hidden = !g.children.length; }); };
     $('.tb .seg', p).addEventListener('click', e => { const o = e.target.closest('i'); if (!o) return; const cur = $('b', o.parentElement); cur.replaceWith(el('i', null, cur.innerHTML)); o.replaceWith(el('b', null, o.innerHTML)); const st = o.textContent === 'Settings'; grid.hidden = st; sett.hidden = !st; rec.hidden = st; sub.hidden = st; });
-    let t = null, s = 0;
+    let t = null, s = 0; const tpl = $('.th', p).cloneNode(true);
     rec.addEventListener('click', () => {
       if (!t) { s = 0; rec.classList.add('on'); lab.textContent = 'Stop · 0:00'; t = setInterval(() => { s++; lab.textContent = `Stop · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }, 1000); return; }
       clearInterval(t); t = null; rec.classList.remove('on'); lab.textContent = 'Record screen';
       const d = `${Math.floor(s / 60)}:${String(Math.max(1, s) % 60).padStart(2, '0')}`, now = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
-      const n = $('.th', p).cloneNode(true); n.classList.add('new'); n.dataset.t = now; n.dataset.n = 'Screen recording';
+      const n = tpl.cloneNode(true); n.classList.add('new'); n.dataset.t = now; n.dataset.n = 'Screen recording';
       $('.thl span', n).textContent = now; $('.thl .dm', n).textContent = 'Video · ' + d; $('.thi', n).className = 'thi t-s';
       $('.thg', p).prepend(n); count();
     });
@@ -582,7 +583,7 @@
     };
     rows.forEach(r => r.addEventListener('click', () => show(r)));
     const count = () => { const n = $$('.cpr', p).length, pin = $$('.cpr .pn', p).length; if (!pause || pause.textContent.startsWith('Pause')) st.textContent = `Recording · ${n} items · ${pin} pinned · ${(n * 0.15).toFixed(1)} MB`; const cs = $('#cs-n', p); if (cs) cs.textContent = `${n} items · ${(n * 0.15).toFixed(1)} MB on disk`; };
-    const drop = r => { r.classList.add('out'); setTimeout(() => { r.remove(); rows.splice(rows.indexOf(r), 1); apply(); count(); }, 200); };
+    const drop = r => { if (r.classList.contains('out')) return; r.classList.add('out'); setTimeout(() => { r.remove(); const k = rows.indexOf(r); if (k >= 0) rows.splice(k, 1); apply(); count(); }, 200); };
     det.addEventListener('click', async e => {
       if (e.target.closest('.cdel')) { const r = rows.find(x => x.classList.contains('on')); if (r) drop(r); return; }
       const b = e.target.closest('.act, .btn2'); if (!b) return; const o = b.textContent; if (/Copy/.test(o)) { b.textContent = 'Copied'; await sleep(1000); b.textContent = o; return; }
@@ -738,6 +739,6 @@
     if (c.tabIndex < 0) { c.tabIndex = 0; c.setAttribute('role', c.classList.contains('tg') ? 'switch' : 'button'); }
     if (c.classList.contains('tg')) c.setAttribute('aria-checked', String(!c.classList.contains('off')));
   });
-  arm(); new MutationObserver(arm).observe(app, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+  let armQ = 0; arm(); new MutationObserver(() => { if (!armQ) armQ = requestAnimationFrame(() => { armQ = 0; arm(); }); }).observe(app, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
   app.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches(CTL)) { e.preventDefault(); e.target.click(); } });
 })();
