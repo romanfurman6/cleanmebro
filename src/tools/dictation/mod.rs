@@ -106,6 +106,9 @@ pub enum Phase {
     Showing { note: Note, until: Instant },
 }
 
+/// How often the pill adds a bar while listening.
+const LEVEL_EVERY: Duration = Duration::from_millis(33);
+
 /// Work for the model thread.
 enum Job {
     /// Load the model now, while the user is still talking.
@@ -139,6 +142,8 @@ pub struct Dictation {
     place: (Option<Rect>, Option<Pos2>, Option<Rect>),
     /// Loudness, newest last, for the pill's bars.
     levels: Vec<f32>,
+    /// When the last bar was added.
+    level_at: Option<Instant>,
     keys: Option<Keys<Cmd>>,
     esc: Option<Keys<Cmd>>,
     esc_bound: bool,
@@ -192,6 +197,7 @@ impl Dictation {
             target: mac::Target::default(),
             place: (None, None, None),
             levels: Vec::new(),
+            level_at: None,
             keys: None,
             esc: None,
             esc_bound: false,
@@ -528,9 +534,14 @@ impl Dictation {
             if quiet {
                 eprintln!("[dictation] stopped after silence");
             }
-            self.levels.push(level);
-            if self.levels.len() > 64 {
-                self.levels.remove(0);
+            // one bar every 33 ms whatever the frame rate, so the bars move evenly
+            let due = self.level_at.is_none_or(|t| t.elapsed() >= LEVEL_EVERY);
+            if due {
+                self.level_at = Some(Instant::now());
+                self.levels.push(level);
+                if self.levels.len() > 64 {
+                    self.levels.remove(0);
+                }
             }
             if too_long {
                 self.finish();
@@ -569,7 +580,10 @@ impl Dictation {
         }
         self.bind_esc();
         self.poll_download(ctx);
-        if !matches!(self.phase, Phase::Idle) || self.paste_at.is_some() || self.pending.is_some() {
+        if matches!(self.phase, Phase::Listening { .. } | Phase::Working { .. }) {
+            // the pill moves: a steady 60 fps
+            ctx.request_repaint_after(Duration::from_millis(16));
+        } else if !matches!(self.phase, Phase::Idle) || self.paste_at.is_some() || self.pending.is_some() {
             ctx.request_repaint_after(Duration::from_millis(30));
         }
     }
@@ -607,6 +621,12 @@ impl Loaded {
 }
 
 fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
+    // below the UI: the model's threads (they inherit this) must not starve
+    // the pill's spinner while it transcribes
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
+    }
     let mut loaded: Option<(Engine, Loaded)> = None;
     loop {
         let job = match rx.recv_timeout(IDLE_UNLOAD) {
