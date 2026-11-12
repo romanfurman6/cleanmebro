@@ -36,6 +36,8 @@ pub struct Settings {
     /// Where Claude's limits come from: "statusline" (Claude Code's own
     /// status line, when the hook is installed) or "cli" (`claude /usage`).
     pub claude_source: String,
+    /// Settings format: 1 turned the menu bar number off by default.
+    pub version: u8,
 }
 
 impl Default for Settings {
@@ -50,8 +52,10 @@ impl Default for Settings {
             notify_reset: true,
             notify_unused: true,
             show_outages: true,
-            menu_bar: "closest".into(),
+            // the icon alone; a number there is opt-in
+            menu_bar: "off".into(),
             claude_source: "statusline".into(),
+            version: 1,
         }
     }
 }
@@ -68,7 +72,16 @@ fn path() -> PathBuf {
 
 fn cell() -> &'static Mutex<Settings> {
     static S: OnceLock<Mutex<Settings>> = OnceLock::new();
-    S.get_or_init(|| Mutex::new(crate::kit::fs::load_json(&path())))
+    S.get_or_init(|| {
+        let mut s: Settings = crate::kit::fs::load_json(&path());
+        // before version 1 the menu bar showed the closest limit by default
+        if s.version < 1 {
+            s.menu_bar = "off".into();
+            s.version = 1;
+            crate::kit::fs::save_json(&path(), &s, true);
+        }
+        Mutex::new(s)
+    })
 }
 
 /// The current settings.
