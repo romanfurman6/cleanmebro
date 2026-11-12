@@ -210,6 +210,50 @@ fn new_key(folder: &str, path: &Path) -> String {
     format!("{folder}{id}{ext}")
 }
 
+/// The share page on the website: shows the file and lets people edit a copy.
+pub const PAGE: &str = "https://cmdmeow.furman.cat";
+
+/// The link people get: the share page for the file at `file_url`.
+pub fn page_link(file_url: &str, title: &str) -> String {
+    let enc = |s: &str| -> String {
+        s.bytes()
+            .map(|c| match c {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (c as char).to_string(),
+                _ => format!("%{c:02X}"),
+            })
+            .collect()
+    };
+    let mut link = format!("{PAGE}/view/?u={}", enc(file_url));
+    if !title.is_empty() {
+        link.push_str(&format!("&t={}", enc(title)));
+    }
+    link
+}
+
+/// The title shown on the share page: the file's name without extension.
+fn title_of(path: &Path) -> String {
+    path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// Once per bucket and run: let the share page read the bucket (CORS), so
+/// Edit works there. A failure only costs editing, so it is just logged.
+fn allow_page(b: &s3::Bucket) {
+    static DONE: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let id = b.bucket_host();
+    if DONE.lock().map(|d| d.contains(&id)).unwrap_or(true) {
+        return;
+    }
+    match s3::ensure_cors(b, PAGE) {
+        Ok(changed) => {
+            eprintln!("[share] CORS for {PAGE} on {id}: {}", if changed { "added" } else { "already there" });
+            if let Ok(mut d) = DONE.lock() {
+                d.push(id);
+            }
+        }
+        Err(e) => eprintln!("[share] {e}"),
+    }
+}
+
 struct Job {
     path: PathBuf,
     progress: Arc<s3::Progress>,
@@ -238,10 +282,12 @@ impl Uploads {
             .name("share-upload".into())
             .spawn(move || {
                 let r = s3::put_file(&b, &key, &path2, content_type(&path2), link == LinkKind::Public, &p2).map(|()| {
-                    let url = match link {
+                    allow_page(&b);
+                    let file = match link {
                         LinkKind::Public => b.url(&key),
                         LinkKind::Week => s3::presign_get(&b, &key, 7 * 24 * 3600, chrono::Utc::now()),
                     };
+                    let url = page_link(&file, &title_of(&path2));
                     remember(&path2, Shared { key, link: url.clone(), at: chrono::Utc::now().timestamp() });
                     url
                 });
@@ -302,5 +348,15 @@ mod tests {
         assert_ne!(a, b);
         assert!(new_key("", Path::new("a.png")).ends_with(".png"));
         assert_eq!(content_type(Path::new("a.mp4")), "video/mp4");
+    }
+
+    #[test]
+    fn links_open_the_share_page() {
+        let l = page_link("https://clips.fsn1.your-objectstorage.com/recordings/ab12.mp4", "Recording 1");
+        assert_eq!(l, "https://cmdmeow.furman.cat/view/?u=https%3A%2F%2Fclips.fsn1.your-objectstorage.com%2Frecordings%2Fab12.mp4&t=Recording%201");
+        // presigned links keep their query intact inside u=
+        let p = page_link("https://b.x/k.mp4?X-Amz-Signature=a&X-Amz-Date=b", "");
+        assert!(p.ends_with("u=https%3A%2F%2Fb.x%2Fk.mp4%3FX-Amz-Signature%3Da%26X-Amz-Date%3Db"), "{p}");
+        assert_eq!(title_of(Path::new("/x/Shot 2026-11-12 at 10.00.png")), "Shot 2026-11-12 at 10.00");
     }
 }

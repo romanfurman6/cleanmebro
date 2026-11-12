@@ -175,6 +175,85 @@ pub fn presign_get(b: &Bucket, key: &str, secs: u64, now: chrono::DateTime<chron
     format!("https://{}{path}?{query}&X-Amz-Signature={sig}", b.bucket_host())
 }
 
+/// Let the share page (`origin`, e.g. "https://cmdmeow.furman.cat") read
+/// files in the bucket from the browser, so it can edit a copy. Rules the
+/// bucket already has stay. Returns whether the bucket was changed. Blocks.
+pub fn ensure_cors(b: &Bucket, origin: &str) -> Result<bool, String> {
+    let agent = ureq::Agent::new_with_config(ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(20))).build());
+    let empty = hex(&Sha256::digest(b""));
+    // Read what is there now.
+    let now = chrono::Utc::now();
+    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let mut headers: Vec<(String, String)> = vec![("host".into(), b.bucket_host()), ("x-amz-content-sha256".into(), empty.clone()), ("x-amz-date".into(), amz_date.clone())];
+    let auth = authorization(b, "GET", "/", "cors=", &mut headers, &empty, &amz_date);
+    let mut req = agent.get(&format!("https://{}/?cors", b.bucket_host()));
+    for (k, v) in headers.iter().filter(|(k, _)| k != "host") {
+        req = req.header(k, v);
+    }
+    let resp = req.header("authorization", &auth).call().map_err(|e| format!("CORS check failed: {e}"))?;
+    let status = resp.status().as_u16();
+    let text = resp.into_body().read_to_string().unwrap_or_default();
+    let existing = match status {
+        200 => Some(text),
+        404 => None, // NoSuchCORSConfiguration
+        _ => return Err(explain(status, &text).replace("Upload failed", "CORS check failed")),
+    };
+    let Some(body) = cors_config(existing.as_deref(), origin) else { return Ok(false) };
+
+    let hash = hex(&Sha256::digest(body.as_bytes()));
+    let md5 = base64(&md5::Md5::digest(body.as_bytes()));
+    let amz_date = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let mut headers: Vec<(String, String)> = vec![
+        ("content-md5".into(), md5),
+        ("content-type".into(), "application/xml".into()),
+        ("host".into(), b.bucket_host()),
+        ("x-amz-content-sha256".into(), hash.clone()),
+        ("x-amz-date".into(), amz_date.clone()),
+    ];
+    let auth = authorization(b, "PUT", "/", "cors=", &mut headers, &hash, &amz_date);
+    let mut req = agent.put(&format!("https://{}/?cors", b.bucket_host()));
+    for (k, v) in headers.iter().filter(|(k, _)| k != "host") {
+        req = req.header(k, v);
+    }
+    let resp = req.header("authorization", &auth).send(body.as_bytes()).map_err(|e| format!("CORS setup failed: {e}"))?;
+    let status = resp.status().as_u16();
+    if (200..300).contains(&status) {
+        return Ok(true);
+    }
+    let text = resp.into_body().read_to_string().unwrap_or_default();
+    Err(explain(status, &text).replace("Upload failed", "CORS setup failed"))
+}
+
+/// The bucket's CORS document with a read rule for `origin` added, or None
+/// when `origin` is already allowed.
+fn cors_config(existing: Option<&str>, origin: &str) -> Option<String> {
+    let rule = format!(
+        "<CORSRule><AllowedOrigin>{origin}</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>Content-Length</ExposeHeader><ExposeHeader>Content-Range</ExposeHeader><ExposeHeader>Content-Type</ExposeHeader><ExposeHeader>Accept-Ranges</ExposeHeader><MaxAgeSeconds>86400</MaxAgeSeconds></CORSRule>"
+    );
+    match existing.map(str::trim).filter(|x| x.contains("</CORSConfiguration>")) {
+        Some(x) => {
+            if x.contains(&format!("<AllowedOrigin>{origin}</AllowedOrigin>")) || x.contains("<AllowedOrigin>*</AllowedOrigin>") {
+                return None;
+            }
+            let at = x.rfind("</CORSConfiguration>")?;
+            Some(format!("{}{rule}{}", &x[..at], &x[at..]))
+        }
+        None => Some(format!("<CORSConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">{rule}</CORSConfiguration>")),
+    }
+}
+
+fn base64(b: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for c in b.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= c.len() { T[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
+}
+
 /// The Authorization header for a request whose headers (lowercase names)
 /// are all signed.
 fn authorization(b: &Bucket, method: &str, path: &str, query: &str, headers: &mut [(String, String)], payload_hash: &str, amz_date: &str) -> String {
@@ -327,5 +406,26 @@ mod tests {
     fn errors_read_plainly() {
         assert_eq!(explain(403, "<Error><Code>SignatureDoesNotMatch</Code></Error>"), "Upload failed: the secret key doesn't match the access key");
         assert_eq!(explain(500, ""), "Upload failed: the storage answered 500");
+    }
+
+    #[test]
+    fn cors_rule_is_added_once_and_keeps_other_rules() {
+        let o = "https://cmdmeow.furman.cat";
+        let new = cors_config(None, o).unwrap();
+        assert!(new.starts_with("<CORSConfiguration") && new.contains("<AllowedOrigin>https://cmdmeow.furman.cat</AllowedOrigin>") && new.contains("<AllowedHeader>*</AllowedHeader>"), "{new}");
+        assert_eq!(cors_config(Some(&new), o), None);
+        let other = "<?xml version=\"1.0\"?><CORSConfiguration><CORSRule><AllowedOrigin>https://a.b</AllowedOrigin><AllowedMethod>PUT</AllowedMethod></CORSRule></CORSConfiguration>";
+        let merged = cors_config(Some(other), o).unwrap();
+        assert!(merged.contains("https://a.b") && merged.contains(o) && merged.ends_with("</CORSRule></CORSConfiguration>"), "{merged}");
+        assert_eq!(cors_config(Some("<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>"), o), None);
+    }
+
+    #[test]
+    fn base64_and_md5_as_s3_wants() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64(&md5::Md5::digest(b"")), "1B2M2Y8AsgTpgAmY7PhCfg==");
     }
 }
