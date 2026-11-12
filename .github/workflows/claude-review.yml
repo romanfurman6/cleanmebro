@@ -7,8 +7,8 @@ name: Claude review
 # Needs the repo secret CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`), or swap
 # it for `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}`.
 # The review only comments: it never approves, pushes or merges.
-# Runs on GitHub's Linux runner: a review reads code and needs no Mac. PRs from
-# forks get no secrets, so they are skipped.
+# Runs on GitHub's Linux runner: a review reads code and needs no Mac. Only
+# Roman's own PRs are reviewed; everyone else's, and forks, are skipped.
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, labeled]
@@ -18,6 +18,7 @@ jobs:
     if: >-
       !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login == 'romanfurman6' &&
       (github.event.action != 'labeled' || github.event.label.name == 'claude-review')
     runs-on: ubuntu-latest
     # Job-level, so an unrelated label (job skipped) never cancels a running review.
