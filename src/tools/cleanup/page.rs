@@ -103,7 +103,7 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     let has_claude = avail.ready();
     let p = ui.painter().clone();
     page_header(&p, r, "Cleanup", "", TEXT_DIM());
-    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
+    let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - sp::L));
 
     // top: one toolbar with the disk, the AI switch and Scan; below it the
     // groups as columns sized by what the last scan found in each
@@ -371,7 +371,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         return;
     }
 
-    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - PAGE_FOOTER_H - sp::L));
+    let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - PAGE_FOOTER_H - sp::L));
 
     // the groups as tabs: All, then each group that found something
     let mut tabs: Vec<(Option<Group>, String, u64, usize, Color32)> = vec![];
@@ -695,7 +695,7 @@ fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
     p.add(shadow.as_shape(m, CornerRadius::same(14)));
     p.rect_filled(m, 14.0, POPOVER());
     p.rect_stroke(m, 14.0, Stroke::new(1.0, white(31)), StrokeKind::Inside);
-    p.text(m.min + Vec2::new(22.0, 22.0), Align2::LEFT_TOP, format!("Clean {} items ({})?", n, human_bytes(bytes)), bold(17.0), TEXT());
+    p.text(m.min + Vec2::new(22.0, 22.0), Align2::LEFT_TOP, format!("Clean {} items ({})?", n, human_bytes(bytes)), bold(15.0), TEXT());
     paragraph(&p, m.min + Vec2::new(22.0, 58.0), &body, font(13.0), TEXT_SOFT(), bw);
     let danger = app.delete_now || perm;
     let ok_label = if app.delete_now { "Delete now" } else if trashed == 0 { "Clean" } else { "Move to Trash" };
@@ -730,7 +730,7 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
         .collect();
     rows.sort_by(|a, b| b.2.cmp(&a.2));
     // cards fit their content (no stretched empty boxes); the log gets the full height
-    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - 20.0, r.bottom() - sp::L));
+    let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - sp::L));
     let left_h = 2.0 * sp::L + 44.0 + sp::L + 34.0 + sp::XS + 16.0 + sp::XL + 34.0 + if ok { 0.0 } else { 16.0 + sp::S + st.failed.len().min(4) as f32 * 18.0 + 20.0 + sp::L };
     let right_h = 2.0 * sp::L + 34.0 + sp::S + rows.len().max(1) as f32 * sp::ROW_H;
     let h = if app.clean_log { body.height() } else { left_h.max(right_h).min(body.height()) };

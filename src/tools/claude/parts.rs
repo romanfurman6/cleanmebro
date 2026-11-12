@@ -184,46 +184,11 @@ pub fn day_chart(ui: &mut Ui, r: Rect, days: &[Day], m: Measure, pace: Option<f6
     p.text(Pos2::new(plot.right(), r.bottom()), Align2::RIGHT_BOTTOM, "Today", ty::caption(), ty::caption_color());
 }
 
-/// The limit window as a line: use so far, even use (dashed diagonal) and
-/// the forecast to 100% (dashed, red) when it runs out before the reset.
-pub fn limit_chart(ui: &mut Ui, r: Rect, l: &Limit, samples: &[(i64, f32)]) {
-    let p = ui.painter().clone();
-    let (Some(end), true) = (l.resets_at, l.window_secs > 0) else {
-        p.text(r.center(), Align2::CENTER_CENTER, "–", ty::body(), TEXT_FAINT());
-        return;
-    };
-    let start = end - l.window_secs;
-    let now = now();
-    let plot = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top() + sp::S), Pos2::new(r.right(), r.bottom() - 16.0));
-    let at = |t: i64, v: f32| Pos2::new(plot.left() + plot.width() * ((t - start) as f32 / l.window_secs as f32).clamp(0.0, 1.0), plot.bottom() - plot.height() * (v / 100.0).clamp(0.0, 1.0));
-    for v in [25.0, 50.0, 75.0, 100.0] {
-        let y = at(start, v).y;
-        p.line_segment([Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)], Stroke::new(1.0, white(14)));
-        p.text(Pos2::new(plot.left() - 6.0, y), Align2::RIGHT_CENTER, format!("{v:.0}%"), ty::caption(), ty::caption_color());
-    }
-    p.extend(Shape::dashed_line(&[at(start, 0.0), at(end, 100.0)], Stroke::new(1.0, TEXT_DIM()), 4.0, 3.0));
-    let mut pts: Vec<Pos2> = samples.iter().filter(|(t, _)| *t >= start && *t <= now).map(|(t, v)| at(*t, *v)).collect();
-    pts.push(at(now.min(end), l.pct));
-    if pts.len() == 1 {
-        pts.insert(0, at(start, 0.0));
-    }
-    let col = limit_color(l);
-    p.add(Shape::line(pts.clone(), Stroke::new(2.0, col)));
-    let last = *pts.last().unwrap_or(&plot.left_bottom());
-    p.circle_filled(last, 3.5, col);
-    if let Some(out) = pace::of_limit(l, now).and_then(|pc| pc.out_at) {
-        let o = at(out, 100.0);
-        p.extend(Shape::dashed_line(&[last, o], Stroke::new(1.5, RED()), 4.0, 3.0));
-        p.text(o + Vec2::new(0.0, -4.0), Align2::CENTER_BOTTOM, format!("Out {}", alerts::when(out, now)), ty::caption(), RED());
-    }
-    let day = |t: i64| chrono::TimeZone::timestamp_opt(&chrono::Local, t, 0).single().map(|d| d.format(if l.window_secs > 86_400 { "%a" } else { "%H:%M" }).to_string()).unwrap_or_default();
-    p.text(Pos2::new(plot.left(), r.bottom()), Align2::LEFT_BOTTOM, day(start), ty::caption(), ty::caption_color());
-    p.text(Pos2::new(plot.right(), r.bottom()), Align2::RIGHT_BOTTOM, day(end), ty::caption(), ty::caption_color());
-}
 
 /// Rows of name, a bar of its share, tokens and dollars.
 pub fn share_rows(p: &egui::Painter, r: Rect, rows: &[crate::kit::ai::Share], show_usd: bool, home: &str) {
-    let rh = 26.0;
+    // R4: name and value on one line, a 4 pt bar 8 pt under them
+    let rh = sp::BAR_ROW_H;
     // one measure for every bar: dollars when shown (a model without a price
     // is 0), else tokens; mixing them made the priced bars look empty
     let usd_bars = show_usd && rows.iter().any(|s| s.usd > 0.0);
@@ -236,16 +201,17 @@ pub fn share_rows(p: &egui::Painter, r: Rect, rows: &[crate::kit::ai::Share], sh
         }
         let row = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), rh));
         let right = if show_usd { usd(s.usd) } else { crate::kit::ai::human_tokens(s.tokens) };
-        let vr = p.text(Pos2::new(row.right(), row.center().y - 3.0), Align2::RIGHT_CENTER, right, ty::label(), TEXT());
+        let ty_ = row.top() + 8.0;
+        let vr = p.text(Pos2::new(row.right(), ty_), Align2::RIGHT_CENTER, right, ty::label(), TEXT());
         let mut x1 = vr.left() - sp::S;
         if show_usd {
-            let tr = p.text(Pos2::new(x1, row.center().y - 3.0), Align2::RIGHT_CENTER, crate::kit::ai::human_tokens(s.tokens), ty::label(), TEXT_FAINT());
+            let tr = p.text(Pos2::new(x1, ty_), Align2::RIGHT_CENTER, crate::kit::ai::human_tokens(s.tokens), ty::label(), TEXT_FAINT());
             x1 = tr.left() - sp::S;
         }
         let name = s.name.replacen(home, "~", 1);
-        text_fit(p, Pos2::new(row.left(), row.center().y - 3.0), Align2::LEFT_CENTER, &name, ty::label(), TEXT_SOFT(), x1 - row.left());
+        text_fit(p, Pos2::new(row.left(), ty_), Align2::LEFT_CENTER, &name, ty::body(), TEXT_SOFT(), x1 - row.left());
         let v = value(s);
-        bar(p, Rect::from_min_size(Pos2::new(row.left(), row.bottom() - 6.0), Vec2::new(row.width(), 3.0)), (v / top) as f32, with_alpha(CLAUDE(), 0.7));
+        bar(p, Rect::from_min_size(Pos2::new(row.left(), ty_ + 8.0 + 8.0), Vec2::new(row.width(), 4.0)), (v / top) as f32, with_alpha(CLAUDE(), 0.7));
     }
 }
 

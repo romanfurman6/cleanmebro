@@ -65,7 +65,7 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     }
 
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
-    let inner = body.shrink2(Vec2::new(20.0, 0.0));
+    let inner = body.shrink2(Vec2::new(sp::PAGE_EDGE, 0.0));
     let mut action = SheetAction::None;
 
     let mut dev_action = None;
@@ -75,7 +75,7 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
         let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-settings-page"));
         ScrollArea::vertical().id_salt("health-set-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
             let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h + 2.0 * sp::L), Sense::hover());
-            let sr = Rect::from_min_size(Pos2::new(area.left() + 20.0, area.top() + sp::L), Vec2::new(w, h));
+            let sr = Rect::from_min_size(Pos2::new(area.left() + sp::PAGE_EDGE, area.top() + sp::L), Vec2::new(w, h));
             let mut sui = ui.new_child(UiBuilder::new().max_rect(sr).id_salt("health-set-sec"));
             dev_action = super::devices_ui::settings(&mut sui, sr, &s);
         });

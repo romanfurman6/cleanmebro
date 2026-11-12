@@ -62,7 +62,7 @@ fn app_icon(s: &mut Startup, ctx: &egui::Context, p: &egui::Painter, r: Rect, pa
 }
 
 fn outline_chip(p: &egui::Painter, pos: Pos2, align: Align2, label: &str, col: Color32) -> Rect {
-    let g = p.layout_no_wrap(label.to_string(), font(10.0), col);
+    let g = p.layout_no_wrap(label.to_string(), font(11.0), col);
     let r = align.anchor_size(pos, g.size() + Vec2::new(10.0, 2.0));
     // quiet text, no box: a tag is meta, not a button
     p.galley(r.center() - g.size() / 2.0, g, col);
@@ -499,7 +499,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                     } else {
                         "macOS lists them through System Events; allow it once to see and switch them"
                     };
-                    text_fit(&p, Pos2::new(r.left() + 44.0, r.center().y + 2.0), Align2::LEFT_TOP, why, font(11.5), TEXT_FAINT(), tw);
+                    text_fit(&p, Pos2::new(r.left() + 44.0, r.center().y + 2.0), Align2::LEFT_TOP, why, font(12.0), TEXT_FAINT(), tw);
                     if pill_button(ui, br, label, BTN_PRIMARY, true).clicked() {
                         Perm::SystemEvents.ask();
                         retry = true;
@@ -853,7 +853,7 @@ pub fn widget(s: &mut Startup, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
                     app_icon(s, &ctx, &p, ir, j.owner.as_deref(), &j.name, false, &mut budget);
                     let why = j.why().map(|w| w.short()).unwrap_or("");
                     let wr = p.text(Pos2::new(r.right() - 42.0, r.center().y), Align2::RIGHT_CENTER, why, font(11.0), TEXT_FAINT());
-                    text_fit(&p, Pos2::new(ir.right() + 8.0, r.center().y), Align2::LEFT_CENTER, &j.name, font(12.5), TEXT(), wr.left() - ir.right() - 16.0);
+                    text_fit(&p, Pos2::new(ir.right() + 8.0, r.center().y), Align2::LEFT_CENTER, &j.name, font(12.0), TEXT(), wr.left() - ir.right() - 16.0);
                     let sw = Rect::from_center_size(Pos2::new(r.right() - 15.0, r.center().y), Vec2::new(30.0, 18.0));
                     if switch(ui, sw, id.with(("w-sw", &j.label)), true, !busy).clicked() {
                         s.toggle_job(j);

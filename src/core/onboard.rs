@@ -430,7 +430,7 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let bob = if t > 1.8 { ((t - 1.8) * 1.6).sin() * 3.0 } else { 0.0 };
     app_mark(&p, c + Vec2::new(0.0, bob), 96.0, ease((t - 0.3) / 1.2));
     p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT());
-    p.text(Pos2::new(c.x, c.y + 156.0), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(14.0), TEXT_FAINT());
+    p.text(Pos2::new(c.x, c.y + 156.0), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(13.0), TEXT_FAINT());
     let r = Rect::from_center_size(Pos2::new(c.x, c.y + 214.0), Vec2::new(128.0, 40.0));
     pill_button(ui, r, "Set up", BTN_PRIMARY, true).clicked()
 }
@@ -762,7 +762,7 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
         p.rect_filled(r, 9.0, (if blue { BLUE() } else { SIDEBAR() }).gamma_multiply(a.min(1.0)));
         let fg = if blue { ON_ACTION } else { TEXT_SOFT() };
         icon(&p, app.tools[i].badge().icon, Rect::from_center_size(r.center() - Vec2::new(0.0, 8.0), Vec2::splat(18.0 * a)), fg);
-        text_fit(&p, Pos2::new(r.center().x, r.bottom() - 9.0), Align2::CENTER_BOTTOM, app.tools[i].name(), font(10.0), fg.gamma_multiply(0.85 * a.min(1.0)), r.width() - 8.0);
+        text_fit(&p, Pos2::new(r.center().x, r.bottom() - 9.0), Align2::CENTER_BOTTOM, app.tools[i].name(), font(11.0), fg.gamma_multiply(0.85 * a.min(1.0)), r.width() - 8.0);
     }
     restart
 }

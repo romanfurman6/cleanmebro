@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const WIN_R: f32 = 12.0;
-const ROW_H: f32 = 36.0;
+const ROW_H: f32 = sp::ROW_H;
 const ASIDE_W: f32 = 330.0;
 /// Icons are loaded a few per frame so a long list doesn't stall.
 const ICONS_PER_FRAME: usize = 4;
@@ -82,7 +82,7 @@ fn source_chip(p: &egui::Painter, pos: Pos2, s: Source) -> Option<Rect> {
         Source::Setapp => Color32::from_rgb(0xC9, 0xA7, 0xFF),
         _ => TEXT_FAINT(),
     };
-    let g = p.layout_no_wrap(label.to_string(), font(10.0), col);
+    let g = p.layout_no_wrap(label.to_string(), font(11.0), col);
     let r = Align2::LEFT_CENTER.anchor_size(pos, g.size() + Vec2::new(10.0, 2.0));
     // quiet text, no box: a tag is meta, not a button
     p.galley(r.center() - g.size() / 2.0, g, col);
@@ -90,7 +90,7 @@ fn source_chip(p: &egui::Painter, pos: Pos2, s: Source) -> Option<Rect> {
 }
 
 fn outline_chip(p: &egui::Painter, pos: Pos2, align: Align2, label: &str, col: Color32) -> Rect {
-    let g = p.layout_no_wrap(label.to_string(), font(10.0), col);
+    let g = p.layout_no_wrap(label.to_string(), font(11.0), col);
     let r = align.anchor_size(pos, g.size() + Vec2::new(10.0, 2.0));
     // quiet text, no box: a tag is meta, not a button
     p.galley(r.center() - g.size() / 2.0, g, col);
@@ -244,7 +244,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         p.rect_filled(pr, 16.0, with_alpha(TINT(), 0.18));
         dashed_rect(&p, pr, 16.0, with_alpha(GREEN(), 0.9));
         tool_chip(&p, Rect::from_center_size(pr.center() - Vec2::new(0.0, 30.0), Vec2::splat(56.0)), Icon::AppRemove, TINT());
-        p.text(pr.center() + Vec2::new(0.0, 22.0), Align2::CENTER_CENTER, "Drop to uninstall", bold(20.0), TEXT());
+        p.text(pr.center() + Vec2::new(0.0, 22.0), Align2::CENTER_CENTER, "Drop to uninstall", bold(22.0), TEXT());
     }
 }
 
@@ -570,7 +570,7 @@ fn review(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
         (false, n) => format!("Uninstall {n} apps?"),
     };
     let title = if rv.targets.iter().all(|t| t.app.is_none()) && !reset { if n == 1 { format!("Remove what {} left?", rv.targets[0].name) } else { format!("Remove what {n} apps left?") } } else { title };
-    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, title, bold(16.0), TEXT());
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, title, bold(15.0), TEXT());
     y += 30.0;
     let sub = if reset { "Settings, caches and data go to the Trash. The app stays" } else { "Everything goes to the Trash" };
     paragraph(&p, Pos2::new(x0, y), sub, font(13.0), TEXT_DIM(), x1 - x0);
@@ -1079,7 +1079,7 @@ fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
         let first = names.first().cloned().unwrap_or_else(|| "the app".into());
         tool_chip(&p, Rect::from_min_size(Pos2::new(r.left() + 16.0, r.center().y - 20.0), Vec2::splat(40.0)), Icon::AppRemove, TINT());
         let x = r.left() + 70.0;
-        text_fit(&p, Pos2::new(x, r.center().y - 9.0), Align2::LEFT_CENTER, if over { "Release to review" } else { "Drop here to uninstall" }, bold(14.0), if over { GREEN() } else { TEXT() }, r.right() - x - 14.0);
+        text_fit(&p, Pos2::new(x, r.center().y - 9.0), Align2::LEFT_CENTER, if over { "Release to review" } else { "Drop here to uninstall" }, bold(13.0), if over { GREEN() } else { TEXT() }, r.right() - x - 14.0);
         text_fit(&p, Pos2::new(x, r.center().y + 11.0), Align2::LEFT_CENTER, &format!("{first} and its files, after you confirm"), font(12.0), TEXT_DIM(), r.right() - x - 14.0);
         ictx.request_repaint_after(Duration::from_millis(100));
     });

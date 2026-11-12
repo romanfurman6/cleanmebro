@@ -467,7 +467,7 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
             let x = lr.left() + 12.0 + k as f32 * (w / 2.0);
             p.text(Pos2::new(x, lr.top() + 38.0), Align2::LEFT_TOP, *label, font(12.0), TEXT_DIM());
             let txt = v.map(|v| format!("{v:.0}")).unwrap_or_else(|| "—".into());
-            let g = p.layout_no_wrap(txt, bold(24.0), TEXT());
+            let g = p.layout_no_wrap(txt, bold(28.0), TEXT());
             let gw = g.size().x;
             p.galley(Pos2::new(x, lr.top() + 54.0), g, TEXT());
             p.text(Pos2::new(x + gw + 5.0, lr.top() + 76.0), Align2::LEFT_BOTTOM, "Mbps", font(13.0), TEXT_DIM());

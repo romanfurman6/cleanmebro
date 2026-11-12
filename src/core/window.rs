@@ -100,7 +100,7 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
         return;
     }
     if !app.tools.get(app.page).is_some_and(|t| t.has_page()) {
-        p.text(content.center(), Align2::CENTER_CENTER, "No tools with a page are installed", font(15.0), TEXT_DIM());
+        p.text(content.center(), Align2::CENTER_CENTER, "No tools with a page are installed", bold(15.0), TEXT_DIM());
         return;
     }
     // a required permission is missing: Allow row on top, the page dimmed and off

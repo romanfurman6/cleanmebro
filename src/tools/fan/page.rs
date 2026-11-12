@@ -54,7 +54,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
             p.circle_filled(c, 44.0, BG());
             crate::kit::glass::stroke_circle(&p, c, 44.0, Stroke::new(1.0, white(15)));
             blades(&p, c, 40.0, spin(&format!("fan-{i}"), t, f.rpm), BLADE(), RAISED());
-            let g = p.layout_no_wrap(rpm_text(f.rpm), bold(26.0), TEXT());
+            let g = p.layout_no_wrap(rpm_text(f.rpm), bold(28.0), TEXT());
             let u = p.layout_no_wrap("rpm".into(), font(13.0), TEXT_DIM());
             let tw = g.size().x + 4.0 + u.size().x;
             let base = fr.top() + 160.0;
@@ -226,8 +226,8 @@ fn fixed_slider(ui: &mut Ui, r: Rect, st: &Settings, fan: &Fan, cmds: &mut Vec<C
     let knob = Pos2::new(track.left() + track.width() * v, cy);
     p.circle_filled(knob, 9.0, Color32::WHITE);
     crate::kit::glass::stroke_circle(&p, knob, 9.0, Stroke::new(1.0, with_alpha(Color32::BLACK, 0.3)));
-    p.text(Pos2::new(track.left(), cy + 15.0), Align2::LEFT_CENTER, rpm_text(fan.min), font(10.0), TEXT_FAINT());
-    p.text(Pos2::new(track.right(), cy + 15.0), Align2::RIGHT_CENTER, rpm_text(fan.max), font(10.0), TEXT_FAINT());
+    p.text(Pos2::new(track.left(), cy + 15.0), Align2::LEFT_CENTER, rpm_text(fan.min), font(11.0), TEXT_FAINT());
+    p.text(Pos2::new(track.right(), cy + 15.0), Align2::RIGHT_CENTER, rpm_text(fan.max), font(11.0), TEXT_FAINT());
     if resp.hovered() || resp.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -253,15 +253,15 @@ fn curve_editor(ui: &mut Ui, r: Rect, st: &Settings, fan: &Fan, temp: Option<f32
     for k in 0..=4 {
         let yy = y_of(k as f32 / 4.0);
         p.line_segment([Pos2::new(chart.left(), yy), Pos2::new(chart.right(), yy)], Stroke::new(1.0, white(10)));
-        p.text(Pos2::new(chart.left() - 6.0, yy), Align2::RIGHT_CENTER, rpm_text(speed(fan, k as f32 / 4.0)), font(10.0), TEXT_FAINT());
+        p.text(Pos2::new(chart.left() - 6.0, yy), Align2::RIGHT_CENTER, rpm_text(speed(fan, k as f32 / 4.0)), font(11.0), TEXT_FAINT());
     }
     for t in (30..=100).step_by(10) {
-        p.text(Pos2::new(x_of(t as f32), chart.bottom() + 10.0), Align2::CENTER_CENTER, format!("{t}°"), font(10.0), TEXT_FAINT());
+        p.text(Pos2::new(x_of(t as f32), chart.bottom() + 10.0), Align2::CENTER_CENTER, format!("{t}°"), font(11.0), TEXT_FAINT());
     }
     // Auto zone
     let zone = Rect::from_min_max(Pos2::new(x_of(CURVE_HI), chart.top()), chart.max);
     p.rect_filled(zone, 0.0, with_alpha(RED(), 0.10));
-    p.text(Pos2::new(zone.center().x, chart.top() + 10.0), Align2::CENTER_CENTER, "Auto", bold(10.0), with_alpha(RED(), 0.9));
+    p.text(Pos2::new(zone.center().x, chart.top() + 10.0), Align2::CENTER_CENTER, "Auto", bold(11.0), with_alpha(RED(), 0.9));
     // the line and its fill
     let c = &st.curve;
     let mut pts = vec![Pos2::new(x_of(CURVE_LO), y_of(c.pts[0].1))];
@@ -374,7 +374,7 @@ fn heat_map(p: &egui::Painter, r: Rect, s: &Snapshot) {
             let (cx, cy) = (k % cols, k / cols);
             let b = Rect::from_min_size(Pos2::new(die.left() + pad + cx as f32 * (bw + pad), die.top() + pad + cy as f32 * (bh + pad)), Vec2::new(bw, bh));
             p.rect_filled(b, 7.0, white(8));
-            p.text(b.min + Vec2::new(6.0, 5.0), Align2::LEFT_TOP, g.group.label(), bold(10.0), TEXT_SOFT());
+            p.text(b.min + Vec2::new(6.0, 5.0), Align2::LEFT_TOP, g.group.label(), bold(11.0), TEXT_SOFT());
             p.text(Pos2::new(b.right() - 6.0, b.top() + 5.0), Align2::RIGHT_TOP, format!("{:.0}°", g.max), bold(11.0), heat_text(g.max));
             let cells = Rect::from_min_max(Pos2::new(b.left() + 6.0, b.top() + 21.0), Pos2::new(b.right() - 6.0, b.bottom() - 6.0));
             let nc = g.cells.len().max(1);

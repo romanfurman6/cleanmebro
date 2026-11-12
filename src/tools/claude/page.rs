@@ -7,7 +7,7 @@ use super::backend::{self, All};
 use super::parts::{self, Measure};
 use super::ui::CLEANUP;
 use crate::core::tool::Cx;
-use crate::kit::ai::{self, history, settings, Billing, Day, UsageInfo};
+use crate::kit::ai::{self, settings, Billing, Day, UsageInfo};
 use crate::kit::claude_code::{self as cc, Availability};
 use crate::kit::glass::*;
 use crate::kit::sync::LockExt;
@@ -62,7 +62,7 @@ fn not_set_up(a: Availability, cl: &UsageInfo, demo: bool, ui: &mut Ui, r: Rect,
     tool_chip(&p, Rect::from_center_size(Pos2::new(r.center().x, y + 28.0), Vec2::splat(56.0)), Icon::Gauge, tint::CLAUDE());
     y += 56.0 + 20.0;
     let title = if a == Availability::SignedOut { format!("{} isn't signed in", m.name) } else { format!("{} isn't installed", m.name) };
-    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, title, bold(20.0), TEXT());
+    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, title, bold(22.0), TEXT());
     y += 32.0 + 12.0;
     let steps: &[&str] = if a == Availability::SignedOut { m.sign_in_steps } else { m.install_steps };
     let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(colw, 12.0 + steps.len() as f32 * 34.0));
@@ -127,8 +127,8 @@ pub fn page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
 
     let is_claude = meta.id == "claude";
     let show_usd = settings::get().show_cost;
-    let x0 = r.left() + 20.0;
-    let x1 = r.right() - 20.0;
+    let x0 = r.left() + sp::PAGE_EDGE;
+    let x1 = r.right() - sp::PAGE_EDGE;
     let y = r.top() + PAGE_HEADER_H + 1.0 + sp::L;
     let cw = (x1 - x0 - 3.0 * GAP) / 4.0;
     let ch = 158.0;
@@ -211,9 +211,9 @@ fn empty_note(p: &egui::Painter, r: Rect, msg: &str) {
 fn no_usage(cl: &UsageInfo, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
     let m = ai::meta(cl.provider);
-    let c = Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + (r.height() - PAGE_HEADER_H) * 0.36);
+    let c = Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + sp::XXL + (r.height() - PAGE_HEADER_H) * 0.3);
     tool_chip(&p, Rect::from_center_size(c, Vec2::splat(56.0)), Icon::Gauge, tint::CLAUDE());
-    p.text(c + Vec2::new(0.0, 52.0), Align2::CENTER_CENTER, format!("No {} usage yet", m.name), bold(17.0), TEXT());
+    p.text(c + Vec2::new(0.0, 52.0), Align2::CENTER_CENTER, format!("No {} usage yet", m.name), bold(15.0), TEXT());
     let w = (r.width() - 48.0).min(400.0);
     let msg = format!("Use {} on this Mac and its tokens, cost, models and projects show up here. Nothing in the last 30 days so far.", m.name);
     let mut job = egui::text::LayoutJob::simple(msg, ty::body(), TEXT_DIM(), w);
@@ -387,43 +387,25 @@ fn chart_card(ui: &mut Ui, r: Rect, cl: &UsageInfo, id: &str, show_usd: bool, de
     let p = ui.painter().clone();
     glass_card(&p, r, R_CARD, 0.0, false);
     let i = r.shrink(sp::L);
-    let has_limit = !cl.is_api() && cl.weekly().or(cl.session()).is_some_and(|l| l.resets_at.is_some() && l.window_secs > 0);
-    let mut tabs: Vec<&str> = Vec::new();
-    if has_limit {
-        tabs.push("Limit");
-    }
-    if show_usd && cl.is_api() {
-        tabs.push("Spend");
-    }
-    tabs.push("Tokens");
-    if show_usd && !cl.is_api() {
-        tabs.push("API price");
-    }
-    let key = ui.scope_id().with(("ai-chart-tab", id));
-    let mut tab = ui.ctx().data_mut(|d| d.get_temp::<usize>(key)).unwrap_or(0).min(tabs.len() - 1);
-    let title = match tabs[tab] {
-        "Limit" => "History",
-        "Spend" => "Spend · this month",
-        _ => "Last 30 days",
-    };
+    // one question per card: limits live in the top row; this card is always
+    // daily usage, and Tokens | $ only changes the unit of the same bars
+    let _ = demo;
+    let units: Vec<&str> = if show_usd { vec!["Tokens", "$"] } else { vec![] };
+    let key = ui.scope_id().with(("ai-chart-unit", id));
+    let mut unit = ui.ctx().data_mut(|d| d.get_temp::<usize>(key)).unwrap_or(usize::from(cl.is_api() && show_usd)).min(units.len().saturating_sub(1));
+    let title = if cl.is_api() { "Usage · this month" } else { "Usage · 30 days" };
     p.text(i.left_top(), Align2::LEFT_TOP, title, ty::title(), TEXT());
-    let tw = 76.0 * tabs.len() as f32;
-    let tr = Rect::from_min_size(Pos2::new(i.right() - tw, i.top() - 4.0), Vec2::new(tw, 24.0));
-    if let Some(k) = segmented(ui, tr, key.with("seg"), &tabs, tab) {
-        tab = k;
-        ui.ctx().data_mut(|d| d.insert_temp(key, k));
-    }
-    let body = Rect::from_min_max(Pos2::new(i.left(), i.top() + 24.0 + sp::M), i.max);
-    match tabs[tab] {
-        "Limit" => {
-            let Some(l) = cl.weekly().filter(|l| l.resets_at.is_some()).or(cl.session()) else { return };
-            p.text(Pos2::new(tr.left() - sp::M, i.top() + 8.0), Align2::RIGHT_CENTER, backend::short_label(&l.label), ty::label(), TEXT_DIM());
-            let mut samples = history::with(id, |h| (h.window(l), false));
-            if demo {
-                samples = demo_samples(l);
-            }
-            parts::limit_chart(ui, body, l, &samples);
+    if !units.is_empty() {
+        let tw = 120.0;
+        let tr = Rect::from_min_size(Pos2::new(i.right() - tw, i.top() - 6.0), Vec2::new(tw, sp::CONTROL_H));
+        if let Some(k) = segmented(ui, tr, key.with("seg"), &units, unit) {
+            unit = k;
+            ui.ctx().data_mut(|d| d.insert_temp(key, k));
         }
+    }
+    let usd_unit = units.get(unit) == Some(&"$");
+    let body = Rect::from_min_max(Pos2::new(i.left(), i.top() + 24.0 + sp::M), i.max);
+    match if cl.is_api() && usd_unit { "Spend" } else if usd_unit { "API price" } else { "Tokens" } {
         "Spend" => {
             let pace = budget(cl).map(|b| b / days_in_month() as f64);
             let days: Vec<Day> = cl.local.month().to_vec();
@@ -443,21 +425,6 @@ fn chart_card(ui: &mut Ui, r: Rect, cl: &UsageInfo, id: &str, show_usd: bool, de
     }
 }
 
-/// A made-up climb to the limit's current use, for screenshots.
-fn demo_samples(l: &ai::Limit) -> Vec<(i64, f32)> {
-    let (Some(end), now) = (l.resets_at, parts::now()) else { return Vec::new() };
-    let start = end - l.window_secs;
-    let steps = 40;
-    (0..steps)
-        .map(|k| {
-            let t = start + (now - start) * k / steps;
-            let f = k as f32 / steps as f32;
-            // busy days and quiet nights
-            let wave = (f * 14.0).sin() * 0.04;
-            (t, (l.pct * (f.powf(1.3) + wave).clamp(0.0, 1.0)).max(0.0))
-        })
-        .collect()
-}
 
 // ---------------------------------------------------------------- all
 
@@ -471,8 +438,8 @@ fn all_page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let sub = if show_usd { format!("{} today", parts::usd(today)) } else { String::new() };
     let loading = infos.iter().any(|i| i.loading);
     header(ui, r, &sub, TEXT_DIM(), loading, demo, cx);
-    let x0 = r.left() + 20.0;
-    let x1 = r.right() - 20.0;
+    let x0 = r.left() + sp::PAGE_EDGE;
+    let x1 = r.right() - sp::PAGE_EDGE;
     let mut y = r.top() + PAGE_HEADER_H + 1.0 + sp::L;
     let cols = if infos.len() > 2 { 2 } else { infos.len().max(1) };
     let cw = (x1 - x0 - GAP * (cols as f32 - 1.0)) / cols as f32;

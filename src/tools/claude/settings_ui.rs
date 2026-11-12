@@ -5,7 +5,7 @@ use crate::kit::ai::{self, settings, statusline};
 use crate::kit::glass::*;
 use egui::{Align2, Pos2, Rect, Ui, Vec2};
 
-const ROW_H: f32 = 44.0;
+const ROW_H: f32 = sp::SETTINGS_ROW_H;
 const THRESHOLDS: [u8; 3] = [50, 80, 95];
 const MENU: [(&str, &str); 4] = [("closest", "Closest to limit"), ("claude", "Claude"), ("codex", "Codex"), ("off", "Off")];
 

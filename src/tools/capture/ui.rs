@@ -13,7 +13,7 @@ use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, U
 use std::path::PathBuf;
 use std::time::Instant;
 
-const ROW_H: f32 = 36.0;
+const ROW_H: f32 = sp::SETTINGS_ROW_H;
 
 pub fn command_icon(c: Command) -> Ico {
     match c {
@@ -99,7 +99,7 @@ fn modes(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, id: egui::Id, r: Rect,
             icons::draw(p, command_icon(*cmd), Rect::from_center_size(Pos2::new(b.center().x, top), Vec2::splat(17.0)), fg);
             p.text(Pos2::new(b.center().x, top + 17.0), Align2::CENTER_CENTER, label, font(11.0), fg);
             if keys {
-                p.text(Pos2::new(b.center().x, top + 29.0), Align2::CENTER_CENTER, key_label(c, *cmd), font(10.0), TEXT_FAINT());
+                p.text(Pos2::new(b.center().x, top + 29.0), Align2::CENTER_CENTER, key_label(c, *cmd), font(11.0), TEXT_FAINT());
             }
         } else {
             let g = p.layout_no_wrap(label.to_string(), font(11.0), fg);
@@ -1107,7 +1107,7 @@ fn options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
     for (r, s, delta) in [(minus, "−", -10i64), (plus, "+", 10)] {
         let resp = ui.interact(r, id.with(("step", s)), Sense::click());
         p.rect_filled(r, 6.0, white(if resp.hovered() { 34 } else { 20 }));
-        p.text(r.center(), Align2::CENTER_CENTER, s, bold(14.0), TEXT());
+        p.text(r.center(), Align2::CENTER_CENTER, s, bold(13.0), TEXT());
         if resp.clicked() {
             c.settings.keep = (c.settings.keep as i64 + delta).clamp(KEEP_MIN as i64, KEEP_MAX as i64) as usize;
             c.store.trim(c.settings.keep);

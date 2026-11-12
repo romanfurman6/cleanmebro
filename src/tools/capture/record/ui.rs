@@ -113,7 +113,7 @@ fn device_menu(ui: &mut Ui, p: &egui::Painter, at: Pos2, w: f32, m: Media, devs:
         if cur == Some(dev.id.as_str()) {
             p.text(Pos2::new(rr.left() + 12.0, rr.center().y), Align2::CENTER_CENTER, "✓", bold(12.0), TEXT());
         }
-        text_fit(p, Pos2::new(rr.left() + 26.0, rr.center().y), Align2::LEFT_CENTER, &dev.name, font(12.5), TEXT(), rr.width() - 34.0);
+        text_fit(p, Pos2::new(rr.left() + 26.0, rr.center().y), Align2::LEFT_CENTER, &dev.name, font(12.0), TEXT(), rr.width() - 34.0);
         if resp.clicked() {
             todo.push(Do::Use(m, dev.id.clone()));
         }
@@ -357,7 +357,7 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
         let name = if many { format!("{}  ⌄", d.name) } else { d.name.clone() };
         let nr = Rect::from_center_size(Pos2::new(card.center().x, y + 12.0), Vec2::new(x1 - x0, 28.0));
         let nresp = ui.interact(nr, id.with("name"), if many { Sense::click() } else { Sense::hover() });
-        text_fit(p, nr.center(), Align2::CENTER_CENTER, &name, bold(21.0), TEXT(), nr.width());
+        text_fit(p, nr.center(), Align2::CENTER_CENTER, &name, bold(22.0), TEXT(), nr.width());
         if many && nresp.on_hover_text("Record another display").clicked() {
             todo.push(Do::Display);
         }
@@ -655,7 +655,7 @@ fn bar(c: &mut Capture, ctx: &egui::Context) {
         let dot = Pos2::new(sr.left() + 20.0, sr.center().y);
         crate::kit::glass::stroke_circle(&p, dot, 10.0, Stroke::new(2.0, color));
         p.rect_filled(Rect::from_center_size(dot, Vec2::splat(8.0)), 2.0, color);
-        p.text(Pos2::new(dot.x + 18.0, sr.center().y), Align2::LEFT_CENTER, timeline::clock_label(length), bold(16.0), color);
+        p.text(Pos2::new(dot.x + 18.0, sr.center().y), Align2::LEFT_CENTER, timeline::clock_label(length), bold(15.0), color);
         if sresp.hovered() {
             vctx.set_cursor_icon(egui::CursorIcon::PointingHand);
         }

@@ -13,7 +13,7 @@ use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, U
 const PILL_TITLE: &str = "Cmd+Meow Dictation";
 const PILL_H: f32 = 34.0;
 const PILL_W: f32 = 132.0;
-const ROW_H: f32 = 36.0;
+const ROW_H: f32 = sp::SETTINGS_ROW_H;
 /// History cards: inner padding, the meta line, the gap under it, the gap
 /// between cards.
 const PAD: f32 = 12.0;
