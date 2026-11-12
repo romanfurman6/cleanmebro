@@ -337,6 +337,7 @@ impl Editor {
         if let Some(prev) = self.undo.pop() {
             self.redo.push(std::mem::replace(&mut self.doc, prev));
             self.selected = None;
+            self.drop_gestures();
         }
     }
 
@@ -344,7 +345,15 @@ impl Editor {
         if let Some(next) = self.redo.pop() {
             self.undo.push(std::mem::replace(&mut self.doc, next));
             self.selected = None;
+            self.drop_gestures();
         }
+    }
+
+    /// A drag in progress points into the old document: drop it.
+    fn drop_gestures(&mut self) {
+        self.resizing = None;
+        self.pen = None;
+        self.drag = None;
     }
 
     fn color(&self) -> Rgba8 {
@@ -814,13 +823,14 @@ impl Editor {
         // dragging out shapes
         if self.tool.drags() {
             if resp.drag_started() {
-                if let Some(s) = resp.interact_pointer_pos() {
+                // only on the picture, not on the frame around it
+                if let Some(s) = resp.interact_pointer_pos().filter(|s| shown.contains(*s)) {
                     let q = at_img(s);
                     self.drag = Some((q, q));
                 }
             }
             if let (Some((a, _)), Some(s)) = (self.drag, resp.interact_pointer_pos()) {
-                if resp.dragged() {
+                if resp.dragged() || resp.drag_stopped() {
                     self.drag = Some((a, at_img(s)));
                 }
             }
@@ -840,14 +850,16 @@ impl Editor {
             Tool::Select => self.select_tool(&resp, &at_img, ui.ctx(), scale),
             Tool::Pen => {
                 if resp.drag_started() {
-                    if let Some(s) = resp.interact_pointer_pos() {
+                    if let Some(s) = resp.interact_pointer_pos().filter(|s| shown.contains(*s)) {
                         self.pen = Some(vec![at_img(s)]);
                     }
                 }
                 if let (Some(pts), Some(s)) = (self.pen.as_mut(), resp.interact_pointer_pos()) {
                     let q = at_img(s);
                     // a point every 2 screen points keeps the line smooth and light
-                    if resp.dragged() && pts.last().is_none_or(|l| (q - *l).length() * scale >= 2.0) {
+                    let far = pts.last().is_none_or(|l| (q - *l).length() * scale >= 2.0);
+                    // the release point too, so the stroke ends where the hand did
+                    if (resp.dragged() && far) || (resp.drag_stopped() && pts.last() != Some(&q)) {
                         pts.push(q);
                     }
                 }
@@ -1076,7 +1088,7 @@ impl Editor {
         // handles first: they sit on or outside the mark's edge
         if let Some(h) = resp.hover_pos() {
             if let Some((i, k)) = self.resizing.as_ref().map(|r| (r.0, r.1)).or_else(|| self.handle_at(at_img(h), scale)) {
-                let corner = matches!(self.doc.marks[i], Mark::Arrow { .. });
+                let corner = self.doc.marks.get(i).is_some_and(|m| matches!(m, Mark::Arrow { .. }));
                 ctx.set_cursor_icon(match (corner, k) {
                     (true, _) => egui::CursorIcon::Crosshair,
                     (_, 0 | 4) => egui::CursorIcon::ResizeNwSe,
@@ -1092,7 +1104,11 @@ impl Editor {
             }
         }
         if let Some((i, k, orig)) = self.resizing.clone() {
-            if let (true, Some(s)) = (resp.dragged(), resp.interact_pointer_pos()) {
+            if i >= self.doc.marks.len() {
+                self.resizing = None;
+                return;
+            }
+            if let (true, Some(s)) = (resp.dragged() || resp.drag_stopped(), resp.interact_pointer_pos()) {
                 let mut m = orig.clone();
                 m.drag_handle(k, at_img(s));
                 self.doc.marks[i] = m;
@@ -1182,7 +1198,7 @@ impl Editor {
             self.push_undo();
             self.doc.marks.remove(i);
         } else if !cmd {
-            for t in Tool::DRAW.iter().chain(Tool::MEASURE.iter()) {
+            for t in Tool::DRAW.iter().chain(Tool::MEASURE.iter()).chain(Tool::LOOK.iter()) {
                 if pressed(t.key()) {
                     self.set_tool(*t);
                     break;
@@ -1458,5 +1474,14 @@ mod tests {
         }
         assert!(!e.doc.marks.is_empty(), "recognition never answered");
         assert!(matches!(&e.doc.marks[0], Mark::Erase { boxes, .. } if boxes.is_empty()), "no OCR here: whole box");
+    }
+
+    #[test]
+    fn undo_in_the_middle_of_a_resize_drops_it() {
+        let mut e = ed();
+        e.add(Mark::Highlight { r: Rect::from_min_max(Pos2::ZERO, Pos2::new(10.0, 10.0)), color: [1, 2, 3, 255] });
+        e.resizing = Some((0, 4, e.doc.marks[0].clone()));
+        e.undo();
+        assert!(e.resizing.is_none() && e.doc.marks.is_empty());
     }
 }

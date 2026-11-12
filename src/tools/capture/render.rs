@@ -59,16 +59,21 @@ impl Mark {
                 outer.contains(p) && (!inner.is_positive() || !inner.contains(p))
             }
             Mark::Ellipse { r, width, .. } => {
-                // distance from the outline, measured along the ray from the center
+                // distance to the nearest point of the outline (sampled
+                // finely enough for any on-screen size)
                 let c = r.center();
-                let (a, b) = (r.width() / 2.0, r.height() / 2.0);
+                let (a, b) = (r.width().abs() / 2.0, r.height().abs() / 2.0);
                 if a < 1.0 || b < 1.0 {
                     return self.bounds().expand(slack).contains(p);
                 }
-                let d = p - c;
-                let k = ((d.x / a).powi(2) + (d.y / b).powi(2)).sqrt();
-                let on = if k > 0.0 { d / k } else { Vec2::new(a, 0.0) };
-                (d.length() - on.length()).abs() <= width / 2.0 + slack
+                let n = ((a.max(b) * 0.5) as usize).clamp(64, 720);
+                let near = (0..n)
+                    .map(|i| {
+                        let th = i as f32 / n as f32 * std::f32::consts::TAU;
+                        (c + Vec2::new(a * th.cos(), b * th.sin()) - p).length()
+                    })
+                    .fold(f32::MAX, f32::min);
+                near <= width / 2.0 + slack
             }
             Mark::Pen { pts, width, .. } => match pts.len() {
                 0 => false,
@@ -654,13 +659,10 @@ fn draw_shapes(img: &mut RgbaImage, marks: &[Mark]) {
                     if pts.len() == 1 {
                         pb.line_to(first.x + 0.01, first.y);
                     }
-                    // smooth: curves through the midpoints between samples
-                    for w in pts.windows(2).skip(1) {
-                        let m = w[0] + (w[1] - w[0]) / 2.0;
-                        pb.quad_to(w[0].x, w[0].y, m.x, m.y);
-                    }
-                    if let Some(last) = pts.last().filter(|_| pts.len() > 1) {
-                        pb.line_to(last.x, last.y);
+                    // the same segments the editor draws and hits (dense samples
+                    // with round joins look smooth)
+                    for q in pts.iter().skip(1) {
+                        pb.line_to(q.x, q.y);
                     }
                 }
                 if let Some(path) = pb.finish() {
@@ -1016,5 +1018,13 @@ mod tests {
         assert_eq!(edge_span(&img, 30, 20, 8), Some((20, 59, 10, 29)));
         assert_eq!(pixel(&img, -1, 0), None);
         assert_eq!(surrounding_color(&img, Rect::from_min_max(Pos2::new(21.0, 11.0), Pos2::new(58.0, 28.0))), [11, 107, 216, 255]);
+    }
+
+    #[test]
+    fn a_flat_ellipse_is_hit_near_its_outline() {
+        let m = Mark::Ellipse { r: Rect::from_min_max(Pos2::ZERO, Pos2::new(200.0, 20.0)), color: [0; 4], width: 4.0 };
+        // under 3 px from the outline, far along the ray from the center
+        assert!(m.hit(Pos2::new(170.0, 3.0), 6.0));
+        assert!(!m.hit(Pos2::new(100.0, 10.0), 6.0));
     }
 }

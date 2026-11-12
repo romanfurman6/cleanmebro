@@ -630,6 +630,11 @@ impl Capture {
         // one editor at a time; the one open keeps its changes in history
         if let Some(mut old) = self.editor.take() {
             self.commit_edit(&mut old.ed);
+            // the next editor starts with the frame chosen in this one
+            if self.settings.frame != old.ed.frame_style {
+                self.settings.frame = old.ed.frame_style;
+                self.save_settings();
+            }
         }
         let title = self.title_for(id);
         let s = &self.settings;
