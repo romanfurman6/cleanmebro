@@ -383,7 +383,7 @@ impl Capture {
             }
         };
         self.files_at = None;
-        if self.settings.share.auto && self.settings.share.ready(share::VIDEO_ACCOUNT) {
+        if self.settings.share.auto && self.settings.share.set_up(share::VIDEO_ACCOUNT) {
             self.share(st.path.clone());
         }
         if self.settings.rec.open_editor {
@@ -625,7 +625,7 @@ impl Capture {
         if let Some(id) = id {
             let path = self.store.path(id);
             let (s, account) = self.share_for(&path);
-            if s.auto && s.ready(account) {
+            if s.auto && s.set_up(account) {
                 self.share(path);
             }
         }
