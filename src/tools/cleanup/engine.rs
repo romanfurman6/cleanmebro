@@ -18,17 +18,22 @@ pub enum Group {
     AiTools,
     AppCaches,
     Developer,
+    Projects,
+    Installers,
     Logs,
     Trash,
 }
 
 impl Group {
-    pub const ALL: [Group; 5] = [Group::AiTools, Group::AppCaches, Group::Developer, Group::Logs, Group::Trash];
+    pub const COUNT: usize = 7;
+    pub const ALL: [Group; Group::COUNT] = [Group::AiTools, Group::AppCaches, Group::Developer, Group::Projects, Group::Installers, Group::Logs, Group::Trash];
     pub fn title(self) -> &'static str {
         match self {
             Group::AiTools => "AI Tools",
             Group::AppCaches => "App Caches",
             Group::Developer => "Developer Tools",
+            Group::Projects => "Projects",
+            Group::Installers => "Installers",
             Group::Logs => "Logs",
             Group::Trash => "Trash",
         }
@@ -38,6 +43,8 @@ impl Group {
             Group::AiTools => "Caches, logs, temp files and old versions of AI tools: Claude, Codex, Gemini, Cursor. Projects you use are never touched.",
             Group::AppCaches => "Cache files apps keep to start faster. They pile up over time and are rebuilt when needed.",
             Group::Developer => "Xcode build data, simulator caches and package manager downloads, fetched again when needed.",
+            Group::Projects => "Build output of code projects you haven't touched in a while: node_modules, target and the like. Sources are never touched.",
+            Group::Installers => "Old installers in Downloads. The apps they installed stay.",
             Group::Logs => "Activity logs from apps and macOS. Useful only for debugging, especially when old.",
             Group::Trash => "Items you already deleted still take space until the Trash is emptied.",
         }
@@ -75,6 +82,19 @@ pub enum Who {
     You,
 }
 
+/// How an item is removed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Action {
+    /// Its file or folder (to the Trash or deleted).
+    Files,
+    /// `simctl delete` a simulator whose runtime is gone.
+    SimDevice(String),
+    /// `simctl runtime delete` an old simulator runtime.
+    SimRuntime(String),
+    /// `brew cleanup`: old versions and downloads.
+    BrewCleanup,
+}
+
 #[derive(Clone, Debug)]
 pub struct Item {
     pub group: Group,
@@ -93,6 +113,7 @@ pub struct Item {
     pub hard_keep: bool,
     pub permanent: bool, // emptying the Trash can't be undone
     pub app_running: bool,
+    pub action: Action,
 }
 
 impl Item {
@@ -102,6 +123,10 @@ impl Item {
     /// Anything the rules or Claude weren't sure of goes to the Trash.
     pub fn rebuilds(&self) -> bool {
         self.verdict == Verdict::Safe && self.rule_verdict == Verdict::Safe && self.by != Who::You && matches!(self.kind, "Caches" | "Logs" | "Temp Files" | "Build Data")
+    }
+    /// Removed by a tool, not by moving files: can't go to the Trash.
+    pub fn by_command(&self) -> bool {
+        self.action != Action::Files
     }
 }
 
@@ -141,7 +166,7 @@ pub struct State {
     pub hidden_kept: usize,
     /// While scanning: per group (in [`Group::ALL`] order) what has been
     /// measured so far, so the totals grow live.
-    pub live: [GroupLive; 5],
+    pub live: [GroupLive; Group::COUNT],
     /// While scanning: every place to look at has been listed (only measuring is left).
     pub listed: bool,
 }
@@ -183,19 +208,21 @@ pub type Shared = Arc<Mutex<State>>;
 
 type ScanStep = (&'static str, fn(&mut Ctx));
 
-struct Ctx {
-    items: Vec<Item>,
+pub(super) struct Ctx {
+    pub(super) items: Vec<Item>,
     /// Paths the person chose to keep in an earlier scan: not offered again.
     kept: HashSet<PathBuf>,
     hidden_kept: usize,
-    running_ids: HashSet<String>,
+    pub(super) running_ids: HashSet<String>,
     running_names: HashSet<String>,
+    /// Homebrew's own cleanup was offered: its download cache isn't offered again.
+    brew: bool,
     shared: Shared,
     egui: egui::Context,
 }
 
 impl Ctx {
-    fn stopped(&self) -> bool {
+    pub(super) fn stopped(&self) -> bool {
         self.shared.lock_ok().stop
     }
     fn status(&self, s: &str, progress: f32) {
@@ -204,8 +231,35 @@ impl Ctx {
         g.progress = progress;
         self.egui.request_repaint();
     }
+    /// Offer an item removed by a tool (simctl, brew): its size comes from the
+    /// tool and it lives outside the home folder.
     #[allow(clippy::too_many_arguments)]
-    fn add(&mut self, group: Group, title: &str, path: PathBuf, kind: &'static str, verdict: Verdict, reason: &str) {
+    pub(super) fn add_action(&mut self, group: Group, title: &str, path: PathBuf, kind: &'static str, verdict: Verdict, reason: &str, action: Action, bytes: u64) {
+        if self.kept.contains(&path) {
+            self.hidden_kept += 1;
+            return;
+        }
+        self.items.push(Item {
+            group,
+            title: title.to_string(),
+            path,
+            bytes,
+            age_days: 0.0,
+            kind,
+            verdict,
+            reason: reason.to_string(),
+            rule_reason: reason.to_string(),
+            rule_verdict: verdict,
+            by: Who::Rule,
+            selected: false,
+            hard_keep: false,
+            permanent: true,
+            app_running: false,
+            action,
+        });
+    }
+
+    pub(super) fn add(&mut self, group: Group, title: &str, path: PathBuf, kind: &'static str, verdict: Verdict, reason: &str) {
         // The app's own cache and logs (also under its first name, CleanMeBro): a few MB, and in use while it runs
         if path.file_name().is_some_and(|n| {
             let n = n.to_string_lossy().to_lowercase();
@@ -217,7 +271,8 @@ impl Ctx {
             self.hidden_kept += 1;
             return;
         }
-        if path.symlink_metadata().is_err() {
+        // missing, or a link: removing a link frees nothing
+        if !path.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
             return;
         }
         // measured later, all at once and in parallel, once nested and
@@ -239,8 +294,9 @@ impl Ctx {
             hard_keep: false,
             permanent: false,
             app_running: false,
+            action: Action::Files,
         };
-        if let Some(why) = is_protected(&path) {
+        if let Some(why) = guard(group, &path) {
             it.verdict = Verdict::Keep;
             it.reason = why.into();
             it.hard_keep = true;
@@ -255,6 +311,19 @@ impl Ctx {
         }
         self.items.push(it);
     }
+}
+
+/// Why `p` must never be removed by `group`'s rules, if so. Everything
+/// Cleanup offers lives in the home folder; build output of code projects is
+/// judged by its own rules (it sits in folders that are otherwise personal).
+pub(super) fn guard(group: Group, p: &Path) -> Option<&'static str> {
+    if !p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir)) || !p.starts_with(home()) {
+        return Some("Outside your home folder");
+    }
+    if group == Group::Projects {
+        return super::projects::still_build_output(p);
+    }
+    is_protected(p)
 }
 
 /// The app a cache belongs to is running (by its folder's bundle id or the
@@ -296,7 +365,8 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
                     if k >= n || shared.lock_ok().stop {
                         break;
                     }
-                    let size = dir_size(&items[k].path);
+                    // a tool's item came with its size
+                    let size = if items[k].action == Action::Files { dir_size(&items[k].path) } else { items[k].bytes };
                     sizes[k].store(size, std::sync::atomic::Ordering::Relaxed);
                     let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     let mut g = shared.lock_ok();
@@ -329,13 +399,13 @@ fn age_days(p: &Path) -> f64 {
         .unwrap_or(0.0)
 }
 
-fn children(p: &Path) -> Vec<PathBuf> {
+pub(super) fn children(p: &Path) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = std::fs::read_dir(p).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default();
     v.sort();
     v
 }
 
-fn fname(p: &Path) -> String {
+pub(super) fn fname(p: &Path) -> String {
     p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
@@ -399,15 +469,19 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
     }
     std::thread::spawn(move || {
         let (running_ids, running_names) = running_apps();
-        let mut c = Ctx { items: Vec::new(), kept: kept().into_iter().collect(), hidden_kept: 0, running_ids, running_names, shared: shared.clone(), egui: ctx.clone() };
-        let steps: [ScanStep; 8] = [
+        let mut c = Ctx { items: Vec::new(), kept: kept().into_iter().collect(), hidden_kept: 0, running_ids, running_names, brew: false, shared: shared.clone(), egui: ctx.clone() };
+        let steps: [ScanStep; 12] = [
             ("Claude", scan_claude),
             ("AI tools", scan_ai_tools),
+            ("Homebrew", scan_brew),
             ("User caches", scan_user_caches),
             ("App caches", scan_app_caches),
             ("Logs", scan_logs),
-            ("Xcode", scan_xcode),
+            ("Xcode", super::xcode::scan),
+            ("Simulators", super::xcode::scan_simulators),
             ("Developer caches", scan_developer),
+            ("Projects", super::projects::scan),
+            ("Installers", scan_installers),
             ("Trash", scan_trash),
         ];
         // finding what to look at is quick; measuring it is the long part
@@ -587,24 +661,21 @@ fn scan_user_caches(c: &mut Ctx) {
     let h = home();
     let caches = h.join("Library/Caches");
     let skip = ["claude-cli-nodejs", "com.anthropic.claudefordesktop", "com.anthropic.claudefordesktop.ShipIt"];
-    let keep = [
-        ("com.apple.bird", "iCloud Drive sync state — removing it can disrupt syncing"),
-        ("CloudKit", "iCloud sync data"),
-        ("com.apple.cloudd", "iCloud sync data"),
-        ("com.apple.nsurlsessiond", "Downloads in progress for apps"),
-        ("com.apple.akd", "Apple ID sign-in"),
-        ("FamilyCircle", "Family Sharing"),
-    ];
+    let keep = &super::rules::catalog().keep_caches;
     for p in children(&caches) {
         if c.stopped() {
             return;
         }
         let n = fname(&p);
-        if skip.contains(&n.as_str()) || n.starts_with('.') {
+        if skip.contains(&n.as_str()) || n.starts_with('.') || (n == "Homebrew" && c.brew) {
             continue;
         }
-        if let Some((_, why)) = keep.iter().find(|(k, _)| *k == n) {
-            c.add(Group::AppCaches, &pretty(&n), p, "Caches", Verdict::Keep, why);
+        if let Some(k) = keep.iter().find(|k| k.matches(&n)) {
+            c.add(Group::AppCaches, &pretty(&n), p.clone(), "Caches", Verdict::Keep, &k.reason);
+            // neither Claude nor a click turns these into junk
+            if let Some(it) = c.items.last_mut().filter(|i| i.path == p) {
+                it.hard_keep = true;
+            }
             continue;
         }
         let (v, why) = if n.starts_with("com.apple.") {
@@ -617,25 +688,12 @@ fn scan_user_caches(c: &mut Ctx) {
         c.add(Group::AppCaches, &pretty(&n), p, "Caches", v, why);
     }
 }
-
 // ---- App caches: hard-coded app rules from SystemJunkScanning + Electron + sandbox
 
 fn scan_app_caches(c: &mut Ctx) {
     let h = home();
-    let rules: [(&str, &str, Verdict, &str); 10] = [
-        ("Library/Application Support/Adobe/Common/Media Cache Files", "Adobe Media Cache", Verdict::Safe, "Premiere/After Effects media cache; rebuilt on open"),
-        ("Library/Application Support/Adobe/Common/Media Cache", "Adobe Media Cache Database", Verdict::Safe, "Media cache index; rebuilt on open"),
-        ("Library/Application Support/Spotify/PersistentCache/Storage", "Spotify offline cache", Verdict::Safe, "Streamed music cache (not your downloads list)"),
-        ("Library/Application Support/Telegram Desktop/tdata/user_data", "Telegram media cache", Verdict::Ask, "Media from chats; downloaded again when opened"),
-        ("Library/Containers/org.telegram.desktop/Data/Library/Application Support/Telegram Desktop/tdata/user_data", "Telegram media cache", Verdict::Ask, "Media from chats; downloaded again when opened"),
-        ("Library/Containers/com.tencent.xinWeChat/Data/Library/Application Support/com.tencent.xinWeChat/2.0b4.0.9", "WeChat data", Verdict::Ask, "WeChat media and chat files"),
-        ("Library/Containers/com.apple.mail/Data/Library/Mail Downloads", "Mail Downloads", Verdict::Safe, "Copies of opened attachments; the originals stay in your mail"),
-        ("Library/Application Support/Steam/appcache", "Steam app cache", Verdict::Safe, "Store and library cache"),
-        ("Library/Application Support/Steam/depotcache", "Steam depot cache", Verdict::Safe, "Download manifests"),
-        ("Library/Application Support/MobileSync/Backup", "iOS Device Backups", Verdict::Ask, "Backups of your iPhone/iPad — removing the latest one means you can't restore from it"),
-    ];
-    for (rel, title, v, why) in rules {
-        c.add(Group::AppCaches, title, h.join(rel), "Caches", v, why);
+    for r in &super::rules::catalog().app_caches {
+        c.add(Group::AppCaches, &r.title, h.join(&r.path), "Caches", r.verdict(), &r.reason);
     }
     // Electron / Chromium app caches (CMElectronAppsCacheScanTask)
     let support = h.join("Library/Application Support");
@@ -690,57 +748,93 @@ fn scan_logs(c: &mut Ctx) {
     }
 }
 
-// ---- Xcode Junk (CMXcode* scan tasks)
-
-fn scan_xcode(c: &mut Ctx) {
-    let x = home().join("Library/Developer");
-    for p in children(&x.join("Xcode/DerivedData")) {
-        c.add(Group::Developer, &format!("Derived Data · {}", fname(&p).split('-').next().unwrap_or("")), p, "Build Data", Verdict::Safe, "Build products and index; Xcode rebuilds them");
-    }
-    c.add(Group::Developer, "Xcode Caches", x.join("Xcode/DocumentationCache"), "Caches", Verdict::Safe, "Documentation cache");
-    c.add(Group::Developer, "Swift module cache", x.join("Xcode/ModuleCache.noindex"), "Caches", Verdict::Safe, "Precompiled module cache");
-    c.add(Group::Developer, "SwiftUI Previews", x.join("Xcode/UserData/Previews"), "Caches", Verdict::Safe, "Preview simulator data");
-    c.add(Group::Developer, "iOS Device Logs", x.join("Xcode/iOS Device Logs"), "Logs", Verdict::Safe, "Device logs collected by Xcode");
-    c.add(Group::Developer, "Simulator caches", x.join("CoreSimulator/Caches"), "Caches", Verdict::Safe, "Simulator dyld caches; rebuilt on boot");
-    for os in ["iOS DeviceSupport", "watchOS DeviceSupport", "macOS DeviceSupport", "tvOS DeviceSupport", "visionOS DeviceSupport"] {
-        let mut vers = children(&x.join("Xcode").join(os));
-        vers.sort_by_key(|v| version_key(&fname(v)));
-        let newest = vers.last().cloned();
-        for v in vers {
-            let latest = Some(&v) == newest.as_ref();
-            let (verdict, why) = if latest { (Verdict::Ask, "Newest device support — needed to debug on that device") } else { (Verdict::Safe, "Support files for an older OS version; recreated when you connect that device") };
-            c.add(Group::Developer, &format!("{} {}", os.replace(" DeviceSupport", ""), fname(&v)), v, "Device Support", verdict, why);
-        }
-    }
-    for a in children(&x.join("Xcode/Archives")) {
-        c.add(Group::Developer, &format!("Archives {}", fname(&a)), a, "Archives", Verdict::Ask, "App archives hold debug symbols for builds you shipped");
-    }
-}
-
-fn version_key(s: &str) -> Vec<u32> {
-    s.split(|c: char| !c.is_ascii_digit()).filter_map(|x| x.parse().ok()).take(4).collect()
-}
-
-// ---- developer caches (Gradle from the original, the rest common package managers)
-
+// ---- developer caches (package managers and build tools)
 fn scan_developer(c: &mut Ctx) {
     let h = home();
-    let rules: [(&str, &str, Verdict, &str); 9] = [
-        (".npm/_cacache", "npm cache", Verdict::Safe, "npm downloads; fetched again when needed"),
-        (".gradle/caches", "Gradle caches", Verdict::Safe, "Gradle dependency cache"),
-        (".cache/pip", "pip cache", Verdict::Safe, "Python package downloads"),
-        ("go/pkg/mod/cache/download", "Go module downloads", Verdict::Safe, "Go module download cache"),
-        (".bun/install/cache", "Bun cache", Verdict::Safe, "Bun package downloads"),
-        (".yarn/berry/cache", "Yarn cache", Verdict::Safe, "Yarn package downloads"),
-        (".cargo/registry/cache", "Rust crate downloads", Verdict::Ask, "Crate archives; needed for offline builds"),
-        (".cocoapods/repos", "CocoaPods specs", Verdict::Ask, "Spec repositories; cloned again on next install"),
-        ("Library/pnpm/store", "pnpm store", Verdict::Ask, "Shared package store linked into your projects"),
-    ];
-    for (rel, title, v, why) in rules {
-        c.add(Group::Developer, title, h.join(rel), "Caches", v, why);
+    for r in &super::rules::catalog().developer {
+        c.add(Group::Developer, &r.title, h.join(&r.path), "Caches", r.verdict(), &r.reason);
     }
 }
-
+// ---- Homebrew: its own cleanup (old versions and downloads) when brew is there
+fn scan_brew(c: &mut Ctx) {
+    let Some(brew) = super::run::find_tool(&["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]) else { return };
+    let Some(o) = super::run::output(
+        std::process::Command::new(&brew).args(["cleanup", "--dry-run", "--prune=all"]).env("HOMEBREW_NO_AUTO_UPDATE", "1").env("HOMEBREW_NO_ENV_HINTS", "1").env("HOMEBREW_NO_ANALYTICS", "1"),
+        std::time::Duration::from_secs(60),
+    ) else {
+        return;
+    };
+    if !o.status.success() {
+        return;
+    }
+    let bytes = brew_freed(&String::from_utf8_lossy(&o.stdout));
+    c.brew = true;
+    if bytes >= m::MIN_ITEM_BYTES {
+        let prefix = brew.parent().and_then(|b| b.parent()).map(Path::to_path_buf).unwrap_or_default();
+        c.add_action(Group::Developer, "Homebrew old versions and downloads", prefix.join("Cellar"), "Caches", Verdict::Safe, "Older versions of what you installed with brew, and its downloads; brew fetches them again", Action::BrewCleanup, bytes);
+    }
+}
+/// What `brew cleanup --dry-run` says it would free ("…free approximately 1.2GB…").
+fn brew_freed(out: &str) -> u64 {
+    let Some(line) = out.lines().rev().find(|l| l.contains("would free approximately")) else { return 0 };
+    let Some(amount) = line.split("approximately").nth(1).and_then(|r| r.split_whitespace().next()) else { return 0 };
+    let split = amount.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(amount.len());
+    let (num, unit) = amount.split_at(split);
+    let n: f64 = num.parse().unwrap_or(0.0);
+    let mul = match unit.trim().to_uppercase().as_str() {
+        "KB" => 1024.0,
+        "MB" => 1024.0 * 1024.0,
+        "GB" => 1024.0 * 1024.0 * 1024.0,
+        "TB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => 1.0,
+    };
+    (n * mul) as u64
+}
+fn run_brew_cleanup() -> Result<(), String> {
+    let brew = super::run::find_tool(&["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]).ok_or("Homebrew isn't installed any more")?;
+    let o = super::run::output(
+        std::process::Command::new(brew).args(["cleanup", "--prune=all"]).env("HOMEBREW_NO_AUTO_UPDATE", "1").env("HOMEBREW_NO_ENV_HINTS", "1").env("HOMEBREW_NO_ANALYTICS", "1"),
+        std::time::Duration::from_secs(600),
+    )
+    .ok_or("brew cleanup didn't finish")?;
+    if o.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("brew cleanup failed").to_string())
+    }
+}
+// ---- old installers in Downloads
+fn scan_installers(c: &mut Ctx) {
+    let rules = &super::rules::catalog().installers;
+    for (p, age) in installers(&home().join("Downloads"), &rules.extensions, rules.min_age_days as f64) {
+        let name = fname(&p);
+        c.add(Group::Installers, &name, p, "Installers", Verdict::Ask, &format!("Installer downloaded {} days ago; the app it installed stays", age as u64));
+    }
+}
+/// Installer files (by extension) in `dir` and one level down, older than `min_days`.
+pub(super) fn installers(dir: &Path, exts: &[String], min_days: f64) -> Vec<(PathBuf, f64)> {
+    let mut out = Vec::new();
+    let look = |d: &Path, out: &mut Vec<(PathBuf, f64)>| {
+        for p in children(d) {
+            let Ok(md) = p.symlink_metadata() else { continue };
+            let ext = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            // a .pkg can be a folder (bundle); both count
+            if (md.is_file() || md.is_dir()) && exts.iter().any(|e| *e == ext) {
+                let age = age_days(&p);
+                if age >= min_days {
+                    out.push((p, age));
+                }
+            }
+        }
+    };
+    look(dir, &mut out);
+    for sub in children(dir) {
+        if sub.symlink_metadata().is_ok_and(|m| m.is_dir()) && sub.extension().is_none() {
+            look(&sub, &mut out);
+        }
+    }
+    out
+}
 // ---- Trash bins
 
 fn scan_trash(c: &mut Ctx) {
@@ -929,8 +1023,57 @@ fn clean_order(items: &[Item]) -> Vec<Item> {
     t
 }
 
+/// How one item will be removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum How {
+    /// Moved to the Trash: can be put back.
+    Trash,
+    /// Deleted outright (rebuilt by its app, or the person chose "delete now").
+    Deleted,
+    /// The Trash itself, emptied.
+    Emptied,
+    /// Removed by a tool (simctl, brew).
+    Command,
+}
+
+impl How {
+    pub fn verb(self) -> &'static str {
+        match self {
+            How::Trash => "Moved to Trash",
+            How::Deleted => "Deleted",
+            How::Emptied => "Emptied",
+            How::Command => "Removed",
+        }
+    }
+}
+
+/// The dry run of a clean: what goes, in order, and how. Nothing is touched.
+pub fn plan_clean(items: &[Item], delete_now: bool) -> Vec<(Item, How)> {
+    clean_order(items)
+        .into_iter()
+        .map(|it| {
+            let how = if it.group == Group::Trash {
+                How::Emptied
+            } else if it.by_command() {
+                How::Command
+            } else if delete_now || it.rebuilds() {
+                How::Deleted
+            } else {
+                How::Trash
+            };
+            (it, how)
+        })
+        .collect()
+}
+
+/// Kinds whose folders a running app may be writing into.
+fn live_kind(kind: &str) -> bool {
+    matches!(kind, "Caches" | "Temp Files" | "Build Data")
+}
+
 pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
-    let targets: Vec<Item> = {
+    let plan: Vec<(Item, How)> = {
         let mut g = shared.lock_ok();
         g.phase = Phase::Cleaning;
         g.cleaned_bytes = 0;
@@ -939,56 +1082,78 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
         g.log.clear();
         g.trashed_bytes = 0;
         g.cleaned.clear();
-        clean_order(&g.items)
+        plan_clean(&g.items, delete_now)
     };
     std::thread::spawn(move || {
-        let n = targets.len().max(1);
+        let n = plan.len().max(1);
         // minutes may have passed since the scan: an app opened since then keeps its cache
         let (running_ids, running_names) = running_apps();
-        for (k, it) in targets.iter().enumerate() {
+        // and what every process has open right now (one lsof run)
+        let open = if plan.iter().any(|(it, _)| it.action == Action::Files && live_kind(it.kind)) { super::inuse::OpenFiles::snapshot() } else { None };
+        let mut journal = super::journal::Entry::now();
+        for (k, (it, how)) in plan.iter().enumerate() {
             {
                 let mut g = shared.lock_ok();
                 g.current = it.path.display().to_string();
                 g.progress = k as f32 / n as f32;
             }
             ctx.request_repaint();
-            // last safety net
-            if let Some(why) = is_protected(&it.path).filter(|_| it.group != Group::Trash) {
+            let skip = |why: String, shared: &Shared, journal: &mut super::journal::Entry| {
                 let mut g = shared.lock_ok();
-                g.failed.push((it.title.clone(), why.to_string()));
                 g.log.push(format!("Skipped {}: {why}", it.path.display()));
-                continue;
+                journal.failed.push((it.path.display().to_string(), why.clone()));
+                g.failed.push((it.title.clone(), why));
+            };
+            if it.action == Action::Files {
+                // last safety net
+                if let Some(why) = guard(it.group, &it.path).filter(|_| it.group != Group::Trash) {
+                    skip(why.to_string(), &shared, &mut journal);
+                    continue;
+                }
+                if it.kind == "Caches" && !it.app_running && it.by != Who::You && app_open(&running_ids, &running_names, &it.path, &it.title) {
+                    skip("its app was opened after the scan".into(), &shared, &mut journal);
+                    continue;
+                }
+                // even with the person's OK: an open database would be written to after it's gone
+                if live_kind(it.kind) {
+                    if let Some(why) = super::inuse::blocked(&it.path, open.as_ref()) {
+                        skip(why.to_string(), &shared, &mut journal);
+                        continue;
+                    }
+                }
             }
-            if it.kind == "Caches" && !it.app_running && it.by != Who::You && app_open(&running_ids, &running_names, &it.path, &it.title) {
-                let mut g = shared.lock_ok();
-                g.failed.push((it.title.clone(), "the app is open now".into()));
-                g.log.push(format!("Skipped {}: its app was opened after the scan", it.path.display()));
-                continue;
-            }
-            let to_trash = !delete_now && !it.rebuilds();
-            let res = if it.group == Group::Trash {
-                empty_trash(&it.path)
-            } else if to_trash {
-                move_to_trash(&it.path)
-            } else {
-                remove(&it.path)
+            let res = match (how, &it.action) {
+                (How::Emptied, _) => empty_trash(&it.path),
+                (How::Command, Action::BrewCleanup) => run_brew_cleanup(),
+                (How::Command, a) => super::xcode::remove(a).or_else(|e| if matches!(a, Action::SimDevice(_)) && it.path.is_dir() { remove(&it.path) } else { Err(e) }),
+                (How::Trash, _) => move_to_trash(&it.path),
+                (How::Deleted, _) => remove(&it.path),
             };
             let mut g = shared.lock_ok();
             match res {
                 Ok(()) => {
-                    // an emptied Trash is gone for good, not "in the Trash"
-                    if to_trash && it.group != Group::Trash {
+                    if *how == How::Trash {
                         g.trashed_bytes += it.bytes;
                     }
                     g.cleaned_bytes += it.bytes;
                     g.cleaned_count += 1;
                     g.cleaned.push((it.group, it.bytes));
-                    g.log.push(format!("Removed {} ({})", it.path.display(), crate::kit::glass::human_bytes(it.bytes)));
+                    g.log.push(format!("{}: {} ({})", how.verb(), it.path.display(), crate::kit::glass::human_bytes(it.bytes)));
                     g.items.retain(|x| x.path != it.path);
+                    journal.items.push(super::journal::Removed { title: it.title.clone(), path: it.path.display().to_string(), bytes: it.bytes, how: *how });
+                    // an archive's day folder left empty goes too
+                    if it.kind == "Archives" && matches!(how, How::Trash | How::Deleted) {
+                        if let Some(day) = it.path.parent() {
+                            if children(day).iter().all(|c| fname(c) == ".DS_Store") {
+                                let _ = std::fs::remove_dir_all(day);
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
-                    g.failed.push((it.title.clone(), e.clone()));
                     g.log.push(format!("Couldn't remove {}: {e}", it.path.display()));
+                    journal.failed.push((it.path.display().to_string(), e.clone()));
+                    g.failed.push((it.title.clone(), e));
                 }
             }
         }
@@ -998,11 +1163,13 @@ pub fn start_clean(shared: Shared, ctx: egui::Context, delete_now: bool) {
         if g.cleaned_bytes > 0 {
             record_clean(g.cleaned_bytes);
         }
+        if !journal.items.is_empty() || !journal.failed.is_empty() {
+            super::journal::record(journal);
+        }
         ctx.request_repaint();
         crate::kit::sound::play(if g.failed.is_empty() { crate::kit::sound::Cue::Done } else { crate::kit::sound::Cue::Oops });
     });
 }
-
 /// Past cleans, oldest first: (unix seconds, bytes removed). Kept so the
 /// widget can show what Cleanup did without a new scan.
 /// Read once from disk, then kept in memory (the widget asks every frame).
@@ -1193,13 +1360,6 @@ mod tests {
     }
 
     #[test]
-    fn version_sorting() {
-        let mut v = vec!["17.10 (21A)", "17.2 (21C)", "9.3"];
-        v.sort_by_key(|s| version_key(s));
-        assert_eq!(v, vec!["9.3", "17.2 (21C)", "17.10 (21A)"]);
-    }
-
-    #[test]
     fn verdicts_from_ai_text() {
         let text = "Sure:\n[{\"i\":0,\"v\":\"safe\",\"r\":\"cache\"},{\"i\":1,\"v\":\"keep\"},{\"i\":2,\"v\":\"maybe\",\"r\":\"?\"},{\"v\":\"safe\"}]\nDone.";
         let v = parse_verdicts(text);
@@ -1242,6 +1402,7 @@ mod tests {
             hard_keep: false,
             permanent: false,
             app_running: false,
+            action: Action::Files,
         }
     }
 
@@ -1315,6 +1476,7 @@ mod tests {
             hard_keep: false,
             permanent: false,
             app_running: false,
+            action: Action::Files,
         };
         let s = State {
             items: vec![
@@ -1330,5 +1492,92 @@ mod tests {
         assert_eq!(s.pending_questions(), 1);
         assert_eq!(s.group_bytes(Group::Logs), 80);
         assert_eq!(s.claude_safe_bytes(), 10);
+    }
+
+    fn plain(group: Group, path: &str, kind: &'static str, verdict: Verdict, action: Action) -> Item {
+        Item {
+            group,
+            title: path.into(),
+            path: PathBuf::from(path),
+            bytes: 100,
+            age_days: 0.0,
+            kind,
+            verdict,
+            reason: String::new(),
+            rule_reason: String::new(),
+            rule_verdict: verdict,
+            by: Who::Rule,
+            selected: true,
+            hard_keep: false,
+            permanent: false,
+            app_running: false,
+            action,
+        }
+    }
+
+    #[test]
+    fn dry_run_says_how_each_item_goes() {
+        let mut trash = plain(Group::Trash, "/t", "Trash", Verdict::Safe, Action::Files);
+        trash.permanent = true;
+        let mut kept = plain(Group::Logs, "/k", "Logs", Verdict::Keep, Action::Files);
+        kept.selected = true;
+        let mut off = plain(Group::Logs, "/off", "Logs", Verdict::Safe, Action::Files);
+        off.selected = false;
+        let items = vec![
+            plain(Group::AppCaches, "/cache", "Caches", Verdict::Safe, Action::Files),
+            plain(Group::AiTools, "/history", "Old Sessions", Verdict::Ask, Action::Files),
+            plain(Group::Developer, "/sim", "Simulators", Verdict::Safe, Action::SimDevice("AB-12".into())),
+            plain(Group::Developer, "/brew", "Caches", Verdict::Safe, Action::BrewCleanup),
+            trash,
+            kept,
+            off,
+        ];
+        let plan: Vec<(String, How)> = plan_clean(&items, false).into_iter().map(|(i, h)| (i.path.display().to_string(), h)).collect();
+        assert_eq!(
+            plan,
+            vec![("/t".into(), How::Emptied), ("/cache".into(), How::Deleted), ("/history".into(), How::Trash), ("/sim".into(), How::Command), ("/brew".into(), How::Command)],
+            "the Trash first, kept and unselected items never"
+        );
+        // "delete now" deletes what would have gone to the Trash; tools stay tools
+        let now: Vec<How> = plan_clean(&items, true).into_iter().map(|(_, h)| h).collect();
+        assert_eq!(now, vec![How::Emptied, How::Deleted, How::Deleted, How::Command, How::Command]);
+    }
+
+    #[test]
+    fn guard_keeps_cleanup_in_the_home_folder() {
+        let h = home();
+        assert!(guard(Group::AppCaches, Path::new("/System/Library/Caches")).is_some());
+        assert!(guard(Group::AppCaches, &h.join("Library/Caches/../../Documents")).is_some());
+        assert!(guard(Group::AppCaches, &h.join("Documents/x")).is_some());
+        assert!(guard(Group::AppCaches, &h.join("Library/Caches/com.example.app")).is_none());
+        // build output in a code folder is judged by the project rules, not refused outright
+        assert_eq!(guard(Group::Projects, &h.join("Projects/nothing-here/node_modules")), Some("Not a plain build folder any more"));
+    }
+
+    #[test]
+    fn brew_dry_run_size() {
+        let out = "Would remove: /opt/homebrew/Cellar/node/20.1.0 (2,000 files, 60MB)\n==> This operation would free approximately 1.5GB of disk space.\n";
+        assert_eq!(brew_freed(out), (1.5 * 1024.0 * 1024.0 * 1024.0) as u64);
+        assert_eq!(brew_freed("==> This operation would free approximately 512KB of disk space."), 512 * 1024);
+        assert_eq!(brew_freed("nothing to do"), 0);
+    }
+
+    #[test]
+    fn old_installers_only() {
+        let base = std::env::temp_dir().join(format!("cmdmeow-dl-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("sub")).unwrap();
+        std::fs::create_dir_all(base.join("Bundle.pkg")).unwrap();
+        for f in ["Old.dmg", "New.dmg", "notes.txt", "sub/Deep.PKG"] {
+            std::fs::write(base.join(f), "x").unwrap();
+        }
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 86_400);
+        for f in ["Old.dmg", "sub/Deep.PKG", "Bundle.pkg"] {
+            std::fs::File::open(base.join(f)).unwrap().set_modified(old).unwrap();
+        }
+        let exts: Vec<String> = ["dmg", "pkg"].map(String::from).to_vec();
+        let mut found: Vec<String> = installers(&base, &exts, 14.0).into_iter().map(|(p, _)| p.strip_prefix(&base).unwrap().display().to_string()).collect();
+        found.sort();
+        assert_eq!(found, vec!["Bundle.pkg", "Old.dmg", "sub/Deep.PKG"]);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

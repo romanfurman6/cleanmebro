@@ -472,8 +472,37 @@ fn finder_space(path: &str) -> Option<(u64, u64)> {
 }
 
 /// Paths that are never offered for removal, whatever the rules or the AI say.
+/// A path is also judged by where it really leads: a symlinked parent (say a
+/// cache folder linked into Documents) can't route around these rules. That
+/// second look can only refuse, never allow.
 pub fn is_protected(p: &Path) -> Option<&'static str> {
-    let h = home();
+    is_protected_in(p, &home())
+}
+
+fn is_protected_in(p: &Path, h: &Path) -> Option<&'static str> {
+    if !p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Some("Not a plain full path");
+    }
+    if let Some(why) = protected_literal(p, h) {
+        return Some(why);
+    }
+    // where it really is: the parent resolved (the item itself may be a link,
+    // which removal treats as the link alone), checked against the real home too
+    let real_home = h.canonicalize().unwrap_or_else(|_| h.to_path_buf());
+    if let (Some(parent), Some(name)) = (p.parent(), p.file_name()) {
+        if let Ok(rp) = parent.canonicalize() {
+            let resolved = rp.join(name);
+            if resolved != p {
+                if let Some(why) = protected_literal(&resolved, h).or_else(|| protected_literal(&resolved, &real_home)) {
+                    return Some(why);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn protected_literal(p: &Path, h: &Path) -> Option<&'static str> {
     let personal = ["Documents", "Desktop", "Pictures", "Movies", "Music", "Projects", "Developer", "Dropbox", "Library/Mobile Documents", "Library/Keychains", "Library/Messages", ".ssh", ".gnupg"];
     for d in personal {
         if p.starts_with(h.join(d)) {
@@ -540,6 +569,29 @@ mod tests {
         assert!(is_protected(&h.join("Library/Caches/com.example.app")).is_none());
         // "Documents" must match a whole folder name, not a prefix
         assert!(is_protected(&h.join("DocumentsOld")).is_none());
+    }
+
+    #[test]
+    fn odd_paths_are_refused() {
+        let h = home();
+        assert!(is_protected(Path::new("Library/Caches/x")).is_some());
+        assert!(is_protected(&h.join("Library/Caches/../../Documents")).is_some());
+        // ".." inside a name is fine
+        assert!(is_protected(&h.join("Library/Caches/a..b")).is_none());
+    }
+
+    #[test]
+    fn a_symlinked_parent_cant_route_around_the_rules() {
+        // a cache folder that is really a link into Documents
+        let h = std::env::temp_dir().join(format!("cmb-link-{}", std::process::id()));
+        std::fs::create_dir_all(h.join("Documents/thesis")).unwrap();
+        std::fs::create_dir_all(h.join("Library/Caches/real")).unwrap();
+        std::os::unix::fs::symlink(h.join("Documents"), h.join("Library/Caches/evil")).unwrap();
+        assert!(is_protected_in(&h.join("Library/Caches/evil/thesis"), &h).is_some());
+        assert!(is_protected_in(&h.join("Library/Caches/real"), &h).is_none());
+        // the link itself is only a link: removing it leaves Documents alone
+        assert!(is_protected_in(&h.join("Library/Caches/evil"), &h).is_none());
+        std::fs::remove_dir_all(&h).unwrap();
     }
 
     #[test]
