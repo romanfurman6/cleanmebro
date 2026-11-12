@@ -35,8 +35,6 @@ Needs macOS 12 or later, Apple silicon or Intel.
 
 ## What's inside
 
-<img src="docs/images/panel.png" width="340" align="right" alt="The menu bar panel">
-
 | Tool | What it does |
 | --- | --- |
 | **Cleanup** | Caches, logs and leftovers, reviewed before anything moves to the Trash |
@@ -57,16 +55,19 @@ Needs macOS 12 or later, Apple silicon or Intel.
 Every tool can be turned off, and the panel is a grid of widgets you arrange
 yourself.
 
-<br clear="right">
-
 <p align="center">
   <img src="docs/images/lens.png" width="760" alt="Disk Map">
 </p>
 
-<p align="center">
-  <img src="docs/images/ai-usage.png" width="374" alt="AI Usage">
-  <img src="docs/images/clipboard.png" width="374" alt="Clipboard history">
-</p>
+<table align="center">
+  <tr>
+    <td valign="top"><img src="docs/images/panel.png" width="290" alt="The menu bar panel"></td>
+    <td valign="top">
+      <img src="docs/images/ai-usage.png" width="500" alt="AI Usage"><br>
+      <img src="docs/images/clipboard.png" width="500" alt="Clipboard history">
+    </td>
+  </tr>
+</table>
 
 ### Instead of
 
