@@ -1,65 +1,100 @@
 <p align="center">
-  <img src="docs/images/icon.png" width="128" alt="Cmd+Meow icon">
+  <img src="docs/images/icon.png" width="112" alt="Cmd+Meow icon">
 </p>
 
 <h1 align="center">Cmd+Meow</h1>
 
+<p align="center"><b>Everything your Mac needs. Free.</b><br>
+Fourteen Mac tools in one menu bar app. Open source, no account, runs locally.</p>
+
 <p align="center">
+  <a href="https://github.com/romanfurman6/cmdmeow/releases/latest/download/CmdMeow.dmg"><b>Download for macOS</b></a> ·
   <a href="https://cmdmeow.com">Website</a> ·
-  <a href="https://github.com/romanfurman6/cmdmeow/releases/latest/download/CmdMeow.dmg">Download v0.1.1</a> ·
-  <a href="https://github.com/romanfurman6/cmdmeow/actions/workflows/macos.yml">Latest build</a>
+  <a href="https://github.com/romanfurman6/cmdmeow/releases">Releases</a>
 </p>
 
-Everything your Mac needs, free and open source. One menu bar app for
-cleanup, uninstalling apps, startup items, disk map, Mac health, AI usage, fan
-control, screenshots, screen recording, sharing, dictation, clipboard history,
-external displays and keep-awake. Written in Rust; everything runs locally.
+<p align="center">
+  <a href="https://github.com/romanfurman6/cmdmeow/releases/latest"><img src="https://img.shields.io/github/v/release/romanfurman6/cmdmeow?label=version&color=C8F05A&labelColor=1d211d" alt="Latest version"></a>
+  <img src="https://img.shields.io/badge/macOS-12%2B-C8F05A?labelColor=1d211d" alt="macOS 12+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-C8F05A?labelColor=1d211d" alt="MIT license"></a>
+  <a href="https://github.com/romanfurman6/cmdmeow/actions/workflows/macos.yml"><img src="https://img.shields.io/github/actions/workflow/status/romanfurman6/cmdmeow/macos.yml?branch=main&label=build&labelColor=1d211d" alt="Build"></a>
+</p>
 
 <p align="center">
-  <a href="https://cmdmeow.com/promo.mp4"><img src="docs/images/promo.gif" width="720" alt="Cmd+Meow in 40 seconds"></a>
+  <a href="https://cmdmeow.com/promo.mp4"><img src="docs/images/promo.gif" width="760" alt="Cmd+Meow in 40 seconds"></a>
 </p>
 
 ## Install
 
-Latest version: **0.1.1** ([release notes](https://github.com/romanfurman6/cmdmeow/releases/tag/v0.1.1)).
-
-1. Download [CmdMeow.dmg](https://github.com/romanfurman6/cmdmeow/releases/latest/download/CmdMeow.dmg) and move Cmd+Meow to Applications. Needs macOS 12 or later.
-2. The app is signed with a Developer ID but not notarized yet, so macOS blocks the first launch.
-   Open it once, then go to System Settings › Privacy & Security and click **Open Anyway**.
+1. Download [CmdMeow.dmg](https://github.com/romanfurman6/cmdmeow/releases/latest/download/CmdMeow.dmg) and drag Cmd+Meow to Applications.
+2. The app is signed but not notarized yet, so the first launch is blocked. Open it once, then click **Open Anyway** in System Settings › Privacy & Security.
    Or run `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`.
-3. First-run setup asks for the permissions each tool needs.
+3. First-run setup asks only for the permissions of the tools you turn on.
+
+Needs macOS 12 or later, Apple silicon or Intel.
+
+## What's inside
+
+<img src="docs/images/panel.png" width="340" align="right" alt="The menu bar panel">
+
+| Tool | What it does |
+| --- | --- |
+| **Cleanup** | Caches, logs and leftovers, reviewed before anything moves to the Trash |
+| **Disk Map** | What takes space, as live bubbles you can drill into |
+| **Uninstaller** | Removes apps together with their leftovers |
+| **Startup** | Login items, agents and daemons; flags what you don't need |
+| **Mac Health** | CPU, memory, disk, battery, Wi-Fi speed test, Bluetooth batteries |
+| **AI Usage** | Claude, Codex, Gemini and OpenCode limits, pace and cost |
+| **Fan Control** | Fan speeds, chip heat map, fixed speed or your own curve |
+| **Screenshot** | Area, window or screen, an editor with arrows, blur and text |
+| **Video** | Screen recording with camera, mic and system audio |
+| **Sharing** | Upload a shot or a recording to your own S3 and copy a link |
+| **Dictation** | ⌥D types what you say at the caret; speech stays on the Mac |
+| **Clipboard** | History with search, pins and quick paste |
+| **Keep Awake** | Keeps the Mac awake, also while Claude Code works |
+| **Displays** | Brightness and volume of external monitors from your keys |
+
+Every tool can be turned off, and the panel is a grid of widgets you arrange
+yourself.
+
+<br clear="right">
 
 <p align="center">
-  <img src="docs/images/panel.png" width="380" alt="The menu bar panel">
+  <img src="docs/images/lens.png" width="760" alt="Disk Map">
 </p>
 
-## What it does
+### Instead of
 
-- **Cleanup** finds caches, logs and other junk; Claude can review each path (never file contents). Items go to the Trash.
-- **Disk Map** shows what takes space as live bubbles, with the largest files and a drill-down into any folder.
-- **Uninstaller** removes apps with their leftovers; **Startup** turns off what starts with your Mac.
-- **Mac Health**: CPU, memory, disk, battery (charge limit, power in watts, top processes), Wi-Fi with a speed test, and Bluetooth device batteries.
-- **AI Usage** shows usage for Claude, Codex, Gemini and OpenCode: plan limits, pace and forecast, cost at API prices, alerts.
-- **Screenshot** has an editor (marks, blur, text from the screen); **Video** records the screen with camera, mic and system audio. **Sharing** uploads either to your own S3 storage and copies a link to the [share page](https://cmdmeow.com/view/).
-- **Dictation** (⌥D) types what you say at the caret; speech recognition runs on the Mac.
-- **Displays** sets brightness and speaker volume of external monitors (DDC/CI, or dimming the picture when a monitor can't be reached), from the panel or the keyboard's own keys.
-- **Clipboard**, **Fan Control** and **Keep Awake** (also while Claude Code works) round it out. Any tool can be turned off.
-- Links for scripts, Raycast or Shortcuts (`open cmdmeow://…`; the Dev build answers `cmdmeow-dev://`):
-  - `awake/on`, `awake/off`, `awake/toggle`
-  - `capture/area`, `window`, `screen`, `delayed`, `text`, `color`, `ruler`, `record`, `history`
-  - `dictation/toggle`, `start`, `stop`, `cancel`
-  - `open/<tool>` with an optional page, e.g. `open/disk-map`, `open/capture/settings`, `open/settings`
-- Keep Awake's switch can also get its own shortcut on its page.
+CleanMyMac, DaisyDisk, CleanShot X, Loom, Paste, iStat Menus, Wispr Flow and
+Amphetamine each do one of these jobs. Cmd+Meow does them in one free app.
 
-![Disk Map](docs/images/lens.png)
+<sub>CleanMyMac, DaisyDisk, CleanShot X, Loom, Paste, iStat Menus, Wispr Flow and
+Amphetamine are trademarks of their owners. Cmd+Meow is not affiliated with them.</sub>
 
-## Requirements
+### Automation
+
+Every action has a link for scripts, Raycast or Shortcuts: `open cmdmeow://…`
+(the Dev build answers `cmdmeow-dev://`).
+
+| Link | Does |
+| --- | --- |
+| `awake/on`, `awake/off`, `awake/toggle` | Keep Awake |
+| `capture/area`, `window`, `screen`, `delayed`, `text`, `color`, `ruler`, `record`, `history` | Screenshot and Video |
+| `dictation/toggle`, `start`, `stop`, `cancel` | Dictation |
+| `open/<tool>[/<page>]`, e.g. `open/disk-map`, `open/capture/settings`, `open/settings` | Open a page |
+
+## Privacy and safety
+
+- No account, no telemetry. Files, clipboard, recordings and dictation never leave the Mac unless you share them.
+- Cleanup never reads file contents. If you turn on the AI review, only paths, sizes and ages go to Claude.
+- Documents, Desktop, Projects, Keychains, `.ssh` and any folder with `.git` are always kept.
+- Removed items go to the Trash unless you choose "Delete right away".
+
+## Development
 
 - macOS (uses AppKit for the glass material and menu bar behavior)
 - Rust stable (edition 2021)
 - Optional: [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) signed in, for Claude limits in AI Usage and the Cleanup AI judge
-
-## Build and run
 
 ```bash
 git clone https://github.com/romanfurman6/cmdmeow
@@ -67,8 +102,6 @@ cd cmdmeow
 cargo run --release            # menu bar app
 cargo test                     # unit tests
 ```
-
-### Build the app
 
 ```bash
 scripts/bundle-mac.sh              # target/bundle/CmdMeow.app + .zip
@@ -79,7 +112,8 @@ CI (`.github/workflows/macos.yml`) runs the tests and builds a universal
 `CmdMeow.app` on every push and PR; download it from the run's
 **Artifacts**.
 
-### Releases
+<details>
+<summary><b>Releases, signing and notarization</b></summary>
 
 Versions follow semver; `Cargo.toml` is the source of truth. The app's
 Info.plist gets it as `CFBundleShortVersionString`, the commit count as
@@ -96,7 +130,7 @@ build, then a GitHub Release with generated notes and `CmdMeow.dmg`,
 `https://github.com/romanfurman6/cmdmeow/releases/latest/download/CmdMeow.zip`
 always points to the newest version (the website's Download button uses it).
 
-### Signing and notarization
+#### Signing and notarization
 
 Release builds are signed with **Developer ID Application** and notarized when
 these repository secrets are set (Settings › Secrets and variables › Actions);
@@ -129,7 +163,10 @@ The icon artwork is `assets/icon/AppIcon-art.png`; regenerate `assets/AppIcon.ic
 with `python3 scripts/make-icon.py` (needs `pip install pillow`). The menu bar
 icon is drawn from vector paths in `src/kit/brand.rs`.
 
-### Test and preview modes
+</details>
+
+<details>
+<summary><b>Test and preview modes</b></summary>
 
 ```bash
 # Read-only Cleanup check: prints what would be offered, removes nothing
@@ -145,7 +182,10 @@ cargo run --release -- --screenshot out.png --view panel
 `cleanup`, `results`, `lens`, `lens-live`, `claude`, `clipboard`,
 `clipboard-settings`, `clipboard-quick`, `clipboard-list`.
 
-## Architecture
+</details>
+
+<details>
+<summary><b>Architecture</b></summary>
 
 The app is a small **core** (the shell) plus independent **tools**. Each tool
 is one folder under `src/tools/` and implements the `Tool` trait
@@ -161,7 +201,7 @@ menu-bar title.
   columns and reports its own height. The panel grows with its widgets and
   scrolls past the screen height.
 
-### Adding a tool
+#### Adding a tool
 
 1. Create `src/tools/<name>/mod.rs` with a struct implementing `Tool`
    (`id`, `name`, `badge` are required; everything else is optional).
@@ -171,7 +211,10 @@ Its widgets appear in the gallery of **Settings › Widgets**, it gets an
 on/off switch in **Settings › Tools**, and if it has a page it gets a sidebar
 entry. Nothing in `src/core/` changes.
 
-## Project layout
+</details>
+
+<details>
+<summary><b>Project layout</b></summary>
 
 ```
 cmdmeow/
@@ -226,17 +269,7 @@ cmdmeow/
 The images in `docs/images/` are rendered from sample data with
 `--screenshot <file.png> --view <name>`.
 
-## Safety
-
-- Cleanup never reads file contents; only paths, sizes and ages are sent to Claude.
-- Hard-kept locations (Documents, Desktop, Projects, Keychains, `.ssh`, any folder
-  with `.git`, Claude settings, and so on) can't be overridden by rules or the AI.
-- Removal moves to the Trash unless you choose "Delete right away".
-
-## Known gaps
-
-- Some health thresholds are estimated (marked in `docs/MECHANICS.md`).
-- Live glass and tray behavior hasn't been visually verified end to end.
+</details>
 
 ## License
 
