@@ -371,7 +371,7 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
         let label = mode.label();
         let bw = button_width(p, label, BTN_SECONDARY);
         let br = Rect::from_min_size(Pos2::new(x, r.bottom() - 26.0), Vec2::new(bw, 26.0));
-        let tip = if mode == super::monitor::SpeedMode::Quick { "About 10 seconds" } else { "About 20 seconds, more streams" };
+        let tip = if mode == super::monitor::SpeedMode::Quick { "About 6 seconds" } else { "About 20 seconds, more streams" };
         if pill_button(ui, br, label, BTN_SECONDARY, !s.speed.running).on_hover_text(tip).clicked() {
             out = Some(SheetAction::SpeedTest(mode));
         }

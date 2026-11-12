@@ -297,7 +297,7 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (Option<SpeedMode>, bool) {
             let w = button_width(&p, label, BTN_SECONDARY);
             let r = Rect::from_min_size(Pos2::new(l - sp::S - w, by), Vec2::new(w, 30.0));
             let tip = match mode {
-                SpeedMode::Quick => "About 10 seconds",
+                SpeedMode::Quick => "About 6 seconds",
                 SpeedMode::Full => "About 20 seconds, more streams",
             };
             if pill_button(ui, r, label, BTN_SECONDARY, true).on_hover_text(tip).clicked() {
