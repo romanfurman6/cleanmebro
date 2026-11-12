@@ -61,6 +61,8 @@ pub struct Scan {
     pub event: Mutex<Option<u64>>,
     /// An update of the shown map is running (it stays on screen meanwhile).
     pub updating: AtomicBool,
+    /// That update is an automatic one: nothing shows it's running.
+    pub quiet: AtomicBool,
 }
 
 pub type Shared = Arc<Scan>;
@@ -174,11 +176,17 @@ pub(super) const UPDATE_LIMIT: usize = 50_000;
 
 /// Bring the shown map up to date: only the folders that changed since it
 /// was made are read again (from the system's file-change history). Falls
-/// back to a whole new map when there's no usable history.
-pub fn update(shared: Shared, ctx: egui::Context) {
+/// back to a whole new map when there's no usable history. `quiet` (an
+/// automatic update while the page is open): no progress, no sound, and no
+/// new map when the history can't be used; nothing is saved when nothing
+/// on the map changed.
+pub fn update(shared: Shared, ctx: egui::Context, quiet: bool) {
     if shared.running.swap(true, Ordering::SeqCst) {
         return;
     }
+    // the map stays on screen while it's brought up to date
+    shared.quiet.store(quiet, Ordering::SeqCst);
+    shared.updating.store(true, Ordering::SeqCst);
     std::thread::spawn(move || {
         below_ui();
         let old = shared.result.lock_ok().clone();
@@ -187,28 +195,45 @@ pub fn update(shared: Shared, ctx: egui::Context) {
         let fresh = chrono::Utc::now().timestamp() - when < UPDATE_MAX_AGE;
         let root = old.as_ref().map(|n| n.path.clone()).unwrap_or_else(|| PathBuf::from("/"));
         let plan = match (old, since) {
-            (Some(old), Some(since)) if fresh && root == Path::new("/") => {
-                shared.updating.store(true, Ordering::SeqCst);
+            (Some(old), Some(since)) if fresh => {
                 ctx.request_repaint();
                 let now_event = super::history::current();
-                super::history::since(since, &[PathBuf::from("/"), PathBuf::from("/System/Volumes/Data")], std::time::Duration::from_secs(10)).filter(|c| c.len() <= UPDATE_LIMIT).map(|c| (old, c, now_event))
+                super::history::since(since, &watch_roots(&root), std::time::Duration::from_secs(10)).filter(|c| c.len() <= UPDATE_LIMIT).map(|c| (old, c, now_event))
             }
             _ => None,
         };
         let Some((old, changes, now_event)) = plan else {
             shared.updating.store(false, Ordering::SeqCst);
-            full(&shared, &root, &ctx);
+            if quiet {
+                shared.running.store(false, Ordering::SeqCst);
+            } else {
+                full(&shared, &root, &ctx);
+            }
             return;
         };
+        let changes = relevant(changes, &root);
+        if changes.is_empty() {
+            // nothing on the map changed (only the app's own files, or
+            // places outside it): just remember how far the history was read
+            *shared.event.lock_ok() = now_event;
+            shared.updating.store(false, Ordering::SeqCst);
+            shared.running.store(false, Ordering::SeqCst);
+            ctx.request_repaint();
+            return;
+        }
         shared.stop.store(false, Ordering::SeqCst);
-        shared.files.store(0, Ordering::SeqCst);
-        shared.bytes.store(0, Ordering::SeqCst);
+        if !quiet {
+            shared.files.store(0, Ordering::SeqCst);
+            shared.bytes.store(0, Ordering::SeqCst);
+        }
         let w = Walker::new(&root, &shared, &ctx);
         let node = w.refresh(old, 0, &changes);
         let stopped = shared.stop.load(Ordering::SeqCst);
         if let (Some(node), false) = (node, stopped) {
             let now = chrono::Utc::now().timestamp();
-            save(&node, now, now_event);
+            if root == Path::new("/") {
+                save(&node, now, now_event);
+            }
             *shared.when.lock_ok() = Some(now);
             *shared.event.lock_ok() = now_event;
             *shared.result.lock_ok() = Some(node);
@@ -216,10 +241,27 @@ pub fn update(shared: Shared, ctx: egui::Context) {
         shared.updating.store(false, Ordering::SeqCst);
         shared.running.store(false, Ordering::SeqCst);
         ctx.request_repaint();
-        if !stopped {
+        if !stopped && !quiet {
             crate::kit::sound::play(crate::kit::sound::Cue::Ready);
         }
     });
+}
+
+/// Where the change history for a map of `root` is read: the startup disk
+/// is also reached through its Data volume.
+pub fn watch_roots(root: &Path) -> Vec<PathBuf> {
+    if root == Path::new("/") {
+        vec![PathBuf::from("/"), PathBuf::from("/System/Volumes/Data")]
+    } else {
+        vec![root.to_path_buf()]
+    }
+}
+
+/// The changes that touch the map of `root`: inside it, and not the app's
+/// own data (saving the map would otherwise count as a change of the map).
+fn relevant(changes: Vec<Change>, root: &Path) -> Vec<Change> {
+    let own = crate::kit::fs::data_path("");
+    changes.into_iter().filter(|c| c.path.starts_with(root) && !c.path.starts_with(&own)).collect()
 }
 
 /// One changed folder from the history. `deep`: everything under it may have
@@ -751,6 +793,16 @@ mod tests {
         let updated = w.refresh(updated, 0, &[Change { path: base.join("t2"), deep: true }]).unwrap();
         same(&updated, &map_now(&base));
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn only_changes_on_the_map_count() {
+        let own = crate::kit::fs::data_path("diskmap.json");
+        let c = |p: &Path| Change { path: p.to_path_buf(), deep: false };
+        let got = relevant(vec![c(Path::new("/Users/me/a")), c(Path::new("/Volumes/X/b")), c(own.parent().unwrap())], Path::new("/Users/me"));
+        assert_eq!(got, vec![c(Path::new("/Users/me/a"))]);
+        assert_eq!(watch_roots(Path::new("/")).len(), 2);
+        assert_eq!(watch_roots(Path::new("/Users/me")), vec![PathBuf::from("/Users/me")]);
     }
 
     #[test]
