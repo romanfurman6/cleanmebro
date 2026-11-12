@@ -141,6 +141,11 @@ pub struct Settings {
     pub rec: RecSettings,
     /// Uploading recordings for a link.
     pub share: super::share::Settings,
+    /// Uploading screenshots: their own switches, folder and link kind,
+    /// and (unless `shot_share_reuse`) their own storage.
+    pub shot_share: super::share::Settings,
+    /// Screenshots go to the videos' storage (in their own folder).
+    pub shot_share_reuse: bool,
 }
 
 /// Frame rates the recorder offers.
@@ -237,6 +242,8 @@ impl Default for Settings {
             frame: Default::default(),
             rec: RecSettings::default(),
             share: Default::default(),
+            shot_share: super::share::Settings::shots(),
+            shot_share_reuse: true,
         }
     }
 }
@@ -280,6 +287,10 @@ impl Settings {
     /// Keep values in range after loading a file someone edited by hand.
     fn sanitize(mut self) -> Self {
         self.keep = self.keep.clamp(KEEP_MIN, KEEP_MAX);
+        // the first default folder; videos and screenshots now sit side by side
+        if self.share.folder.trim() == "recordings/" {
+            self.share.folder = super::share::VIDEO_FOLDER.into();
+        }
         if !DELAYS.contains(&self.delay) {
             self.delay = 0;
         }

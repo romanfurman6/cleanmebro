@@ -328,6 +328,8 @@ impl Item {
 enum Act {
     Copy,
     Edit,
+    /// Upload (or reuse the last upload) and copy the link.
+    Link,
     Pin,
     Reveal,
     Delete,
@@ -347,6 +349,7 @@ fn run_act(c: &mut Capture, act: Act, it: &Item) {
             Act::Copy => c.hud(if record::sys::copy_file(v) { "Copied the video" } else { "Couldn't copy" }),
             Act::Reveal => mac::reveal(v),
             Act::Pin => c.hud("Videos can't be pinned"),
+            Act::Link => c.copy_link(v.clone()),
             Act::Delete => {}
         }
         if act != Act::Delete {
@@ -392,6 +395,11 @@ fn run_act(c: &mut Capture, act: Act, it: &Item) {
             }
         }
         (Act::Reveal, Src::File) => mac::reveal(&it.path),
+        (Act::Link, Src::Shot(id)) => {
+            let path = c.store.path(*id);
+            c.copy_link(path);
+        }
+        (Act::Link, Src::File) => c.copy_link(it.path.clone()),
         (Act::Delete, Src::Shot(id)) => {
             c.store.remove(*id);
             c.forget_dropped_thumbs();
@@ -477,25 +485,29 @@ fn tile_ui(ui: &mut Ui, p: &egui::Painter, r: Rect, it: &Item, tex: Option<egui:
         let bar = Rect::from_min_max(Pos2::new(r.left() + 1.0, r.bottom() - 38.0), Pos2::new(r.right() - 1.0, r.bottom() - 1.0));
         p.rect_filled(bar, egui::CornerRadius { nw: 0, ne: 0, sw: 7, se: 7 }, Color32::from_rgba_unmultiplied(20, 20, 22, 225));
         let delete_tip = if it.src == Src::File { "Move to Trash" } else { "Delete" };
-        let acts: [(Ico, &str, Act); 5] = [
+        let video = it.video.is_some();
+        let mut acts: Vec<(Ico, &str, Act)> = vec![
             (Ico::Copy, "Copy", Act::Copy),
-            (if it.video.is_some() { Ico::Scissors } else { Ico::Edit }, if it.video.is_some() { "Play and edit" } else { "Edit" }, Act::Edit),
-            (Ico::Pin, "Pin on screen", Act::Pin),
-            (Ico::Folder, "Show in Finder", Act::Reveal),
-            (Ico::Trash, delete_tip, Act::Delete),
+            (if video { Ico::Scissors } else { Ico::Edit }, if video { "Play and edit" } else { "Edit" }, Act::Edit),
+            (Ico::Link, "Copy link", Act::Link),
         ];
-        let bw = 26.0;
-        let total = acts.len() as f32 * bw + (acts.len() - 1) as f32 * 4.0;
+        if !video {
+            acts.push((Ico::Pin, "Pin on screen", Act::Pin));
+        }
+        acts.extend([(Ico::Folder, "Show in Finder", Act::Reveal), (Ico::Trash, delete_tip, Act::Delete)]);
+        let gap = 3.0;
+        let bw = ((bar.width() - 12.0 - (acts.len() - 1) as f32 * gap) / acts.len() as f32).min(26.0);
+        let total = acts.len() as f32 * bw + (acts.len() - 1) as f32 * gap;
         let mut x = bar.center().x - total / 2.0;
         for (ico, tip, a) in acts {
             let br = Rect::from_min_size(Pos2::new(x, bar.center().y - 13.0), Vec2::splat(bw));
             let b = ui.interact(br, id.with(tip), Sense::click());
             p.rect_filled(br, 6.0, white(if b.hovered() { 46 } else { 26 }));
-            icons::draw(p, ico, br.shrink(6.0), if a == Act::Delete && b.hovered() { RED() } else { TEXT() });
+            icons::draw(p, ico, br.shrink((bw * 0.23).min(6.0)), if a == Act::Delete && b.hovered() { RED() } else { TEXT() });
             if b.on_hover_text(tip).clicked() {
                 out = Some(a);
             }
-            x += bw + 4.0;
+            x += bw + gap;
         }
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -693,17 +705,32 @@ fn field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, secret: bool) -> e
 
 /// Sharing: upload recordings to the person's S3-compatible storage
 /// (Hetzner Object Storage…) and copy the link.
-fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
-    use super::share::{secret, LinkKind};
+/// Uploading for a link: the videos' storage, or (`shots`) the screenshots'
+/// settings, which can reuse the videos' storage in their own folder.
+/// Returns the bottom of what it drew.
+fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect, shots: bool) -> f32 {
+    use super::share::{secret, LinkKind, SHOT_ACCOUNT, SHOT_FOLDER, VIDEO_ACCOUNT, VIDEO_FOLDER};
     let x0 = col.left();
-    let id = ui.scope_id().with("share");
+    let id = ui.scope_id().with(("share", shots));
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Sharing", bold(15.0), TEXT());
-    let card = card_rows(p, x0, col.top() + 28.0, col.width(), 9);
-    let mut s = c.settings.share.clone();
-    let labels = ["Upload each recording", "Copy the link when done", "Link", "Endpoint", "Bucket", "Folder", "Access key", "Secret key", "Region"];
+    let mut s = if shots { c.settings.shot_share.clone() } else { c.settings.share.clone() };
+    let reuse = shots && c.settings.shot_share_reuse;
+    let mut new_reuse = reuse;
+    // rows: switches, (storage), link, folder, then the storage fields
+    let mut labels: Vec<&str> = vec![if shots { "Upload each screenshot" } else { "Upload each recording" }, "Copy the link when done"];
+    if shots {
+        labels.push("Storage");
+    }
+    labels.extend(["Link", "Folder"]);
+    let own = !reuse;
+    if own {
+        labels.extend(["Endpoint", "Bucket", "Access key", "Secret key", "Region"]);
+    }
+    let card = card_rows(p, x0, col.top() + 28.0, col.width(), labels.len());
     for (k, l) in labels.iter().enumerate() {
         p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT());
     }
+    let row = |l: &str| labels.iter().position(|x| *x == l).unwrap_or(0);
     for (k, on) in [(0usize, s.auto), (1, s.copy_link)] {
         let y = row_y(card, k);
         if switch(ui, Rect::from_min_size(Pos2::new(card.right() - 12.0 - 30.0, y - 9.0), Vec2::new(30.0, 18.0)), id.with(("sw", k)), on, true).clicked() {
@@ -714,8 +741,16 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
             }
         }
     }
-    let y = row_y(card, 2);
-    if let Some(i) = segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - 210.0, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0)), id.with("link"), &["Public", "Expires in 7 days"], (s.link == LinkKind::Week) as usize) {
+    let seg = |ui: &mut Ui, k: usize, w: f32, salt: &str, labels: &[&str], cur: usize| {
+        let y = row_y(card, k);
+        segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - w, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0)), id.with(salt), labels, cur)
+    };
+    if shots {
+        if let Some(i) = seg(ui, row("Storage"), 210.0, "storage", &["Same as videos", "Its own"], (!reuse) as usize) {
+            new_reuse = i == 0;
+        }
+    }
+    if let Some(i) = seg(ui, row("Link"), 210.0, "link", &["Public", "Expires in 7 days"], (s.link == LinkKind::Week) as usize) {
         s.link = if i == 1 { LinkKind::Week } else { LinkKind::Public };
     }
     let fw = (card.width() * 0.6).min(260.0);
@@ -723,37 +758,56 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
         let y = row_y(card, k);
         Rect::from_min_max(Pos2::new(card.right() - 12.0 - fw, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0))
     };
-    field(ui, frect(3), &mut s.endpoint, "fsn1.your-objectstorage.com", false);
-    field(ui, frect(4), &mut s.bucket, "my-bucket", false);
-    field(ui, frect(5), &mut s.folder, "recordings/", false);
-    field(ui, frect(6), &mut s.access_key, "Access key", false);
-    // the secret goes straight to the Keychain and is never shown back
-    let has_secret = *c.has_secret.get_or_insert_with(|| secret::get().is_some());
-    let resp = field(ui, frect(7), &mut c.share_secret, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
-    if resp.lost_focus() && !c.share_secret.is_empty() {
-        let v = std::mem::take(&mut c.share_secret);
-        let v = v.trim();
-        match secret::set(v) {
-            Ok(()) if v.is_empty() => c.has_secret = Some(false),
-            Ok(()) => {
-                c.has_secret = Some(true);
-                c.hud("Secret key saved in the Keychain")
+    field(ui, frect(row("Folder")), &mut s.folder, if shots { SHOT_FOLDER } else { VIDEO_FOLDER }, false);
+    let account = if shots { SHOT_ACCOUNT } else { VIDEO_ACCOUNT };
+    if own {
+        field(ui, frect(row("Endpoint")), &mut s.endpoint, "fsn1.your-objectstorage.com", false);
+        field(ui, frect(row("Bucket")), &mut s.bucket, "my-bucket", false);
+        field(ui, frect(row("Access key")), &mut s.access_key, "Access key", false);
+        // the secret goes straight to the Keychain and is never shown back
+        let has = if shots { &mut c.has_shot_secret } else { &mut c.has_secret };
+        let has_secret = *has.get_or_insert_with(|| secret::get(account).is_some());
+        let mut typed = std::mem::take(if shots { &mut c.shot_secret } else { &mut c.share_secret });
+        let resp = field(ui, frect(row("Secret key")), &mut typed, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
+        if resp.lost_focus() && !typed.is_empty() {
+            let v = std::mem::take(&mut typed);
+            let v = v.trim();
+            let saved = secret::set(account, v);
+            let has = if shots { &mut c.has_shot_secret } else { &mut c.has_secret };
+            match saved {
+                Ok(()) if v.is_empty() => *has = Some(false),
+                Ok(()) => {
+                    *has = Some(true);
+                    c.hud("Secret key saved in the Keychain")
+                }
+                Err(e) => c.hud(format!("Couldn't save to the Keychain: {e}")),
             }
-            Err(e) => c.hud(format!("Couldn't save to the Keychain: {e}")),
         }
+        *(if shots { &mut c.shot_secret } else { &mut c.share_secret }) = typed;
+        field(ui, frect(row("Region")), &mut s.region, "From the endpoint", false);
     }
-    field(ui, frect(8), &mut s.region, "From the endpoint", false);
-    let note = if s.ready() {
-        let b = s.bucket();
-        format!("Links look like https://{}/{}…", b.bucket_host(), s.folder.trim_start_matches('/'))
+    // where links point
+    let (eff, acc) = if reuse { (super::share::Settings { folder: s.folder.clone(), ..c.settings.share.clone() }, VIDEO_ACCOUNT) } else { (s.clone(), account) };
+    let note = if eff.ready(acc) {
+        let b = eff.bucket(acc);
+        format!("Links look like https://{}/{}…", b.bucket_host(), eff.folder.trim_start_matches('/'))
+    } else if reuse {
+        "Uses the storage set up in Video settings".into()
     } else {
         "S3-compatible storage".into()
     };
-    paragraph(p, Pos2::new(x0, card.bottom() + 10.0), &note, font(12.0), TEXT_FAINT(), col.width());
-    if s != c.settings.share {
-        c.settings.share = s;
+    let h = paragraph(p, Pos2::new(x0, card.bottom() + 10.0), &note, font(12.0), TEXT_FAINT(), col.width());
+    let changed = if shots { s != c.settings.shot_share || new_reuse != c.settings.shot_share_reuse } else { s != c.settings.share };
+    if changed {
+        if shots {
+            c.settings.shot_share = s;
+            c.settings.shot_share_reuse = new_reuse;
+        } else {
+            c.settings.share = s;
+        }
         c.save_settings();
     }
+    card.bottom() + 10.0 + h
 }
 
 fn row_y(card: Rect, k: usize) -> f32 {
@@ -769,7 +823,9 @@ fn settings_page(c: &mut Capture, ui: &mut Ui, body: Rect, cx: &mut Cx) {
         let gap = 20.0;
         let x0 = area.left() + 24.0;
         let colw = (area.width() - 48.0 - gap) / 2.0;
-        shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())), &SHOT_KEYS);
+        let below = shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())), &SHOT_KEYS);
+        let sy = below + 28.0;
+        sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0, sy), Vec2::new(colw, area.bottom() - sy)), true);
         options(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())));
     });
 }
@@ -1186,7 +1242,7 @@ pub fn video_page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 let below = shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())), &VIDEO_KEYS);
                 let ry = below + 28.0;
                 recording_options(c, ui, &p, Rect::from_min_size(Pos2::new(x0, ry), Vec2::new(colw, area.bottom() - ry)));
-                sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())));
+                sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())), false);
             });
         }
     }
