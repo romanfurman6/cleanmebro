@@ -435,29 +435,51 @@
   new MutationObserver(paint).observe($('.main'), { subtree: true, attributes: true, attributeFilter: ['hidden'] });
   paint();
 
-  // One bar: eleven menu bar icons fly into the Cmd+Meow panel
+  // One bar: the menu bar icons jump into Cmd+Meow, each becomes a live widget
   (() => {
     const bars = document.getElementById('bars'); if (!bars) return;
-    const n = document.getElementById('bars-n'), ap = $$('.mi2.ap', bars), tiles = $$('.mt', bars);
-    const reset = () => { bars.className = 'bars'; tiles.forEach(t => t.classList.remove('in')); n.textContent = '11 apps'; };
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { bars.classList.add('b-one', 'b-open', 'b-gone'); tiles.forEach(t => t.classList.add('in')); n.textContent = '1 app'; return; }
+    const n = document.getElementById('bars-n'), ap = $$('.mi2.ap', bars), wg = $$('.wg', bars);
+    ap.forEach((ic, k) => ic.style.setProperty('--k', k));
+    const wOf = i => wg.find(w => +w.dataset.i === i);
+    const label = async t => { n.classList.add('flip'); await sleep(300); n.textContent = t; n.classList.remove('flip'); };
+    const reset = () => { bars.className = 'bars'; ap.forEach(ic => ic.classList.remove('out')); wg.forEach(w => w.classList.remove('on')); n.textContent = '11 apps'; };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { bars.classList.add('b-one', 'b-open'); ap.forEach(ic => ic.classList.add('out')); wg.forEach(w => w.classList.add('on')); n.textContent = '1 app'; return; }
+    const ORDER = [5, 0, 9, 3, 7, 2, 10, 6, 1, 8, 4];
     let gen = 0, on = false;
-    const play = async id => {
-      reset(); await sleep(1800); if (id !== gen) return;
-      bars.classList.add('b-one'); await sleep(450); bars.classList.add('b-open'); await sleep(350); if (id !== gen) return;
-      ap.forEach((ic, i) => {
-        const t = tiles[i], a = ic.getBoundingClientRect(), b = $('.mti', t).getBoundingClientRect();
-        const f = ic.cloneNode(true); f.classList.add('fly'); f.style.left = a.left + 'px'; f.style.top = a.top + 'px'; document.body.append(f);
-        ic.style.opacity = 0;
-        const an = f.animate([{ transform: 'none' }, { transform: `translate(${b.left - a.left + 1}px, ${b.top - a.top + 2}px)` }], { duration: 650, delay: i * 70, easing: 'cubic-bezier(.5,0,.2,1)', fill: 'forwards' });
-        an.onfinish = () => { f.remove(); t.classList.add('in'); };
-      });
-      await sleep(650 + ap.length * 70 + 100); if (id !== gen) return;
-      ap.forEach(ic => { ic.style.opacity = ''; }); bars.classList.add('b-gone'); n.textContent = '1 app';
-      await sleep(3200); if (id !== gen) return;
-      bars.classList.remove('b-open'); await sleep(2200); if (id === gen) play(id);
+    const fly = (ic, w, i) => {
+      const a = ic.getBoundingClientRect(), b = $('.wi', w).getBoundingClientRect();
+      const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
+      const f = ic.cloneNode(true); f.classList.remove('ap'); f.classList.add('fly'); f.style.left = a.left + 'px'; f.style.top = a.top + 'px'; f.style.width = a.width + 'px';
+      document.body.append(f); ic.classList.add('out');
+      const side = (i % 2 ? 1 : -1) * (40 + (i * 37) % 70), lift = -18 - (i * 13) % 22, tilt = (i % 2 ? 1 : -1) * (14 + (i * 7) % 16);
+      const an = f.animate([
+        { transform: 'translate(0,0) scale(1) rotate(0deg)', easing: 'cubic-bezier(.2,.7,.4,1)' },
+        { transform: `translate(${dx * 0.35 + side}px, ${lift}px) scale(1.7) rotate(${tilt}deg)`, offset: 0.32, easing: 'cubic-bezier(.5,0,.3,1)' },
+        { transform: `translate(${dx}px, ${dy}px) scale(1.05) rotate(0deg)` }
+      ], { duration: 820 + (i * 53) % 220, fill: 'forwards' });
+      return new Promise(r => { an.onfinish = () => { f.remove(); w.classList.add('on'); r(); }; });
     };
-    new IntersectionObserver(es => { if (es[0].isIntersecting) { if (!on) { on = true; play(++gen); } } else { on = false; gen++; $$('.mi2.fly').forEach(f => f.remove()); ap.forEach(ic => { ic.style.opacity = ''; }); reset(); } }, { threshold: 0.5 }).observe(bars);
+    const play = async id => {
+      reset(); await sleep(1400); if (id !== gen) return;
+      bars.classList.add('b-wig'); await sleep(900); if (id !== gen) return;
+      bars.classList.add('b-one'); await sleep(420); bars.classList.add('b-open'); await sleep(380); if (id !== gen) return;
+      bars.classList.remove('b-wig');
+      const all = [];
+      for (const [k, i] of ORDER.entries()) {
+        if (id !== gen) return;
+        all.push(fly(ap[i], wOf(i), k));
+        bars.classList.remove('b-hit'); void bars.offsetWidth; bars.classList.add('b-hit');
+        await sleep(70 + (k * 29) % 70);
+      }
+      await Promise.all(all); if (id !== gen) return;
+      label('1 app');
+      await sleep(4200); if (id !== gen) return;
+      bars.classList.remove('b-open'); await sleep(2000); if (id === gen) play(id);
+    };
+    new IntersectionObserver(es => {
+      if (es[0].isIntersecting) { if (!on) { on = true; play(++gen); } }
+      else { on = false; gen++; $$('.mi2.fly').forEach(f => f.remove()); reset(); }
+    }, { threshold: 0.45 }).observe(bars);
   })();
 
   document.querySelectorAll('[data-go]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); window.cmShow && window.cmShow(a.dataset.go); app.scrollIntoView({ behavior: 'smooth', block: 'center' }); }));
