@@ -376,7 +376,7 @@ mod mac {
     pub fn gatt() -> Vec<Extra> {
         let mut s = state().lock_ok();
         s.gatt.retain(|_, (_, _, t)| t.elapsed() < GATT_TTL);
-        let mut v: Vec<Extra> = s.gatt.values().map(|(name, pct, _)| Extra { name: name.clone(), pct: *pct, charging: None }).collect();
+        let mut v: Vec<Extra> = s.gatt.values().map(|(name, pct, _)| Extra { name: name.clone(), pct: *pct, charging: None, address: String::new() }).collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         v
     }
@@ -395,7 +395,7 @@ mod mac {
             if !(0.0..=1.0).contains(&level) {
                 continue;
             }
-            out.push(Extra { name, pct: (level * 100.0).round() as u8, charging: (st >= 0).then_some(st >= 1) });
+            out.push(Extra { name, pct: (level * 100.0).round() as u8, charging: (st >= 0).then_some(st >= 1), address: String::new() });
         }
         out
     }
@@ -433,11 +433,12 @@ mod mac {
             .filter_map(|d| {
                 let pct: u8 = unsafe { msg_send![&*d, batteryPercentSingle] };
                 let name = string(unsafe { msg_send![&*d, name] })?;
+                let address = string(unsafe { msg_send![&*d, addressString] }).map(|a| a.to_lowercase().replace(':', "-")).unwrap_or_default();
                 static LOGGED: AtomicBool = AtomicBool::new(false);
                 if !LOGGED.swap(true, Ordering::Relaxed) {
-                    eprintln!("[bt] classic battery: {name} {pct}%");
+                    eprintln!("[bt] classic battery: {name} {address} {pct}%");
                 }
-                (1..=100).contains(&pct).then_some(Extra { name, pct, charging: None })
+                (1..=100).contains(&pct).then_some(Extra { name, pct, charging: None, address })
             })
             .collect()
     }
