@@ -2,12 +2,16 @@
 //! Bluetooth devices, shown as panel widgets with a detail sheet each.
 
 use crate::kit::sync::LockExt;
+mod ble;
 mod devices;
+mod devices_store;
 mod devices_ui;
 pub mod monitor;
 mod page;
 mod sheets;
 mod speed;
+mod speedtest;
+mod traffic;
 mod ui;
 
 use crate::core::tool::{Action, Badge, Cx, PanelHeader, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
@@ -56,7 +60,7 @@ impl Tool for System {
     }
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};
-        vec![Need::may(Perm::FullDisk), Need::may(Perm::Notifications)]
+        vec![Need::may(Perm::FullDisk), Need::may(Perm::Bluetooth), Need::may(Perm::Notifications)]
     }
 
     fn section(&self) -> &'static str {
@@ -67,6 +71,9 @@ impl Tool for System {
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
         WIDGETS.to_vec()
+    }
+    fn widget_loading(&self, _widget: &str) -> bool {
+        !self.mon.lock_ok().ready
     }
     fn widget_ui(&mut self, widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(&self.mon, widget, size, ui, rect, cx);
@@ -116,7 +123,7 @@ impl Tool for System {
     /// The emptiest Bluetooth device while it is low ("Mouse 14%").
     fn tray_title(&self) -> Option<String> {
         let s = self.mon.lock_ok();
-        devices::tray_title(&s.devices, s.bt_prefs)
+        devices::tray_title(&s.devices, &s.bt_prefs)
     }
 
     fn demo_view(&mut self, view: &str) -> Option<View> {

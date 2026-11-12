@@ -37,6 +37,25 @@ impl Command {
         }
     }
 
+    /// Its name in links: `cmdmeow://capture/<slug>`.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Command::Area => "area",
+            Command::Window => "window",
+            Command::Screen => "screen",
+            Command::Delayed => "delayed",
+            Command::Text => "text",
+            Command::Color => "color",
+            Command::Ruler => "ruler",
+            Command::History => "history",
+            Command::Record => "record",
+        }
+    }
+
+    pub fn from_slug(s: &str) -> Option<Command> {
+        Command::ALL.into_iter().find(|c| c.slug() == s)
+    }
+
     /// Shortcut on first launch. ⌘⇧3/4/5 belong to macOS, so they're avoided.
     pub fn default_shortcut(self) -> Option<Shortcut> {
         let key = match self {
@@ -116,10 +135,16 @@ pub struct Settings {
     pub blur: BlurStyle,
     pub cover: Cover,
     pub keep_breaks: bool,
+    /// The editor's last frame (backdrop, padding, corners, shadow, ratio).
+    pub frame: super::render::Frame,
     /// Screen recording.
     pub rec: RecSettings,
-    /// Uploading recordings for a link.
+    /// The storage (set up on the Sharing page), and the videos' folder
+    /// and switches.
     pub share: super::share::Settings,
+    /// Screenshots: only their folder and switches are used; the storage
+    /// is `share`'s.
+    pub shot_share: super::share::Settings,
 }
 
 /// Frame rates the recorder offers.
@@ -172,6 +197,8 @@ pub struct RecSettings {
     pub open_editor: bool,
     /// Seconds the saved card stays up; None keeps it until closed.
     pub card_secs: Option<u32>,
+    /// How recordings are drawn after Stop (smooth cursor, frame…).
+    pub look: crate::tools::capture::video::scene::Style,
 }
 
 impl Default for RecSettings {
@@ -190,6 +217,7 @@ impl Default for RecSettings {
             countdown: 3,
             open_editor: false,
             card_secs: Some(8),
+            look: Default::default(),
         }
     }
 }
@@ -210,8 +238,10 @@ impl Default for Settings {
             blur: BlurStyle::Pixelate,
             cover: Cover::Box,
             keep_breaks: true,
+            frame: Default::default(),
             rec: RecSettings::default(),
             share: Default::default(),
+            shot_share: super::share::Settings::shots(),
         }
     }
 }
@@ -255,6 +285,10 @@ impl Settings {
     /// Keep values in range after loading a file someone edited by hand.
     fn sanitize(mut self) -> Self {
         self.keep = self.keep.clamp(KEEP_MIN, KEEP_MAX);
+        // the first default folder; videos and screenshots now sit side by side
+        if self.share.folder.trim() == "recordings/" {
+            self.share.folder = super::share::VIDEO_FOLDER.into();
+        }
         if !DELAYS.contains(&self.delay) {
             self.delay = 0;
         }

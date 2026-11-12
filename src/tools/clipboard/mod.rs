@@ -5,6 +5,8 @@
 //! Page routes: "" (as left), "history", "settings".
 
 mod mac;
+mod privacy;
+mod search;
 mod settings;
 mod store;
 mod ui;
@@ -218,6 +220,12 @@ impl Clipboard {
         if clip.png.is_some() && !self.settings.keep_images {
             return;
         }
+        if clip.remote && !self.settings.record_remote {
+            return;
+        }
+        if !self.settings.record_secrets && clip.files.is_empty() && clip.png.is_none() && clip.text.as_deref().is_some_and(privacy::is_secret) {
+            return;
+        }
         if let Some(id) = self.store.add(&clip, now_ms(), self.settings.limits()) {
             if self.selected.is_none() {
                 self.selected = Some(id);
@@ -281,7 +289,8 @@ impl Clipboard {
         }
     }
 
-    /// Entries that pass the filter and search, pinned first.
+    /// Entries that pass the filter and search, pinned first. When no entry
+    /// holds the words as typed, a forgiving match ranks the rest, best first.
     fn visible(&self, filter: Filter, query: &str) -> Vec<u64> {
         let rev = self.store.rev();
         let mut memo = self.visible_memo.borrow_mut();
@@ -290,8 +299,22 @@ impl Clipboard {
                 return ids.clone();
             }
         }
-        let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
-        let ids: Vec<u64> = self.store.ordered().into_iter().filter(|e| filter.passes(e) && e.matches_words(&words)).map(|e| e.id).collect();
+        let q = search::Query::new(query);
+        let pool: Vec<&store::Entry> = self.store.ordered().into_iter().filter(|e| filter.passes(e)).collect();
+        let ids: Vec<u64> = if q.is_empty() {
+            pool.iter().map(|e| e.id).collect()
+        } else {
+            let hays: Vec<Vec<char>> = pool.iter().map(|e| e.haystack()).collect();
+            let exact: Vec<u64> = pool.iter().zip(&hays).filter(|(_, h)| search::exact(h, &q)).map(|(e, _)| e.id).collect();
+            if !exact.is_empty() {
+                exact
+            } else {
+                let mut loose: Vec<(i32, u64)> = pool.iter().zip(&hays).filter_map(|(e, h)| search::fuzzy(h, &q).map(|s| (s, e.id))).collect();
+                // stable: equal scores keep the pinned-then-newest order
+                loose.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
+                loose.into_iter().map(|(_, id)| id).collect()
+            }
+        };
         *memo = Some((filter, query.to_string(), rev, ids.clone()));
         ids
     }
@@ -473,6 +496,31 @@ mod tests {
         assert!(c.store.get(v[0]).unwrap().pinned, "pinned first");
         assert_eq!(c.visible(Filter::Kind(Kind::Color), "").len(), 1);
         assert_eq!(c.visible(Filter::All, "github").len(), 1);
+        // nothing holds "gthb" as typed: the forgiving match finds the link
+        let v = c.visible(Filter::All, "gthb");
+        assert!(!v.is_empty());
+        assert!(c.store.get(v[0]).unwrap().text.contains("github"));
+        assert!(c.visible(Filter::All, "zqxj").is_empty());
+    }
+
+    #[test]
+    fn tokens_and_remote_clips() {
+        let mut c = demo();
+        let n = c.store.entries.len();
+        let token = Clip { text: Some("ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789".into()), ..Default::default() };
+        c.take(token.clone());
+        c.take(Clip { text: Some("4111 1111 1111 1111".into()), ..Default::default() });
+        assert_eq!(c.store.entries.len(), n, "tokens and cards skipped by default");
+        c.settings.record_secrets = true;
+        c.take(token);
+        assert_eq!(c.store.entries.len(), n + 1, "turned on in Settings");
+
+        let remote = Clip { text: Some("from my iPhone".into()), remote: true, ..Default::default() };
+        c.take(remote.clone());
+        assert_eq!(c.store.entries.len(), n + 2, "Universal Clipboard kept by default");
+        c.settings.record_remote = false;
+        c.take(Clip { text: Some("another from iPhone".into()), ..remote });
+        assert_eq!(c.store.entries.len(), n + 2);
     }
 
     #[test]

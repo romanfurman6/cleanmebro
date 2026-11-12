@@ -1,8 +1,10 @@
 //! Startup on screen: the window page (suggestions, Undo, the list by
 //! where things come from) and the panel widget at 1:1, 1:2 and 2:4.
 
+use super::extra::{BtmItem, CronJob, SysExt};
 use super::items::{Job, LoginApp, Scope, Why};
-use super::{plural, Filter, Startup};
+use super::sign::Flag;
+use super::{plural, trust_key, Filter, Gone, Startup};
 use crate::core::tool::{Cx, Size};
 use crate::kit::glass::*;
 use crate::kit::{macos, tile};
@@ -67,8 +69,28 @@ fn outline_chip(p: &egui::Painter, pos: Pos2, align: Align2, label: &str, col: C
     r
 }
 
+fn flag_color(f: Flag) -> Color32 {
+    if f.strong() { RED() } else { AMBER() }
+}
+
+/// "3h ago", "2 days ago".
+fn ago(at: u64) -> String {
+    let s = super::now_secs().saturating_sub(at);
+    match s {
+        0..=89 => "just now".into(),
+        90..=5399 => format!("{} min ago", (s + 30) / 60),
+        5400..=129_599 => format!("{}h ago", (s + 1800) / 3600),
+        _ => format!("{} days ago", (s + 43_200) / 86_400),
+    }
+}
+
 fn why_color(w: Why) -> Color32 {
     if w == Why::Removed { ORPHAN_TEXT() } else { SUGGEST_TEXT() }
+}
+
+/// The outermost app around a program.
+fn owner_of(p: &Path) -> Option<&Path> {
+    p.ancestors().filter(|a| a.extension().is_some_and(|e| e == "app")).last()
 }
 
 /// An app in /Applications that the Uninstaller can show.
@@ -81,10 +103,23 @@ fn uninstallable(owner: &Option<PathBuf>) -> Option<&PathBuf> {
 
 // ---------------------------------------------------------------- page
 
+#[derive(Clone, Copy, PartialEq)]
+enum HeadLink {
+    None,
+    /// "Open in System Settings"
+    Settings,
+    /// "Show all": read the Background Items list (password)
+    ShowAll,
+}
+
 enum Row {
-    Head(&'static str, &'static str, bool),
+    Head(&'static str, HeadLink),
     App(LoginApp),
     Job(Job),
+    Cron(CronJob),
+    Ext(SysExt),
+    Btm(BtmItem),
+    Gone(Gone),
     Note(String),
     /// System Events access is missing: the login apps can't be read.
     Allow,
@@ -95,14 +130,25 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
     s.load_apps();
     let events_ok = s.events_allowed();
-    let (loaded, jobs, apps, apps_loaded, apps_err, new_labels, undo, busy, notify) = {
+    let (loaded, jobs, apps, apps_loaded, apps_err, new_labels, changed_labels, undo, busy, notify) = {
         let g = s.state();
-        (g.jobs_loaded, g.jobs.clone(), g.apps.clone(), g.apps_loaded, g.apps_error.clone(), g.new_labels.clone(), g.undoable(), g.busy.clone(), g.settings.notify_new)
+        (g.jobs_loaded, g.jobs.clone(), g.apps.clone(), g.apps_loaded, g.apps_error.clone(), g.new_labels.clone(), g.changed_labels.clone(), g.undoable(), g.busy.clone(), g.settings.notify_new)
     };
-    let total = jobs.len() + apps.len();
+    let (cron, new_cron, sysext, btm, btm_busy, gone, trusted) = {
+        let g = s.state();
+        (g.cron.clone(), g.new_cron.clone(), g.sysext.clone(), g.btm.clone(), g.btm_busy, g.settings.gone.clone(), g.settings.trusted.clone())
+    };
+    let is_trusted = |j: &Job| trusted.get(&trust_key(j)).is_some_and(|fp| *fp == j.fp);
+    let flags_of = |j: &Job| if is_trusted(j) { Vec::new() } else { j.flags() };
+    let is_suggested = |j: &Job| j.suggested() && !is_trusted(j);
+    let total = jobs.len() + apps.len() + cron.len() + sysext.len();
     let running = jobs.iter().filter(|j| j.pid.is_some()).count();
-    let suggested: Vec<&Job> = jobs.iter().filter(|j| j.suggested()).collect();
-    let off = jobs.iter().filter(|j| !j.on).count() + apps.iter().filter(|a| !a.on).count();
+    let suggested: Vec<&Job> = jobs.iter().filter(|j| is_suggested(j)).collect();
+    let flagged = jobs.iter().filter(|j| !flags_of(j).is_empty()).count() + cron.iter().filter(|c| !c.flags().is_empty()).count();
+    if flagged == 0 && s.filter == Filter::Flagged && loaded {
+        s.filter = Filter::All;
+    }
+    let off = jobs.iter().filter(|j| !j.on).count() + apps.iter().filter(|a| !a.on).count() + cron.iter().filter(|c| !c.on).count();
     let sub = if !loaded {
         "Reading what starts with your Mac…".to_string()
     } else {
@@ -111,16 +157,16 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let btns = page_header(&p, r, "Startup", &sub, TEXT_DIM());
 
     // filter + search on the right of the header
-    let labels_owned = [format!("All {total}"), format!("Suggested {}", suggested.len()), format!("Off {off}")];
-    let labels: Vec<&str> = labels_owned.iter().map(|x| x.as_str()).collect();
-    let tr = Rect::from_min_max(Pos2::new(btns.right() - 300.0, btns.top()), btns.max);
-    let cur = match s.filter {
-        Filter::All => 0,
-        Filter::Suggested => 1,
-        Filter::Off => 2,
-    };
+    let mut tabs = vec![(Filter::All, format!("All {total}")), (Filter::Suggested, format!("Suggested {}", suggested.len()))];
+    if flagged > 0 {
+        tabs.push((Filter::Flagged, format!("Flagged {flagged}")));
+    }
+    tabs.push((Filter::Off, format!("Off {off}")));
+    let labels: Vec<&str> = tabs.iter().map(|(_, x)| x.as_str()).collect();
+    let tr = Rect::from_min_max(Pos2::new(btns.right() - 100.0 * tabs.len() as f32, btns.top()), btns.max);
+    let cur = tabs.iter().position(|(f, _)| *f == s.filter).unwrap_or(0);
     if let Some(i) = segmented(ui, tr, ui.scope_id().with("su-filter"), &labels, cur) {
-        s.filter = [Filter::All, Filter::Suggested, Filter::Off][i];
+        s.filter = tabs[i].0;
     }
     let sr = Rect::from_min_max(Pos2::new(tr.left() - 12.0 - 190.0, tr.top()), Pos2::new(tr.left() - 12.0, tr.bottom()));
     let mut q = std::mem::take(&mut s.search);
@@ -139,10 +185,11 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let needle = s.search.trim().to_lowercase();
     let hit = |name: &str, label: &str| needle.is_empty() || name.to_lowercase().contains(&needle) || label.to_lowercase().contains(&needle);
     let job_ok = |j: &Job| {
-        hit(&j.name, &j.label)
+        (hit(&j.name, &j.label) || hit(&j.command(), ""))
             && match s.filter {
                 Filter::All => true,
-                Filter::Suggested => j.suggested(),
+                Filter::Suggested => is_suggested(j),
+                Filter::Flagged => !flags_of(j).is_empty(),
                 Filter::Off => !j.on,
             }
     };
@@ -150,15 +197,25 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         hit(&a.name, &a.path.to_string_lossy())
             && match s.filter {
                 Filter::All => true,
-                Filter::Suggested => false,
+                Filter::Suggested | Filter::Flagged => false,
                 Filter::Off => !a.on,
             }
     };
+    let cron_ok = |c: &CronJob| {
+        hit(&c.name(), &c.command)
+            && match s.filter {
+                Filter::All => true,
+                Filter::Suggested => false,
+                Filter::Flagged => !c.flags().is_empty(),
+                Filter::Off => !c.on,
+            }
+    };
+    let all = s.filter == Filter::All;
     let mut rows = Vec::new();
-    if s.filter != Filter::Suggested {
+    if all || s.filter == Filter::Off {
         let a: Vec<&LoginApp> = apps.iter().filter(|a| app_ok(a)).collect();
-        if !a.is_empty() || (s.filter == Filter::All && needle.is_empty()) {
-            rows.push(Row::Head("Open at login", "", true));
+        if !a.is_empty() || (all && needle.is_empty()) {
+            rows.push(Row::Head("Open at login", HeadLink::Settings));
             match (&apps_err, apps_loaded) {
                 _ if !events_ok => rows.push(Row::Allow),
                 (Some(_), _) => rows.push(Row::Allow),
@@ -168,30 +225,68 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             }
         }
     }
-    for (scopes, title, hint) in [
-        (&[Scope::User, Scope::AllUsers][..], "Background agents", ""),
-        (&[Scope::System][..], "System daemons", ""),
-    ] {
+    for (scopes, title) in [(&[Scope::User, Scope::AllUsers][..], "Background agents"), (&[Scope::System][..], "System daemons")] {
         let js: Vec<&Job> = jobs.iter().filter(|j| scopes.contains(&j.scope) && job_ok(j)).collect();
         if js.is_empty() {
             continue;
         }
-        rows.push(Row::Head(title, hint, false));
+        rows.push(Row::Head(title, HeadLink::None));
         rows.extend(js.into_iter().cloned().map(Row::Job));
+    }
+    let cs: Vec<&CronJob> = cron.iter().filter(|c| cron_ok(c)).collect();
+    if !cs.is_empty() {
+        rows.push(Row::Head("Cron jobs", HeadLink::None));
+        rows.extend(cs.into_iter().cloned().map(Row::Cron));
+    }
+    if all {
+        let xs: Vec<&SysExt> = sysext.iter().filter(|x| hit(&x.name, &x.bundle_id)).collect();
+        if !xs.is_empty() {
+            rows.push(Row::Head("System extensions", HeadLink::Settings));
+            rows.extend(xs.into_iter().cloned().map(Row::Ext));
+        }
+        // the full list from macOS, minus what's already above
+        let labels: Vec<&str> = jobs.iter().map(|j| j.label.as_str()).collect();
+        let programs: Vec<PathBuf> = jobs.iter().filter_map(|j| j.program.clone()).collect();
+        let app_paths: Vec<PathBuf> = apps.iter().map(|a| a.path.clone()).collect();
+        match &btm {
+            None if needle.is_empty() => {
+                rows.push(Row::Head("Background items", if btm_busy { HeadLink::None } else { HeadLink::ShowAll }));
+                if btm_busy {
+                    rows.push(Row::Note("Reading…".into()));
+                }
+            }
+            None => {}
+            Some(list) => {
+                let extra: Vec<BtmItem> = super::extra::btm_extra(list, macos::uid(), &labels, &programs, &app_paths).into_iter().filter(|b| hit(&b.name, &b.developer)).collect();
+                if !extra.is_empty() || needle.is_empty() {
+                    rows.push(Row::Head("Background items", HeadLink::Settings));
+                    if extra.is_empty() {
+                        rows.push(Row::Note("Nothing else".into()));
+                    }
+                    rows.extend(extra.into_iter().map(Row::Btm));
+                }
+            }
+        }
+        let gs: Vec<&Gone> = gone.iter().rev().filter(|g| hit(&g.name, &g.label)).collect();
+        if !gs.is_empty() {
+            rows.push(Row::Head("Removed", HeadLink::None));
+            rows.extend(gs.into_iter().cloned().map(Row::Gone));
+        }
     }
     if rows.is_empty() {
         rows.push(Row::Note(match s.filter {
             Filter::Suggested => "Nothing to turn off".into(),
+            Filter::Flagged => "Nothing looks wrong".into(),
             Filter::Off => "Nothing turned off".into(),
             Filter::All => "No matches".into(),
         }));
     }
 
-    let top_h = if busy.is_some() || undo.is_some() || (!suggested.is_empty() && s.filter != Filter::Off) { 70.0 } else { 0.0 };
+    let top_h = if busy.is_some() || undo.is_some() || (!suggested.is_empty() && matches!(s.filter, Filter::All | Filter::Suggested)) { 70.0 } else { 0.0 };
     let list_h: f32 = rows.iter().map(|r| match r {
         Row::Head(..) => HEAD_H,
         Row::Note(_) => 40.0,
-        Row::Allow => 50.0,
+        Row::Allow => 62.0,
         _ => ROW_H + ROW_GAP,
     }).sum::<f32>()
         + 56.0;
@@ -200,6 +295,10 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     child.set_clip_rect(area);
     let mut flip_app: Option<LoginApp> = None;
     let mut flip_job: Option<Job> = None;
+    let mut flip_cron: Option<CronJob> = None;
+    let mut trust: Option<(Job, bool)> = None;
+    let mut vt: Option<Job> = None;
+    let mut show_btm = false;
     let mut trash: Option<Job> = None;
     let mut turn_off_all = false;
     let mut do_undo = false;
@@ -248,13 +347,135 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
 
         for row in &rows {
             match row {
-                Row::Head(t, hint, settings) => {
-                    let tr = section_header(&p, Pos2::new(a.left() + 4.0, y + 22.0), Align2::LEFT_CENTER, t);
-                    p.text(Pos2::new(tr.right() + 8.0, y + 22.0), Align2::LEFT_CENTER, *hint, font(11.0), TEXT_FAINT());
-                    if *settings && link(ui, Pos2::new(a.right() - 4.0, y + 22.0), Align2::RIGHT_CENTER, "Open in System Settings", 12.0).clicked() {
-                        super::items::open_settings();
+                Row::Head(t, l) => {
+                    section_header(&p, Pos2::new(a.left() + 4.0, y + 22.0), Align2::LEFT_CENTER, t);
+                    let at = Pos2::new(a.right() - 4.0, y + 22.0);
+                    match l {
+                        HeadLink::Settings => {
+                            if link(ui, at, Align2::RIGHT_CENTER, "Open in System Settings", 12.0).clicked() {
+                                super::items::open_settings();
+                            }
+                        }
+                        HeadLink::ShowAll => {
+                            if link(ui, at, Align2::RIGHT_CENTER, "Show all", 12.0).on_hover_text("Asks for your password").clicked() {
+                                show_btm = true;
+                            }
+                        }
+                        HeadLink::None => {}
                     }
                     y += HEAD_H;
+                }
+                Row::Cron(c) => {
+                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), ROW_H));
+                    let fl = c.flags();
+                    glass_card(&p, r, 10.0, 0.0, false);
+                    if fl.iter().any(|f| f.strong()) {
+                        p.rect_filled(r, 10.0, red_wash(0.05));
+                    }
+                    let ir = Rect::from_center_size(Pos2::new(r.left() + 27.0, r.center().y), Vec2::splat(26.0));
+                    let name = c.name();
+                    app_icon(s, &ctx, &p, ir, None, &name, !c.on, &mut budget);
+                    let cols = columns(r);
+                    let name_max = cols.when - ir.right() - 24.0;
+                    let nr = text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &name, bold(13.0), if c.on { TEXT() } else { TEXT_DIM() }, name_max * 0.6);
+                    let mut cx0 = nr.right() + 6.0;
+                    for f in &fl {
+                        cx0 = outline_chip(&p, Pos2::new(cx0, r.center().y - 8.0), Align2::LEFT_CENTER, f.label(), flag_color(*f)).right() + 4.0;
+                    }
+                    if new_cron.contains(&c.line) {
+                        outline_chip(&p, Pos2::new(cx0, r.center().y - 8.0), Align2::LEFT_CENTER, "new", ACCENT());
+                    }
+                    let dr = text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, &c.command, font(11.0), TEXT_FAINT(), name_max);
+                    ui.interact(dr, ui.scope_id().with(("su-cron-tip", &c.line)), Sense::hover()).on_hover_text(&c.line);
+                    when_cell(&p, cols.when, r.center().y, Icon::Clock, &c.when);
+                    if !c.on {
+                        state_cell(&p, cols.state, r.center().y, Some("off"), false);
+                    }
+                    let sw = Rect::from_center_size(Pos2::new(r.right() - 30.0, r.center().y), Vec2::new(36.0, 20.0));
+                    let more = Rect::from_center_size(Pos2::new(sw.left() - 18.0, r.center().y), Vec2::splat(24.0));
+                    let mr = icon_dots(ui, more, ui.scope_id().with(("su-cron-more", &c.line)));
+                    egui::Popup::menu(&mr).show(|ui| {
+                        ui.set_min_width(220.0);
+                        ui.label(egui::RichText::new(&c.line).monospace().small());
+                        ui.separator();
+                        if ui.button("Copy command").clicked() {
+                            ui.ctx().copy_text(c.command.clone());
+                        }
+                    });
+                    if switch(ui, sw, ui.scope_id().with(("su-cron", &c.line)), c.on, busy.is_none()).on_hover_text(if c.on { "Turn off" } else { "Turn on" }).clicked() {
+                        flip_cron = Some(c.clone());
+                    }
+                    y += ROW_H + ROW_GAP;
+                }
+                Row::Ext(x) => {
+                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), ROW_H));
+                    glass_card(&p, r, 10.0, 0.0, false);
+                    let ir = Rect::from_center_size(Pos2::new(r.left() + 27.0, r.center().y), Vec2::splat(26.0));
+                    app_icon(s, &ctx, &p, ir, None, &x.name, !x.on, &mut budget);
+                    let cols = columns(r);
+                    let name_max = cols.when - ir.right() - 24.0;
+                    text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &x.name, bold(13.0), if x.on { TEXT() } else { TEXT_DIM() }, name_max);
+                    text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, &format!("{} · {}", x.bundle_id, x.team), font(11.0), TEXT_FAINT(), name_max);
+                    when_cell(&p, cols.when, r.center().y, Icon::Shield, &x.kind);
+                    let state = if x.state.contains("waiting") { Some("waiting") } else if !x.on { Some("off") } else if x.active { None } else { Some("idle") };
+                    state_cell(&p, cols.state, r.center().y, state, x.on && x.active && state.is_none());
+                    let more = Rect::from_center_size(Pos2::new(r.right() - 30.0, r.center().y), Vec2::splat(24.0));
+                    let mr = icon_dots(ui, more, ui.scope_id().with(("su-ext-more", &x.bundle_id)));
+                    egui::Popup::menu(&mr).show(|ui| {
+                        ui.set_min_width(220.0);
+                        ui.label(egui::RichText::new(&x.state).small());
+                        ui.separator();
+                        if ui.button("Open in System Settings").clicked() {
+                            super::items::open_settings();
+                        }
+                        if ui.button("Copy bundle ID").clicked() {
+                            ui.ctx().copy_text(x.bundle_id.clone());
+                        }
+                    });
+                    y += ROW_H + ROW_GAP;
+                }
+                Row::Btm(b) => {
+                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), ROW_H));
+                    glass_card(&p, r, 10.0, 0.0, false);
+                    let ir = Rect::from_center_size(Pos2::new(r.left() + 27.0, r.center().y), Vec2::splat(26.0));
+                    let icon_path = b.path.as_deref().filter(|p| p.extension().is_some_and(|e| e == "app")).or(b.program.as_deref().and_then(|p| owner_of(p)));
+                    app_icon(s, &ctx, &p, ir, icon_path, &b.name, !b.on, &mut budget);
+                    let cols = columns(r);
+                    let name_max = cols.when - ir.right() - 24.0;
+                    text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &b.name, bold(13.0), if b.on { TEXT() } else { TEXT_DIM() }, name_max);
+                    let detail = if b.developer.is_empty() { b.label().to_string() } else { format!("{} · {}", b.developer, b.label()) };
+                    text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, &detail, font(11.0), TEXT_FAINT(), name_max);
+                    when_cell(&p, cols.when, r.center().y, Icon::Power, &b.kind);
+                    if !b.on {
+                        state_cell(&p, cols.state, r.center().y, Some("off"), false);
+                    }
+                    let more = Rect::from_center_size(Pos2::new(r.right() - 30.0, r.center().y), Vec2::splat(24.0));
+                    let mr = icon_dots(ui, more, ui.scope_id().with(("su-btm-more", &b.identifier)));
+                    egui::Popup::menu(&mr).show(|ui| {
+                        ui.set_min_width(220.0);
+                        if ui.button("Open in System Settings").clicked() {
+                            super::items::open_settings();
+                        }
+                        if let Some(f) = b.program.as_ref().or(b.path.as_ref()) {
+                            if ui.button("Show in Finder").clicked() {
+                                macos::reveal(f);
+                            }
+                        }
+                    });
+                    y += ROW_H + ROW_GAP;
+                }
+                Row::Gone(g) => {
+                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), ROW_H));
+                    glass_card(&p, r, 10.0, 0.0, false);
+                    let ir = Rect::from_center_size(Pos2::new(r.left() + 27.0, r.center().y), Vec2::splat(26.0));
+                    app_icon(s, &ctx, &p, ir, None, &g.name, true, &mut budget);
+                    let cols = columns(r);
+                    let name_max = cols.when - ir.right() - 24.0;
+                    text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y - 8.0), Align2::LEFT_CENTER, &g.name, bold(13.0), TEXT_DIM(), name_max);
+                    text_fit(&p, Pos2::new(ir.right() + 10.0, r.center().y + 9.0), Align2::LEFT_CENTER, &g.label, font(11.0), TEXT_FAINT(), name_max);
+                    when_cell(&p, cols.when, r.center().y, Icon::Clock, &ago(g.at));
+                    state_cell(&p, cols.state, r.center().y, Some("removed"), false);
+                    y += ROW_H + ROW_GAP;
                 }
                 Row::Note(t) => {
                     let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 36.0));
@@ -264,13 +485,21 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 }
                 Row::Allow => {
                     use crate::kit::perms::{Perm, Status};
-                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 46.0));
+                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 58.0));
                     glass_card(&p, r, 10.0, 0.0, false);
                     icon(&p, Icon::Script, Rect::from_center_size(Pos2::new(r.left() + 24.0, r.center().y), Vec2::splat(18.0)), TEXT_SOFT());
-                    p.text(Pos2::new(r.left() + 44.0, r.center().y), Align2::LEFT_CENTER, Perm::SystemEvents.name(), bold(13.0), TEXT());
-                    let label = if s.events.0 == Status::Denied { "Open Settings" } else { "Allow" };
+                    let denied = s.events.0 == Status::Denied;
+                    let label = if denied { "Open Settings" } else { "Allow access" };
                     let bw = button_width(&p, label, BTN_PRIMARY);
                     let br = Rect::from_min_size(Pos2::new(r.right() - 12.0 - bw, r.center().y - 14.0), Vec2::new(bw, 28.0));
+                    let tw = br.left() - r.left() - 44.0 - 12.0;
+                    text_fit(&p, Pos2::new(r.left() + 44.0, r.center().y - 1.0), Align2::LEFT_BOTTOM, "Can't see the apps that open at login", bold(13.0), TEXT(), tw);
+                    let why = if denied {
+                        "Turn on System Events for Cmd+Meow in Privacy & Security › Automation"
+                    } else {
+                        "macOS lists them through System Events; allow it once to see and switch them"
+                    };
+                    text_fit(&p, Pos2::new(r.left() + 44.0, r.center().y + 2.0), Align2::LEFT_TOP, why, font(11.5), TEXT_FAINT(), tw);
                     if pill_button(ui, br, label, BTN_PRIMARY, true).clicked() {
                         Perm::SystemEvents.ask();
                         retry = true;
@@ -279,7 +508,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                         // repaint now and then so the row goes once access lands
                         ctx.request_repaint_after(std::time::Duration::from_secs(1));
                     }
-                    y += 50.0;
+                    y += 62.0;
                 }
                 Row::App(la) => {
                     let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), ROW_H));
@@ -301,9 +530,11 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 }
                 Row::Job(j) => {
                     let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), ROW_H));
-                    let why = j.why().filter(|_| j.on);
+                    let trusted_now = is_trusted(j);
+                    let why = j.why().filter(|_| j.on && !trusted_now);
+                    let fl = flags_of(j);
                     glass_card(&p, r, 10.0, 0.0, false);
-                    if why.is_some() {
+                    if why.is_some() || fl.iter().any(|f| f.strong()) {
                         p.rect_filled(r, 10.0, red_wash(0.05));
                     }
                     let ir = Rect::from_center_size(Pos2::new(r.left() + 27.0, r.center().y), Vec2::splat(26.0));
@@ -326,12 +557,17 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                         let cr = outline_chip(&p, Pos2::new(cx0, r.center().y - 8.0), Align2::LEFT_CENTER, label, col);
                         cx0 = cr.right() + 4.0;
                     };
+                    for f in &fl {
+                        chip(f.label(), flag_color(*f));
+                    }
                     if let Some(w) = why {
                         chip(if w == Why::Removed { "app removed" } else { "suggested" }, why_color(w));
                     } else if j.orphan {
                         chip("app removed", ORPHAN_TEXT());
                     }
-                    if new_labels.contains(&j.label) {
+                    if !trusted_now && changed_labels.contains(&j.label) {
+                        chip("changed", AMBER());
+                    } else if !trusted_now && new_labels.contains(&j.label) {
                         chip("new", ACCENT());
                     }
                     if j.admin() {
@@ -354,7 +590,16 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                     }
                     let mr = icon_dots(ui, more, ui.scope_id().with(("su-more", &j.label, j.scope as u8)));
                     egui::Popup::menu(&mr).show(|ui| {
-                        ui.set_min_width(220.0);
+                        ui.set_min_width(260.0);
+                        ui.set_max_width(420.0);
+                        if let Some(sg) = &j.sig {
+                            ui.label(egui::RichText::new(sg.line()).small().strong());
+                        }
+                        let cmd = j.command();
+                        if !cmd.is_empty() {
+                            ui.add(egui::Label::new(egui::RichText::new(&cmd).monospace().small()).wrap());
+                        }
+                        ui.separator();
                         if let Some(app) = uninstallable(&j.owner) {
                             let n = app.file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
                             if ui.button(format!("Open {n} in Uninstaller")).clicked() {
@@ -366,6 +611,19 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                         }
                         if ui.button("Copy label").clicked() {
                             ui.ctx().copy_text(j.label.clone());
+                        }
+                        if !cmd.is_empty() && ui.button("Copy command").clicked() {
+                            ui.ctx().copy_text(cmd.clone());
+                        }
+                        if j.vt_file().is_some_and(|f| f.is_file()) && ui.button("Check on VirusTotal").on_hover_text("Opens virustotal.com with the file's hash; the file isn't uploaded").clicked() {
+                            vt = Some(j.clone());
+                        }
+                        if trusted_now {
+                            if ui.button("Don't trust").clicked() {
+                                trust = Some((j.clone(), false));
+                            }
+                        } else if (!j.flags().is_empty() || j.why().is_some() || new_labels.contains(&j.label) || changed_labels.contains(&j.label)) && ui.button("Trust").clicked() {
+                            trust = Some((j.clone(), true));
                         }
                         // a bundled job's file is part of its app
                         if !j.bundled {
@@ -408,6 +666,18 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     }
     if let Some(j) = flip_job {
         s.toggle_job(&j);
+    }
+    if let Some(c) = flip_cron {
+        s.toggle_cron(&c);
+    }
+    if let Some((j, on)) = trust {
+        s.set_trust(&j, on);
+    }
+    if let Some(j) = vt {
+        s.virustotal(&j);
+    }
+    if show_btm {
+        s.load_btm();
     }
     if let Some(j) = trash {
         s.trash(&j);

@@ -1,7 +1,7 @@
 //! The speed test as a modal over the whole window: a dial that follows
 //! the transfer live, then ping, download and upload side by side.
 
-use super::monitor::{SpeedPhase, SpeedTest};
+use super::monitor::{SpeedMode, SpeedPhase, SpeedTest};
 use crate::kit::glass::*;
 use egui::epaint::{PathShape, PathStroke};
 use egui::{Align2, Color32, CornerRadius, FontFamily, FontId, Id, Key, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -67,17 +67,17 @@ fn up_color() -> Color32 {
 }
 
 /// Draw the modal while it is open (and while it fades out). Returns true
-/// when the user asks to run the test again.
-pub fn modal(ui: &mut Ui, s: &SpeedTest) -> bool {
+/// the mode to run when the user asks for another test.
+pub fn modal(ui: &mut Ui, s: &SpeedTest) -> Option<SpeedMode> {
     let ctx = ui.ctx().clone();
     let open = ctx.data(|d| d.get_temp::<bool>(id())).unwrap_or(false);
     let a = ctx.animate_bool_with_time(id().with("fade"), open, 0.18);
     if a <= 0.0 {
-        return false;
+        return None;
     }
     let ease = 1.0 - (1.0 - a).powi(3);
     let full = ctx.content_rect();
-    let mut again = false;
+    let mut again = None;
     egui::Area::new(id().with("area"))
         .order(Order::Foreground)
         .fixed_pos(full.min)
@@ -94,7 +94,7 @@ pub fn modal(ui: &mut Ui, s: &SpeedTest) -> bool {
             let card = ui.interact(m, id().with("card"), Sense::click());
             card_bg(ui.painter(), m);
             let (rerun, closed) = content(ui, m, s);
-            again = rerun && open;
+            again = rerun.filter(|_| open);
             let esc = ctx.input(|i| i.key_pressed(Key::Escape));
             if open && (closed || esc || (scrim.clicked() && !card.contains_pointer())) {
                 close(&ctx);
@@ -123,8 +123,8 @@ struct Col {
     glyph: Option<Icon>,
 }
 
-/// Returns (run again, close).
-fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
+/// Returns (the mode to run again, close).
+fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (Option<SpeedMode>, bool) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time) as f32;
@@ -133,7 +133,8 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
     let mut y = m.top() + PAD;
 
     // header
-    p.text(Pos2::new(x0, y + 14.0), Align2::LEFT_CENTER, "Speed test", ty::lead(), TEXT());
+    let tr = p.text(Pos2::new(x0, y + 14.0), Align2::LEFT_CENTER, "Speed test", ty::lead(), TEXT());
+    p.text(Pos2::new(tr.right() + 8.0, y + 15.0), Align2::LEFT_CENTER, s.mode.label(), ty::caption(), ty::caption_color());
     let cr = Rect::from_center_size(Pos2::new(x1 - 13.0, y + 14.0), Vec2::splat(26.0));
     let mut closed = round_button(ui, cr, Icon::Close, "Close").clicked();
     y += 28.0 + sp::M;
@@ -257,7 +258,11 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
                 let g = p.layout_no_wrap(txt, ty::number(), TEXT());
                 let gw = g.size().x;
                 p.galley(Pos2::new(cx, row.top() + 26.0), g, TEXT());
-                p.text(Pos2::new(cx + gw + 4.0, row.top() + 46.0), Align2::LEFT_BOTTOM, unit, ty::label(), TEXT_DIM());
+                let ur = p.text(Pos2::new(cx + gw + 4.0, row.top() + 46.0), Align2::LEFT_BOTTOM, unit, ty::label(), TEXT_DIM());
+                // jitter rides along with ping
+                if let (SpeedPhase::Ping, Some(j)) = (ph, s.jitter_ms) {
+                    p.text(Pos2::new(ur.right() + 6.0, row.top() + 46.0), Align2::LEFT_BOTTOM, format!("±{j:.0}"), ty::label(), TEXT_MUTED());
+                }
             }
             None if active => {
                 // a short bar that fills with this phase's share of the test
@@ -278,27 +283,42 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
 
     // buttons, or the error
     let by = y;
-    let mut again = false;
-    if let Some(e) = &s.error {
-        text_fit(&p, Pos2::new(x0, by + 15.0), Align2::LEFT_CENTER, e, ty::label(), AMBER(), (x1 - x0) * 0.55);
-    }
+    let mut again = None;
+    let left;
     if !s.running {
         let done_w = button_width(&p, "Done", BTN_PRIMARY);
         let dr = Rect::from_min_size(Pos2::new(x1 - done_w, by), Vec2::new(done_w, 30.0));
         if pill_button(ui, dr, "Done", BTN_PRIMARY, true).clicked() {
             closed = true;
         }
-        let aw = button_width(&p, "Test again", BTN_SECONDARY);
-        let ar = Rect::from_min_size(Pos2::new(dr.left() - sp::S - aw, by), Vec2::new(aw, 30.0));
-        if pill_button(ui, ar, "Test again", BTN_SECONDARY, true).clicked() {
-            again = true;
+        let mut l = dr.left();
+        for mode in [SpeedMode::Full, SpeedMode::Quick] {
+            let label = mode.label();
+            let w = button_width(&p, label, BTN_SECONDARY);
+            let r = Rect::from_min_size(Pos2::new(l - sp::S - w, by), Vec2::new(w, 30.0));
+            let tip = match mode {
+                SpeedMode::Quick => "About 10 seconds",
+                SpeedMode::Full => "About 20 seconds, more streams",
+            };
+            if pill_button(ui, r, label, BTN_SECONDARY, true).on_hover_text(tip).clicked() {
+                again = Some(mode);
+            }
+            l = r.left();
         }
+        left = l;
     } else {
         let sw = button_width(&p, "Stop", BTN_SECONDARY);
         let sr = Rect::from_min_size(Pos2::new(x1 - sw, by), Vec2::new(sw, 30.0));
         if pill_button(ui, sr, "Stop", BTN_SECONDARY, true).clicked() {
             s.stop();
         }
+        left = sr.left();
+    }
+    let tw = left - sp::M - x0;
+    if let Some(e) = &s.error {
+        text_fit(&p, Pos2::new(x0, by + 15.0), Align2::LEFT_CENTER, e, ty::label(), AMBER(), tw);
+    } else if let Some(server) = &s.server {
+        text_fit(&p, Pos2::new(x0, by + 15.0), Align2::LEFT_CENTER, &server.line(), ty::label(), TEXT_DIM(), tw);
     }
     (again, closed)
 }

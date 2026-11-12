@@ -5,6 +5,12 @@
 
 use crate::kit::sync::LockExt;
 pub mod engine;
+mod inuse;
+mod journal;
+mod projects;
+mod rules;
+mod run;
+mod xcode;
 mod page;
 
 use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec};
@@ -203,6 +209,8 @@ impl Tool for Cleanup {
                     engine::GroupLive { bytes: 4_200_000_000, items: 9, total: 14, done: 14 },
                     engine::GroupLive { bytes: 1_900_000_000, items: 22, total: 61, done: 30 },
                     engine::GroupLive { bytes: 2_600_000_000, items: 3, total: 8, done: 5 },
+                    engine::GroupLive { bytes: 1_100_000_000, items: 4, total: 6, done: 2 },
+                    engine::GroupLive { bytes: 0, items: 0, total: 2, done: 0 },
                     engine::GroupLive { bytes: 0, items: 0, total: 3, done: 3 },
                     engine::GroupLive { bytes: 0, items: 0, total: 1, done: 0 },
                 ];

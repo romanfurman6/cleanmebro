@@ -23,11 +23,13 @@ pub struct Settings {
     pub claude_screen: bool,
     /// Minutes to stay awake after Claude goes quiet.
     pub grace_min: u32,
+    /// System-wide shortcut that flips the switch.
+    pub shortcut: Option<crate::kit::hotkeys::Shortcut>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { claude: true, manual_screen: true, claude_screen: false, grace_min: 5 }
+        Settings { claude: true, manual_screen: true, claude_screen: false, grace_min: 5, shortcut: None }
     }
 }
 

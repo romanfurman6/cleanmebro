@@ -63,6 +63,39 @@ impl Shortcut {
     }
 }
 
+/// What a shortcut recorder heard this frame.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Heard {
+    Nothing,
+    /// Esc: keep the old one.
+    Cancel,
+    /// ⌫: no shortcut.
+    Remove,
+    Set(Shortcut),
+}
+
+/// Read this frame's key presses for a shortcut recorder in our own window.
+pub fn listen(ctx: &egui::Context) -> Heard {
+    ctx.input(|i| {
+        let mut heard = Heard::Nothing;
+        for e in &i.events {
+            if let egui::Event::Key { key, pressed: true, modifiers, .. } = e {
+                let plain = !modifiers.command && !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd;
+                heard = if *key == egui::Key::Escape && plain {
+                    Heard::Cancel
+                } else if (*key == egui::Key::Backspace || *key == egui::Key::Delete) && plain {
+                    Heard::Remove
+                } else if let Some(s) = Shortcut::from_press(*key, *modifiers) {
+                    Heard::Set(s)
+                } else {
+                    continue;
+                };
+            }
+        }
+        heard
+    })
+}
+
 /// The `keyboard-types` code name for an egui key name, as the global
 /// shortcut library wants it. None for keys we don't offer.
 pub fn key_code(key: &str) -> Option<String> {

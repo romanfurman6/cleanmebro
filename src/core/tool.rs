@@ -250,6 +250,11 @@ pub trait Tool {
     }
     /// Draw a widget at `size` (one the spec offers) filling `rect`.
     fn widget_ui(&mut self, _widget: &str, _size: Size, _ui: &mut Ui, _rect: Rect, _cx: &mut Cx) {}
+    /// True while the widget has no data yet: the panel draws a loading
+    /// card (glyph, name, pulsing bars) in its place.
+    fn widget_loading(&self, _widget: &str) -> bool {
+        false
+    }
 
     // ---- detail sheets beside the panel
     /// Draws the whole sheet, header included (see `glass::sheet_header`).

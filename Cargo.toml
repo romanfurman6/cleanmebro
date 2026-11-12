@@ -26,6 +26,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # sharing recordings to S3-compatible storage (request signing, random names)
 sha2 = "0.10"
 hmac = "0.12"
+md-5 = "0.10"
 getrandom = "0.3"
 # unpacking the dictation model (a .tar.bz2)
 bzip2 = "0.4"
@@ -33,10 +34,10 @@ tar = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSValue", "NSObject", "NSProcessInfo", "NSGeometry", "NSArray", "NSString", "NSFileManager", "NSURL", "NSError", "NSData", "NSDictionary", "NSBundle"] }
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSView", "NSVisualEffectView", "NSResponder", "NSColor", "NSRunningApplication", "NSWorkspace", "NSGraphics", "NSGlassEffectView", "NSAppearance", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphicsContext", "NSFontDescriptor", "NSPasteboard", "NSScreen", "objc2-core-foundation", "objc2-quartz-core", "NSEvent"] }
+objc2-foundation = { version = "0.3", features = ["NSValue", "NSObject", "NSProcessInfo", "NSGeometry", "NSArray", "NSString", "NSFileManager", "NSURL", "NSError", "NSData", "NSDictionary", "NSBundle", "NSSet"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSView", "NSVisualEffectView", "NSResponder", "NSColor", "NSRunningApplication", "NSWorkspace", "NSGraphics", "NSGlassEffectView", "NSAppearance", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphicsContext", "NSFontDescriptor", "NSPasteboard", "NSScreen", "NSCursor", "objc2-core-foundation", "objc2-quartz-core", "NSEvent"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
-objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotificationSettings"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotificationSettings", "UNNotificationResponse", "UNNotification", "UNNotificationAction", "UNNotificationCategory"] }
 block2 = "0.6"
 objc2-vision = { version = "0.3", default-features = false, features = ["std", "VNRequest", "VNRecognizeTextRequest", "VNRequestHandler", "VNObservation", "VNTypes", "objc2-core-foundation"] }
 # screen recording

@@ -50,6 +50,7 @@ pub struct Battery {
 
 pub use super::devices::Device;
 use super::devices;
+use super::devices_store::{History, Seen};
 
 #[derive(Clone, Debug, Default)]
 pub struct Wifi {
@@ -72,8 +73,27 @@ pub enum SpeedPhase {
     Done,
 }
 
+/// How long a speed test runs: Quick (a few seconds, fewer streams) or
+/// Full (longer phases, more streams, more pings).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpeedMode {
+    #[default]
+    Quick,
+    Full,
+}
+
+impl SpeedMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            SpeedMode::Quick => "Quick test",
+            SpeedMode::Full => "Full test",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SpeedTest {
+    pub mode: SpeedMode,
     pub running: bool,
     pub phase: SpeedPhase,
     /// The rate of the transfer under way, in Mbps (for the gauge).
@@ -82,6 +102,9 @@ pub struct SpeedTest {
     pub down_mbps: Option<f64>,
     pub up_mbps: Option<f64>,
     pub latency_ms: Option<f64>,
+    pub jitter_ms: Option<f64>,
+    /// The provider and the test server's city, when the server says.
+    pub server: Option<super::speedtest::ServerInfo>,
     pub error: Option<String>,
     /// Set by [`SpeedTest::stop`]; the test thread checks it between reads.
     pub cancel: Arc<AtomicBool>,
@@ -132,10 +155,15 @@ pub struct Snapshot {
     pub net_recv_total: u64,
     pub online: bool,
     pub wifi: Wifi,
+    /// Bluetooth devices: connected ones, then ones seen before.
     pub devices: Vec<Device>,
+    /// The ones the person hid (still listed on the Devices page).
+    pub hidden_devices: Vec<Device>,
     /// Device alert and menu bar settings (changed from the Devices sheet).
     pub bt_prefs: devices::Prefs,
     pub speed: SpeedTest,
+    /// Busiest apps on the network, while the Network sheet shows.
+    pub apps: Vec<super::traffic::AppRate>,
 }
 
 impl Snapshot {
@@ -200,14 +228,95 @@ impl Snapshot {
 
 pub type Shared = Arc<Mutex<Snapshot>>;
 
-/// Change the device alert / menu bar settings and save them.
+/// Change the device alert / menu bar settings and save them. Hiding or
+/// showing a device takes effect at once.
 pub fn change_bt_prefs(mon: &Shared, f: impl FnOnce(&mut devices::Prefs)) {
     let prefs = {
         let mut s = mon.lock_ok();
         f(&mut s.bt_prefs);
-        s.bt_prefs
+        let mut all = std::mem::take(&mut s.devices);
+        all.append(&mut s.hidden_devices);
+        let (shown, hidden) = s.bt_prefs.split(devices::lowest_first(&all));
+        s.devices = shown;
+        s.hidden_devices = hidden;
+        s.bt_prefs.clone()
     };
     prefs.save();
+}
+
+/// What the devices list remembers: last known charges and a week of history.
+struct BtStore {
+    seen: Seen,
+    history: History,
+}
+
+static BT_STORE: std::sync::OnceLock<Mutex<BtStore>> = std::sync::OnceLock::new();
+
+fn bt_store() -> &'static Mutex<BtStore> {
+    BT_STORE.get_or_init(|| {
+        let now = devices::now();
+        let mut history: History = crate::kit::fs::load_json(&History::path());
+        history.prune(now);
+        Mutex::new(BtStore { seen: crate::kit::fs::load_json(&Seen::path()), history })
+    })
+}
+
+/// Forget a device that isn't connected: its last charge, its history and
+/// its settings.
+pub fn forget_device(mon: &Shared, key: &str) {
+    {
+        let mut st = bt_store().lock_ok();
+        st.seen.forget(key);
+        st.history.forget(key);
+        crate::kit::fs::save_json_later(&Seen::path(), &st.seen, false);
+        crate::kit::fs::save_json_later(&History::path(), &st.history, false);
+    }
+    change_bt_prefs(mon, |p| {
+        p.devices.remove(key);
+    });
+    let mut s = mon.lock_ok();
+    s.devices.retain(|d| d.live() || d.key() != key);
+    s.hidden_devices.retain(|d| d.live() || d.key() != key);
+}
+
+/// The full device list: what's connected (the report, the input
+/// registry, Bluetooth LE and controllers), then what was seen before;
+/// each with its trend and estimate. Updates the stores.
+fn read_devices(profile: &devices::Profile) -> Vec<Device> {
+    let mut list = profile.connected.clone();
+    let mut io = run_cmd("ioreg", &["-r", "-l", "-k", "BatteryPercent"]);
+    io.push_str(&run_cmd("ioreg", &["-r", "-l", "-k", "BatteryPercentSingle"]));
+    devices::merge(&mut list, &devices::parse_ioreg(&io));
+    devices::merge_extra(&mut list, &profile.paired_pods, &super::ble::adverts(), &super::ble::extra());
+    let now = devices::now();
+    let mut st = bt_store().lock_ok();
+    let mut history_changed = false;
+    for d in &list {
+        if let Some(b) = d.battery() {
+            history_changed |= st.history.record(&d.key(), now, b);
+        }
+    }
+    if st.seen.update(&list, now) || SEEN_SAVE_EVERY.with_borrow_mut(|e| e.due(SEEN_SAVE)) {
+        crate::kit::fs::save_json_later(&Seen::path(), &st.seen, false);
+    }
+    if history_changed && HISTORY_SAVE_EVERY.with_borrow_mut(|e| e.due(HISTORY_SAVE)) {
+        crate::kit::fs::save_json_later(&History::path(), &st.history, false);
+    }
+    let away = st.seen.away(&list);
+    list.extend(away);
+    for d in &mut list {
+        let key = d.key();
+        d.trend = st.history.trend(&key, now);
+        d.eta = if d.charging || !d.live() { None } else { st.history.eta(&key) };
+    }
+    list
+}
+
+const SEEN_SAVE: Duration = Duration::from_secs(10 * 60);
+const HISTORY_SAVE: Duration = Duration::from_secs(15 * 60);
+thread_local! {
+    static SEEN_SAVE_EVERY: std::cell::RefCell<Every> = std::cell::RefCell::new(Every::default());
+    static HISTORY_SAVE_EVERY: std::cell::RefCell<Every> = std::cell::RefCell::new(Every::default());
 }
 
 pub fn start(ctx: egui::Context, demo: bool) -> Shared {
@@ -247,8 +356,11 @@ const BATTERY_EVERY: Cadence = Cadence::secs(10, Some(60));
 const BATTERY_HEALTH_EVERY: Duration = Duration::from_secs(30 * 60);
 /// Input devices (`ioreg`): batteries for the alerts and the menu-bar title.
 const HID_EVERY: Cadence = Cadence::secs(10, Some(60));
-/// The full Bluetooth report (`system_profiler`, slow).
+/// The full Bluetooth report (`system_profiler`, slow). A device coming or
+/// going refreshes it at once, so this is only for levels.
 const BT_PROFILE_EVERY: Cadence = Cadence::secs(60, Some(10 * 60));
+/// After a connect, look again this much later (levels arrive late).
+const BT_RECHECK_AFTER: Duration = Duration::from_secs(12);
 /// The network's name (`ipconfig`, fast).
 const WIFI_EVERY: Cadence = Cadence::secs(60, None);
 /// Channel, signal and so on (`system_profiler`, ~10 s as it may scan).
@@ -318,8 +430,12 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
     let mut last_ticks = cpu_ticks();
     let mut last_net = Instant::now();
     // the slow Bluetooth report, refreshed from the input registry in between
-    let mut bt_profile: Vec<Device> = Vec::new();
+    let mut bt_profile = devices::Profile::default();
     let mut bt_alerts = devices::Alerts::default();
+    // the connected set, to refresh as soon as a device comes or goes; and
+    // a second look a little later (the report lags behind a connect)
+    let mut bt_connected: Option<Vec<String>> = None;
+    let mut bt_recheck: Option<Instant> = None;
     let (mut battery_at, mut health_at, mut hid_at, mut profile_at) = (Every::default(), Every::default(), Every::default(), Every::default());
     let (mut wifi_at, mut wifi_details_at, mut sizes_at) = (Every::default(), Every::default(), Every::default());
     let mut wifi_info = Wifi::default();
@@ -374,15 +490,29 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
             wifi_info = wifi_details();
         }
         let wifi = WIFI_EVERY.due(&mut wifi_at).then(|| wifi_name(&wifi_info));
+        // Bluetooth LE: starts once the panel has been opened (it may ask
+        // for the Bluetooth permission), then scans now and then
+        if activity::visible() {
+            super::ble::start();
+        }
+        super::ble::tick();
+        if let Some(now_connected) = super::ble::connected() {
+            if bt_connected.as_ref().is_some_and(|c| *c != now_connected) {
+                profile_at.reset();
+                hid_at.reset();
+                bt_recheck = Some(Instant::now() + BT_RECHECK_AFTER);
+            }
+            bt_connected = Some(now_connected);
+        }
+        if bt_recheck.is_some_and(|t| Instant::now() >= t) {
+            bt_recheck = None;
+            profile_at.reset();
+        }
         let slow_profile = BT_PROFILE_EVERY.due(&mut profile_at);
         if slow_profile {
             bt_profile = devices::parse_profiler(&run_cmd("system_profiler", &["SPBluetoothDataType", "-json"]));
         }
-        let devices = (HID_EVERY.due(&mut hid_at) || slow_profile).then(|| {
-            let mut list = bt_profile.clone();
-            devices::merge(&mut list, &devices::parse_ioreg(&run_cmd("ioreg", &["-r", "-l", "-k", "BatteryPercent"])));
-            list
-        });
+        let devices = (HID_EVERY.due(&mut hid_at) || slow_profile).then(|| read_devices(&bt_profile));
 
         {
             let mut s = shared.lock_ok();
@@ -429,15 +559,16 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
                 s.battery = b;
             }
             if let Some(d) = devices {
-                if s.bt_prefs.alerts {
-                    for (title, body) in bt_alerts.check(&d) {
-                        crate::kit::notify::send(&title, &body);
-                    }
-                } else {
-                    // stay quiet, but remember so turning alerts on doesn't replay old ones
-                    bt_alerts.check(&d);
+                let notes = bt_alerts.check(&d, &s.bt_prefs);
+                // with alerts off, stay quiet but remember, so turning them
+                // on doesn't replay old ones
+                // each kind goes out only while its own switch is on
+                for n in notes.into_iter().filter(|n| n.charged || s.bt_prefs.alerts) {
+                    crate::kit::notify::send(&n.title, &n.body);
                 }
-                s.devices = d;
+                let (shown, hidden) = s.bt_prefs.split(d);
+                s.devices = shown;
+                s.hidden_devices = hidden;
             }
             if let Some(w) = wifi {
                 s.wifi = w;
@@ -718,165 +849,7 @@ fn apply_ipconfig(w: &mut Wifi, out: &str) {
 
 // ---------------------------------------------------------------- speed test
 
-pub fn start_speed_test(shared: Shared, ctx: egui::Context) {
-    {
-        let mut s = shared.lock_ok();
-        if s.speed.running {
-            return;
-        }
-        s.speed = SpeedTest { running: true, phase: SpeedPhase::Ping, ..Default::default() };
-    }
-    let cancel = shared.lock_ok().speed.cancel.clone();
-    let stopped = move || cancel.load(Ordering::Relaxed);
-    std::thread::spawn(move || {
-        let set = |f: &dyn Fn(&mut SpeedTest)| {
-            let mut s = shared.lock_ok();
-            f(&mut s.speed);
-            ctx.request_repaint();
-        };
-        // a stop ends the test quietly with what it has so far
-        let fail = |msg: String| {
-            let quiet = stopped();
-            set(&|s| {
-                s.running = false;
-                s.phase = SpeedPhase::Done;
-                s.live_mbps = 0.0;
-                s.error = if quiet { None } else { Some(msg.clone()) };
-            })
-        };
-        let agent = ureq::Agent::new_with_config(
-            ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build(),
-        );
-        // latency: the first call opens the connection, the median of the
-        // next few is the round trip
-        let ping_url = format!("{}?bytes=0", m::SPEED_TEST_DOWN_URL);
-        if let Err(e) = agent.get(&ping_url).call() {
-            fail(format!("No internet connection ({e})"));
-            return;
-        }
-        let mut rtts = Vec::new();
-        for _ in 0..5 {
-            if stopped() {
-                fail(String::new());
-                return;
-            }
-            let t0 = Instant::now();
-            if agent.get(&ping_url).call().is_ok() {
-                rtts.push(t0.elapsed().as_secs_f64() * 1000.0);
-            }
-        }
-        rtts.sort_by(|a, b| a.total_cmp(b));
-        let latency = rtts.get(rtts.len() / 2).copied().unwrap_or(0.0);
-        set(&|s| {
-            s.latency_ms = Some(latency);
-            s.progress = 0.1;
-            s.phase = SpeedPhase::Download;
-        });
-        // download, reporting the rate as it goes
-        let t0 = Instant::now();
-        let url = format!("{}?bytes={}", m::SPEED_TEST_DOWN_URL, m::SPEED_TEST_BYTES);
-        let down = agent.get(&url).call().and_then(|r| {
-            let mut reader = r.into_body().into_reader();
-            let mut buf = vec![0u8; 64 * 1024];
-            let mut got = 0u64;
-            let mut last = Instant::now();
-            loop {
-                use std::io::Read;
-                if stopped() {
-                    return Err(ureq::Error::Io(std::io::Error::other("stopped")));
-                }
-                let n = reader.read(&mut buf).map_err(ureq::Error::Io)?;
-                if n == 0 {
-                    break;
-                }
-                got += n as u64;
-                if last.elapsed() >= Duration::from_millis(80) {
-                    last = Instant::now();
-                    let mbps = got as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6;
-                    let frac = got as f32 / m::SPEED_TEST_BYTES as f32;
-                    set(&|s| {
-                        s.live_mbps = mbps;
-                        s.progress = 0.1 + 0.5 * frac.min(1.0);
-                    });
-                }
-            }
-            Ok(got)
-        });
-        match down {
-            Ok(bytes) => {
-                let mbps = bytes as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6;
-                set(&|s| {
-                    s.down_mbps = Some(mbps);
-                    s.live_mbps = 0.0;
-                    s.progress = 0.6;
-                    s.phase = SpeedPhase::Upload;
-                });
-            }
-            Err(e) => {
-                fail(format!("Network error: {e}"));
-                return;
-            }
-        }
-        // upload, streamed from a counting reader so the gauge can follow
-        let total = m::SPEED_TEST_UPLOAD_BYTES;
-        let t0 = Instant::now();
-        let report = |sent: u64| {
-            let secs = t0.elapsed().as_secs_f64().max(1e-3);
-            let mbps = sent as f64 * 8.0 / secs / 1e6;
-            let frac = sent as f32 / total as f32;
-            set(&|s| {
-                s.live_mbps = mbps;
-                s.progress = 0.6 + 0.4 * frac.min(1.0);
-            });
-        };
-        let mut reader = Zeros { left: total, sent: 0, last: Instant::now(), report: &report, stopped: &stopped };
-        let up = agent
-            .post(m::SPEED_TEST_UP_URL)
-            .header("Content-Type", "application/octet-stream")
-            .header("Content-Length", &total.to_string())
-            .send(ureq::SendBody::from_reader(&mut reader));
-        let secs = t0.elapsed().as_secs_f64();
-        let quiet = stopped();
-        set(&|s| {
-            match &up {
-                Ok(_) => s.up_mbps = Some(total as f64 * 8.0 / secs / 1e6),
-                Err(_) if quiet => {}
-                Err(e) => s.error = Some(format!("Upload test failed: {e}")),
-            }
-            s.progress = 1.0;
-            s.live_mbps = 0.0;
-            s.phase = SpeedPhase::Done;
-            s.running = false;
-        });
-    });
-}
-
-/// `left` zero bytes for an upload body; calls `report` with the bytes
-/// handed out so far every ~80 ms.
-struct Zeros<'a> {
-    left: u64,
-    sent: u64,
-    last: Instant,
-    report: &'a dyn Fn(u64),
-    stopped: &'a dyn Fn() -> bool,
-}
-
-impl std::io::Read for Zeros<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if (self.stopped)() {
-            return Err(std::io::Error::other("stopped"));
-        }
-        let n = (buf.len() as u64).min(self.left).min(64 * 1024) as usize;
-        buf[..n].fill(0);
-        self.left -= n as u64;
-        self.sent += n as u64;
-        if self.last.elapsed() >= Duration::from_millis(80) {
-            self.last = Instant::now();
-            (self.report)(self.sent);
-        }
-        Ok(n)
-    }
-}
+pub use super::speedtest::start as start_speed_test;
 
 /// "Good for" activities, by download speed in Mbps.
 pub fn good_for(mbps: f64) -> Vec<&'static str> {
@@ -945,8 +918,13 @@ pub fn demo_snapshot() -> Snapshot {
         online: true,
         wifi: Wifi { name: "Home Wi-Fi".into(), security: "WPA3 PERSONAL".into(), phy: "802.11ax".into(), channel: "149 (5GHz, 80MHz)".into(), signal: "-52 dBm / -92 dBm".into(), wired: false },
         devices: devices::demo(),
+        hidden_devices: vec![],
         bt_prefs: devices::Prefs::default(),
         speed: SpeedTest::default(),
+        apps: [("Safari", 2_400_000.0, 61_000.0), ("Slack", 180_000.0, 24_000.0), ("Music", 96_000.0, 2_000.0)]
+            .iter()
+            .map(|(n, d, u)| super::traffic::AppRate { name: n.to_string(), down: *d, up: *u })
+            .collect(),
     }
 }
 

@@ -3,7 +3,10 @@
 //! Elsewhere these do nothing, so the tool builds and its tests run on Linux.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
+use super::fit::Around;
 use egui::{Pos2, Rect};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// The app the words go into.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -30,18 +33,88 @@ pub fn plausible_caret(r: Rect) -> bool {
     r.is_finite() && !at_origin && r.height() > 2.0 && r.height() < 200.0 && r.width() < 2000.0
 }
 
-pub use imp::{accessibility, activate, float, front_app, mouse, paste, restore, screen_at};
+/// The text around the caret in `target`'s focused field; None when the
+/// app doesn't say (or it's a password field).
+pub fn around(target: &Target) -> Option<Around> {
+    imp::around(target.pid)
+}
+
+/// When the app reads what we put on the clipboard.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Receipt {
+    /// Clipboard change count after our write.
+    pub count: isize,
+    /// The last read, and the change count after we answered it.
+    pub read: Option<(Instant, isize)>,
+}
+
+/// A paste in flight: what was on the clipboard before, and whether the
+/// app has taken the text yet.
+pub struct Pasted {
+    pub saved: Saved,
+    pub pressed: Instant,
+    pub receipt: Arc<Mutex<Receipt>>,
+    /// The object that hands the text over when it's read; the clipboard
+    /// calls it, so it lives until the clipboard is put back.
+    _owner: Option<Box<dyn std::any::Any>>,
+}
+
+impl Pasted {
+    /// The change count the clipboard has while it still holds our text.
+    pub fn count(&self) -> isize {
+        let r = self.receipt.lock().map(|r| *r).unwrap_or_default();
+        r.read.map(|(_, c)| c).unwrap_or(r.count)
+    }
+
+    /// Take the clipboard from before out (a newer paste keeps it).
+    pub fn take_saved(&mut self) -> Saved {
+        std::mem::take(&mut self.saved)
+    }
+
+    pub fn last_read(&self) -> Option<Instant> {
+        self.receipt.lock().ok().and_then(|r| r.read.map(|(t, _)| t))
+    }
+}
+
+/// Put back the clipboard from before `p` (unless someone copied since),
+/// then let the text's owner go.
+pub fn put_back(mut p: Pasted) {
+    let count = p.count();
+    restore(p.take_saved(), count);
+    drop(p);
+}
+
+/// After the app reads the text, it may read again right away (Chromium
+/// looks, then reads): wait this long after the last read.
+pub const READ_QUIET: Duration = Duration::from_millis(200);
+/// No read seen after ⌘V (or it came before, from a clipboard manager):
+/// put the clipboard back after this long anyway.
+pub const READ_GIVE_UP: Duration = Duration::from_secs(4);
+
+/// Whether to put the old clipboard back now. Only a read after ⌘V was
+/// pressed is the app pasting; an earlier one is someone watching the
+/// clipboard.
+pub fn restore_due(pressed: Instant, last_read: Option<Instant>, now: Instant) -> bool {
+    match last_read {
+        Some(r) if r >= pressed => now >= r + READ_QUIET,
+        _ => now >= pressed + READ_GIVE_UP,
+    }
+}
+
+pub use imp::{accessibility, activate, float, front_app, mouse, paste, paste_tracked, restore, screen_at};
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::{plausible_caret, Saved, Target};
+    use super::{plausible_caret, Around, Pasted, Receipt, Saved, Target};
     use egui::{Pos2, Rect, Vec2};
     use objc2::rc::Retained;
-    use objc2::runtime::ProtocolObject;
-    use objc2::MainThreadMarker;
+    use objc2::runtime::{AnyObject, ProtocolObject};
+    use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker};
     use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSEvent, NSPasteboard, NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting, NSRunningApplication, NSScreen, NSWindowCollectionBehavior, NSWorkspace};
-    use objc2_foundation::{NSArray, NSData, NSString};
+    use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
     use std::ffi::c_void;
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
 
     type CFTypeRef = *const c_void;
 
@@ -88,6 +161,10 @@ mod imp {
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
         fn CFRelease(x: CFTypeRef);
+        fn CFGetTypeID(x: CFTypeRef) -> usize;
+        fn CFStringGetTypeID() -> usize;
+        fn CFNumberGetTypeID() -> usize;
+        fn CFNumberGetValue(n: CFTypeRef, kind: isize, out: *mut c_void) -> bool;
         static kCFBooleanTrue: CFTypeRef;
     }
 
@@ -168,6 +245,56 @@ mod imp {
         let size: CgPoint = attr(focused.0, "AXSize").and_then(|v| value(&v, AX_VALUE_SIZE))?;
         let r = Rect::from_min_size(Pos2::new(pos.x as f32, pos.y as f32), Vec2::new(size.x as f32, size.y as f32));
         (r.height() > 8.0 && r.height() < 60.0 && plausible_caret(Rect::from_min_size(r.min, Vec2::new(1.0, r.height())))).then(|| Rect::from_min_size(r.min, Vec2::new(1.0, r.height())))
+    }
+
+    fn string(v: &Cf) -> Option<String> {
+        if unsafe { CFGetTypeID(v.0) != CFStringGetTypeID() } {
+            return None;
+        }
+        Some(unsafe { &*(v.0 as *const NSString) }.to_string())
+    }
+
+    fn number(v: &Cf) -> Option<isize> {
+        if unsafe { CFGetTypeID(v.0) != CFNumberGetTypeID() } {
+            return None;
+        }
+        let mut out: isize = 0;
+        // kCFNumberCFIndexType
+        unsafe { CFNumberGetValue(v.0, 14, &mut out as *mut isize as *mut c_void) }.then_some(out)
+    }
+
+    fn text_in(elem: CFTypeRef, r: CfRange) -> Option<String> {
+        if r.length <= 0 {
+            return Some(String::new());
+        }
+        let range = Cf(unsafe { AXValueCreate(AX_VALUE_RANGE, &r as *const CfRange as *const c_void) });
+        string(&param_attr(elem, "AXStringForRange", range.0)?)
+    }
+
+    pub fn around(pid: i32) -> Option<Around> {
+        if pid <= 0 || !accessibility() {
+            return None;
+        }
+        let app = Cf(unsafe { AXUIElementCreateApplication(pid) });
+        unsafe { AXUIElementSetMessagingTimeout(app.0, 0.25) };
+        let focused = attr(app.0, "AXFocusedUIElement")?;
+        if attr(focused.0, "AXSubrole").and_then(|v| string(&v)).as_deref() == Some("AXSecureTextField") {
+            return None;
+        }
+        let sel: CfRange = attr(focused.0, "AXSelectedTextRange").and_then(|v| value(&v, AX_VALUE_RANGE))?;
+        if sel.location < 0 || sel.length < 0 {
+            return None;
+        }
+        // a few words each side is all the fitting needs
+        let from = (sel.location - 64).max(0);
+        let before = text_in(focused.0, CfRange { location: from, length: sel.location - from })?;
+        let start = sel.location + sel.length;
+        let after = match attr(focused.0, "AXNumberOfCharacters").and_then(|v| number(&v)) {
+            Some(total) => text_in(focused.0, CfRange { location: start, length: (total - start).clamp(0, 16) }),
+            None => text_in(focused.0, CfRange { location: start, length: 16 }).or_else(|| text_in(focused.0, CfRange { location: start, length: 1 })),
+        }
+        .unwrap_or_default();
+        Some(Around { before, after })
     }
 
     pub fn front_app() -> Option<Target> {
@@ -258,6 +385,58 @@ mod imp {
         Some((saved, count))
     }
 
+    struct OwnerState {
+        text: String,
+        receipt: Arc<Mutex<Receipt>>,
+    }
+
+    define_class!(
+        /// Hands the text to the clipboard the moment an app reads it, so
+        /// we know the paste happened.
+        #[unsafe(super(NSObject))]
+        #[name = "CmdMeowDictationPaste"]
+        #[ivars = OwnerState]
+        struct Owner;
+
+        unsafe impl NSObjectProtocol for Owner {}
+
+        impl Owner {
+            #[unsafe(method(pasteboard:provideDataForType:))]
+            fn provide(&self, pb: &NSPasteboard, ty: &NSString) {
+                let st = self.ivars();
+                if ty.to_string() == unsafe { NSPasteboardTypeString }.to_string() {
+                    let _ = pb.setString_forType(&NSString::from_str(&st.text), ty);
+                }
+                let count = pb.changeCount();
+                if let Ok(mut r) = st.receipt.lock() {
+                    r.read = Some((Instant::now(), count));
+                }
+            }
+        }
+    );
+
+    /// Like [`paste`] with ⌘V, but the text is only promised: the clipboard
+    /// asks us for it when the app reads it, which tells the caller when
+    /// it's safe to put the old clipboard back.
+    pub fn paste_tracked(text: &str) -> Option<Pasted> {
+        let pb = NSPasteboard::generalPasteboard();
+        let saved = save(&pb);
+        let receipt = Arc::new(Mutex::new(Receipt::default()));
+        let owner: Retained<Owner> = unsafe { msg_send![super(Owner::alloc().set_ivars(OwnerState { text: text.to_string(), receipt: receipt.clone() })), init] };
+        let transient = NSString::from_str("org.nspasteboard.TransientType");
+        let types = NSArray::from_slice(&[unsafe { NSPasteboardTypeString }, &*transient]);
+        let o: &AnyObject = &owner;
+        unsafe { pb.declareTypes_owner(&types, Some(o)) };
+        if !pb.setData_forType(Some(&NSData::new()), &transient) {
+            return None;
+        }
+        if let Ok(mut r) = receipt.lock() {
+            r.count = pb.changeCount();
+        }
+        press_cmd_v();
+        Some(Pasted { saved, pressed: Instant::now(), receipt, _owner: Some(Box::new(owner)) })
+    }
+
     fn press_cmd_v() {
         const KEY_V: u16 = 9;
         const FLAG_CMD: u64 = 0x0010_0000;
@@ -327,11 +506,17 @@ mod imp {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    use super::{Saved, Target};
+    use super::{Around, Pasted, Saved, Target};
     use egui::{Pos2, Rect};
 
     pub fn accessibility() -> bool {
         false
+    }
+    pub fn around(_pid: i32) -> Option<Around> {
+        None
+    }
+    pub fn paste_tracked(_text: &str) -> Option<Pasted> {
+        None
     }
     pub fn caret(_pid: i32) -> Option<Rect> {
         None
@@ -383,6 +568,22 @@ mod tests {
         assert!(!plausible_caret(Rect::from_min_size(Pos2::ZERO, Vec2::new(1.0, 17.0))));
         assert!(!plausible_caret(Rect::from_min_size(Pos2::new(300.0, 200.0), Vec2::new(0.0, 0.0))));
         assert!(!plausible_caret(Rect::from_min_size(Pos2::new(300.0, 200.0), Vec2::new(900.0, 700.0))));
+    }
+
+    #[test]
+    fn the_clipboard_comes_back_after_the_app_reads_it() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        // read 50 ms after ⌘V: back 200 ms after that
+        assert!(!restore_due(t0, Some(ms(50)), ms(200)));
+        assert!(restore_due(t0, Some(ms(50)), ms(250)));
+        // a slow app reading after 2 s still gets the new text
+        assert!(!restore_due(t0, None, ms(2000)));
+        assert!(!restore_due(t0, Some(ms(2000)), ms(2100)));
+        // a read before ⌘V (a clipboard watcher) doesn't count
+        assert!(!restore_due(ms(100), Some(t0), ms(500)));
+        // never read: give up after a while
+        assert!(restore_due(t0, None, ms(4000)));
     }
 
     #[test]

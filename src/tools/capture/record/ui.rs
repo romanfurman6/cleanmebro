@@ -5,7 +5,7 @@
 
 use super::super::icons::{self, Ico};
 use super::super::windows::{floating, plain};
-use super::super::{Capture, ID};
+use super::super::Capture;
 use super::sys::{self, Media};
 use super::{timeline, Chosen, Confirm, Phase, Source};
 use crate::core::tool::Cx;
@@ -201,7 +201,7 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
             Source::Display => {
                 p.rect_filled(r, 0.0, DIM);
                 p.rect_stroke(r, 0.0, Stroke::new(3.0, tint::CAPTURE()), StrokeKind::Inside);
-                let card = Rect::from_center_size(r.center(), Vec2::new(440.0, 440.0));
+                let card = Rect::from_center_size(r.center(), Vec2::new(440.0, 464.0));
                 display_card(ui, &p, card, &d, &s, many, &cam_name, &mic_name, &devs, &mut todo);
                 if devs.menu.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     todo.push(Do::Start(super::chose_display(&d, &s)));
@@ -333,8 +333,8 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
             Do::Use(m, id) => c.rec.use_device(m, id, &mut c.settings.rec),
             Do::Settings => {
                 c.rec.cancel();
-                c.tab = super::super::Tab::Settings;
-                cx.open_page(ID, "settings");
+                c.vtab = super::super::VTab::Settings;
+                cx.open_page(super::super::VIDEO_ID, "settings");
             }
         }
     }
@@ -385,7 +385,8 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
         }
         y += 56.0 + 14.0;
 
-        let rows = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 3.0 * 48.0));
+        const ROW: f32 = 56.0;
+        let rows = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 3.0 * ROW));
         p.rect_filled(rows, 12.0, ROWS);
         let list: [(Ico, &str, String, bool, Option<Media>); 3] = [
             (Ico::Camera, "Camera", cam.to_string(), s.camera, Some(Media::Camera)),
@@ -393,21 +394,22 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
             (Ico::Speaker, "System audio", "Everything you hear".into(), s.system_audio, None),
         ];
         for (k, (ico, label, dev, on, media)) in list.into_iter().enumerate() {
-            let rr = Rect::from_min_size(Pos2::new(x0, y + k as f32 * 48.0), Vec2::new(x1 - x0, 48.0));
+            let rr = Rect::from_min_size(Pos2::new(x0, y + k as f32 * ROW), Vec2::new(x1 - x0, ROW));
             if k > 0 {
                 p.line_segment([Pos2::new(rr.left() + 12.0, rr.top()), Pos2::new(rr.right() - 12.0, rr.top())], Stroke::new(1.0, white(15)));
             }
             icons::draw(p, ico, Rect::from_center_size(Pos2::new(rr.left() + 22.0, rr.center().y), Vec2::splat(18.0)), TEXT_SOFT());
-            p.text(Pos2::new(rr.left() + 44.0, rr.center().y - 8.0), Align2::LEFT_CENTER, label, font(13.0), TEXT());
-            let dr = text_fit(p, Pos2::new(rr.left() + 44.0, rr.center().y + 9.0), Align2::LEFT_CENTER, &dev, font(11.0), TEXT_DIM(), rr.width() - 170.0);
+            p.text(Pos2::new(rr.left() + 44.0, rr.center().y - 10.0), Align2::LEFT_CENTER, label, font(13.0), TEXT());
+            let dr = text_fit(p, Pos2::new(rr.left() + 44.0, rr.center().y + 10.0), Align2::LEFT_CENTER, &dev, font(11.0), TEXT_DIM(), rr.width() - 170.0);
             if let Some(m) = media {
                 chevron(p, Pos2::new(dr.right() + 9.0, dr.center().y), TEXT_DIM());
-                let dresp = ui.interact(dr.with_max_x(dr.right() + 16.0).expand(4.0), id.with(("dev", k)), Sense::click());
-                if dresp.hovered() {
+                let hit = dr.with_max_x(dr.right() + 16.0).expand2(Vec2::new(5.0, 2.0));
+                let dresp = ui.interact(hit, id.with(("dev", k)), Sense::click());
+                if dresp.hovered() || devs.menu == Some(m) {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    p.rect_stroke(dr.with_max_x(dr.right() + 16.0).expand(4.0), 5.0, Stroke::new(1.0, white(36)), StrokeKind::Inside);
+                    p.rect_filled(hit, 5.0, white(20));
                 }
-                if dresp.on_hover_text("Choose the device").clicked() {
+                if dresp.clicked() {
                     todo.push(Do::Menu(if devs.menu == Some(m) { None } else { Some(m) }));
                 }
             }
@@ -425,7 +427,7 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
                 });
             }
         }
-        y += 3.0 * 48.0 + 12.0;
+        y += 3.0 * ROW + 14.0;
         p.text(Pos2::new(x0, y + 14.0), Align2::LEFT_CENTER, "Esc to cancel", font(12.0), TEXT_FAINT());
         let gr = Rect::from_min_size(Pos2::new(x1 - 28.0, y), Vec2::splat(28.0));
         if icon_button(ui, gr, id.with("gear"), Ico::Gear, "Recording settings", TEXT_SOFT(), true) {
@@ -433,7 +435,7 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
         }
         if let Some(m) = devs.menu {
             let k = if m == Media::Camera { 0.0 } else { 1.0 };
-            let top = rows.top() + k * 48.0 + 44.0;
+            let top = rows.top() + k * ROW + ROW - 2.0;
             device_menu(ui, p, Pos2::new(x0 + 36.0, top), x1 - x0 - 72.0, m, devs, todo);
         }
     }

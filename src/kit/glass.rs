@@ -137,6 +137,8 @@ pub mod tint {
     #[allow(non_snake_case)]
     pub fn FAN() -> Color32 { HEALTH() }
     #[allow(non_snake_case)]
+    pub fn DISPLAYS() -> Color32 { HEALTH() }
+    #[allow(non_snake_case)]
     pub fn CAPTURE() -> Color32 { pick(hex(0xF7B267), hex(0xC06A12)) }
     #[allow(non_snake_case)]
     pub fn KEEP_AWAKE() -> Color32 { pick(hex(0xE8E1FF), hex(0x6A5AC8)) }
@@ -842,6 +844,8 @@ pub enum Icon {
     Heart,
     Thermo,
     Clock,
+    /// Sharing: a chain link.
+    Link,
     Up,
     Down,
     Back,
@@ -871,6 +875,9 @@ pub enum Icon {
     Mouse,
     Keyboard,
     Trackpad,
+    Gamepad,
+    Phone,
+    Tablet,
     // permissions
     ScreenRec,
     Access,
@@ -884,6 +891,11 @@ pub enum Icon {
     AppRemove,
     /// A file.
     Doc,
+    /// An external monitor.
+    Display,
+    Sun,
+    Speaker,
+    SpeakerOff,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -909,11 +921,16 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Trash => "trash",
         Icon::Folder => "folder",
         Icon::Doc => "doc",
+        Icon::Display => "display",
+        Icon::Sun => "sun.max",
+        Icon::Speaker => "speaker.wave.2",
+        Icon::SpeakerOff => "speaker.slash",
         Icon::Lens => "magnifyingglass",
         Icon::Laptop => "laptopcomputer",
         Icon::Heart => "heart",
         Icon::Thermo => "thermometer.medium",
         Icon::Clock => "clock",
+        Icon::Link => "link",
         Icon::Up => "arrow.up",
         Icon::Down => "arrow.down",
         Icon::Back => "chevron.left",
@@ -941,6 +958,9 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Mouse => "magicmouse",
         Icon::Keyboard => "keyboard",
         Icon::Trackpad => "rectangle.and.hand.point.up.left",
+        Icon::Gamepad => "gamecontroller",
+        Icon::Phone => "iphone",
+        Icon::Tablet => "ipad",
         Icon::ScreenRec => "rectangle.dashed.badge.record",
         Icon::Access => "accessibility",
         Icon::Script => "applescript",
@@ -1114,6 +1134,12 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             stroke_circle(&p, pt(12.0, 12.0), 9.0 * u, st);
             open(&[(12.0, 7.0), (12.0, 12.0), (15.5, 14.0)]);
         }
+        Icon::Link => {
+            // two links at 45°, as two short open loops
+            open(&[(10.5, 13.5), (13.5, 10.5)]);
+            open(&[(9.0, 11.0), (6.5, 13.5), (6.5, 17.5), (10.5, 17.5), (13.0, 15.0)]);
+            open(&[(15.0, 13.0), (17.5, 10.5), (17.5, 6.5), (13.5, 6.5), (11.0, 9.0)]);
+        }
         Icon::Up => {
             open(&[(12.0, 20.0), (12.0, 4.5)]);
             open(&[(6.5, 10.0), (12.0, 4.5), (17.5, 10.0)]);
@@ -1230,6 +1256,21 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             open(&[(4.0, 15.0), (20.0, 15.0)]);
             open(&[(12.0, 15.0), (12.0, 19.0)]);
         }
+        Icon::Gamepad => {
+            boxr(3.0, 7.0, 21.0, 17.0, 5.0);
+            open(&[(6.5, 12.0), (10.5, 12.0)]);
+            open(&[(8.5, 10.0), (8.5, 14.0)]);
+            dot(15.5, 11.0, 1.1);
+            dot(17.5, 13.5, 1.1);
+        }
+        Icon::Phone => {
+            boxr(7.0, 3.0, 17.0, 21.0, 2.5);
+            open(&[(10.5, 18.0), (13.5, 18.0)]);
+        }
+        Icon::Tablet => {
+            boxr(4.0, 3.0, 20.0, 21.0, 2.5);
+            dot(12.0, 18.5, 0.9);
+        }
         Icon::ScreenRec => {
             boxr(3.0, 5.0, 21.0, 17.0, 2.0);
             open(&[(9.0, 21.0), (15.0, 21.0)]);
@@ -1260,6 +1301,29 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             arc(12.0, 10.0, 5.0, std::f32::consts::PI, std::f32::consts::TAU);
             open(&[(17.0, 10.0), (17.0, 15.0), (19.0, 17.0), (5.0, 17.0)]);
             open(&[(10.0, 20.0), (14.0, 20.0)]);
+        }
+        Icon::Display => {
+            boxr(3.0, 4.0, 21.0, 16.0, 1.5);
+            open(&[(12.0, 16.0), (12.0, 20.0)]);
+            open(&[(8.0, 20.0), (16.0, 20.0)]);
+        }
+        Icon::Sun => {
+            p.circle_stroke(pt(12.0, 12.0), 4.0 * u, st);
+            for k in 0..8 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                let (dx, dy) = (a.cos(), a.sin());
+                open(&[(12.0 + dx * 7.0, 12.0 + dy * 7.0), (12.0 + dx * 9.5, 12.0 + dy * 9.5)]);
+            }
+        }
+        Icon::Speaker | Icon::SpeakerOff => {
+            closed(&[(3.0, 9.0), (7.0, 9.0), (12.0, 5.0), (12.0, 19.0), (7.0, 15.0), (3.0, 15.0)]);
+            if icon == Icon::Speaker {
+                arc(13.0, 12.0, 4.0, -0.9, 0.9);
+                arc(13.0, 12.0, 7.5, -0.9, 0.9);
+            } else {
+                open(&[(15.0, 9.0), (21.0, 15.0)]);
+                open(&[(21.0, 9.0), (15.0, 15.0)]);
+            }
         }
     }
 }
@@ -1358,17 +1422,46 @@ mod tests {
     }
 }
 
-/// A single-line search field with a magnifier, painted into `r`.
+/// A single-line search field with a magnifier, painted into `r`: the hint
+/// sits a little right of the caret (not under it), a thin caret, a ring
+/// while focused and a clear button once there's text.
 pub fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, focus: bool, size: f32) -> egui::Response {
     let p = ui.painter().clone();
+    let id = ui.scope_id().with(("search-field", hint));
+    let focused = ui.ctx().memory(|m| m.focused()) == Some(id.with("edit"));
     p.rect_filled(r, 7.0, white(15));
-    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(size)), TEXT_FAINT());
-    let tr = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top()), Pos2::new(r.right() - 8.0, r.bottom()));
+    if focused {
+        p.rect_stroke(r, 7.0, Stroke::new(1.0, white(46)), egui::StrokeKind::Inside);
+    }
+    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(13.0)), TEXT_FAINT());
+    let clear = !text.is_empty();
+    let right = if clear { r.right() - 26.0 } else { r.right() - 8.0 };
+    let tr = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top()), Pos2::new(right, r.bottom()));
+    if text.is_empty() {
+        text_fit(&p, Pos2::new(tr.left() + 3.0, r.center().y), Align2::LEFT_CENTER, hint, font(size), TEXT_FAINT(), tr.width() - 3.0);
+    }
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT())).frame(egui::Frame::NONE).font(font(size)).text_color(TEXT()).desired_width(tr.width());
+    child.visuals_mut().text_cursor.stroke = Stroke::new(1.5, TEXT());
+    let te = egui::TextEdit::singleline(text).id(id.with("edit")).frame(egui::Frame::NONE).margin(Vec2::ZERO).font(font(size)).text_color(TEXT()).desired_width(tr.width());
     let resp = child.add(te);
     if focus && !resp.has_focus() {
         resp.request_focus();
+    }
+    if clear {
+        let cr = Rect::from_center_size(Pos2::new(r.right() - 14.0, r.center().y), Vec2::splat(16.0));
+        let cresp = ui.interact(cr, id.with("clear"), egui::Sense::click());
+        p.circle_filled(cr.center(), 7.0, if cresp.hovered() { white(70) } else { white(40) });
+        let d = 2.5;
+        let st = Stroke::new(1.3, Color32::from_black_alpha(200));
+        p.line_segment([cr.center() + Vec2::new(-d, -d), cr.center() + Vec2::new(d, d)], st);
+        p.line_segment([cr.center() + Vec2::new(-d, d), cr.center() + Vec2::new(d, -d)], st);
+        if cresp.on_hover_text("Clear").clicked() {
+            text.clear();
+            resp.request_focus();
+        }
+    }
+    if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        text.clear();
     }
     resp
 }

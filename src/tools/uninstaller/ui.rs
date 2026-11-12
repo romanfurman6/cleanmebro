@@ -110,7 +110,7 @@ pub fn item_label(it: &Item, user_library: &Path) -> String {
 
 /// "App + 8 items · 17.3 GB".
 pub fn target_line(t: &Target) -> String {
-    let sel: Vec<&Item> = t.items.iter().filter(|i| i.selected && !(t.reset && matches!(i.kind, Kind::App | Kind::Launch))).collect();
+    let sel: Vec<&Item> = t.items.iter().filter(|i| i.selected && !(t.reset && i.kind.is_part())).collect();
     let bytes: u64 = sel.iter().map(|i| i.bytes).sum();
     let files = sel.iter().filter(|i| i.kind != Kind::App).count();
     let has_app = sel.iter().any(|i| i.kind == Kind::App);
@@ -123,7 +123,7 @@ pub fn target_line(t: &Target) -> String {
 }
 
 fn target_bytes(t: &Target) -> u64 {
-    t.items.iter().filter(|i| i.selected && !(t.reset && matches!(i.kind, Kind::App | Kind::Launch))).map(|i| i.bytes).sum()
+    t.items.iter().filter(|i| i.selected && !(t.reset && i.kind.is_part())).map(|i| i.bytes).sum()
 }
 
 fn is_running(u: &mut Uninstaller, id: &str) -> bool {
@@ -277,16 +277,6 @@ fn chip_row(ui: &mut Ui, p: &egui::Painter, x: f32, y: f32, cur: &mut Filter) ->
     x
 }
 
-fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str) {
-    let p = ui.painter().clone();
-    p.rect_filled(r, 7.0, white(15));
-    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(12.0)), TEXT_FAINT());
-    let tr = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top()), Pos2::new(r.right() - 8.0, r.bottom()));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT())).frame(egui::Frame::NONE).font(font(12.0)).text_color(TEXT()).desired_width(tr.width());
-    child.add(te);
-}
-
 fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
@@ -295,7 +285,7 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let fy = body.top() + 12.0;
     let sr = Rect::from_min_size(Pos2::new(x0, fy - 1.0), Vec2::new(190.0, 28.0));
     let mut q = std::mem::take(&mut u.search);
-    search_field(ui, sr, &mut q, "Search apps");
+    search_field(ui, sr, &mut q, "Search apps", false, 13.0);
     u.search = q;
     let mut f = u.filter;
     chip_row(ui, &p, sr.right() + 10.0, fy, &mut f);
@@ -533,7 +523,7 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
     let rw = (w - gap) * 0.42;
     let reset_r = Rect::from_min_size(Pos2::new(x0, btn_top), Vec2::new(rw, 30.0));
     let main_r = Rect::from_min_max(Pos2::new(reset_r.right() + gap, btn_top), Pos2::new(x1, btn_top + 30.0));
-    let has_data = a.items.iter().any(|i| !matches!(i.kind, Kind::App | Kind::Launch));
+    let has_data = a.items.iter().any(|i| !i.kind.is_part());
     if pill_button(ui, reset_r, "Reset…", BTN_SECONDARY, has_data).on_hover_text("Remove its settings and data, keep the app").clicked() {
         u.review = Some(Review { targets: vec![a.target(true)], open: [0].into() });
     }
@@ -693,7 +683,7 @@ fn review(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
 
 /// The items a target will touch (a reset leaves the app and its jobs).
 fn visible_items(t: &Target) -> Vec<&Item> {
-    t.items.iter().filter(|i| !(t.reset && matches!(i.kind, Kind::App | Kind::Launch))).collect()
+    t.items.iter().filter(|i| !(t.reset && i.kind.is_part())).collect()
 }
 
 // ---------------------------------------------------------------- progress and result
@@ -1175,7 +1165,7 @@ pub mod demo {
             let p = if rel.starts_with('/') { PathBuf::from(rel) } else { lib.join(rel) };
             items.push(Item { path: p, kind: *kind, bytes: *b, admin: *admin, selected: true });
         }
-        AppRow { path, name: name.into(), id: id.into(), version: ver.into(), source: src, locked, last_used: used_days.map(|d| NOW - d * 86400 - 3600), items, sized: true }
+        AppRow { path, name: name.into(), id: id.into(), version: ver.into(), source: src, locked, last_used: used_days.map(|d| NOW - d * 86400 - 3600), items, sized: true, alt: Vec::new(), sign: Default::default(), pkgs: Vec::new() }
     }
 
     pub fn apps() -> Vec<AppRow> {

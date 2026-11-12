@@ -7,10 +7,13 @@
 //! Page routes: "" (as left), "history", "settings".
 
 mod audio;
+mod cut;
+mod fit;
 mod mac;
 pub mod probe;
 mod settings;
 mod ui;
+mod words;
 
 use crate::core::tool::{Action, Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec};
 use crate::kit::glass::Icon;
@@ -44,8 +47,9 @@ const MIN_VOICE_SECS: f32 = 0.3;
 const IDLE_UNLOAD: Duration = Duration::from_secs(10 * 60);
 /// Wait after bringing the app forward before pressing ⌘V.
 const PASTE_DELAY: Duration = Duration::from_millis(90);
-/// Wait after ⌘V before putting the old clipboard back.
-const RESTORE_DELAY: Duration = Duration::from_millis(600);
+/// Keep listening this long after the shortcut is let go: people let go
+/// while still saying the last word.
+const TAIL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -61,6 +65,28 @@ enum Cmd {
     Done,
 }
 
+/// `cmdmeow://dictation/<action>`. A link has no key to hold, so it always
+/// starts hands-free: it stops after silence, by the shortcut, or by `stop`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Link {
+    Toggle,
+    Start,
+    Stop,
+    Cancel,
+}
+
+impl Link {
+    fn read(action: &str) -> Option<Link> {
+        match action {
+            "toggle" => Some(Link::Toggle),
+            "start" => Some(Link::Start),
+            "stop" => Some(Link::Stop),
+            "cancel" => Some(Link::Cancel),
+            _ => None,
+        }
+    }
+}
+
 /// What the pill says once the talking is over.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Note {
@@ -73,11 +99,15 @@ pub enum Note {
 /// Where dictation is.
 pub enum Phase {
     Idle,
-    /// `heard` is when the voice was last above a whisper.
-    Listening { mic: Mic, since: Instant, tapped: bool, heard: Instant },
+    /// `heard` is when the voice was last above a whisper; `ending` is set
+    /// once they've asked to stop and the mic catches the last bit.
+    Listening { mic: Mic, since: Instant, tapped: bool, heard: Instant, ending: Option<Instant> },
     Working { job: u64 },
     Showing { note: Note, until: Instant },
 }
+
+/// How often the pill adds a bar while listening.
+const LEVEL_EVERY: Duration = Duration::from_millis(33);
 
 /// Work for the model thread.
 enum Job {
@@ -112,9 +142,12 @@ pub struct Dictation {
     place: (Option<Rect>, Option<Pos2>, Option<Rect>),
     /// Loudness, newest last, for the pill's bars.
     levels: Vec<f32>,
+    /// When the last bar was added.
+    level_at: Option<Instant>,
     keys: Option<Keys<Cmd>>,
     esc: Option<Keys<Cmd>>,
     esc_bound: bool,
+    links: Option<crate::kit::url_scheme::Inbox<Link>>,
     bound: Option<Shortcut>,
     key_error: Option<String>,
     /// Recording a new shortcut on the Settings tab.
@@ -125,8 +158,13 @@ pub struct Dictation {
     heard: Receiver<Heard>,
     next_job: u64,
     voice_secs: f32,
+    /// The text around the caret when they started.
+    around: Option<fit::Around>,
     paste_at: Option<(Instant, String)>,
-    restore_at: Option<(Instant, mac::Saved, isize)>,
+    /// A paste whose clipboard goes back once the app has read it.
+    pending: Option<mac::Pasted>,
+    /// A word being typed into the Words list.
+    pub word_draft: String,
     pub download: Option<Download>,
     download_error: Option<String>,
     /// Shell requests made outside a ui pass.
@@ -159,9 +197,11 @@ impl Dictation {
             target: mac::Target::default(),
             place: (None, None, None),
             levels: Vec::new(),
+            level_at: None,
             keys: None,
             esc: None,
             esc_bound: false,
+            links: (!env.demo).then(|| crate::kit::url_scheme::Inbox::new("dictation", Some(env.ctx.clone()), Link::read)),
             bound: None,
             key_error: None,
             recording_key: false,
@@ -170,8 +210,10 @@ impl Dictation {
             heard,
             next_job: 0,
             voice_secs: 0.0,
+            around: None,
             paste_at: None,
-            restore_at: None,
+            pending: None,
+            word_draft: String::new(),
             download: None,
             download_error: None,
             actions: Vec::new(),
@@ -275,6 +317,7 @@ impl Dictation {
     pub fn start(&mut self) {
         self.target = mac::front_app().unwrap_or_default();
         let caret = mac::caret(&self.target);
+        self.around = mac::around(&self.target);
         let mouse = mac::mouse();
         let at = caret.map(|c| c.center()).or(mouse).unwrap_or(Pos2::new(600.0, 400.0));
         self.place = (caret, mouse, mac::screen_at(at));
@@ -302,9 +345,16 @@ impl Dictation {
         match Mic::start() {
             Ok(mic) => {
                 let _ = self.jobs.send(Job::Warm(engine));
-                self.phase = Phase::Listening { mic, since: Instant::now(), tapped: false, heard: Instant::now() };
+                self.phase = Phase::Listening { mic, since: Instant::now(), tapped: false, heard: Instant::now(), ending: None };
             }
             Err(e) => self.show(Note::Problem(e), 2.5),
+        }
+    }
+
+    /// They asked to stop: listen a moment longer, then finish.
+    fn end(&mut self) {
+        if let Phase::Listening { ending, .. } = &mut self.phase {
+            ending.get_or_insert(Instant::now() + TAIL);
         }
     }
 
@@ -323,6 +373,10 @@ impl Dictation {
         if secs < MIN_VOICE_SECS || audio::silent(&pcm, MODEL_RATE) {
             return self.show(Note::Problem("Didn't hear anything".into()), 1.4);
         }
+        // the quiet before and after isn't sent: faster, and models make
+        // words up in silence
+        let keep = cut::trim(&pcm, MODEL_RATE);
+        let pcm = if keep.len() < pcm.len() { pcm[keep].to_vec() } else { pcm };
         self.next_job += 1;
         self.voice_secs = secs;
         let job = Job::Run { job: self.next_job, engine: self.settings.engine, lang: None, pcm };
@@ -330,6 +384,23 @@ impl Dictation {
             return self.show(Note::Problem("Speech to text isn't running".into()), 2.5);
         }
         self.phase = Phase::Working { job: self.next_job };
+    }
+
+    fn follow(&mut self, link: Link) {
+        let listening = matches!(self.phase, Phase::Listening { .. });
+        match link {
+            Link::Toggle if listening => self.finish(),
+            Link::Toggle | Link::Start => {
+                if matches!(self.phase, Phase::Idle | Phase::Showing { .. }) {
+                    self.start();
+                    if let Phase::Listening { tapped, .. } = &mut self.phase {
+                        *tapped = true;
+                    }
+                }
+            }
+            Link::Stop => self.finish(),
+            Link::Cancel => self.cancel(),
+        }
     }
 
     fn cancel(&mut self) {
@@ -348,12 +419,14 @@ impl Dictation {
             Err(e) => self.show(Note::Problem(e), 3.0),
             Ok(t) if t.is_empty() => self.show(Note::Problem("Didn't catch that".into()), 1.6),
             Ok(t) => {
+                let t = words::apply(&t, &self.settings.words);
                 if self.settings.keep_history {
                     self.history.add(Said { at: chrono::Local::now().timestamp(), text: t.clone(), app: self.target.name.clone(), secs: self.voice_secs });
                     self.save_history();
                 }
                 if mac::accessibility() {
                     mac::activate(&self.target);
+                    let t = fit::fit(&t, self.around.as_ref(), &self.settings.words);
                     self.paste_at = Some((Instant::now() + PASTE_DELAY, t));
                     self.show(Note::Pasted, 0.8);
                 } else {
@@ -414,7 +487,7 @@ impl Dictation {
         let side = self.esc.as_ref().map(|k| k.poll()).unwrap_or_default();
         let cancels: Vec<_> = side.iter().filter(|c| **c == Cmd::Cancel).collect();
         if side.contains(&Cmd::Done) && matches!(self.phase, Phase::Listening { .. }) {
-            self.finish();
+            self.end();
         }
         for c in presses {
             if c != Cmd::Talk {
@@ -422,7 +495,7 @@ impl Dictation {
             }
             match &self.phase {
                 Phase::Idle | Phase::Showing { .. } => self.start(),
-                Phase::Listening { tapped: true, .. } => self.finish(),
+                Phase::Listening { tapped: true, .. } => self.end(),
                 _ => {}
             }
         }
@@ -430,12 +503,12 @@ impl Dictation {
             if c != Cmd::Talk {
                 continue;
             }
-            if let Phase::Listening { since, tapped, .. } = &mut self.phase {
-                if !*tapped {
+            if let Phase::Listening { since, tapped, ending, .. } = &mut self.phase {
+                if !*tapped && ending.is_none() {
                     if since.elapsed() < HOLD {
                         *tapped = true;
                     } else {
-                        self.finish();
+                        self.end();
                     }
                 }
             }
@@ -443,8 +516,12 @@ impl Dictation {
         if !cancels.is_empty() {
             self.cancel();
         }
+        let links = self.links.as_ref().map(|l| l.take()).unwrap_or_default();
+        for l in links {
+            self.follow(l);
+        }
         let stop_after = self.settings.stop_after_silence();
-        if let Phase::Listening { mic, since, tapped, heard } = &mut self.phase {
+        if let Phase::Listening { mic, since, tapped, heard, ending } = &mut self.phase {
             let failed = mic.failed();
             let level = mic.level();
             if level > audio::VOICE_LEVEL {
@@ -452,13 +529,19 @@ impl Dictation {
             }
             // hands-free (tapped) only: holding the key is its own stop
             let quiet = *tapped && stop_after.is_some_and(|d| heard.elapsed() > d);
-            let too_long = since.elapsed() > MAX_TALK || quiet;
+            let ended = ending.is_some_and(|t| Instant::now() >= t);
+            let too_long = since.elapsed() > MAX_TALK || quiet || ended;
             if quiet {
                 eprintln!("[dictation] stopped after silence");
             }
-            self.levels.push(level);
-            if self.levels.len() > 64 {
-                self.levels.remove(0);
+            // one bar every 33 ms whatever the frame rate, so the bars move evenly
+            let due = self.level_at.is_none_or(|t| t.elapsed() >= LEVEL_EVERY);
+            if due {
+                self.level_at = Some(Instant::now());
+                self.levels.push(level);
+                if self.levels.len() > 64 {
+                    self.levels.remove(0);
+                }
             }
             if too_long {
                 self.finish();
@@ -472,17 +555,20 @@ impl Dictation {
         }
         if self.paste_at.as_ref().is_some_and(|(t, _)| Instant::now() >= *t) {
             let (_, text) = self.paste_at.take().unwrap();
-            if let Some((saved, count)) = mac::paste(&text, true) {
-                if self.settings.restore_clipboard {
+            if self.settings.restore_clipboard {
+                if let Some(mut p) = mac::paste_tracked(&text) {
                     // a restore still pending holds the clipboard from before
-                    let saved = self.restore_at.take().map(|(_, old, _)| old).unwrap_or(saved);
-                    self.restore_at = Some((Instant::now() + RESTORE_DELAY, saved, count));
+                    if let Some(mut old) = self.pending.take() {
+                        p.saved = old.take_saved();
+                    }
+                    self.pending = Some(p);
                 }
+            } else {
+                let _ = mac::paste(&text, true);
             }
         }
-        if self.restore_at.as_ref().is_some_and(|(t, _, _)| Instant::now() >= *t) {
-            let (_, saved, count) = self.restore_at.take().unwrap();
-            mac::restore(saved, count);
+        if self.pending.as_ref().is_some_and(|p| mac::restore_due(p.pressed, p.last_read(), Instant::now())) {
+            mac::put_back(self.pending.take().unwrap());
         }
         if self.recording_key && self.recording_seen.elapsed() > Duration::from_secs(1) {
             self.recording_key = false;
@@ -494,7 +580,10 @@ impl Dictation {
         }
         self.bind_esc();
         self.poll_download(ctx);
-        if !matches!(self.phase, Phase::Idle) || self.paste_at.is_some() || self.restore_at.is_some() {
+        if matches!(self.phase, Phase::Listening { .. } | Phase::Working { .. }) {
+            // the pill moves: a steady 60 fps
+            ctx.request_repaint_after(Duration::from_millis(16));
+        } else if !matches!(self.phase, Phase::Idle) || self.paste_at.is_some() || self.pending.is_some() {
             ctx.request_repaint_after(Duration::from_millis(30));
         }
     }
@@ -502,18 +591,43 @@ impl Dictation {
 
 /// The model thread: keeps one model loaded while it's used, lets it go
 /// after a while.
-fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
-    enum Loaded {
-        Parakeet(crate::kit::parakeet::Loaded),
-        Whisper(crate::kit::whisper::Loaded),
-    }
-    let mut loaded: Option<(Engine, Loaded)> = None;
-    let load = |e: Engine| -> Result<Loaded, String> {
+/// A speech model in memory.
+pub(crate) enum Loaded {
+    Parakeet(crate::kit::parakeet::Loaded),
+    Whisper(crate::kit::whisper::Loaded),
+}
+
+impl Loaded {
+    pub(crate) fn load(e: Engine) -> Result<Loaded, String> {
         match e {
             Engine::Parakeet => crate::kit::parakeet::Loaded::load().map(Loaded::Parakeet),
             Engine::Whisper => crate::kit::whisper::Loaded::load(crate::kit::whisper::Model::Accurate).map(Loaded::Whisper),
         }
-    };
+    }
+
+    /// The voice as one line of text. A long take goes in pieces cut at
+    /// its pauses.
+    pub(crate) fn run(&self, pcm: &[f32], lang: Option<&str>) -> Result<String, String> {
+        let mut said = Vec::new();
+        for piece in cut::split(pcm, MODEL_RATE) {
+            let pcm = &pcm[piece];
+            match self {
+                Loaded::Parakeet(m) => said.push(m.run(pcm)?),
+                Loaded::Whisper(m) => said.extend(m.run(pcm, lang, None)?.into_iter().map(|s| s.2)),
+            }
+        }
+        Ok(audio::tidy_text(&said))
+    }
+}
+
+fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
+    // below the UI: the model's threads (they inherit this) must not starve
+    // the pill's spinner while it transcribes
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
+    }
+    let mut loaded: Option<(Engine, Loaded)> = None;
     loop {
         let job = match rx.recv_timeout(IDLE_UNLOAD) {
             Ok(j) => j,
@@ -528,7 +642,7 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
         };
         if loaded.as_ref().is_none_or(|(e, _)| *e != engine) {
             loaded = None;
-            match load(engine) {
+            match Loaded::load(engine) {
                 Ok(l) => loaded = Some((engine, l)),
                 Err(e) => {
                     eprintln!("[dictation] {e}");
@@ -543,8 +657,7 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
         let Job::Run { job, lang, pcm, .. } = job else { continue };
         let t0 = Instant::now();
         let text = match &loaded {
-            Some((_, Loaded::Parakeet(m))) => m.run(&pcm).map(|t| audio::tidy_text(&[t])),
-            Some((_, Loaded::Whisper(m))) => m.run(&pcm, lang, None).map(|segs| audio::tidy_text(&segs.into_iter().map(|s| s.2).collect::<Vec<_>>())),
+            Some((_, m)) => m.run(&pcm, lang),
             None => Err("The speech model didn't load".into()),
         };
         eprintln!("[dictation] {:.1} s of voice in {} ms", pcm.len() as f32 / MODEL_RATE as f32, t0.elapsed().as_millis());
@@ -631,11 +744,15 @@ impl Tool for Dictation {
     }
     fn set_on(&mut self, on: bool) {
         self.on = on;
+        // links that came while off aren't run late
+        if let Some(l) = &self.links {
+            l.take();
+        }
         if !on {
             self.cancel();
             self.paste_at = None;
-            if let Some((_, saved, count)) = self.restore_at.take() {
-                mac::restore(saved, count);
+            if let Some(p) = self.pending.take() {
+                mac::put_back(p);
             }
             self.recording_key = false;
             self.release_keys();
@@ -675,6 +792,23 @@ impl Tool for Dictation {
 mod tests {
     use super::*;
 
+    #[test]
+    fn links_name_their_action() {
+        assert_eq!(Link::read("toggle"), Some(Link::Toggle));
+        assert_eq!(Link::read("start"), Some(Link::Start));
+        assert_eq!(Link::read("stop"), Some(Link::Stop));
+        assert_eq!(Link::read("cancel"), Some(Link::Cancel));
+        assert_eq!(Link::read("talk"), None);
+    }
+
+    #[test]
+    fn stop_and_cancel_links_do_nothing_while_idle() {
+        let mut d = demo();
+        d.follow(Link::Stop);
+        d.follow(Link::Cancel);
+        assert!(matches!(d.phase, Phase::Idle));
+    }
+
     fn demo() -> Dictation {
         Dictation::new(&ToolEnv { ctx: egui::Context::default(), demo: true })
     }
@@ -694,6 +828,20 @@ mod tests {
         assert!(n.iter().any(|x| x.perm == Perm::Microphone));
         assert!(n.iter().any(|x| x.perm == Perm::Accessibility));
         assert!(n.iter().any(|x| matches!(x.perm, Perm::Own { id: MODEL_NEED, .. })));
+    }
+
+    // the stand-in microphone exists off macOS only
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn letting_go_keeps_listening_a_moment() {
+        let mut d = demo();
+        d.phase = Phase::Listening { mic: Mic, since: Instant::now(), tapped: true, heard: Instant::now(), ending: None };
+        d.end();
+        let Phase::Listening { ending: Some(first), .. } = d.phase else { panic!("stopped at once") };
+        assert!(first > Instant::now());
+        // asking again doesn't push the end out
+        d.end();
+        assert!(matches!(d.phase, Phase::Listening { ending: Some(t), .. } if t == first));
     }
 
     #[test]

@@ -96,8 +96,8 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
             (Icon::Wifi, name, split_num(&human_rate(s.net_down)), format!("↑ {}", human_rate(s.net_up)), None)
         }
         "devices" => {
-            let n = s.devices.len();
-            let low = devices::lowest_first(&s.devices).into_iter().next();
+            let n = s.devices.iter().filter(|d| d.live()).count();
+            let low = devices::lowest_first(&s.devices).into_iter().find(|d| d.live());
             let caption = if n == 0 { "None connected".to_string() } else { devices_ui::note(&s.devices) };
             match low.as_ref().and_then(|d| d.battery().map(|b| (d, b))) {
                 Some((d, b)) => (d.kind.icon(), "Devices".into(), (b.to_string(), "%".into()), caption, Some(((b as f32 / 100.0).clamp(0.02, 1.0), devices::color(b)))),
@@ -333,16 +333,28 @@ pub fn detail(mon: &monitor::Shared, d: &str, ui: &mut Ui, rect: Rect, cx: &mut 
         "devices" => Sheet::Devices,
         _ => return,
     };
+    if kind == Sheet::Network {
+        super::traffic::want(mon, ui.ctx());
+    }
     let s = mon.lock_ok().clone();
     match sheets::sheet(ui, rect, kind, &s) {
         Action::Close => cx.close_detail(),
         Action::Open(tool) => cx.open_page(tool, ""),
-        Action::SpeedTest => monitor::start_speed_test(mon.clone(), ui.ctx().clone()),
+        Action::SpeedTest(mode) => {
+            // the same modal as on the Mac Health page
+            monitor::start_speed_test(mon.clone(), ui.ctx().clone(), mode);
+            super::speed::open(ui.ctx());
+        }
         Action::MeasureFolders => monitor::measure_folders(mon.clone(), ui.ctx().clone()),
         Action::ToggleAlerts => monitor::change_bt_prefs(mon, |p| crate::kit::notify::flip(&mut p.alerts)),
         Action::ToggleMenuBar => monitor::change_bt_prefs(mon, |p| p.menu_bar = !p.menu_bar),
         Action::OpenBluetooth => devices::open_bluetooth_settings(),
         Action::None => {}
+    }
+    if kind == Sheet::Network {
+        if let Some(mode) = super::speed::modal(ui, &s.speed) {
+            monitor::start_speed_test(mon.clone(), ui.ctx().clone(), mode);
+        }
     }
 }
 
