@@ -106,10 +106,14 @@ impl OpenFiles {
         v.dedup();
         OpenFiles(v)
     }
-    /// Some open file is `path` or lies inside it.
+    /// Some open file is `path` or lies inside it. lsof names files by their
+    /// real path (/private/var/… for /var/…), so the resolved path counts too.
     pub fn holds(&self, path: &Path) -> bool {
-        let i = self.0.partition_point(|p| p.as_path() < path);
-        self.0.get(i).is_some_and(|p| p.starts_with(path))
+        let inside = |q: &Path| {
+            let i = self.0.partition_point(|p| p.as_path() < q);
+            self.0.get(i).is_some_and(|p| p.starts_with(q))
+        };
+        inside(path) || path.canonicalize().is_ok_and(|real| real != path && inside(&real))
     }
 }
 
@@ -181,6 +185,18 @@ mod tests {
         // a sibling with a longer name is not "inside"
         assert!(!o.holds(Path::new("/Users/me/Library/Caches/Ap")));
         assert!(!o.holds(Path::new("/Users/me/Library/Caches/App2")));
+    }
+
+    #[test]
+    fn open_files_are_matched_by_their_real_path() {
+        // macOS: /var is a link to /private/var, and lsof prints the latter
+        let base = std::env::temp_dir().join(format!("cmdmeow-inuse-real-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("real")).unwrap();
+        std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
+        let real = base.join("real").canonicalize().unwrap();
+        let o = OpenFiles::from(vec![real.join("Cache.db")]);
+        assert!(o.holds(&base.join("link")));
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
