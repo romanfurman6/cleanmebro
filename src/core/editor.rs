@@ -150,7 +150,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     // list: search, then each tool's widgets
     let sr = Rect::from_min_size(lr.min + Vec2::new(sp::M, sp::L), Vec2::new(list_w - 2.0 * sp::M, 28.0));
     let mut q = std::mem::take(&mut app.widget_search);
-    let sresp = search_field(ui, sr, &mut q, "Search", false, 13.0);
+    let sresp = search_field(ui, sr, &mut q, "Search", false);
     if sresp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         q.clear();
     }

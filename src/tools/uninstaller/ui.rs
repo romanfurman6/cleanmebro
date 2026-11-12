@@ -285,7 +285,7 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let fy = body.top() + 12.0;
     let sr = Rect::from_min_size(Pos2::new(x0, fy - 1.0), Vec2::new(190.0, 28.0));
     let mut q = std::mem::take(&mut u.search);
-    search_field(ui, sr, &mut q, "Search apps", false, 13.0);
+    search_field(ui, sr, &mut q, "Search apps", false);
     u.search = q;
     let mut f = u.filter;
     chip_row(ui, &p, sr.right() + 10.0, fy, &mut f);

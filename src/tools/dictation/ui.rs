@@ -501,12 +501,8 @@ fn words_card(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, x0: f32, top: f
 
     let y = card.top() + 4.0 + ROW_H / 2.0;
     let ar = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 56.0, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0));
-    let fr = Rect::from_min_max(Pos2::new(card.left() + 12.0, y - 13.0), Pos2::new(ar.left() - 8.0, y + 13.0));
-    p.rect_filled(fr, 6.0, white(15));
-    let tr = fr.shrink2(Vec2::new(8.0, 0.0));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let te = egui::TextEdit::singleline(&mut d.word_draft).hint_text(egui::RichText::new("Name, brand or term").color(TEXT_FAINT())).frame(egui::Frame::NONE).font(font(12.0)).text_color(TEXT()).desired_width(tr.width()).id(id.with("field"));
-    let resp = child.add(te);
+    let fr = Rect::from_min_max(Pos2::new(card.left() + 12.0, y - sp::CONTROL_H / 2.0), Pos2::new(ar.left() - 8.0, y + sp::CONTROL_H / 2.0));
+    let resp = text_input(ui, fr, id.with("field"), &mut d.word_draft, "Name, brand or term", FieldStyle::default());
     let entered = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     let can_add = !d.word_draft.trim().is_empty();
     if (pill_button(ui, ar, "Add", BTN_SECONDARY, can_add).clicked() || entered) && d.settings.add_word(&d.word_draft) {

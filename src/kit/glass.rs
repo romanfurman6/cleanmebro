@@ -1435,46 +1435,74 @@ mod tests {
     }
 }
 
-/// A single-line search field with a magnifier, painted into `r`: the hint
-/// sits a little right of the caret (not under it), a thin caret, a ring
-/// while focused and a clear button once there's text.
-pub fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, focus: bool, size: f32) -> egui::Response {
+/// How a [`text_input`] looks: the magnifier and clear button of a search
+/// field, hidden typing, or text kept to the right (amounts).
+#[derive(Clone, Copy, Default)]
+pub struct FieldStyle {
+    pub search: bool,
+    pub secret: bool,
+    pub right: bool,
+}
+
+/// Gap between the caret and the hint, so the caret never sits on its first letter.
+const HINT_GAP: f32 = 3.0;
+
+/// The one text field: a rounded fill, a ring while focused, text and hint
+/// in body type on one baseline, vertically centred in `r` whatever its height.
+pub fn text_input(ui: &mut Ui, r: Rect, id: egui::Id, text: &mut String, hint: &str, st: FieldStyle) -> egui::Response {
     let p = ui.painter().clone();
-    let id = ui.scope_id().with(("search-field", hint));
-    let focused = ui.ctx().memory(|m| m.focused()) == Some(id.with("edit"));
-    p.rect_filled(r, 7.0, white(15));
+    let fid = ty::body();
+    let edit_id = id.with("edit");
+    let focused = ui.ctx().memory(|m| m.focused()) == Some(edit_id);
+    p.rect_filled(r, R_SMALL, white(15));
     if focused {
-        p.rect_stroke(r, 7.0, Stroke::new(1.0, white(46)), egui::StrokeKind::Inside);
+        p.rect_stroke(r, R_SMALL, Stroke::new(1.0, white(46)), egui::StrokeKind::Inside);
     }
-    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(13.0)), TEXT_FAINT());
-    let clear = !text.is_empty();
-    let right = if clear { r.right() - 26.0 } else { r.right() - 8.0 };
-    let tr = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top()), Pos2::new(right, r.bottom()));
+    let clear = st.search && !text.is_empty();
+    let left = if st.search {
+        icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(13.0)), TEXT_FAINT());
+        r.left() + 28.0
+    } else {
+        r.left() + 10.0
+    };
+    let right = if clear { r.right() - 26.0 } else { r.right() - 10.0 };
+    // exactly one line tall, centred: the caret, the text and the hint share it
+    let row_h = ui.ctx().fonts_mut(|f| f.row_height(&fid));
+    let tr = Rect::from_min_max(Pos2::new(left, r.center().y - row_h / 2.0), Pos2::new(right.max(left + 1.0), r.center().y + row_h / 2.0));
     if text.is_empty() {
-        text_fit(&p, Pos2::new(tr.left() + 3.0, r.center().y), Align2::LEFT_CENTER, hint, font(size), TEXT_FAINT(), tr.width() - 3.0);
+        let (at, align) = if st.right { (Pos2::new(tr.right() - HINT_GAP, r.center().y), Align2::RIGHT_CENTER) } else { (Pos2::new(tr.left() + HINT_GAP, r.center().y), Align2::LEFT_CENTER) };
+        text_fit(&p, at, align, hint, fid.clone(), TEXT_FAINT(), tr.width() - HINT_GAP);
     }
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let align = if st.right { Align2::RIGHT_CENTER } else { Align2::LEFT_CENTER };
+    let te = egui::TextEdit::singleline(text).id(edit_id).frame(egui::Frame::NONE).margin(Vec2::ZERO).font(fid).text_color(TEXT()).password(st.secret).align(align).desired_width(tr.width()).min_size(tr.size());
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Min)));
     child.visuals_mut().text_cursor.stroke = Stroke::new(1.5, TEXT());
-    let te = egui::TextEdit::singleline(text).id(id.with("edit")).frame(egui::Frame::NONE).margin(Vec2::ZERO).font(font(size)).text_color(TEXT()).desired_width(tr.width());
     let resp = child.add(te);
-    if focus && !resp.has_focus() {
-        resp.request_focus();
-    }
     if clear {
         let cr = Rect::from_center_size(Pos2::new(r.right() - 14.0, r.center().y), Vec2::splat(16.0));
         let cresp = ui.interact(cr, id.with("clear"), egui::Sense::click());
         p.circle_filled(cr.center(), 7.0, if cresp.hovered() { white(70) } else { white(40) });
         let d = 2.5;
-        let st = Stroke::new(1.3, Color32::from_black_alpha(200));
-        p.line_segment([cr.center() + Vec2::new(-d, -d), cr.center() + Vec2::new(d, d)], st);
-        p.line_segment([cr.center() + Vec2::new(-d, d), cr.center() + Vec2::new(d, -d)], st);
+        let s = Stroke::new(1.3, Color32::from_black_alpha(200));
+        p.line_segment([cr.center() + Vec2::new(-d, -d), cr.center() + Vec2::new(d, d)], s);
+        p.line_segment([cr.center() + Vec2::new(-d, d), cr.center() + Vec2::new(d, -d)], s);
         if cresp.on_hover_text("Clear").clicked() {
             text.clear();
             resp.request_focus();
         }
     }
-    if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+    if st.search && resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         text.clear();
+    }
+    resp
+}
+
+/// A search field: [`text_input`] with the magnifier and a clear button.
+pub fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, focus: bool) -> egui::Response {
+    let id = ui.scope_id().with(("search-field", hint));
+    let resp = text_input(ui, r, id, text, hint, FieldStyle { search: true, ..Default::default() });
+    if focus && !resp.has_focus() {
+        resp.request_focus();
     }
     resp
 }
