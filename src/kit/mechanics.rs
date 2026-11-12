@@ -87,8 +87,19 @@ pub const MONITOR_REFRESH_MS: u64 = 2000;
 // Speed test ("downloads a small test file")
 pub const SPEED_TEST_DOWN_URL: &str = "https://speed.cloudflare.com/__down";
 pub const SPEED_TEST_UP_URL: &str = "https://speed.cloudflare.com/__up";
-pub const SPEED_TEST_BYTES: u64 = 25_000_000;
-pub const SPEED_TEST_UPLOAD_BYTES: u64 = 8_000_000;
+pub const SPEED_TEST_META_URL: &str = "https://speed.cloudflare.com/meta";
+/// Each of download and upload runs this long, over several connections
+/// (one TCP stream can't fill a fast line).
+pub const SPEED_TEST_PHASE: std::time::Duration = std::time::Duration::from_secs(8);
+/// The start of a transfer (TCP slow start) doesn't count.
+pub const SPEED_TEST_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+pub const SPEED_TEST_STREAMS_DOWN: usize = 6;
+pub const SPEED_TEST_STREAMS_UP: usize = 4;
+/// Bytes per request: streams ask again until the phase ends.
+pub const SPEED_TEST_CHUNK_DOWN: u64 = 100_000_000;
+pub const SPEED_TEST_CHUNK_UP: u64 = 4_000_000;
+/// Round trips for ping and jitter, after one that opens the connection.
+pub const SPEED_TEST_PINGS: usize = 10;
 /// Legend "Good for:" (labels from the Menu strings, Mbps estimated)
 pub const GOOD_FOR: [(&str, f64); 6] = [
     ("Messaging", 0.5),

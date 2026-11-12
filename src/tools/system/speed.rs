@@ -257,7 +257,11 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
                 let g = p.layout_no_wrap(txt, ty::number(), TEXT());
                 let gw = g.size().x;
                 p.galley(Pos2::new(cx, row.top() + 26.0), g, TEXT());
-                p.text(Pos2::new(cx + gw + 4.0, row.top() + 46.0), Align2::LEFT_BOTTOM, unit, ty::label(), TEXT_DIM());
+                let ur = p.text(Pos2::new(cx + gw + 4.0, row.top() + 46.0), Align2::LEFT_BOTTOM, unit, ty::label(), TEXT_DIM());
+                // jitter rides along with ping
+                if let (SpeedPhase::Ping, Some(j)) = (ph, s.jitter_ms) {
+                    p.text(Pos2::new(ur.right() + 6.0, row.top() + 46.0), Align2::LEFT_BOTTOM, format!("±{j:.0}"), ty::label(), TEXT_MUTED());
+                }
             }
             None if active => {
                 // a short bar that fills with this phase's share of the test
@@ -281,6 +285,8 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (bool, bool) {
     let mut again = false;
     if let Some(e) = &s.error {
         text_fit(&p, Pos2::new(x0, by + 15.0), Align2::LEFT_CENTER, e, ty::label(), AMBER(), (x1 - x0) * 0.55);
+    } else if let Some(server) = &s.server {
+        text_fit(&p, Pos2::new(x0, by + 15.0), Align2::LEFT_CENTER, &server.line(), ty::label(), TEXT_DIM(), (x1 - x0) * 0.55);
     }
     if !s.running {
         let done_w = button_width(&p, "Done", BTN_PRIMARY);
