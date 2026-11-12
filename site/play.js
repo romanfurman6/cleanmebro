@@ -460,8 +460,8 @@
       return new Promise(r => { an.onfinish = () => { f.remove(); w.classList.add('on'); r(); }; });
     };
     const play = async id => {
-      reset(); await sleep(1400); if (id !== gen) return;
-      bars.classList.add('b-wig'); await sleep(900); if (id !== gen) return;
+      reset(); await sleep(700); if (id !== gen) return;
+      bars.classList.add('b-wig'); await sleep(600); if (id !== gen) return;
       bars.classList.add('b-one'); await sleep(420); bars.classList.add('b-open'); await sleep(380); if (id !== gen) return;
       bars.classList.remove('b-wig');
       const all = []; bars.classList.add('b-eat');
@@ -472,8 +472,8 @@
       }
       await Promise.all(all); bars.classList.remove('b-eat'); if (id !== gen) return;
       label('1 app');
-      await sleep(4200); if (id !== gen) return;
-      bars.classList.remove('b-open'); await sleep(2000); if (id === gen) play(id);
+      await sleep(2600); if (id !== gen) return;
+      bars.classList.remove('b-open'); await sleep(1000); if (id === gen) play(id);
     };
     new IntersectionObserver(es => {
       if (es[0].isIntersecting) { if (!on) { on = true; play(++gen); } }
