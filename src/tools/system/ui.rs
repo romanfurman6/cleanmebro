@@ -342,6 +342,10 @@ pub fn detail(mon: &monitor::Shared, d: &str, ui: &mut Ui, rect: Rect, cx: &mut 
         Action::ToggleAlerts => monitor::change_bt_prefs(mon, |p| crate::kit::notify::flip(&mut p.alerts)),
         Action::ToggleMenuBar => monitor::change_bt_prefs(mon, |p| p.menu_bar = !p.menu_bar),
         Action::OpenBluetooth => devices::open_bluetooth_settings(),
+        Action::SetLimit(l) => monitor::change_charge(mon, ui.ctx(), |p| p.limit = l),
+        Action::ToggleSailing => monitor::change_charge(mon, ui.ctx(), |p| p.sailing = !p.sailing),
+        Action::ToggleHeat => monitor::change_charge(mon, ui.ctx(), |p| p.heat = !p.heat),
+        Action::InstallHelper => monitor::install_charge_helper(mon, ui.ctx()),
         Action::None => {}
     }
 }

@@ -4,6 +4,7 @@
 //! buttons at the bottom right. The sheet reports what the user asked for
 //! instead of acting on the app, so any shell can host it.
 
+use crate::kit::charge;
 use super::monitor::{self, Level, Snapshot};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
@@ -31,6 +32,11 @@ pub enum Action {
     ToggleAlerts,
     ToggleMenuBar,
     OpenBluetooth,
+    /// Charge limit, a value from [`charge::LIMITS`].
+    SetLimit(u8),
+    ToggleSailing,
+    ToggleHeat,
+    InstallHelper,
 }
 
 fn level_color(l: Level) -> Color32 {
@@ -84,12 +90,15 @@ struct Spec {
     facts: Vec<Fact>,
     /// On/off rows under the cards: label, hint, state, what a click does.
     switches: Vec<(&'static str, String, bool, Action)>,
+    /// The charge limit row above the switches: the selected index in
+    /// [`charge::LIMITS`].
+    limit: Option<usize>,
     buttons: Vec<(&'static str, u8, Action)>,
 }
 
 impl Spec {
     fn new(icon: Icon, chip: Color32, title: impl Into<String>, sub: impl Into<String>) -> Self {
-        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], switches: vec![], buttons: vec![] }
+        Spec { icon, chip, title: title.into(), sub: sub.into(), hero: None, segs: vec![], spark: vec![], legend: vec![], speed: false, facts: vec![], switches: vec![], limit: None, buttons: vec![] }
     }
 }
 
@@ -164,16 +173,23 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
         }
         Sheet::Battery => {
             let b = &s.battery;
+            let c = &s.charge;
+            // the helper stopped charging (limit or heat)
+            let ours = b.plugged && !b.charging && c.policy.active() && c.helper_ok == Some(true);
             let state = if !b.present {
-                "Power adapter"
+                "Power adapter".to_string()
+            } else if ours && c.status.state.hot {
+                "Paused · battery warm".to_string()
+            } else if ours && c.status.state.held {
+                format!("Held at {}% limit", c.policy.limit)
             } else if b.full || (b.plugged && b.percent >= 100) {
-                "Fully charged"
+                "Fully charged".into()
             } else if b.charging {
-                "Charging"
+                "Charging".into()
             } else if b.plugged {
-                "Not charging · on adapter"
+                "Not charging · on adapter".into()
             } else {
-                "On battery"
+                "On battery".into()
             };
             let mut sp = Spec::new(Icon::Battery(b.percent), tint::HEALTH(), "Battery", state);
             if !b.present {
@@ -201,7 +217,11 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
                 Some(t) => sp.facts.push(fact("Temperature", format!("{t:.0} °C"), if t < 35.0 { TEXT() } else { AMBER() }, if t < 35.0 { "Within the normal range." } else { "Warmer than ideal." })),
                 None => sp.facts.push(fact("Temperature", "—", TEXT(), "Not reported")),
             }
-            let time = if b.charging {
+            let time = if ours && c.status.state.hot {
+                Some((format!("Over {:.0} °C", charge::HEAT_C), ""))
+            } else if ours && c.status.state.held {
+                Some((format!("{}% limit", c.policy.limit), ""))
+            } else if b.charging {
                 b.minutes_left.map(|m| (format!("{} until full", human_duration(m as u64 * 60)), ""))
             } else if !b.plugged {
                 b.minutes_left.map(|m| (format!("About {} left", human_duration(m as u64 * 60)), ""))
@@ -212,6 +232,14 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             };
             if let Some((v, h)) = time {
                 sp.facts.push(fact(if b.plugged && !b.charging { "Why not charging" } else { "Time" }, v, TEXT(), h));
+            }
+            sp.limit = Some(charge::LIMITS.iter().position(|l| *l == c.policy.limit).unwrap_or(0));
+            if c.policy.active() {
+                sp.switches.push(("Sailing", format!("Resume below {}%", c.policy.resume_below()), c.policy.sailing, Action::ToggleSailing));
+                sp.switches.push(("Heat protection", format!("Pause at {:.0} °C", charge::HEAT_C), c.policy.heat, Action::ToggleHeat));
+            }
+            if c.needs_helper() || c.installing {
+                sp.buttons = vec![("Install helper", BTN_PRIMARY, Action::InstallHelper)];
             }
             sp
         }
@@ -283,14 +311,14 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
 /// Draw one sheet into `rect` and report what was clicked.
 /// A button whose work is already running.
 fn busy(act: Action, s: &Snapshot) -> bool {
-    (act == Action::SpeedTest && s.speed.running) || (act == Action::MeasureFolders && s.sizing)
+    (act == Action::SpeedTest && s.speed.running) || (act == Action::MeasureFolders && s.sizing) || (act == Action::InstallHelper && s.charge.installing)
 }
 
 fn busy_label(act: Action) -> &'static str {
-    if act == Action::MeasureFolders {
-        "Measuring…"
-    } else {
-        "Testing…"
+    match act {
+        Action::MeasureFolders => "Measuring…",
+        Action::InstallHelper => "Installing…",
+        _ => "Testing…",
     }
 }
 
@@ -481,21 +509,42 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
 
 const SWITCH_ROW_H: f32 = 48.0;
 
-/// Height of the switches card plus the gap above it (0 without switches).
-fn switches_h(sp: &Spec) -> f32 {
-    if sp.switches.is_empty() { 0.0 } else { 14.0 + 8.0 + sp.switches.len() as f32 * SWITCH_ROW_H }
+/// Rows in the switches card (the charge limit row counts as one).
+fn switch_rows(sp: &Spec) -> usize {
+    sp.switches.len() + sp.limit.is_some() as usize
 }
 
-/// The on/off rows of a sheet in one card starting at `y`.
+/// Height of the switches card plus the gap above it (0 without switches).
+fn switches_h(sp: &Spec) -> f32 {
+    let n = switch_rows(sp);
+    if n == 0 { 0.0 } else { 14.0 + 8.0 + n as f32 * SWITCH_ROW_H }
+}
+
+/// The on/off rows of a sheet in one card starting at `y`, under the
+/// charge limit row when there is one.
 fn switches(ui: &mut Ui, sp: &Spec, x0: f32, w: f32, y: f32) -> Action {
-    if sp.switches.is_empty() {
+    let n = switch_rows(sp);
+    if n == 0 {
         return Action::None;
     }
     let p = ui.painter().clone();
-    let card = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 8.0 + sp.switches.len() as f32 * SWITCH_ROW_H));
+    let card = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, 8.0 + n as f32 * SWITCH_ROW_H));
     glass_card(&p, card, R_CARD, 0.0, false);
     let mut action = Action::None;
+    let first = sp.limit.is_some() as usize;
+    if let Some(sel) = sp.limit {
+        let rr = Rect::from_min_size(Pos2::new(x0, y + 4.0), Vec2::new(w, SWITCH_ROW_H));
+        let sw = (w * 0.55).clamp(160.0, 240.0);
+        let sr = Rect::from_min_size(Pos2::new(rr.right() - 12.0 - sw, rr.center().y - 13.0), Vec2::new(sw, 26.0));
+        let labels: Vec<String> = charge::LIMITS.iter().map(|l| if *l >= 100 { "Off".to_string() } else { format!("{l}%") }).collect();
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+        if let Some(i) = segmented(ui, sr, ui.scope_id().with("charge-limit"), &labels, sel) {
+            action = Action::SetLimit(charge::LIMITS[i]);
+        }
+        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y), Align2::LEFT_CENTER, "Charge limit", font(13.0), TEXT(), sr.left() - rr.left() - 24.0);
+    }
     for (k, (label, hint, on, act)) in sp.switches.iter().enumerate() {
+        let k = k + first;
         let rr = Rect::from_min_size(Pos2::new(x0, y + 4.0 + k as f32 * SWITCH_ROW_H), Vec2::new(w, SWITCH_ROW_H));
         if k > 0 {
             hairline(&p, Pos2::new(rr.left() + 12.0, rr.top()), Pos2::new(rr.right() - 12.0, rr.top()));

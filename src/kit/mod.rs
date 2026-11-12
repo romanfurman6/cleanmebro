@@ -5,10 +5,12 @@
 pub mod activity;
 pub mod ai;
 pub mod brand;
+pub mod charge;
 pub mod claude_code;
 pub mod fs;
 pub mod fswatch;
 pub mod glass;
+pub mod helper;
 pub mod hotkeys;
 pub mod login;
 pub mod macos;

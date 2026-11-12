@@ -76,7 +76,7 @@ pub fn report() {
     if let Some(smc) = mac::Smc::open() {
         println!("Control keys:");
         let n = r.fans.len().max(1);
-        let mut keys = vec!["Ftst".to_string()];
+        let mut keys = vec!["Ftst".to_string(), "CHTE".into(), "CH0B".into(), "CH0C".into()];
         for i in 0..n {
             for k in ["Md", "md", "Tg", "Dc"] {
                 keys.push(format!("F{i}{k}"));
@@ -84,7 +84,7 @@ pub fn report() {
         }
         for k in keys {
             match smc.info_of(&k) {
-                Some((size, kind)) => println!("  {k:<5} {kind} ({size} B) = {:?}", smc.read(&k)),
+                Some((size, kind)) => println!("  {k:<5} {kind} ({size} B) = {:?} {:02x?}", smc.read(&k), smc.read_bytes(&k).unwrap_or_default()),
                 None => println!("  {k:<5} -"),
             }
         }
@@ -96,6 +96,29 @@ pub fn report() {
     println!("SMC temperature keys: {}", r.smc_temps.len());
     for s in &r.smc_temps {
         println!("  {:<6} {:>6.1} °C  {:?}", s.name, s.celsius, s.group);
+    }
+}
+
+/// The bytes that switch charging off (`inhibit`) or back on, per key.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn charge_bytes(key: &str, inhibit: bool) -> Option<Vec<u8>> {
+    match key {
+        "CHTE" => Some(if inhibit { vec![1, 0, 0, 0] } else { vec![0; 4] }),
+        "CH0B" | "CH0C" => Some(vec![if inhibit { 2 } else { 0 }]),
+        _ => None,
+    }
+}
+
+/// Which charging keys to use, given each key's size on this Mac (`None`
+/// = missing). `CHTE` wins: where it exists the older keys do nothing.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn charge_keys(size_of: impl Fn(&str) -> Option<usize>) -> Option<Vec<&'static str>> {
+    let fits = |k: &str| size_of(k).is_some_and(|n| charge_bytes(k, false).is_some_and(|b| b.len() == n));
+    if fits("CHTE") {
+        Some(vec!["CHTE"])
+    } else {
+        let keys: Vec<&'static str> = ["CH0B", "CH0C"].into_iter().filter(|k| fits(k)).collect();
+        (!keys.is_empty()).then_some(keys)
     }
 }
 
@@ -305,9 +328,29 @@ pub(super) mod mac {
         pub fn write(&self, key: &str, v: f32) -> bool {
             let Some(info) = self.info(key) else { return false };
             let Some(b) = encode(info.kind, v, info.size as usize) else { return false };
+            self.write_raw(key, info, &b)
+        }
+
+        /// Write raw bytes to a key; they must be exactly the key's size.
+        /// Needs root.
+        pub fn write_bytes(&self, key: &str, b: &[u8]) -> bool {
+            self.info(key).is_some_and(|info| self.write_raw(key, info, b))
+        }
+
+        fn write_raw(&self, key: &str, info: KeyInfo, b: &[u8]) -> bool {
+            if b.len() != info.size as usize {
+                return false;
+            }
             let mut input = KeyData { key: fourcc(key), info, data8: CMD_WRITE_BYTES, ..Default::default() };
-            input.bytes[..b.len()].copy_from_slice(&b);
+            input.bytes[..b.len()].copy_from_slice(b);
             self.call(&input).is_some()
+        }
+
+        /// A key's raw bytes.
+        pub fn read_bytes(&self, key: &str) -> Option<Vec<u8>> {
+            let info = self.info(key)?;
+            let out = self.call(&KeyData { key: fourcc(key), info, data8: CMD_READ_BYTES, ..Default::default() })?;
+            Some(out.bytes[..info.size as usize].to_vec())
         }
 
         pub fn read_with(&self, key: &str, info: KeyInfo) -> Option<f32> {
@@ -411,6 +454,38 @@ pub(super) mod mac {
         }
     }
 
+    /// Turns battery charging off and on through the SMC (root only). Newer
+    /// firmware has one key, `CHTE`; older Apple silicon firmware two,
+    /// `CH0B` and `CH0C`.
+    pub struct Charger {
+        smc: Smc,
+        keys: Vec<&'static str>,
+    }
+
+    impl Charger {
+        pub fn open() -> Option<Charger> {
+            let smc = Smc::open()?;
+            let keys = super::charge_keys(|k| smc.info(k).map(|i| i.size as usize))?;
+            Some(Charger { smc, keys })
+        }
+
+        /// Switch charging off (`inhibit`) or back on. True if every key took it.
+        pub fn set(&self, inhibit: bool) -> bool {
+            let mut ok = true;
+            for k in &self.keys {
+                ok &= super::charge_bytes(k, inhibit).is_some_and(|b| self.smc.write_bytes(k, &b));
+            }
+            ok
+        }
+
+        /// Charging is switched off now.
+        pub fn inhibited(&self) -> Option<bool> {
+            let k = self.keys.first()?;
+            let b = self.smc.read_bytes(k)?;
+            Some(Some(b) != super::charge_bytes(k, false))
+        }
+    }
+
     impl Drop for Smc {
         fn drop(&mut self) {
             unsafe {
@@ -493,7 +568,22 @@ pub(super) mod mac {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, encode, fourcc};
+    use super::{charge_bytes, charge_keys, decode, encode, fourcc};
+
+    #[test]
+    fn picks_charging_keys() {
+        let mac = |have: &'static [(&'static str, usize)]| move |k: &str| have.iter().find(|h| h.0 == k).map(|h| h.1);
+        assert_eq!(charge_keys(mac(&[("CHTE", 4), ("CH0B", 1), ("CH0C", 1)])), Some(vec!["CHTE"]));
+        assert_eq!(charge_keys(mac(&[("CH0B", 1), ("CH0C", 1)])), Some(vec!["CH0B", "CH0C"]));
+        assert_eq!(charge_keys(mac(&[("CH0B", 1)])), Some(vec!["CH0B"]));
+        // a key of an unexpected size is never written
+        assert_eq!(charge_keys(mac(&[("CHTE", 2), ("CH0B", 1)])), Some(vec!["CH0B"]));
+        assert_eq!(charge_keys(mac(&[("CHTE", 2)])), None);
+        assert_eq!(charge_keys(mac(&[])), None);
+        assert_eq!(charge_bytes("CHTE", true), Some(vec![1, 0, 0, 0]));
+        assert_eq!(charge_bytes("CH0C", false), Some(vec![0]));
+        assert_eq!(charge_bytes("F0Md", true), None);
+    }
 
     #[test]
     fn encodes_smc_types() {

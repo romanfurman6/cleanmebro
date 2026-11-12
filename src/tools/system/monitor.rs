@@ -49,6 +49,7 @@ pub struct Battery {
 }
 
 pub use super::devices::Device;
+use crate::kit::charge;
 use super::devices;
 
 #[derive(Clone, Debug, Default)]
@@ -136,6 +137,8 @@ pub struct Snapshot {
     /// Device alert and menu bar settings (changed from the Devices sheet).
     pub bt_prefs: devices::Prefs,
     pub speed: SpeedTest,
+    /// Charge limit (held by the fan helper).
+    pub charge: charge::View,
 }
 
 impl Snapshot {
@@ -201,6 +204,57 @@ impl Snapshot {
 pub type Shared = Arc<Mutex<Snapshot>>;
 
 /// Change the device alert / menu bar settings and save them.
+/// Change the charge policy, save it and hand it to the helper.
+pub fn change_charge(mon: &Shared, ctx: &egui::Context, f: impl FnOnce(&mut charge::Policy)) {
+    let p = {
+        let mut s = mon.lock_ok();
+        f(&mut s.charge.policy);
+        s.charge.policy = s.charge.policy.sanitize();
+        s.charge.policy
+    };
+    charge::save(&p);
+    let (mon, ctx) = (mon.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        sync_charge(&mon, &p);
+        ctx.request_repaint();
+    });
+}
+
+/// Install (or update) the helper from the Battery sheet, then hand it the policy.
+pub fn install_charge_helper(mon: &Shared, ctx: &egui::Context) {
+    {
+        let mut s = mon.lock_ok();
+        if s.charge.installing {
+            return;
+        }
+        s.charge.installing = true;
+    }
+    let (mon, ctx) = (mon.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        let _ = crate::kit::helper::install();
+        let p = {
+            let mut s = mon.lock_ok();
+            s.charge.installing = false;
+            s.charge.policy
+        };
+        sync_charge(&mon, &p);
+        ctx.request_repaint();
+    });
+}
+
+/// Send the policy to the helper and keep what it answers.
+fn sync_charge(mon: &Shared, p: &charge::Policy) {
+    let r = charge::send(p);
+    let mut s = mon.lock_ok();
+    match r {
+        Some(Some(st)) => {
+            s.charge.helper_ok = Some(true);
+            s.charge.status = st;
+        }
+        _ => s.charge.helper_ok = Some(false),
+    }
+}
+
 pub fn change_bt_prefs(mon: &Shared, f: impl FnOnce(&mut devices::Prefs)) {
     let prefs = {
         let mut s = mon.lock_ok();
@@ -211,7 +265,9 @@ pub fn change_bt_prefs(mon: &Shared, f: impl FnOnce(&mut devices::Prefs)) {
 }
 
 pub fn start(ctx: egui::Context, demo: bool) -> Shared {
-    let shared: Shared = Arc::new(Mutex::new(Snapshot { bt_prefs: devices::Prefs::load(), ..Snapshot::default() }));
+    let policy = if demo { charge::Policy::default() } else { charge::load() };
+    let charge = charge::View { policy, ..Default::default() };
+    let shared: Shared = Arc::new(Mutex::new(Snapshot { bt_prefs: devices::Prefs::load(), charge, ..Snapshot::default() }));
     let s = shared.clone();
     std::thread::Builder::new()
         .name("monitor".into())
@@ -312,7 +368,7 @@ pub fn measure_folders(shared: Shared, ctx: egui::Context) {
     });
 }
 
-fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
+fn run(shared: Shared, ctx: egui::Context, demo: bool) {
     let mut sys = sysinfo::System::new();
     let mut nets = sysinfo::Networks::new_with_refreshed_list();
     let mut last_ticks = cpu_ticks();
@@ -360,7 +416,14 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
         let thermal = crate::kit::native::thermal_state();
         let uptime = sysinfo::System::uptime();
 
-        let battery = BATTERY_EVERY.due(&mut battery_at).then(|| {
+        let battery_due = BATTERY_EVERY.due(&mut battery_at);
+        // keep the helper's charge state fresh (and hand it the policy
+        // again, in case it was reinstalled)
+        let policy = shared.lock_ok().charge.policy;
+        if battery_due && !demo && policy.active() {
+            sync_charge(&shared, &policy);
+        }
+        let battery = battery_due.then(|| {
             let mut b = parse_battery(&run_cmd("ioreg", &["-rn", "AppleSmartBattery"]));
             if b.present {
                 if health_text.is_empty() || health_at.due(BATTERY_HEALTH_EVERY) {
@@ -947,6 +1010,12 @@ pub fn demo_snapshot() -> Snapshot {
         devices: devices::demo(),
         bt_prefs: devices::Prefs::default(),
         speed: SpeedTest::default(),
+        charge: charge::View {
+            policy: charge::Policy { limit: 80, ..Default::default() },
+            helper_ok: Some(true),
+            status: charge::Status { supported: true, policy: None, state: charge::State { held: true, hot: false } },
+            installing: false,
+        },
     }
 }
 
