@@ -55,6 +55,9 @@ pub struct Settings {
     pub keep_history: bool,
     /// Hands-free: stop after this many quiet seconds; 0 never.
     pub silence_secs: u32,
+    /// The person's own words (names, brands): what sounds like one of
+    /// them is written their way.
+    pub words: Vec<String>,
     /// Settings format; 1 moved the old default ⌥Space to ⌥D. Missing in
     /// a file means 0, not today's.
     #[serde(default)]
@@ -69,7 +72,21 @@ fn old_default() -> Shortcut {
 /// The choices for [`Settings::silence_secs`].
 pub const SILENCE_CHOICES: [u32; 4] = [0, 3, 5, 10];
 
+/// Most words in the list.
+pub const WORDS_MAX: usize = 200;
+
 impl Settings {
+    /// Add `w` (trimmed) unless it's empty, too long or already there
+    /// (any case). Returns whether it was added.
+    pub fn add_word(&mut self, w: &str) -> bool {
+        let w = w.split_whitespace().collect::<Vec<_>>().join(" ");
+        if w.is_empty() || w.chars().count() > 40 || self.words.len() >= WORDS_MAX || self.words.iter().any(|x| x.to_lowercase() == w.to_lowercase()) {
+            return false;
+        }
+        self.words.push(w);
+        true
+    }
+
     pub fn stop_after_silence(&self) -> Option<std::time::Duration> {
         (self.silence_secs > 0).then(|| std::time::Duration::from_secs(self.silence_secs as u64))
     }
@@ -81,7 +98,7 @@ pub fn default_shortcut() -> Shortcut {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, restore_clipboard: true, keep_history: true, silence_secs: 5, version: VERSION }
+        Settings { shortcut: Some(default_shortcut()), engine: Engine::Parakeet, restore_clipboard: true, keep_history: true, silence_secs: 5, words: Vec::new(), version: VERSION }
     }
 }
 
@@ -173,6 +190,16 @@ mod tests {
         let mine = Shortcut { cmd: true, shift: true, alt: false, ctrl: false, key: "D".into() };
         let s = upgrade(Settings { shortcut: Some(mine.clone()), version: 0, ..Settings::default() });
         assert_eq!(s.shortcut, Some(mine));
+    }
+
+    #[test]
+    fn words_are_added_once_and_tidy() {
+        let mut s = Settings::default();
+        assert!(s.add_word("  Cmd   Meow "));
+        assert!(!s.add_word("cmd meow"));
+        assert!(!s.add_word("   "));
+        assert!(!s.add_word(&"x".repeat(41)));
+        assert_eq!(s.words, vec!["Cmd Meow".to_string()]);
     }
 
     #[test]

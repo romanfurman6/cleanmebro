@@ -58,24 +58,13 @@ pub fn probe(a: &[String]) -> Result<(), String> {
         return Err("Nothing heard (silent input; for the mic, check the Microphone permission)".into());
     }
     let t = Instant::now();
-    let text = match engine {
-        Engine::Parakeet => {
-            let m = crate::kit::parakeet::Loaded::load()?;
-            eprintln!("[dictation] loaded {} in {:?}", engine.name(), t.elapsed());
-            let t = Instant::now();
-            let text = audio::tidy_text(&[m.run(&pcm)?]);
-            eprintln!("[dictation] ran in {:?}", t.elapsed());
-            text
-        }
-        Engine::Whisper => {
-            let m = crate::kit::whisper::Loaded::load(crate::kit::whisper::Model::Accurate)?;
-            eprintln!("[dictation] loaded {} in {:?}", engine.name(), t.elapsed());
-            let t = Instant::now();
-            let segs = m.run(&pcm, lang, None)?;
-            eprintln!("[dictation] ran in {:?}", t.elapsed());
-            audio::tidy_text(&segs.into_iter().map(|s| s.2).collect::<Vec<_>>())
-        }
-    };
+    let m = super::Loaded::load(engine)?;
+    eprintln!("[dictation] loaded {} in {:?}", engine.name(), t.elapsed());
+    let t = Instant::now();
+    let keep = super::cut::trim(&pcm, MODEL_RATE);
+    eprintln!("[dictation] kept {:.2}–{:.2} s, {} piece(s)", keep.start as f32 / MODEL_RATE as f32, keep.end as f32 / MODEL_RATE as f32, super::cut::split(&pcm[keep.clone()], MODEL_RATE).len());
+    let text = m.run(&pcm[keep], lang)?;
+    eprintln!("[dictation] ran in {:?}", t.elapsed());
     if text.is_empty() {
         return Err("Nothing heard".into());
     }
