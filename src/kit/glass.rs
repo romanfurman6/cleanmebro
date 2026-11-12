@@ -1468,6 +1468,8 @@ pub fn text_input(ui: &mut Ui, r: Rect, id: egui::Id, text: &mut String, hint: &
     let right = if clear { r.right() - 26.0 } else { r.right() - 10.0 };
     // exactly one line tall, centred: the caret, the text and the hint share it
     let row_h = ui.ctx().fonts_mut(|f| f.row_height(&fid));
+    // egui grows a TextEdit to interact_size.y downwards; size the row to match so it stays centred
+    let row_h = row_h.max(ui.spacing().interact_size.y);
     let tr = Rect::from_min_max(Pos2::new(left, r.center().y - row_h / 2.0), Pos2::new(right.max(left + 1.0), r.center().y + row_h / 2.0));
     if text.is_empty() {
         let (at, align) = if st.right { (Pos2::new(tr.right() - HINT_GAP, r.center().y), Align2::RIGHT_CENTER) } else { (Pos2::new(tr.left() + HINT_GAP, r.center().y), Align2::LEFT_CENTER) };
