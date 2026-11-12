@@ -5,7 +5,7 @@
 
 use super::super::icons::{self, Ico};
 use super::super::windows::{floating, plain};
-use super::super::{Capture, ID};
+use super::super::Capture;
 use super::sys::{self, Media};
 use super::{timeline, Chosen, Confirm, Phase, Source};
 use crate::core::tool::Cx;
@@ -333,8 +333,8 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
             Do::Use(m, id) => c.rec.use_device(m, id, &mut c.settings.rec),
             Do::Settings => {
                 c.rec.cancel();
-                c.tab = super::super::Tab::Settings;
-                cx.open_page(ID, "settings");
+                c.vtab = super::super::VTab::Settings;
+                cx.open_page(super::super::VIDEO_ID, "settings");
             }
         }
     }

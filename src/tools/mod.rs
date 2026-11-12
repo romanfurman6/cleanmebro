@@ -20,15 +20,17 @@ use crate::core::tool::{Tool, ToolEnv};
 
 /// Every tool, in the order of the window sidebar.
 pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
+    let (shot, video) = capture::tools(env);
     vec![
         Box::new(system::System::new(env)),
         Box::new(cleanup::Cleanup::new(env)),
         Box::new(lens::Lens::new(env)),
         Box::new(uninstaller::Uninstaller::new(env)),
         Box::new(startup::Startup::new(env)),
-        Box::new(capture::Capture::new(env)),
-        Box::new(clipboard::Clipboard::new(env)),
+        Box::new(shot),
+        Box::new(video),
         Box::new(dictation::Dictation::new(env)),
+        Box::new(clipboard::Clipboard::new(env)),
         Box::new(claude::Claude::new(env)),
         Box::new(keep_awake::KeepAwake::new(env)),
         Box::new(fan::FanControl::new(env)),
@@ -41,6 +43,7 @@ pub fn all(env: &ToolEnv) -> Vec<Box<dyn Tool>> {
 pub const DEFAULT_WIDGET_ORDER: &[&str] = &[
     "cleanup/clean",
     "capture/capture",
+    "video/record",
     "keep_awake/card",
     "clipboard/recent",
     "dictation/card",

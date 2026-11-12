@@ -43,7 +43,9 @@ pub fn small(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32,
 /// The two lines at the bottom of a Small widget.
 pub fn small_text(p: &egui::Painter, rect: Rect, title: &str, sub: &str, sub_col: Color32) {
     let w = rect.width() - 2.0 * PAD;
-    text_fit(p, Pos2::new(rect.left() + PAD, rect.bottom() - 26.0), Align2::LEFT_BOTTOM, title, ty::title(), TEXT(), w);
+    // a long name ("Screenshot") steps down a size or two before it's cut
+    let fid = [13.0, 12.0, 11.0].into_iter().map(bold).find(|f| p.layout_no_wrap(title.to_string(), f.clone(), TEXT()).size().x <= w).unwrap_or_else(ty::title);
+    text_fit(p, Pos2::new(rect.left() + PAD, rect.bottom() - 26.0), Align2::LEFT_BOTTOM, title, fid, TEXT(), w);
     let sub_col = if sub_col == TEXT_DIM() { ty::caption_color() } else { sub_col };
     text_fit(p, Pos2::new(rect.left() + PAD, rect.bottom() - 10.0), Align2::LEFT_BOTTOM, sub, ty::caption(), sub_col, w);
 }

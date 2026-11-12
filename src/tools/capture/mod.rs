@@ -18,6 +18,7 @@ pub mod record;
 mod render;
 mod settings;
 mod store;
+mod tools;
 mod ui;
 pub mod share;
 pub mod video;
@@ -38,6 +39,11 @@ use store::{Kind, Store};
 
 pub const ID: ToolId = "capture";
 const CARD: &str = "capture";
+/// The Video tool's id and its widget: recording lives in the same state
+/// as screenshots (one engine, one settings file), shown as its own tool.
+pub const VIDEO_ID: ToolId = "video";
+const VIDEO_CARD: &str = "record";
+pub use tools::tools;
 
 /// What a grab is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +87,13 @@ enum Done {
 pub enum Tab {
     History,
     Folder,
+    Settings,
+}
+
+/// The Video page's tabs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VTab {
+    Recordings,
     Settings,
 }
 
@@ -141,6 +154,10 @@ pub struct Capture {
     files_at: Option<Instant>,
     files_busy: bool,
     tab: Tab,
+    vtab: VTab,
+    /// Which of the two tools are on: Screenshot (`shot_on`) and Video.
+    shot_on: bool,
+    video_on: bool,
     /// Recording a new shortcut for this command.
     recording: Option<Command>,
     filter: usize,
@@ -200,6 +217,9 @@ impl Capture {
             files_at: None,
             files_busy: false,
             tab: Tab::History,
+            vtab: VTab::Recordings,
+            shot_on: true,
+            video_on: true,
             recording: None,
             filter: 0,
             confirm_clear: None,
@@ -226,8 +246,52 @@ impl Capture {
 
     /// Register the shortcuts from settings (not while one is being recorded).
     fn apply_keys(&mut self) {
+        let (shot, video) = (self.shot_on, self.video_on);
         if let Some(k) = &mut self.keys {
-            self.key_errors = k.apply(&self.settings.bound());
+            // only the keys of the tools that are on
+            let bound: Vec<_> = self.settings.bound().into_iter().filter(|(c, _)| if *c == Command::Record { video } else { shot }).collect();
+            self.key_errors = k.apply(&bound);
+        }
+    }
+
+    /// Turn Screenshot and/or Video on or off. Both off is the old "off";
+    /// one of them off drops its keys and closes what belongs to it.
+    fn set_parts(&mut self, shot: Option<bool>, video: Option<bool>) {
+        let was = self.shot_on || self.video_on;
+        if let Some(v) = shot {
+            self.shot_on = v;
+        }
+        if let Some(v) = video {
+            self.video_on = v;
+        }
+        let any = self.shot_on || self.video_on;
+        if !any {
+            Tool::set_on(self, false);
+            return;
+        }
+        if !was {
+            Tool::set_on(self, true);
+        }
+        if shot == Some(false) {
+            self.queue.retain(|(c, _)| *c == Command::Record);
+            self.countdown = None;
+            self.preview = None;
+            self.pins.clear();
+            self.overlay = None;
+            if let Some(mut ew) = self.editor.take() {
+                self.commit_edit(&mut ew.ed);
+            }
+        }
+        if video == Some(false) {
+            self.queue.retain(|(c, _)| *c != Command::Record);
+            if self.rec.live().is_some() {
+                self.rec.stop();
+            } else if !matches!(self.rec.phase, record::Phase::Saving | record::Phase::Rendering(_)) {
+                self.rec.cancel();
+            }
+        }
+        if self.recording.is_none() {
+            self.apply_keys();
         }
     }
 
