@@ -137,6 +137,8 @@ pub mod tint {
     #[allow(non_snake_case)]
     pub fn FAN() -> Color32 { HEALTH() }
     #[allow(non_snake_case)]
+    pub fn DISPLAYS() -> Color32 { HEALTH() }
+    #[allow(non_snake_case)]
     pub fn CAPTURE() -> Color32 { pick(hex(0xF7B267), hex(0xC06A12)) }
     #[allow(non_snake_case)]
     pub fn KEEP_AWAKE() -> Color32 { pick(hex(0xE8E1FF), hex(0x6A5AC8)) }
@@ -884,6 +886,11 @@ pub enum Icon {
     AppRemove,
     /// A file.
     Doc,
+    /// An external monitor.
+    Display,
+    Sun,
+    Speaker,
+    SpeakerOff,
 }
 
 /// The SF Symbol behind each icon (outline variants: icons are monochrome strokes).
@@ -909,6 +916,10 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Trash => "trash",
         Icon::Folder => "folder",
         Icon::Doc => "doc",
+        Icon::Display => "display",
+        Icon::Sun => "sun.max",
+        Icon::Speaker => "speaker.wave.2",
+        Icon::SpeakerOff => "speaker.slash",
         Icon::Lens => "magnifyingglass",
         Icon::Laptop => "laptopcomputer",
         Icon::Heart => "heart",
@@ -1260,6 +1271,29 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             arc(12.0, 10.0, 5.0, std::f32::consts::PI, std::f32::consts::TAU);
             open(&[(17.0, 10.0), (17.0, 15.0), (19.0, 17.0), (5.0, 17.0)]);
             open(&[(10.0, 20.0), (14.0, 20.0)]);
+        }
+        Icon::Display => {
+            boxr(3.0, 4.0, 21.0, 16.0, 1.5);
+            open(&[(12.0, 16.0), (12.0, 20.0)]);
+            open(&[(8.0, 20.0), (16.0, 20.0)]);
+        }
+        Icon::Sun => {
+            p.circle_stroke(pt(12.0, 12.0), 4.0 * u, st);
+            for k in 0..8 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                let (dx, dy) = (a.cos(), a.sin());
+                open(&[(12.0 + dx * 7.0, 12.0 + dy * 7.0), (12.0 + dx * 9.5, 12.0 + dy * 9.5)]);
+            }
+        }
+        Icon::Speaker | Icon::SpeakerOff => {
+            closed(&[(3.0, 9.0), (7.0, 9.0), (12.0, 5.0), (12.0, 19.0), (7.0, 15.0), (3.0, 15.0)]);
+            if icon == Icon::Speaker {
+                arc(13.0, 12.0, 4.0, -0.9, 0.9);
+                arc(13.0, 12.0, 7.5, -0.9, 0.9);
+            } else {
+                open(&[(15.0, 9.0), (21.0, 15.0)]);
+                open(&[(21.0, 9.0), (15.0, 15.0)]);
+            }
         }
     }
 }
