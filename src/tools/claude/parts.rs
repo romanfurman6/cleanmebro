@@ -1,0 +1,252 @@
+//! Pieces the AI usage page, card and sheet share: colours, pace marks,
+//! money and freshness labels, and the interactive day chart.
+
+use crate::kit::ai::{alerts, pace, Day, Limit, UsageInfo};
+use crate::kit::glass::*;
+use egui::{Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
+
+/// Bar colour for a usage percentage: the tool's tint, amber from 70%,
+/// red from 90%.
+pub fn usage_color(pct: f32) -> Color32 {
+    if pct >= 90.0 {
+        RED()
+    } else if pct >= 70.0 {
+        AMBER()
+    } else {
+        CLAUDE()
+    }
+}
+
+pub fn now() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+/// Colour of a limit: red when ahead of pace or nearly full.
+pub fn limit_color(l: &Limit) -> Color32 {
+    match pace::of_limit(l, now()) {
+        Some(p) if p.state == pace::State::Ahead && l.pct >= 20.0 => RED(),
+        _ => usage_color(l.pct),
+    }
+}
+
+/// "Ahead of pace" / "On pace" / "Room to spare", with its colour.
+pub fn pace_label(l: &Limit) -> Option<(&'static str, Color32)> {
+    let p = pace::of_limit(l, now())?;
+    Some(match p.state {
+        pace::State::Ahead => ("Ahead of pace", RED()),
+        pace::State::OnPace => ("On pace", TEXT()),
+        pace::State::Room => ("Room to spare", GREEN()),
+    })
+}
+
+/// "Out Sat 14:00" when the current rate runs out before the reset, else
+/// when it resets.
+pub fn forecast(l: &Limit) -> String {
+    let now = now();
+    match pace::of_limit(l, now).and_then(|p| p.out_at) {
+        Some(at) => format!("Out {}", alerts::when(at, now)),
+        None => l.resets_at.map(|r| format!("Resets {}", alerts::when(r, now))).unwrap_or_else(|| reset_short(&l.resets)),
+    }
+}
+
+/// "21:10" / "Mon 05:00": when a limit resets.
+pub fn reset_when(l: &Limit) -> String {
+    l.resets_at.map(|r| alerts::when(r, now())).unwrap_or_else(|| l.resets.split(" (").next().unwrap_or("").to_string())
+}
+
+fn reset_short(s: &str) -> String {
+    let s = s.split(" (").next().unwrap_or(s);
+    if s.is_empty() { String::new() } else { format!("Resets {s}") }
+}
+
+/// A ring with a tick where even use would be by now.
+pub fn pace_ring(p: &egui::Painter, c: Pos2, r: f32, w: f32, l: &Limit) {
+    crate::kit::tile::ring(p, c, r, w, l.pct / 100.0, limit_color(l));
+    if let Some(pc) = pace::of_limit(l, now()) {
+        let a = -std::f32::consts::FRAC_PI_2 + pc.expected / 100.0 * std::f32::consts::TAU;
+        let d = Vec2::angled(a);
+        p.line_segment([c + d * (r - w / 2.0 - 2.0), c + d * (r + w / 2.0 + 2.0)], Stroke::new(2.0, TEXT()));
+    }
+}
+
+/// A thin bar with the even-use tick.
+pub fn pace_bar(p: &egui::Painter, r: Rect, l: &Limit) {
+    bar(p, r, (l.pct / 100.0).max(0.01), limit_color(l));
+    if let Some(pc) = pace::of_limit(l, now()) {
+        let x = r.left() + r.width() * pc.expected / 100.0;
+        p.line_segment([Pos2::new(x, r.top() - 3.0), Pos2::new(x, r.bottom() + 3.0)], Stroke::new(1.5, TEXT()));
+    }
+}
+
+/// "$38.40", "$664".
+pub fn usd(v: f64) -> String {
+    if v >= 100.0 { format!("${v:.0}") } else { format!("${v:.2}") }
+}
+
+/// "Live · 14:20" (green), "As of 13:52" (amber, the last check failed),
+/// or "14:20" for a CLI or local read.
+pub fn fresh(i: &UsageInfo) -> (String, Color32) {
+    let Some(f) = i.fetched else { return (String::new(), TEXT_FAINT()) };
+    let t = f.format("%H:%M");
+    if i.stale {
+        (format!("As of {t}"), AMBER())
+    } else if i.source == "Live" {
+        (format!("Live · {t}"), GREEN())
+    } else if i.source.is_empty() {
+        (t.to_string(), TEXT_FAINT())
+    } else {
+        (format!("{} · {t}", i.source), TEXT_FAINT())
+    }
+}
+
+/// A small chip for an outage: "Degraded" (amber) or "Outage" (red).
+pub fn incident_chip(p: &egui::Painter, pos: Pos2, align: Align2, i: &UsageInfo) -> Option<Rect> {
+    let s = i.incident.as_deref()?;
+    let c = if s == "Outage" { RED() } else { AMBER() };
+    Some(chip(p, pos, align, s, (with_alpha(c, 0.16), c)))
+}
+
+/// What the chart shows per day.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Measure {
+    Tokens,
+    Usd,
+}
+
+/// Bars per day with a hover readout above them: date, $, tokens and
+/// requests of the day under the pointer (today when none). `pace` draws a
+/// dashed line at that many dollars a day (a budget's even share).
+pub fn day_chart(ui: &mut Ui, r: Rect, days: &[Day], m: Measure, pace: Option<f64>, salt: &str) {
+    let p = ui.painter().clone();
+    if days.is_empty() {
+        return;
+    }
+    let head = 18.0;
+    let foot = 16.0;
+    let plot = Rect::from_min_max(Pos2::new(r.left(), r.top() + head + sp::S), Pos2::new(r.right(), r.bottom() - foot));
+    let val = |d: &Day| match m {
+        Measure::Tokens => d.tokens as f64,
+        Measure::Usd => d.usd,
+    };
+    let top = days.iter().map(val).fold(pace.unwrap_or(0.0), f64::max).max(1e-9);
+    let n = days.len() as f32;
+    let gap = if n > 14.0 { 3.0 } else { 6.0 };
+    let bw = ((plot.width() - gap * (n - 1.0)) / n).max(1.0);
+    let resp = ui.interact(plot.expand2(Vec2::new(0.0, head)), ui.scope_id().with(("ai-chart", salt)), Sense::hover());
+    let hover = resp.hover_pos().map(|q| (((q.x - plot.left()) / (bw + gap)) as usize).min(days.len() - 1));
+    let sel = hover.unwrap_or(days.len() - 1);
+    for (i, d) in days.iter().enumerate() {
+        let h = (plot.height() * (val(d) / top) as f32).max(2.0);
+        let x = plot.left() + i as f32 * (bw + gap);
+        let br = Rect::from_min_max(Pos2::new(x, plot.bottom() - h), Pos2::new(x + bw, plot.bottom()));
+        let over = pace.is_some_and(|pc| val(d) > pc);
+        let col = if i == sel {
+            CLAUDE()
+        } else if over {
+            with_alpha(RED(), 0.55)
+        } else {
+            with_alpha(CLAUDE(), 0.28)
+        };
+        p.rect_filled(br, 2.0, col);
+    }
+    if let Some(pc) = pace {
+        let y = plot.bottom() - plot.height() * (pc / top) as f32;
+        p.extend(Shape::dashed_line(&[Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)], Stroke::new(1.0, TEXT_DIM()), 4.0, 3.0));
+    }
+    // readout
+    let d = &days[sel];
+    let today = days.last().map(|l| l.date) == Some(d.date);
+    let date = if today { "Today".to_string() } else { d.date.format("%a %b %-d").to_string() };
+    let mut x = r.left();
+    for (s, f, c) in [
+        (date, ty::title(), TEXT()),
+        (usd(d.usd), ty::title(), TEXT()),
+        (format!("{} tok", crate::kit::ai::human_tokens(d.tokens)), ty::label(), TEXT_DIM()),
+        (if d.requests > 0 { format!("{} req", d.requests) } else { String::new() }, ty::label(), TEXT_DIM()),
+    ] {
+        if s.is_empty() {
+            continue;
+        }
+        let w = text_fit(&p, Pos2::new(x, r.top() + head / 2.0), Align2::LEFT_CENTER, &s, f, c, (r.right() - x).max(0.0)).width();
+        x += w + sp::M;
+    }
+    // first and last day under the bars
+    let lab = |d: &Day| d.date.format("%b %-d").to_string();
+    p.text(Pos2::new(plot.left(), r.bottom()), Align2::LEFT_BOTTOM, lab(&days[0]), ty::caption(), ty::caption_color());
+    p.text(Pos2::new(plot.right(), r.bottom()), Align2::RIGHT_BOTTOM, "Today", ty::caption(), ty::caption_color());
+}
+
+/// The limit window as a line: use so far, even use (dashed diagonal) and
+/// the forecast to 100% (dashed, red) when it runs out before the reset.
+pub fn limit_chart(ui: &mut Ui, r: Rect, l: &Limit, samples: &[(i64, f32)]) {
+    let p = ui.painter().clone();
+    let (Some(end), true) = (l.resets_at, l.window_secs > 0) else {
+        p.text(r.center(), Align2::CENTER_CENTER, "–", ty::body(), TEXT_FAINT());
+        return;
+    };
+    let start = end - l.window_secs;
+    let now = now();
+    let plot = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top() + sp::S), Pos2::new(r.right(), r.bottom() - 16.0));
+    let at = |t: i64, v: f32| Pos2::new(plot.left() + plot.width() * ((t - start) as f32 / l.window_secs as f32).clamp(0.0, 1.0), plot.bottom() - plot.height() * (v / 100.0).clamp(0.0, 1.0));
+    for v in [25.0, 50.0, 75.0, 100.0] {
+        let y = at(start, v).y;
+        p.line_segment([Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)], Stroke::new(1.0, white(14)));
+        p.text(Pos2::new(plot.left() - 6.0, y), Align2::RIGHT_CENTER, format!("{v:.0}%"), ty::caption(), ty::caption_color());
+    }
+    p.extend(Shape::dashed_line(&[at(start, 0.0), at(end, 100.0)], Stroke::new(1.0, TEXT_DIM()), 4.0, 3.0));
+    let mut pts: Vec<Pos2> = samples.iter().filter(|(t, _)| *t >= start && *t <= now).map(|(t, v)| at(*t, *v)).collect();
+    pts.push(at(now.min(end), l.pct));
+    if pts.len() == 1 {
+        pts.insert(0, at(start, 0.0));
+    }
+    let col = limit_color(l);
+    p.add(Shape::line(pts.clone(), Stroke::new(2.0, col)));
+    let last = *pts.last().unwrap_or(&plot.left_bottom());
+    p.circle_filled(last, 3.5, col);
+    if let Some(out) = pace::of_limit(l, now).and_then(|pc| pc.out_at) {
+        let o = at(out, 100.0);
+        p.extend(Shape::dashed_line(&[last, o], Stroke::new(1.5, RED()), 4.0, 3.0));
+        p.text(o + Vec2::new(0.0, -4.0), Align2::CENTER_BOTTOM, format!("Out {}", alerts::when(out, now)), ty::caption(), RED());
+    }
+    let day = |t: i64| chrono::TimeZone::timestamp_opt(&chrono::Local, t, 0).single().map(|d| d.format(if l.window_secs > 86_400 { "%a" } else { "%H:%M" }).to_string()).unwrap_or_default();
+    p.text(Pos2::new(plot.left(), r.bottom()), Align2::LEFT_BOTTOM, day(start), ty::caption(), ty::caption_color());
+    p.text(Pos2::new(plot.right(), r.bottom()), Align2::RIGHT_BOTTOM, day(end), ty::caption(), ty::caption_color());
+}
+
+/// Rows of name, a bar of its share, tokens and dollars.
+pub fn share_rows(p: &egui::Painter, r: Rect, rows: &[crate::kit::ai::Share], show_usd: bool, home: &str) {
+    let rh = 26.0;
+    let top = rows.iter().map(|s| if show_usd && s.usd > 0.0 { s.usd } else { s.tokens as f64 }).fold(0.0, f64::max).max(1e-9);
+    for (k, s) in rows.iter().enumerate() {
+        let y = r.top() + k as f32 * rh;
+        if y + rh > r.bottom() + 1.0 {
+            break;
+        }
+        let row = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), rh));
+        let right = if show_usd { usd(s.usd) } else { crate::kit::ai::human_tokens(s.tokens) };
+        let vr = p.text(Pos2::new(row.right(), row.center().y - 3.0), Align2::RIGHT_CENTER, right, ty::label(), TEXT());
+        let mut x1 = vr.left() - sp::S;
+        if show_usd {
+            let tr = p.text(Pos2::new(x1, row.center().y - 3.0), Align2::RIGHT_CENTER, crate::kit::ai::human_tokens(s.tokens), ty::label(), TEXT_FAINT());
+            x1 = tr.left() - sp::S;
+        }
+        let name = s.name.replacen(home, "~", 1);
+        text_fit(p, Pos2::new(row.left(), row.center().y - 3.0), Align2::LEFT_CENTER, &name, ty::label(), TEXT_SOFT(), x1 - row.left());
+        let v = if show_usd && s.usd > 0.0 { s.usd } else { s.tokens as f64 };
+        bar(p, Rect::from_min_size(Pos2::new(row.left(), row.bottom() - 6.0), Vec2::new(row.width(), 3.0)), (v / top) as f32, with_alpha(CLAUDE(), 0.7));
+    }
+}
+
+/// Daily token bars, oldest first; the last (today) solid, the rest faded.
+pub fn day_bars(p: &egui::Painter, r: Rect, daily: &[u64], gap: f32) {
+    let maxd = daily.iter().copied().max().unwrap_or(1).max(1) as f32;
+    let n = daily.len().max(1) as f32;
+    let bw = (r.width() - gap * (n - 1.0)) / n;
+    for (i, v) in daily.iter().enumerate() {
+        let h = (r.height() * (*v as f32 / maxd)).max(2.0);
+        let x = r.left() + i as f32 * (bw + gap);
+        let br = Rect::from_min_max(Pos2::new(x, r.bottom() - h), Pos2::new(x + bw, r.bottom()));
+        let last = i + 1 == daily.len();
+        p.rect_filled(br, 2.0, if last { CLAUDE() } else { white(46) });
+    }
+}
