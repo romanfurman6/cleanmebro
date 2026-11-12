@@ -606,14 +606,14 @@ fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect)
     use super::settings::{RecQuality, RECORD_FPS};
     let x0 = col.left();
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Screen recording", bold(15.0), TEXT());
-    let card = card_rows(p, x0, col.top() + 28.0, col.width(), 7);
+    let card = card_rows(p, x0, col.top() + 28.0, col.width(), 10);
     let id = ui.scope_id().with("rec-options");
     let mut s = c.settings.rec.clone();
     let seg = |ui: &mut Ui, k: usize, w: f32, labels: &[&str], cur: usize| {
         let y = row_y(card, k);
         segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - w, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0)), id.with(k), labels, cur)
     };
-    let labels = ["Frame rate", "Quality", "Countdown", "Show the cursor", "Highlight clicks", "When it's saved", "Hide the card after"];
+    let labels = ["Frame rate", "Quality", "Countdown", "Show the cursor", "Cursor size", "Smooth cursor", "Hide the cursor when still", "Highlight clicks", "When it's saved", "Hide the card after"];
     for (k, l) in labels.iter().enumerate() {
         p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT());
     }
@@ -631,20 +631,26 @@ fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect)
     if let Some(i) = seg(ui, 2, 150.0, &["Off", "3 s", "5 s"], cd) {
         s.countdown = [0, 3, 5][i];
     }
-    for (k, on) in [(3usize, s.cursor), (4, s.clicks)] {
+    let look = s.look.cursor;
+    for (k, on) in [(3usize, s.cursor), (5, look.smooth), (6, look.hide_idle), (7, s.clicks)] {
         let y = row_y(card, k);
-        if switch(ui, Rect::from_min_size(Pos2::new(card.right() - 12.0 - 30.0, y - 9.0), Vec2::new(30.0, 18.0)), id.with(("sw", k)), on, true).clicked() {
-            if k == 3 {
-                s.cursor = !s.cursor;
-            } else {
-                s.clicks = !s.clicks;
+        if switch(ui, Rect::from_min_size(Pos2::new(card.right() - 12.0 - 30.0, y - 9.0), Vec2::new(30.0, 18.0)), id.with(("sw", k)), on, k == 3 || s.cursor).clicked() {
+            match k {
+                3 => s.cursor = !s.cursor,
+                5 => s.look.cursor.smooth = !look.smooth,
+                6 => s.look.cursor.hide_idle = !look.hide_idle,
+                _ => s.clicks = !s.clicks,
             }
         }
     }
-    if let Some(i) = seg(ui, 5, 190.0, &["Show a card", "Open editor"], s.open_editor as usize) {
+    let size = CURSOR_SIZES.iter().position(|&v| (v - look.size).abs() < 0.01).unwrap_or(1);
+    if let Some(i) = seg(ui, 4, 150.0, &["1×", "1.5×", "2×"], size) {
+        s.look.cursor.size = CURSOR_SIZES[i];
+    }
+    if let Some(i) = seg(ui, 8, 190.0, &["Show a card", "Open editor"], s.open_editor as usize) {
         s.open_editor = i == 1;
     }
-    if let Some(i) = seg(ui, 6, 200.0, &["5 s", "8 s", "15 s", "Never"], secs_index(s.card_secs, &CARD_SECS)) {
+    if let Some(i) = seg(ui, 9, 200.0, &["5 s", "8 s", "15 s", "Never"], secs_index(s.card_secs, &CARD_SECS)) {
         s.card_secs = CARD_SECS.get(i).copied();
     }
     p.text(Pos2::new(x0, card.bottom() + 10.0), Align2::LEFT_TOP, "", font(12.0), TEXT_FAINT());
@@ -654,6 +660,9 @@ fn recording_options(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect)
     }
     card.bottom() + 30.0
 }
+
+/// Cursor sizes in recordings (times the system size).
+const CURSOR_SIZES: [f32; 3] = [1.0, 1.5, 2.0];
 
 /// "Hide after" choices; past the end means never.
 const PREVIEW_SECS: [u32; 3] = [3, 6, 10];

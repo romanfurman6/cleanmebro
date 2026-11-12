@@ -563,10 +563,11 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
     if closed {
         c.commit_edit(&mut ew.ed);
         let s = &mut c.settings;
-        if (s.blur, s.cover, s.keep_breaks) != (ew.ed.blur, ew.ed.cover, ew.ed.keep_breaks) {
+        if (s.blur, s.cover, s.keep_breaks, s.frame) != (ew.ed.blur, ew.ed.cover, ew.ed.keep_breaks, ew.ed.frame_style) {
             s.blur = ew.ed.blur;
             s.cover = ew.ed.cover;
             s.keep_breaks = ew.ed.keep_breaks;
+            s.frame = ew.ed.frame_style;
             c.save_settings();
         }
     } else {

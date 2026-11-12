@@ -6,6 +6,7 @@
 use super::settings::BlurStyle;
 use egui::{Pos2, Rect, Vec2};
 use image::{Rgba, RgbaImage};
+use serde::{Deserialize, Serialize};
 
 pub type Rgba8 = [u8; 4];
 
@@ -13,6 +14,10 @@ pub type Rgba8 = [u8; 4];
 pub enum Mark {
     Arrow { a: Pos2, b: Pos2, color: Rgba8, width: f32 },
     Rect { r: Rect, color: Rgba8, width: f32 },
+    /// An ellipse outline inside `r`.
+    Ellipse { r: Rect, color: Rgba8, width: f32 },
+    /// A freehand line through `pts`.
+    Pen { pts: Vec<Pos2>, color: Rgba8, width: f32 },
     /// A label: text on a filled rounded box of `color`.
     Text { at: Pos2, text: String, color: Rgba8, size: f32 },
     Highlight { r: Rect, color: Rgba8 },
@@ -27,7 +32,14 @@ impl Mark {
     pub fn bounds(&self) -> Rect {
         match self {
             Mark::Arrow { a, b, width, .. } => Rect::from_two_pos(*a, *b).expand(*width * 2.0),
-            Mark::Rect { r, width, .. } => r.expand(*width / 2.0),
+            Mark::Rect { r, width, .. } | Mark::Ellipse { r, width, .. } => r.expand(*width / 2.0),
+            Mark::Pen { pts, width, .. } => {
+                let mut b = Rect::NOTHING;
+                for q in pts {
+                    b.extend_with(*q);
+                }
+                b.expand(*width / 2.0)
+            }
             Mark::Highlight { r, .. } | Mark::Blur { r, .. } | Mark::Erase { r, .. } => *r,
             Mark::Text { at, text, size, .. } => {
                 let s = label_size(text, *size);
@@ -46,7 +58,69 @@ impl Mark {
                 let inner = r.shrink(width / 2.0 + slack);
                 outer.contains(p) && (!inner.is_positive() || !inner.contains(p))
             }
+            Mark::Ellipse { r, width, .. } => {
+                // distance to the nearest point of the outline (sampled
+                // finely enough for any on-screen size)
+                let c = r.center();
+                let (a, b) = (r.width().abs() / 2.0, r.height().abs() / 2.0);
+                if a < 1.0 || b < 1.0 {
+                    return self.bounds().expand(slack).contains(p);
+                }
+                let n = ((a.max(b) * 0.5) as usize).clamp(64, 720);
+                let near = (0..n)
+                    .map(|i| {
+                        let th = i as f32 / n as f32 * std::f32::consts::TAU;
+                        (c + Vec2::new(a * th.cos(), b * th.sin()) - p).length()
+                    })
+                    .fold(f32::MAX, f32::min);
+                near <= width / 2.0 + slack
+            }
+            Mark::Pen { pts, width, .. } => match pts.len() {
+                0 => false,
+                1 => (p - pts[0]).length() <= width + slack,
+                _ => pts.windows(2).any(|w| segment_distance(p, w[0], w[1]) <= width / 2.0 + slack),
+            },
             _ => self.bounds().expand(slack).contains(p),
+        }
+    }
+
+    /// Resize handles, in image px: two ends for an arrow, eight around a
+    /// box (corners and edge midpoints, clockwise from the top left). Marks
+    /// that only move have none.
+    pub fn handles(&self) -> Vec<Pos2> {
+        match self {
+            Mark::Arrow { a, b, .. } => vec![*a, *b],
+            Mark::Rect { r, .. } | Mark::Ellipse { r, .. } | Mark::Highlight { r, .. } => box_handles(*r).to_vec(),
+            Mark::Blur { r, boxes, .. } | Mark::Erase { r, boxes } if boxes.is_empty() => box_handles(*r).to_vec(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Move handle `k` (from [`Mark::handles`]) to `to`.
+    pub fn drag_handle(&mut self, k: usize, to: Pos2) {
+        match self {
+            Mark::Arrow { a, b, .. } => {
+                if k == 0 {
+                    *a = to;
+                } else {
+                    *b = to;
+                }
+            }
+            Mark::Rect { r, .. } | Mark::Ellipse { r, .. } | Mark::Highlight { r, .. } | Mark::Blur { r, .. } | Mark::Erase { r, .. } => {
+                let (mut x0, mut y0, mut x1, mut y1) = (r.min.x, r.min.y, r.max.x, r.max.y);
+                match k {
+                    0 => (x0, y0) = (to.x, to.y),
+                    1 => y0 = to.y,
+                    2 => (x1, y0) = (to.x, to.y),
+                    3 => x1 = to.x,
+                    4 => (x1, y1) = (to.x, to.y),
+                    5 => y1 = to.y,
+                    6 => (x0, y1) = (to.x, to.y),
+                    _ => x0 = to.x,
+                }
+                *r = Rect::from_two_pos(Pos2::new(x0, y0), Pos2::new(x1, y1));
+            }
+            _ => {}
         }
     }
 
@@ -56,7 +130,12 @@ impl Mark {
                 *a += d;
                 *b += d;
             }
-            Mark::Rect { r, .. } | Mark::Highlight { r, .. } => *r = r.translate(d),
+            Mark::Rect { r, .. } | Mark::Ellipse { r, .. } | Mark::Highlight { r, .. } => *r = r.translate(d),
+            Mark::Pen { pts, .. } => {
+                for q in pts {
+                    *q += d;
+                }
+            }
             Mark::Blur { r, boxes, .. } | Mark::Erase { r, boxes } => {
                 *r = r.translate(d);
                 for b in boxes {
@@ -73,11 +152,232 @@ impl Mark {
     }
 }
 
+fn box_handles(r: Rect) -> [Pos2; 8] {
+    let c = r.center();
+    [r.left_top(), Pos2::new(c.x, r.top()), r.right_top(), Pos2::new(r.right(), c.y), r.right_bottom(), Pos2::new(c.x, r.bottom()), r.left_bottom(), Pos2::new(r.left(), c.y)]
+}
+
 /// Everything the editor knows about one capture.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Doc {
     pub marks: Vec<Mark>,
     pub crop: Option<Rect>,
+    /// The backdrop around the picture, if on.
+    pub frame: Option<Frame>,
+    /// Image pixels per point (2 on Retina): sizes the frame's corners and shadow.
+    pub ppp: f32,
+}
+
+impl Default for Doc {
+    fn default() -> Doc {
+        Doc { marks: Vec::new(), crop: None, frame: None, ppp: 1.0 }
+    }
+}
+
+// ---------------------------------------------------------------- frame
+
+/// Backdrops for the frame: name, top-left color, bottom-right color.
+pub const BACKDROPS: [(&str, Rgba8, Rgba8); 6] = [
+    ("Moss", [0x3A, 0x6B, 0x2F, 255], [0x0B, 0x17, 0x0A, 255]),
+    ("Lime", [0xE2, 0xFA, 0x9C, 255], [0x7D, 0xB5, 0x19, 255]),
+    ("Apricot", [0xFC, 0xD9, 0xA6, 255], [0xE0, 0x72, 0x2E, 255]),
+    ("Sky", [0xB4, 0xEE, 0xF6, 255], [0x1F, 0x7A, 0xB0, 255]),
+    ("Lavender", [0xF3, 0xEF, 0xFF, 255], [0x86, 0x70, 0xDC, 255]),
+    ("Graphite", [0x55, 0x5B, 0x61, 255], [0x12, 0x15, 0x17, 255]),
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Ratio {
+    /// Just the padding around the picture.
+    Auto,
+    Wide,
+    Classic,
+    Square,
+}
+
+impl Ratio {
+    pub const ALL: [Ratio; 4] = [Ratio::Auto, Ratio::Wide, Ratio::Classic, Ratio::Square];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Ratio::Auto => "Auto",
+            Ratio::Wide => "16:9",
+            Ratio::Classic => "4:3",
+            Ratio::Square => "1:1",
+        }
+    }
+
+    fn value(self) -> Option<f32> {
+        match self {
+            Ratio::Auto => None,
+            Ratio::Wide => Some(16.0 / 9.0),
+            Ratio::Classic => Some(4.0 / 3.0),
+            Ratio::Square => Some(1.0),
+        }
+    }
+}
+
+/// The picture on a gradient backdrop with padding, round corners and a
+/// soft shadow. The editor remembers the last one used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Frame {
+    /// Index into [`BACKDROPS`].
+    pub bg: usize,
+    /// Padding: 0 small, 1 medium, 2 large.
+    pub pad: usize,
+    pub round: bool,
+    pub shadow: bool,
+    pub ratio: Ratio,
+}
+
+impl Default for Frame {
+    fn default() -> Frame {
+        Frame { bg: 0, pad: 1, round: true, shadow: true, ratio: Ratio::Auto }
+    }
+}
+
+/// Padding per size, as a share of the picture's longer side.
+const FRAME_PAD: [f32; 3] = [0.04, 0.08, 0.13];
+
+/// Where things go in a framed picture, in image px.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameGeom {
+    /// The whole framed image.
+    pub size: Vec2,
+    /// The picture inside it.
+    pub inner: Rect,
+    pub radius: f32,
+    /// Shadow blur and how far down it falls; None without a shadow.
+    pub shadow: Option<(f32, f32)>,
+}
+
+pub fn frame_geom(w: f32, h: f32, f: &Frame, ppp: f32) -> FrameGeom {
+    let ppp = ppp.max(1.0);
+    let pad = (FRAME_PAD[f.pad.min(2)] * w.max(h)).max(8.0 * ppp).round();
+    let (mut ow, mut oh) = (w + 2.0 * pad, h + 2.0 * pad);
+    if let Some(r) = f.ratio.value() {
+        if ow / oh < r {
+            ow = (oh * r).round();
+        } else {
+            oh = (ow / r).round();
+        }
+    }
+    let inner = Rect::from_min_size(Pos2::new(((ow - w) / 2.0).round(), ((oh - h) / 2.0).round()), Vec2::new(w, h));
+    let radius = if f.round { (12.0 * ppp).min(w.min(h) / 4.0) } else { 0.0 };
+    let shadow = f.shadow.then(|| ((24.0 * ppp).min(pad * 0.9), (8.0 * ppp).min(pad * 0.4)));
+    FrameGeom { size: Vec2::new(ow, oh), inner, radius, shadow }
+}
+
+/// `img` on its frame.
+pub fn framed(img: &RgbaImage, f: &Frame, ppp: f32) -> RgbaImage {
+    use tiny_skia::{Color, FillRule, FilterQuality, GradientStop, LinearGradient, Paint, Pattern, Pixmap, Point, SpreadMode, Transform};
+    let (w, h) = img.dimensions();
+    let g = frame_geom(w as f32, h as f32, f, ppp);
+    let (ow, oh) = (g.size.x as u32, g.size.y as u32);
+    let Some(mut pm) = Pixmap::new(ow, oh) else { return img.clone() };
+    let t = Transform::identity();
+    let (_, c0, c1) = BACKDROPS[f.bg.min(BACKDROPS.len() - 1)];
+    let rgba = |c: Rgba8| Color::from_rgba8(c[0], c[1], c[2], c[3]);
+    if let Some(shader) = LinearGradient::new(Point::from_xy(0.0, 0.0), Point::from_xy(ow as f32, oh as f32), vec![GradientStop::new(0.0, rgba(c0)), GradientStop::new(1.0, rgba(c1))], SpreadMode::Pad, t) {
+        let paint = Paint { shader, anti_alias: false, ..Default::default() };
+        if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, ow as f32, oh as f32) {
+            pm.fill_rect(r, &paint, t, None);
+        }
+    }
+    let r = g.inner;
+    if let Some((blur, dy)) = g.shadow {
+        soft_shadow(&mut pm, r.translate(Vec2::new(0.0, dy)), g.radius, blur);
+    }
+    let src = to_pixmap(img);
+    if let (Some(src), Some(path)) = (src, rounded(r, g.radius)) {
+        let shader = Pattern::new(src.as_ref(), SpreadMode::Pad, FilterQuality::Nearest, 1.0, Transform::from_translate(r.min.x, r.min.y));
+        let paint = Paint { shader, anti_alias: true, ..Default::default() };
+        pm.fill_path(&path, &paint, FillRule::Winding, t, None);
+    }
+    let mut out = RgbaImage::new(ow, oh);
+    from_pixmap(&pm, &mut out);
+    out
+}
+
+/// A soft dark shadow of the rounded rect `r` drawn onto `pm`: drawn at a
+/// quarter size, blurred, then scaled up (soft and cheap).
+pub fn soft_shadow(pm: &mut tiny_skia::Pixmap, r: Rect, radius: f32, blur: f32) {
+    use tiny_skia::{FillRule, FilterQuality, Paint, Pixmap, PixmapPaint, Transform};
+    let k = 4.0;
+    let (ow, oh) = (pm.width(), pm.height());
+    let Some(mut sm) = Pixmap::new((ow as f32 / k).ceil() as u32 + 1, (oh as f32 / k).ceil() as u32 + 1) else { return };
+    let sr = Rect::from_min_size(Pos2::new(r.min.x / k, r.min.y / k), r.size() / k);
+    if let Some(path) = rounded(sr, radius / k) {
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(0, 0, 0, 120);
+        paint.anti_alias = true;
+        sm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+    }
+    let (sw, sh) = (sm.width() as usize, sm.height() as usize);
+    blur_alpha(sm.data_mut(), sw, sh, (blur / k / 2.0).round().max(1.0) as usize);
+    let pp = PixmapPaint { quality: FilterQuality::Bilinear, ..Default::default() };
+    pm.draw_pixmap(0, 0, sm.as_ref(), &pp, Transform::from_scale(k, k), None);
+}
+
+/// Three box-blur passes over a black-only premultiplied buffer's alpha.
+fn blur_alpha(data: &mut [u8], w: usize, h: usize, radius: usize) {
+    let mut a: Vec<f32> = data.chunks_exact(4).map(|p| p[3] as f32).collect();
+    let mut line = vec![0f32; w.max(h)];
+    for _ in 0..3 {
+        for pass in 0..2 {
+            let (outer, inner) = if pass == 0 { (h, w) } else { (w, h) };
+            let at = |o: usize, i: usize| if pass == 0 { o * w + i } else { i * w + o };
+            let n = (2 * radius + 1) as f32;
+            for o in 0..outer {
+                // running sum with clamped edges
+                let mut sum = 0f32;
+                for d in 0..=2 * radius {
+                    sum += a[at(o, d.saturating_sub(radius).min(inner - 1))];
+                }
+                for i in 0..inner {
+                    line[i] = sum / n;
+                    let out = a[at(o, i.saturating_sub(radius))];
+                    let inn = a[at(o, (i + radius + 1).min(inner - 1))];
+                    sum += inn - out;
+                }
+                for i in 0..inner {
+                    a[at(o, i)] = line[i];
+                }
+            }
+        }
+    }
+    for (p, v) in data.chunks_exact_mut(4).zip(a) {
+        p.copy_from_slice(&[0, 0, 0, v.round().clamp(0.0, 255.0) as u8]);
+    }
+}
+
+fn to_pixmap(img: &RgbaImage) -> Option<tiny_skia::Pixmap> {
+    let mut pm = tiny_skia::Pixmap::new(img.width(), img.height())?;
+    // straight → premultiplied
+    for (dst, src) in pm.data_mut().chunks_exact_mut(4).zip(img.as_raw().chunks_exact(4)) {
+        let a = src[3] as u32;
+        dst[0] = (src[0] as u32 * a / 255) as u8;
+        dst[1] = (src[1] as u32 * a / 255) as u8;
+        dst[2] = (src[2] as u32 * a / 255) as u8;
+        dst[3] = src[3];
+    }
+    Some(pm)
+}
+
+fn from_pixmap(pm: &tiny_skia::Pixmap, img: &mut RgbaImage) {
+    // premultiplied → straight
+    for (dst, src) in img.chunks_exact_mut(4).zip(pm.data().chunks_exact(4)) {
+        let a = src[3] as u32;
+        if a == 0 {
+            dst.copy_from_slice(&[0, 0, 0, 0]);
+        } else {
+            dst[0] = (src[0] as u32 * 255 / a).min(255) as u8;
+            dst[1] = (src[1] as u32 * 255 / a).min(255) as u8;
+            dst[2] = (src[2] as u32 * 255 / a).min(255) as u8;
+            dst[3] = src[3];
+        }
+    }
 }
 
 impl Doc {
@@ -87,12 +387,16 @@ impl Doc {
     }
 }
 
-/// The finished image: effects, shapes, then the crop.
+/// The finished image: effects, shapes, the crop, then the frame.
 pub fn render(base: &RgbaImage, doc: &Doc) -> RgbaImage {
     let mut img = apply_effects(base, &doc.marks);
     draw_shapes(&mut img, &doc.marks);
-    match doc.crop.and_then(|c| clamp_rect(c, img.width(), img.height())) {
+    let img = match doc.crop.and_then(|c| clamp_rect(c, img.width(), img.height())) {
         Some((x, y, w, h)) => image::imageops::crop_imm(&img, x, y, w, h).to_image(),
+        None => img,
+    };
+    match &doc.frame {
+        Some(f) => framed(&img, f, doc.ppp),
         None => img,
     }
 }
@@ -302,20 +606,12 @@ pub fn ink_on(c: Rgba8) -> Rgba8 {
 }
 
 fn draw_shapes(img: &mut RgbaImage, marks: &[Mark]) {
-    use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
+    use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Stroke, Transform};
     let (w, h) = img.dimensions();
     if !marks.iter().any(|m| !m.is_effect()) || w == 0 || h == 0 {
         return;
     }
-    let Some(mut pm) = Pixmap::new(w, h) else { return };
-    // straight → premultiplied
-    for (dst, src) in pm.data_mut().chunks_exact_mut(4).zip(img.as_raw().chunks_exact(4)) {
-        let a = src[3] as u32;
-        dst[0] = (src[0] as u32 * a / 255) as u8;
-        dst[1] = (src[1] as u32 * a / 255) as u8;
-        dst[2] = (src[2] as u32 * a / 255) as u8;
-        dst[3] = src[3];
-    }
+    let Some(mut pm) = to_pixmap(img) else { return };
     let paint = |c: Rgba8| {
         let mut p = Paint::default();
         p.set_color_rgba8(c[0], c[1], c[2], c[3]);
@@ -350,6 +646,29 @@ fn draw_shapes(img: &mut RgbaImage, marks: &[Mark]) {
                     pm.stroke_path(&path, &paint(*color), &stroke(*width), t, None);
                 }
             }
+            Mark::Ellipse { r, color, width } => {
+                let r = Rect::from_two_pos(r.min, r.max);
+                if let Some(path) = tiny_skia::Rect::from_xywh(r.min.x, r.min.y, r.width(), r.height()).and_then(PathBuilder::from_oval) {
+                    pm.stroke_path(&path, &paint(*color), &stroke(*width), t, None);
+                }
+            }
+            Mark::Pen { pts, color, width } => {
+                let mut pb = PathBuilder::new();
+                if let Some(first) = pts.first() {
+                    pb.move_to(first.x, first.y);
+                    if pts.len() == 1 {
+                        pb.line_to(first.x + 0.01, first.y);
+                    }
+                    // the same segments the editor draws and hits (dense samples
+                    // with round joins look smooth)
+                    for q in pts.iter().skip(1) {
+                        pb.line_to(q.x, q.y);
+                    }
+                }
+                if let Some(path) = pb.finish() {
+                    pm.stroke_path(&path, &paint(*color), &stroke(*width), t, None);
+                }
+            }
             Mark::Highlight { r, color } => {
                 if let Some(path) = rounded(*r, 2.0) {
                     pm.fill_path(&path, &paint([color[0], color[1], color[2], 110]), FillRule::Winding, t, None);
@@ -375,18 +694,7 @@ fn draw_shapes(img: &mut RgbaImage, marks: &[Mark]) {
             Mark::Blur { .. } | Mark::Erase { .. } => {}
         }
     }
-    // premultiplied → straight
-    for (dst, src) in img.chunks_exact_mut(4).zip(pm.data().chunks_exact(4)) {
-        let a = src[3] as u32;
-        if a == 0 {
-            dst.copy_from_slice(&[0, 0, 0, 0]);
-        } else {
-            dst[0] = (src[0] as u32 * 255 / a).min(255) as u8;
-            dst[1] = (src[1] as u32 * 255 / a).min(255) as u8;
-            dst[2] = (src[2] as u32 * 255 / a).min(255) as u8;
-            dst[3] = src[3];
-        }
-    }
+    from_pixmap(&pm, img);
 }
 
 fn rounded(r: Rect, radius: f32) -> Option<tiny_skia::Path> {
@@ -460,11 +768,17 @@ pub fn measure(text: &str, size: f32) -> (f32, f32) {
 
 /// Blend `text` into a premultiplied pixmap, top-left at `pos`.
 fn glyphs(pm: &mut tiny_skia::Pixmap, text: &str, pos: Pos2, size: f32, color: Rgba8) {
+    let (w, h) = (pm.width(), pm.height());
+    glyphs_into(pm.data_mut(), w, h, text, pos, size, color);
+}
+
+/// Blend `text` into premultiplied 4-byte pixels (`w`×`h`, tight rows),
+/// top-left at `pos`. The color's first three bytes go in as they are.
+pub fn glyphs_into(data: &mut [u8], w: u32, h: u32, text: &str, pos: Pos2, size: f32, color: Rgba8) {
     use ab_glyph::{point, Font, ScaleFont};
     let Some(font) = label_font() else { return };
     let sf = font.as_scaled(size);
-    let (w, h) = (pm.width() as i64, pm.height() as i64);
-    let data = pm.data_mut();
+    let (w, h) = (w as i64, h as i64);
     let mut y = pos.y + sf.ascent();
     for line in text.split('\n') {
         let mut x = pos.x;
@@ -625,6 +939,64 @@ mod tests {
     }
 
     #[test]
+    fn ellipse_and_pen_paint_and_hit() {
+        let mut d = Doc::default();
+        let r = Rect::from_min_max(Pos2::new(10.0, 10.0), Pos2::new(110.0, 70.0));
+        d.marks.push(Mark::Ellipse { r, color: [255, 0, 0, 255], width: 4.0 });
+        d.marks.push(Mark::Pen { pts: vec![Pos2::new(5.0, 75.0), Pos2::new(60.0, 76.0), Pos2::new(115.0, 75.0)], color: [0, 0, 255, 255], width: 4.0 });
+        let out = render(&canvas(), &d);
+        assert_eq!(out.get_pixel(60, 10).0, [255, 0, 0, 255], "ellipse top");
+        assert_eq!(out.get_pixel(60, 40).0, [240, 240, 240, 255], "ellipse inside stays");
+        assert_eq!(out.get_pixel(60, 75).0[2], 255, "pen line");
+        assert!(d.marks[0].hit(Pos2::new(10.0, 40.0), 2.0));
+        assert!(!d.marks[0].hit(Pos2::new(60.0, 40.0), 2.0), "hollow inside");
+        assert!(d.marks[1].hit(Pos2::new(80.0, 76.0), 2.0));
+        assert!(!d.marks[1].hit(Pos2::new(80.0, 40.0), 2.0));
+    }
+
+    #[test]
+    fn handles_resize_boxes_and_arrows() {
+        let mut m = Mark::Rect { r: Rect::from_min_max(Pos2::new(10.0, 10.0), Pos2::new(50.0, 30.0)), color: [0; 4], width: 2.0 };
+        assert_eq!(m.handles().len(), 8);
+        m.drag_handle(4, Pos2::new(80.0, 60.0));
+        assert_eq!(m.bounds(), Rect::from_min_max(Pos2::new(10.0, 10.0), Pos2::new(80.0, 60.0)).expand(1.0));
+        // dragging past the opposite edge flips instead of going negative
+        m.drag_handle(3, Pos2::new(0.0, 0.0));
+        assert!(matches!(m, Mark::Rect { r, .. } if r.min.x == 0.0 && r.max.x == 10.0));
+        let mut a = Mark::Arrow { a: Pos2::ZERO, b: Pos2::new(10.0, 0.0), color: [0; 4], width: 2.0 };
+        a.drag_handle(1, Pos2::new(5.0, 5.0));
+        assert!(matches!(a, Mark::Arrow { b, .. } if b == Pos2::new(5.0, 5.0)));
+        let text_blur = Mark::Blur { r: Rect::from_min_max(Pos2::ZERO, Pos2::new(9.0, 9.0)), style: BlurStyle::Blur, boxes: vec![Rect::ZERO] };
+        assert!(text_blur.handles().is_empty(), "only-text covers can't be resized");
+    }
+
+    #[test]
+    fn frame_pads_rounds_and_keeps_the_picture() {
+        let img = RgbaImage::from_pixel(200, 100, Rgba([255, 0, 0, 255]));
+        let f = Frame { bg: 1, pad: 1, round: true, shadow: true, ratio: Ratio::Auto };
+        let out = framed(&img, &f, 1.0);
+        let g = frame_geom(200.0, 100.0, &f, 1.0);
+        assert_eq!(out.dimensions(), (g.size.x as u32, g.size.y as u32));
+        assert_eq!(g.inner.min, Pos2::new(16.0, 16.0), "8% of the longer side");
+        let c = g.inner.center();
+        assert_eq!(out.get_pixel(c.x as u32, c.y as u32).0, [255, 0, 0, 255], "picture in the middle");
+        assert_ne!(out.get_pixel(16, 16).0, [255, 0, 0, 255], "corner is rounded off");
+        assert_eq!(out.get_pixel(0, 0).0, BACKDROPS[1].1, "backdrop starts at its first color");
+        // the shadow darkens the backdrop just under the picture
+        let below = out.get_pixel(c.x as u32, g.inner.max.y as u32 + 4).0;
+        let far = out.get_pixel(c.x as u32 + 1, out.height() - 1).0;
+        assert!((below[0] as i32) < far[0] as i32 + 30, "shadow under the picture");
+        for (ratio, want) in [(Ratio::Wide, 16.0 / 9.0), (Ratio::Square, 1.0), (Ratio::Classic, 4.0 / 3.0)] {
+            let g = frame_geom(200.0, 100.0, &Frame { ratio, ..f }, 1.0);
+            assert!((g.size.x / g.size.y - want).abs() < 0.02, "{ratio:?}");
+            assert!(g.inner.min.x >= 16.0 && g.inner.min.y >= 16.0, "{ratio:?} keeps the padding");
+        }
+        let mut d = Doc::default();
+        d.frame = Some(f);
+        assert_eq!(render(&img, &d).dimensions(), out.dimensions());
+    }
+
+    #[test]
     fn hit_tests() {
         let a = Mark::Arrow { a: Pos2::new(0.0, 0.0), b: Pos2::new(100.0, 0.0), color: [0; 4], width: 4.0 };
         assert!(a.hit(Pos2::new(50.0, 3.0), 2.0));
@@ -646,5 +1018,13 @@ mod tests {
         assert_eq!(edge_span(&img, 30, 20, 8), Some((20, 59, 10, 29)));
         assert_eq!(pixel(&img, -1, 0), None);
         assert_eq!(surrounding_color(&img, Rect::from_min_max(Pos2::new(21.0, 11.0), Pos2::new(58.0, 28.0))), [11, 107, 216, 255]);
+    }
+
+    #[test]
+    fn a_flat_ellipse_is_hit_near_its_outline() {
+        let m = Mark::Ellipse { r: Rect::from_min_max(Pos2::ZERO, Pos2::new(200.0, 20.0)), color: [0; 4], width: 4.0 };
+        // under 3 px from the outline, far along the ray from the center
+        assert!(m.hit(Pos2::new(170.0, 3.0), 6.0));
+        assert!(!m.hit(Pos2::new(100.0, 10.0), 6.0));
     }
 }
