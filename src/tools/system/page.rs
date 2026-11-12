@@ -1,7 +1,8 @@
-//! The Mac Health page in the full window (D6): a bento of five cards that
-//! fits the window without scrolling. CPU (wide, with its history), the
-//! startup disk as a ring, memory, battery and network. Devices open from
-//! the toolbar and take the whole body, with a way back.
+//! The Mac Health page in the full window (D6): a bento of six cards that
+//! fits the window without scrolling. CPU (wide, with its history), memory
+//! and the startup disk on top; network, battery and Bluetooth devices
+//! below. Settings (device alerts, menu bar, hidden devices) sit behind
+//! the Overview / Settings switch in the header.
 //!
 //! Each card shows real readings only: no chart is drawn for data the
 //! monitor does not keep a history of.
@@ -30,10 +31,10 @@ fn level_color(l: Level) -> Color32 {
 pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let s = mon.lock_ok().clone();
     let p = ui.painter().clone();
-    let devices_id = ui.scope_id().with("health-devices");
-    let show_devices = ui.ctx().data(|d| d.get_temp::<bool>(devices_id)).unwrap_or(false);
+    let settings_id = ui.scope_id().with("health-settings");
+    let show_settings = ui.ctx().data(|d| d.get_temp::<bool>(settings_id)).unwrap_or(false);
 
-    // header: model, chip, uptime; the top recommendation and Devices on the right
+    // header: model, chip, uptime; the top recommendation and Overview / Settings on the right
     let mut sub: Vec<String> = Vec::new();
     if !s.model.is_empty() {
         sub.push(s.model.clone());
@@ -50,13 +51,11 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     };
     let btns = page_header(&p, r, "Mac Health", &sub, sub_col);
     let mut right = btns.right();
-    let label = if show_devices { "Back" } else { "Devices…" };
-    let bw = button_width(&p, label, BTN_SECONDARY);
-    let br = Rect::from_min_max(Pos2::new(right - bw, btns.top()), Pos2::new(right, btns.bottom()));
-    if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
-        ui.ctx().data_mut(|d| d.insert_temp(devices_id, !show_devices));
+    let tr = Rect::from_min_max(Pos2::new(right - 180.0, btns.top()), Pos2::new(right, btns.bottom()));
+    if let Some(i) = segmented(ui, tr, ui.scope_id().with("health-tab"), &["Overview", "Settings"], show_settings as usize) {
+        ui.ctx().data_mut(|d| d.insert_temp(settings_id, i == 1));
     }
-    right = br.left() - sp::S;
+    right = tr.left() - sp::M;
     if let Some(rec) = recs.first() {
         let bw = button_width(&p, &rec.action, BTN_PRIMARY);
         let br = Rect::from_min_max(Pos2::new(right - bw, btns.top()), Pos2::new(right, btns.bottom()));
@@ -70,35 +69,37 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     let mut action = SheetAction::None;
 
     let mut dev_action = None;
-    if show_devices {
+    if show_settings {
         let w = inner.width().min(640.0);
-        let h = super::devices_ui::page_height(&s);
-        let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-devices-page"));
-        ScrollArea::vertical().id_salt("health-dev-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
+        let h = super::devices_ui::settings_height(&s);
+        let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-settings-page"));
+        ScrollArea::vertical().id_salt("health-set-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
             let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h + 2.0 * sp::L), Sense::hover());
             let sr = Rect::from_min_size(Pos2::new(area.left() + 20.0, area.top() + sp::L), Vec2::new(w, h));
-            let mut sui = ui.new_child(UiBuilder::new().max_rect(sr).id_salt("health-dev-sec"));
-            dev_action = super::devices_ui::page(&mut sui, sr, &s);
+            let mut sui = ui.new_child(UiBuilder::new().max_rect(sr).id_salt("health-set-sec"));
+            dev_action = super::devices_ui::settings(&mut sui, sr, &s);
         });
     } else {
-        // 3 columns (1.4 : 1 : 1) × 2 rows; CPU spans the first two columns
+        // 3 columns (1.4 : 1 : 1) × 2 rows
         let fits = inner.width() >= BENTO_MIN_W;
-        let total_h = if fits { (body.height() - 2.0 * sp::L).max(BENTO_MIN_H) } else { 5.0 * 250.0 + 4.0 * sp::L };
+        let total_h = if fits { (body.height() - 2.0 * sp::L).max(BENTO_MIN_H) } else { 6.0 * 250.0 + 5.0 * sp::L };
         let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-page"));
         ScrollArea::vertical().id_salt("health-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
             let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), total_h + 2.0 * sp::L), Sense::hover());
             let g = Rect::from_min_size(Pos2::new(inner.left(), area.top() + sp::L), Vec2::new(inner.width(), total_h));
-            let rects: [Rect; 5] = if fits {
+            let rects: [Rect; 6] = if fits {
                 let unit = (g.width() - 2.0 * sp::L) / 3.4;
                 let (c0, c1) = (unit * 1.4, unit);
                 let rh = (g.height() - sp::L) / 2.0;
                 let x = [g.left(), g.left() + c0 + sp::L, g.left() + c0 + c1 + 2.0 * sp::L];
                 let y = [g.top(), g.top() + rh + sp::L];
+                // CPU, memory, disk / network, battery, devices
                 [
-                    Rect::from_min_size(Pos2::new(x[0], y[0]), Vec2::new(c0 + sp::L + c1, rh)),
+                    Rect::from_min_size(Pos2::new(x[0], y[0]), Vec2::new(c0, rh)),
                     Rect::from_min_size(Pos2::new(x[2], y[0]), Vec2::new(c1, rh)),
-                    Rect::from_min_size(Pos2::new(x[0], y[1]), Vec2::new(c0, rh)),
+                    Rect::from_min_size(Pos2::new(x[1], y[0]), Vec2::new(c1, rh)),
                     Rect::from_min_size(Pos2::new(x[1], y[1]), Vec2::new(c1, rh)),
+                    Rect::from_min_size(Pos2::new(x[0], y[1]), Vec2::new(c0, rh)),
                     Rect::from_min_size(Pos2::new(x[2], y[1]), Vec2::new(c1, rh)),
                 ]
             } else {
@@ -117,13 +118,14 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
             if let Some(a) = network_card(ui, &p, rects[4].shrink(sp::L), &s) {
                 action = a;
             }
+            dev_action = devices_card(ui, &p, rects[5].shrink(sp::L), &s);
         });
     }
     match action {
         SheetAction::Open(tool) => cx.open_page(tool, ""),
-        SheetAction::SpeedTest => {
+        SheetAction::SpeedTest(mode) => {
             // a test already under way just shows again
-            monitor::start_speed_test(mon.clone(), ui.ctx().clone());
+            monitor::start_speed_test(mon.clone(), ui.ctx().clone(), mode);
             super::speed::open(ui.ctx());
         }
         SheetAction::MeasureFolders => monitor::measure_folders(mon.clone(), ui.ctx().clone()),
@@ -145,8 +147,8 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
             P::Forget(key) => monitor::forget_device(mon, &key),
         }
     }
-    if super::speed::modal(ui, &s.speed) {
-        monitor::start_speed_test(mon.clone(), ui.ctx().clone());
+    if let Some(mode) = super::speed::modal(ui, &s.speed) {
+        monitor::start_speed_test(mon.clone(), ui.ctx().clone(), mode);
     }
 }
 
@@ -316,6 +318,13 @@ fn battery_card(p: &egui::Painter, r: Rect, s: &Snapshot) {
     ring_stat(p, Rect::from_min_max(Pos2::new(r.left(), y), Pos2::new(r.right(), lt - sp::M)), b.percent as f32 / 100.0, col, &format!("{}%", b.percent), "charge");
 }
 
+fn devices_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option<super::devices_ui::PageAction> {
+    let low = s.devices.iter().filter(|d| super::devices::is_low(d)).count();
+    let status = if low > 0 { Some((super::devices_ui::note(&s.devices), AMBER())) } else { None };
+    let y = card_title(p, r, "Devices", status.as_ref().map(|(t, c)| (t.as_str(), *c)), None);
+    super::devices_ui::card_body(ui, p, Rect::from_min_max(Pos2::new(r.left(), y), r.max), s)
+}
+
 fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option<SheetAction> {
     // the network's own name when macOS gives it (not just "Wi-Fi")
     let named = !s.wifi.name.is_empty() && !s.wifi.name.eq_ignore_ascii_case("wi-fi") && !s.wifi.name.eq_ignore_ascii_case("ethernet");
@@ -327,7 +336,7 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
     for (k, (v, label, col)) in [(human_rate(s.net_down), "download", TEXT()), (human_rate(s.net_up), "upload", TEAL())].into_iter().enumerate() {
         let x = r.left() + k as f32 * colw;
         text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &v, ty::lead(), col, colw - sp::S);
-        p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, label, ty::caption(), ty::caption_color());
+        p.text(Pos2::new(x, y + 25.0), Align2::LEFT_TOP, label, ty::caption(), ty::caption_color());
     }
     let mut rows = vec![(None, "Today".to_string(), format!("{} in · {} out", human_bytes(s.net_recv_total), human_bytes(s.net_sent_total)))];
     if !s.wifi.signal.is_empty() {
@@ -344,16 +353,22 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
     rows.push((None, "Speed".to_string(), speed));
     let bottom = Rect::from_min_max(r.min, Pos2::new(r.right(), r.bottom() - 26.0 - sp::M));
     let lt = legend(p, bottom, &rows);
-    let gr = Rect::from_min_max(Pos2::new(r.left(), y + 34.0 + sp::M), Pos2::new(r.right(), lt - sp::M));
+    let gr = Rect::from_min_max(Pos2::new(r.left(), y + 40.0 + sp::M), Pos2::new(r.right(), lt - sp::M));
     if gr.height() > 20.0 {
         tile::spark(p, gr, &s.net_history, TEAL(), None);
     }
     let mut out = None;
-    let label = "Test speed";
-    let bw = button_width(p, label, BTN_SECONDARY);
-    let br = Rect::from_min_size(Pos2::new(r.left(), r.bottom() - 26.0), Vec2::new(bw, 26.0));
-    if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
-        out = Some(SheetAction::SpeedTest);
+    // the two tests side by side; each opens the dial in its mode
+    let mut x = r.left();
+    for mode in [super::monitor::SpeedMode::Quick, super::monitor::SpeedMode::Full] {
+        let label = mode.label();
+        let bw = button_width(p, label, BTN_SECONDARY);
+        let br = Rect::from_min_size(Pos2::new(x, r.bottom() - 26.0), Vec2::new(bw, 26.0));
+        let tip = if mode == super::monitor::SpeedMode::Quick { "About 10 seconds" } else { "About 20 seconds, more streams" };
+        if pill_button(ui, br, label, BTN_SECONDARY, !s.speed.running).on_hover_text(tip).clicked() {
+            out = Some(SheetAction::SpeedTest(mode));
+        }
+        x = br.right() + sp::S;
     }
     out
 }

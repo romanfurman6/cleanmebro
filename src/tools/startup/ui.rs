@@ -286,7 +286,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let list_h: f32 = rows.iter().map(|r| match r {
         Row::Head(..) => HEAD_H,
         Row::Note(_) => 40.0,
-        Row::Allow => 50.0,
+        Row::Allow => 62.0,
         _ => ROW_H + ROW_GAP,
     }).sum::<f32>()
         + 56.0;
@@ -485,13 +485,21 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 }
                 Row::Allow => {
                     use crate::kit::perms::{Perm, Status};
-                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 46.0));
+                    let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), 58.0));
                     glass_card(&p, r, 10.0, 0.0, false);
                     icon(&p, Icon::Script, Rect::from_center_size(Pos2::new(r.left() + 24.0, r.center().y), Vec2::splat(18.0)), TEXT_SOFT());
-                    p.text(Pos2::new(r.left() + 44.0, r.center().y), Align2::LEFT_CENTER, Perm::SystemEvents.name(), bold(13.0), TEXT());
-                    let label = if s.events.0 == Status::Denied { "Open Settings" } else { "Allow" };
+                    let denied = s.events.0 == Status::Denied;
+                    let label = if denied { "Open Settings" } else { "Allow access" };
                     let bw = button_width(&p, label, BTN_PRIMARY);
                     let br = Rect::from_min_size(Pos2::new(r.right() - 12.0 - bw, r.center().y - 14.0), Vec2::new(bw, 28.0));
+                    let tw = br.left() - r.left() - 44.0 - 12.0;
+                    text_fit(&p, Pos2::new(r.left() + 44.0, r.center().y - 1.0), Align2::LEFT_BOTTOM, "Can't see the apps that open at login", bold(13.0), TEXT(), tw);
+                    let why = if denied {
+                        "Turn on System Events for Cmd+Meow in Privacy & Security › Automation"
+                    } else {
+                        "macOS lists them through System Events; allow it once to see and switch them"
+                    };
+                    text_fit(&p, Pos2::new(r.left() + 44.0, r.center().y + 2.0), Align2::LEFT_TOP, why, font(11.5), TEXT_FAINT(), tw);
                     if pill_button(ui, br, label, BTN_PRIMARY, true).clicked() {
                         Perm::SystemEvents.ask();
                         retry = true;
@@ -500,7 +508,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                         // repaint now and then so the row goes once access lands
                         ctx.request_repaint_after(std::time::Duration::from_secs(1));
                     }
-                    y += 50.0;
+                    y += 62.0;
                 }
                 Row::App(la) => {
                     let r = Rect::from_min_size(Pos2::new(a.left(), y), Vec2::new(a.width(), ROW_H));

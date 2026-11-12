@@ -807,6 +807,9 @@ impl Tool for Startup {
     fn widgets(&self) -> Vec<WidgetSpec> {
         vec![WidgetSpec { id: SUMMARY, title: "Startup", about: "What starts with your Mac, and one button for what can go.", sizes: &[Size::S11, Size::S12], size: Size::S12, default_on: true }]
     }
+    fn widget_loading(&self, _widget: &str) -> bool {
+        !self.state().jobs_loaded
+    }
     fn widget_ui(&mut self, _widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(self, size, ui, rect, cx);
     }

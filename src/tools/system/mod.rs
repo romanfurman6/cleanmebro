@@ -60,7 +60,7 @@ impl Tool for System {
     }
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};
-        vec![Need::may(Perm::FullDisk), Need::may(Perm::Notifications)]
+        vec![Need::may(Perm::FullDisk), Need::may(Perm::Bluetooth), Need::may(Perm::Notifications)]
     }
 
     fn section(&self) -> &'static str {
@@ -71,6 +71,9 @@ impl Tool for System {
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
         WIDGETS.to_vec()
+    }
+    fn widget_loading(&self, _widget: &str) -> bool {
+        !self.mon.lock_ok().ready
     }
     fn widget_ui(&mut self, widget: &str, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         ui::widget(&self.mon, widget, size, ui, rect, cx);

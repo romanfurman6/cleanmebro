@@ -277,16 +277,6 @@ fn chip_row(ui: &mut Ui, p: &egui::Painter, x: f32, y: f32, cur: &mut Filter) ->
     x
 }
 
-fn search_field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str) {
-    let p = ui.painter().clone();
-    p.rect_filled(r, 7.0, white(15));
-    icon(&p, Icon::Search, Rect::from_center_size(Pos2::new(r.left() + 15.0, r.center().y), Vec2::splat(12.0)), TEXT_FAINT());
-    let tr = Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top()), Pos2::new(r.right() - 8.0, r.bottom()));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT())).frame(egui::Frame::NONE).font(font(12.0)).text_color(TEXT()).desired_width(tr.width());
-    child.add(te);
-}
-
 fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
@@ -295,7 +285,7 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let fy = body.top() + 12.0;
     let sr = Rect::from_min_size(Pos2::new(x0, fy - 1.0), Vec2::new(190.0, 28.0));
     let mut q = std::mem::take(&mut u.search);
-    search_field(ui, sr, &mut q, "Search apps");
+    search_field(ui, sr, &mut q, "Search apps", false, 13.0);
     u.search = q;
     let mut f = u.filter;
     chip_row(ui, &p, sr.right() + 10.0, fy, &mut f);
