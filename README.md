@@ -63,6 +63,11 @@ yourself.
   <img src="docs/images/lens.png" width="760" alt="Disk Map">
 </p>
 
+<p align="center">
+  <img src="docs/images/ai-usage.png" width="374" alt="AI Usage">
+  <img src="docs/images/clipboard.png" width="374" alt="Clipboard history">
+</p>
+
 ### Instead of
 
 CleanMyMac, DaisyDisk, CleanShot X, Loom, Paste, iStat Menus, Wispr Flow and
