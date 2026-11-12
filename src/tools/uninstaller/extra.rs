@@ -37,7 +37,8 @@ pub fn parse_codesign(stdout: &str, stderr: &str) -> Sign {
 pub fn signing(app: &Path) -> Sign {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (Option<std::time::SystemTime>, Sign)>>> = OnceLock::new();
+    type Cache = Mutex<HashMap<PathBuf, (Option<std::time::SystemTime>, Sign)>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
     let stamp = app.join("Contents/Info.plist").metadata().and_then(|m| m.modified()).ok();
     let cache = CACHE.get_or_init(Default::default);
     if let Some((s, sign)) = cache.lock().ok().and_then(|c| c.get(app).cloned()) {
@@ -162,7 +163,8 @@ pub fn pkg_payload(id: &str) -> Option<(String, Vec<String>)> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     type Payload = Option<(String, Vec<String>)>;
-    static CACHE: OnceLock<Mutex<HashMap<String, (Option<std::time::SystemTime>, Payload)>>> = OnceLock::new();
+    type Cache = Mutex<HashMap<String, (Option<std::time::SystemTime>, Payload)>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
     let stamp = Path::new("/").join(RECEIPTS).join(format!("{id}.plist")).metadata().and_then(|m| m.modified()).ok();
     let cache = CACHE.get_or_init(Default::default);
     if let Some((s, p)) = cache.lock().ok().and_then(|c| c.get(id).cloned()) {
