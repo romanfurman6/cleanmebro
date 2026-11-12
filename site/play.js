@@ -16,8 +16,10 @@
     const opt = e.target.closest('.seg > i');
     if (opt && !opt.closest('[data-own]')) {
       const seg = opt.parentElement, cur = seg.querySelector('b');
-      if (cur) { const i = el('i', null, cur.innerHTML); cur.replaceWith(i); }
-      const b = el('b', null, opt.innerHTML); opt.replaceWith(b);
+      const keep = (from, to) => { ['tabindex', 'role'].forEach(a => from.hasAttribute(a) && to.setAttribute(a, from.getAttribute(a))); return to; };
+      const had = document.activeElement === opt;
+      if (cur) { const i = keep(cur, el('i', null, cur.innerHTML)); cur.replaceWith(i); }
+      const b = keep(opt, el('b', null, opt.innerHTML)); opt.replaceWith(b); if (had) b.focus();
       seg.dispatchEvent(new CustomEvent('pick', { detail: b.textContent.trim(), bubbles: true }));
     }
     const tg = e.target.closest('.tg');
@@ -176,7 +178,7 @@
     if (trash) trash.addEventListener('click', async () => {
       if (!picked.size || trash.dataset.busy) return; trash.dataset.busy = 1; const o = trash.textContent; trash.textContent = 'Moved to Trash';
       const prune = n => { if (!n.c) return 0; let cut = 0; n.c = n.c.filter(c => picked.has(c) ? (cut += c.s, false) : true); n.c.forEach(c => { const d = prune(c); c.s -= d; cut += d; }); return cut; };
-      root.s -= prune(root); picked.clear(); draw(); await sleep(1200); trash.textContent = o; delete trash.dataset.busy;
+      root.s -= prune(root); picked.clear(); { const k = path.findIndex((n, i) => i && !path[i - 1].c.includes(n)); if (k > 0) path = path.slice(0, k); } draw(); await sleep(1200); trash.textContent = o; delete trash.dataset.busy;
     });
     draw();
   })();

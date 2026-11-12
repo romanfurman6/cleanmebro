@@ -232,3 +232,5 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .jt em { font-style: normal; font-size: 12.5px; line-height: 18px; color: rgba(255,155,122,.85); }
 
 @media (min-width: 861px) and (max-width: 1180px) { .hero { max-width: calc(100vw - 470px); } .hero h1 { font-size: clamp(44px, 6vw, 72px); line-height: 1.05; } .hero .sub { font-size: 22px; line-height: 30px; } }
+
+@media (prefers-reduced-motion: reduce) { .wg.on, .wg.on::after, .wg.on[data-i="4"] .wi svg, .wg.on .rec, .wg.on .wave2 i { animation: none; } }
