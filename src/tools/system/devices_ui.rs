@@ -1,8 +1,8 @@
 //! The Devices widget in every size: the emptiest device as a ring (1:1),
 //! a glyph and charge per device (1:2), a ring per device (1:4), a list
 //! with AirPods split into left, right and case (2:4) and every part of
-//! every device (4:4). Plus the Devices page in Mac Health: each device
-//! with its week, its own alert line, hide and forget.
+//! every device (4:4). Plus the Devices card on Mac Health (a line per
+//! device with its own alert line, hide and forget) and its settings.
 //!
 //! A bolt marks what's charging; a device that isn't connected is dimmed
 //! and says when it was seen.
@@ -182,18 +182,26 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel
 /// One device in a list: glyph, name with its parts or kind under it, a
 /// bar and the charge.
 fn device_line(p: &egui::Painter, lr: Rect, d: &Device) {
+    device_line_sub(p, lr, d, &d.detail());
+}
+
+/// [`device_line`] with its own line under the name.
+fn device_line_sub(p: &egui::Painter, lr: Rect, d: &Device, sub: &str) {
     let b = d.battery();
     let t = Tone::of(d);
     let cy = lr.center().y;
     device_glyph(p, d, Rect::from_center_size(Pos2::new(lr.left() + 9.0, cy), Vec2::splat(17.0)), t.c(TEXT_SOFT()));
     let vr = pct_with_bolt(p, Pos2::new(lr.right(), cy), Align2::RIGHT_CENTER, b, d.charging && d.live(), bold(12.5), t.text(b));
-    let bw = 64.0;
+    // the bar only when the name still has room next to it
+    let bw = if lr.width() >= 300.0 { 64.0 } else { 0.0 };
     let bx1 = vr.left() - 10.0;
-    bar(p, Rect::from_min_max(Pos2::new(bx1 - bw, cy - 2.0), Pos2::new(bx1, cy + 2.0)), frac(b).max(0.01), t.ring(b));
+    if bw > 0.0 {
+        bar(p, Rect::from_min_max(Pos2::new(bx1 - bw, cy - 2.0), Pos2::new(bx1, cy + 2.0)), frac(b).max(0.01), t.ring(b));
+    }
     let tx = lr.left() + 26.0;
-    let tw = bx1 - bw - tx - 10.0;
+    let tw = bx1 - bw - tx - if bw > 0.0 { 10.0 } else { 0.0 };
     text_fit(p, Pos2::new(tx, cy - 1.0), Align2::LEFT_BOTTOM, &d.name, font(12.5), t.c(TEXT()), tw);
-    text_fit(p, Pos2::new(tx, cy + 1.0), Align2::LEFT_TOP, &d.detail(), font(11.0), TEXT_FAINT(), tw);
+    text_fit(p, Pos2::new(tx, cy + 1.0), Align2::LEFT_TOP, sub, font(11.0), TEXT_FAINT(), tw);
 }
 
 /// 4:4: earbuds get a card with a ring per part, other devices a line each.
@@ -253,57 +261,25 @@ pub enum PageAction {
     Forget(String),
 }
 
-const ROW_H: f32 = 64.0;
 const ROW_GAP: f32 = 8.0;
 const SWITCH_H: f32 = 44.0;
+const LINE_H: f32 = 44.0;
+const LINE_GAP: f32 = 6.0;
 
-/// Height of the page's content at width `w`.
-pub fn page_height(s: &Snapshot) -> f32 {
-    let rows = s.devices.len().max(1) as f32;
-    let hidden = if s.hidden_devices.is_empty() { 0.0 } else { 34.0 + s.hidden_devices.len() as f32 * (44.0 + ROW_GAP) };
-    rows * (ROW_H + ROW_GAP) + hidden + 18.0 + 8.0 + 3.0 * SWITCH_H + 18.0 + 30.0
+/// Height of the monitoring settings.
+pub fn settings_height(s: &Snapshot) -> f32 {
+    let hidden = if s.hidden_devices.is_empty() { 0.0 } else { 26.0 + s.hidden_devices.len() as f32 * (44.0 + ROW_GAP) + 18.0 };
+    26.0 + 8.0 + 3.0 * SWITCH_H + hidden + 18.0 + 30.0
 }
 
-/// The Devices page: a row per device, hidden ones, then the switches.
-pub fn page(ui: &mut Ui, r: Rect, s: &Snapshot) -> Option<PageAction> {
+/// Mac Health settings: device alerts and the menu bar, hidden devices,
+/// and the way to Bluetooth settings.
+pub fn settings(ui: &mut Ui, r: Rect, s: &Snapshot) -> Option<PageAction> {
     let p = ui.painter().clone();
     let mut out = None;
     let mut y = r.top();
-    let devs = devices::lowest_first(&s.devices);
-    if devs.is_empty() {
-        let er = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), ROW_H));
-        glass_card(&p, er, R_CARD, 0.0, false);
-        text_fit(&p, er.left_center() + Vec2::new(16.0, 0.0), Align2::LEFT_CENTER, "No devices", font(13.0), TEXT_DIM(), er.width() - 32.0);
-        y += ROW_H + ROW_GAP;
-    }
-    for d in &devs {
-        let rr = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), ROW_H));
-        if let Some(a) = device_row(ui, &p, rr, d, &s.bt_prefs) {
-            out = Some(a);
-        }
-        y += ROW_H + ROW_GAP;
-    }
-    if !s.hidden_devices.is_empty() {
-        y += 8.0;
-        p.text(Pos2::new(r.left() + 4.0, y + 10.0), Align2::LEFT_CENTER, "Hidden", bold(12.0), TEXT_DIM());
-        y += 26.0;
-        for d in &s.hidden_devices {
-            let rr = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), 44.0));
-            glass_card(&p, rr, R_CARD, 0.0, false);
-            let t = Tone { a: AWAY_ALPHA };
-            device_glyph(&p, d, Rect::from_center_size(Pos2::new(rr.left() + 22.0, rr.center().y), Vec2::splat(18.0)), t.c(TEXT_SOFT()));
-            let bw = button_width(&p, "Show", BTN_SECONDARY);
-            let br = Rect::from_min_size(Pos2::new(rr.right() - 10.0 - bw, rr.center().y - 13.0), Vec2::new(bw, 26.0));
-            if pill_button(ui, br, "Show", BTN_SECONDARY, true).clicked() {
-                out = Some(PageAction::Hide(d.key(), false));
-            }
-            let vr = p.text(Pos2::new(br.left() - 12.0, rr.center().y), Align2::RIGHT_CENTER, pct_text(d.battery()), bold(12.0), t.c(TEXT_DIM()));
-            text_fit(&p, Pos2::new(rr.left() + 42.0, rr.center().y), Align2::LEFT_CENTER, &d.name, font(13.0), t.c(TEXT()), vr.left() - rr.left() - 54.0);
-            y += 44.0 + ROW_GAP;
-        }
-    }
-    // switches
-    y += 18.0;
+    p.text(Pos2::new(r.left() + 4.0, y + 10.0), Align2::LEFT_CENTER, "Bluetooth devices", bold(12.0), TEXT_DIM());
+    y += 26.0;
     let prefs = &s.bt_prefs;
     let card = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), 8.0 + 3.0 * SWITCH_H));
     glass_card(&p, card, R_CARD, 0.0, false);
@@ -336,6 +312,25 @@ pub fn page(ui: &mut Ui, r: Rect, s: &Snapshot) -> Option<PageAction> {
         text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y), Align2::LEFT_CENTER, label, font(13.0), TEXT(), tw);
     }
     y = card.bottom() + 18.0;
+    if !s.hidden_devices.is_empty() {
+        p.text(Pos2::new(r.left() + 4.0, y + 10.0), Align2::LEFT_CENTER, "Hidden devices", bold(12.0), TEXT_DIM());
+        y += 26.0;
+        for d in &s.hidden_devices {
+            let rr = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), 44.0));
+            glass_card(&p, rr, R_CARD, 0.0, false);
+            let t = Tone { a: AWAY_ALPHA };
+            device_glyph(&p, d, Rect::from_center_size(Pos2::new(rr.left() + 22.0, rr.center().y), Vec2::splat(18.0)), t.c(TEXT_SOFT()));
+            let bw = button_width(&p, "Show", BTN_SECONDARY);
+            let br = Rect::from_min_size(Pos2::new(rr.right() - 10.0 - bw, rr.center().y - 13.0), Vec2::new(bw, 26.0));
+            if pill_button(ui, br, "Show", BTN_SECONDARY, true).clicked() {
+                out = Some(PageAction::Hide(d.key(), false));
+            }
+            let vr = p.text(Pos2::new(br.left() - 12.0, rr.center().y), Align2::RIGHT_CENTER, pct_text(d.battery()), bold(12.0), t.c(TEXT_DIM()));
+            text_fit(&p, Pos2::new(rr.left() + 42.0, rr.center().y), Align2::LEFT_CENTER, &d.name, font(13.0), t.c(TEXT()), vr.left() - rr.left() - 54.0);
+            y += 44.0 + ROW_GAP;
+        }
+        y += 18.0 - ROW_GAP;
+    }
     let bw = button_width(&p, "Bluetooth Settings", BTN_SECONDARY);
     let br = Rect::from_min_size(Pos2::new(r.right() - bw, y), Vec2::new(bw, 30.0));
     if pill_button(ui, br, "Bluetooth Settings", BTN_SECONDARY, true).clicked() {
@@ -344,20 +339,56 @@ pub fn page(ui: &mut Ui, r: Rect, s: &Snapshot) -> Option<PageAction> {
     out
 }
 
-/// One device on the page: glyph, name, parts or when seen, the week's
-/// trend, how long it lasts, the charge and a menu.
-fn device_row(ui: &mut Ui, p: &egui::Painter, rr: Rect, d: &Device, prefs: &Prefs) -> Option<PageAction> {
+/// The body of the Devices card on Mac Health: a line per device, lowest
+/// first, each with its menu; "+N more" when they don't all fit.
+pub fn card_body(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option<PageAction> {
+    let mut out = None;
+    let devs = devices::lowest_first(&s.devices);
+    if devs.is_empty() {
+        let cy = r.center().y - 16.0;
+        icon(p, Icon::Bluetooth, Rect::from_center_size(Pos2::new(r.center().x, cy - 18.0), Vec2::splat(26.0)), TEXT_FAINT());
+        p.text(Pos2::new(r.center().x, cy + 10.0), Align2::CENTER_CENTER, "No devices connected", font(13.0), TEXT_DIM());
+        let bw = button_width(p, "Bluetooth Settings", BTN_SECONDARY);
+        let br = Rect::from_min_size(Pos2::new(r.left(), r.bottom() - 26.0), Vec2::new(bw, 26.0));
+        if pill_button(ui, br, "Bluetooth Settings", BTN_SECONDARY, true).clicked() {
+            out = Some(PageAction::OpenBluetooth);
+        }
+        return out;
+    }
+    let fit = (((r.height() + LINE_GAP) / (LINE_H + LINE_GAP)).floor() as usize).max(1);
+    let (shown, more) = if devs.len() > fit { (fit - 1, devs.len() - (fit - 1)) } else { (devs.len(), 0) };
+    let mut y = r.top();
+    for d in devs.iter().take(shown) {
+        let lr = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), LINE_H));
+        p.rect_filled(lr, 10.0, white(10));
+        let mr = Rect::from_center_size(Pos2::new(lr.right() - 18.0, lr.center().y), Vec2::new(24.0, 22.0));
+        let mut sub = d.detail();
+        if let Some(e) = d.eta {
+            sub.push_str(&format!(" · {} left", devices::duration_left(e)));
+        }
+        device_line_sub(p, Rect::from_min_max(Pos2::new(lr.left() + 10.0, lr.top()), Pos2::new(mr.left() - 6.0, lr.bottom())), d, &sub);
+        let key = d.key();
+        let resp = dots(ui, mr, ui.scope_id().with(("dev-card-more", &key)));
+        if let Some(a) = device_menu(&resp, d, &s.bt_prefs) {
+            out = Some(a);
+        }
+        y += LINE_H + LINE_GAP;
+    }
+    if more > 0 {
+        let lr = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), LINE_H));
+        let names: Vec<&str> = devs.iter().skip(shown).map(|d| d.name.as_str()).collect();
+        let t = format!("+{more} more");
+        p.text(Pos2::new(lr.left() + 10.0, lr.center().y), Align2::LEFT_CENTER, &t, font(12.0), TEXT_DIM());
+        ui.interact(lr, ui.scope_id().with("dev-card-rest"), Sense::hover()).on_hover_text(names.join("\n"));
+    }
+    out
+}
+
+/// A device's menu: its own alert line, hide and (when away) forget.
+fn device_menu(resp: &Response, d: &Device, prefs: &Prefs) -> Option<PageAction> {
     let mut out = None;
     let key = d.key();
-    let t = Tone::of(d);
-    let b = d.battery();
-    glass_card(p, rr, R_CARD, 0.0, false);
-    let cy = rr.center().y;
-    ring_cell(p, Pos2::new(rr.left() + 32.0, cy), 18.0, d, 15.0);
-    // menu
-    let mr = Rect::from_center_size(Pos2::new(rr.right() - 22.0, cy), Vec2::new(26.0, 22.0));
-    let mresp = dots(ui, mr, ui.scope_id().with(("dev-more", &key)));
-    egui::Popup::menu(&mresp).show(|ui| {
+    egui::Popup::menu(resp).show(|ui| {
         ui.set_min_width(180.0);
         let below = prefs.alert_below(&key);
         ui.menu_button("Alert below", |ui| {
@@ -375,29 +406,6 @@ fn device_row(ui: &mut Ui, p: &egui::Painter, rr: Rect, d: &Device, prefs: &Pref
             out = Some(PageAction::Forget(key.clone()));
         }
     });
-    // charge
-    let vr = pct_with_bolt(p, Pos2::new(mr.left() - 10.0, cy), Align2::RIGHT_CENTER, b, d.charging && d.live(), bold(17.0), t.text(b));
-    let mut right = vr.left() - 16.0;
-    // the week
-    if d.trend.len() > 1 && rr.width() > 420.0 {
-        let sr = Rect::from_min_size(Pos2::new(right - 120.0, cy - 14.0), Vec2::new(120.0, 28.0));
-        let vals: Vec<f32> = d.trend.iter().map(|v| *v as f32).collect();
-        tile::spark_to(p, sr, &vals, t.ring(b), 100.0);
-        right = sr.left() - 16.0;
-    }
-    // name and the line under it
-    let tx = rr.left() + 62.0;
-    let tw = right - tx;
-    text_fit(p, Pos2::new(tx, cy - 1.0), Align2::LEFT_BOTTOM, &d.name, bold(13.0), t.c(TEXT()), tw);
-    let mut sub = d.detail();
-    if let Some(e) = d.eta {
-        sub.push_str(&format!(" · {} left", devices::duration_left(e)));
-    }
-    let below = prefs.alert_below(&key);
-    if below != crate::kit::mechanics::BT_LOW_BATTERY_MAX_PCT + 1 {
-        sub.push_str(&if below == 0 { " · no alert".to_string() } else { format!(" · alert {below}%") });
-    }
-    text_fit(p, Pos2::new(tx, cy + 2.0), Align2::LEFT_TOP, &sub, font(12.0), TEXT_FAINT(), tw);
     out
 }
 
