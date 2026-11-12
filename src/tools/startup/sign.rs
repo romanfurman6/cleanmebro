@@ -174,7 +174,8 @@ pub fn flags(label: &str, program: Option<&Path>, args: &[String], sig: Option<&
     match sig {
         Some(Signer::Unsigned) => out.push(Flag::Unsigned),
         Some(Signer::Broken) => out.push(Flag::BrokenSignature),
-        Some(Signer::AdHoc) if !homebrew_place(place) => out.push(Flag::AdHoc),
+        // Homebrew and our own dev-built helper are ad-hoc on purpose
+        Some(Signer::AdHoc) if !homebrew_place(place) && !label.starts_with("com.romanfurman6.") => out.push(Flag::AdHoc),
         Some(Signer::Script) => out.push(Flag::Script),
         _ => {}
     }
@@ -393,6 +394,7 @@ mod tests {
         // homebrew's ad-hoc binaries are normal
         assert!(flags("homebrew.mxcl.redis", Some(Path::new("/opt/homebrew/opt/redis/bin/redis-server")), &[], Some(&Signer::AdHoc)).is_empty());
         assert_eq!(flags("com.x.y", Some(Path::new("/Users/a/bin/x")), &[], Some(&Signer::AdHoc)), vec![Flag::AdHoc]);
+        assert!(flags("com.romanfurman6.cleanmebro.fanhelper", Some(Path::new("/Library/PrivilegedHelperTools/com.romanfurman6.cleanmebro.fanhelper")), &[], Some(&Signer::AdHoc)).is_empty());
         // a script under ~/.config
         let f = flags("com.x.s", Some(Path::new("/bin/bash")), &s(&["/bin/bash", "/Users/a/.config/s.sh"]), Some(&Signer::Script));
         assert_eq!(f, vec![Flag::HiddenFolder, Flag::Script]);

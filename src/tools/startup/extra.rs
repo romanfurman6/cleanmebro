@@ -178,7 +178,9 @@ pub fn parse_sysext(out: &str) -> Vec<SysExt> {
     let mut found = Vec::new();
     for l in out.lines() {
         if let Some(k) = l.strip_prefix("--- com.apple.system_extension.") {
-            kind = k.trim().replace("_extension", "").replace('_', " ");
+            // "driver_extension (Go to 'System Settings > …')" → "driver"
+            let id = k.split_whitespace().next().unwrap_or("");
+            kind = id.trim_end_matches("_extension").replace('_', " ");
             continue;
         }
         let cols: Vec<&str> = l.split('\t').collect();
@@ -371,7 +373,7 @@ mod tests {
 
     #[test]
     fn reads_system_extensions() {
-        let out = "3 extension(s)\n--- com.apple.system_extension.network_extension\nenabled\tactive\tteamID\tbundleID (version)\tname\t[state]\n*\t*\tVBG97UB4TA\tcom.objective-see.lulu.extension (2.4.1/2.4.1)\tLuLu\t[activated enabled]\n\t\tVBG97UB4TA\tcom.objective-see.lulu.extension (2.3.0/2.3.0)\tLuLu\t[terminated waiting to uninstall on reboot]\n--- com.apple.system_extension.driver_extension\nenabled\tactive\tteamID\tbundleID (version)\tname\t[state]\n\t\tABCDE12345\tcom.acme.driver (1.0/1)\tAcme Driver\t[activated waiting for user]\n";
+        let out = "3 extension(s)\n--- com.apple.system_extension.network_extension\nenabled\tactive\tteamID\tbundleID (version)\tname\t[state]\n*\t*\tVBG97UB4TA\tcom.objective-see.lulu.extension (2.4.1/2.4.1)\tLuLu\t[activated enabled]\n\t\tVBG97UB4TA\tcom.objective-see.lulu.extension (2.3.0/2.3.0)\tLuLu\t[terminated waiting to uninstall on reboot]\n--- com.apple.system_extension.driver_extension (Go to 'System Settings > General > Login Items & Extensions > Driver Extensions' to modify these system extension(s))\nenabled\tactive\tteamID\tbundleID (version)\tname\t[state]\n\t\tABCDE12345\tcom.acme.driver (1.0/1)\tAcme Driver\t[activated waiting for user]\n";
         let x = parse_sysext(out);
         assert_eq!(x.len(), 2);
         assert_eq!((x[0].name.as_str(), x[0].kind.as_str(), x[0].on, x[0].active), ("LuLu", "network", true, true));
