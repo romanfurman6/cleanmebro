@@ -14,6 +14,8 @@ pub enum Perm {
     SystemEvents,
     Microphone,
     Camera,
+    /// CoreBluetooth: AirPods case and bud batteries heard over the air.
+    Bluetooth,
     Notifications,
     /// A tool's own setup step, e.g. Fan Control's privileged helper.
     Own { id: &'static str, name: &'static str, icon: Icon },
@@ -47,7 +49,7 @@ pub enum Status {
 
 impl Perm {
     /// Every system permission, in the order setup lists them.
-    pub const SYSTEM: [Perm; 7] = [Perm::Screen, Perm::Accessibility, Perm::FullDisk, Perm::SystemEvents, Perm::Microphone, Perm::Camera, Perm::Notifications];
+    pub const SYSTEM: [Perm; 8] = [Perm::Screen, Perm::Accessibility, Perm::FullDisk, Perm::SystemEvents, Perm::Microphone, Perm::Camera, Perm::Bluetooth, Perm::Notifications];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -57,6 +59,7 @@ impl Perm {
             Perm::SystemEvents => "System Events",
             Perm::Microphone => "Microphone",
             Perm::Camera => "Camera",
+            Perm::Bluetooth => "Bluetooth",
             Perm::Notifications => "Notifications",
             Perm::Own { name, .. } => name,
         }
@@ -70,6 +73,7 @@ impl Perm {
             Perm::SystemEvents => Icon::Script,
             Perm::Microphone => Icon::Mic,
             Perm::Camera => Icon::Camera,
+            Perm::Bluetooth => Icon::Bluetooth,
             Perm::Notifications => Icon::Bell,
             Perm::Own { icon, .. } => icon,
         }
@@ -93,6 +97,7 @@ impl Perm {
             Perm::SystemEvents => "Privacy_Automation",
             Perm::Microphone => "Privacy_Microphone",
             Perm::Camera => "Privacy_Camera",
+            Perm::Bluetooth => "Privacy_Bluetooth",
             Perm::Notifications => return None,
             Perm::Own { .. } => return None,
         })
@@ -275,6 +280,26 @@ mod imp {
         objc2_foundation::NSBundle::mainBundle().bundleIdentifier().is_some()
     }
 
+    /// The bundle explains Bluetooth use (asking without it gets the app killed).
+    fn bluetooth_text() -> bool {
+        let key = NSString::from_str("NSBluetoothAlwaysUsageDescription");
+        let v: Option<Retained<AnyObject>> = unsafe { objc2::msg_send![&*objc2_foundation::NSBundle::mainBundle(), objectForInfoDictionaryKey: &*key] };
+        v.is_some()
+    }
+
+    /// CBManager.authorization: 0 not asked, 1 restricted, 2 denied, 3 allowed.
+    fn bluetooth() -> Status {
+        if !bluetooth_text() {
+            return Status::NotAsked;
+        }
+        let a: isize = unsafe { objc2::msg_send![objc2::class!(CBManager), authorization] };
+        match a {
+            3 => Status::Allowed,
+            1 | 2 => Status::Denied,
+            _ => Status::NotAsked,
+        }
+    }
+
     fn notifications() -> Status {
         if !bundled() {
             return Status::Allowed; // falls back to AppleScript, which needs nothing
@@ -321,6 +346,7 @@ mod imp {
                 _ => Status::NotAsked,
             },
             Perm::Microphone | Perm::Camera => media(p),
+            Perm::Bluetooth => bluetooth(),
             Perm::Notifications => notifications(),
             Perm::Own { .. } => Status::NotAsked,
         }
@@ -366,6 +392,20 @@ mod imp {
                     let done = block2::RcBlock::new(|_ok: objc2::runtime::Bool| {});
                     unsafe { AVCaptureDevice::requestAccessForMediaType_completionHandler(t, &done) };
                 }
+            }
+            Perm::Bluetooth => {
+                // a central manager asks the first time; kept for the app's life
+                if !bluetooth_text() {
+                    return;
+                }
+                static ASKED: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+                ASKED.get_or_init(|| {
+                    let m: *mut AnyObject = unsafe {
+                        let alloc: *mut AnyObject = objc2::msg_send![objc2::class!(CBCentralManager), alloc];
+                        objc2::msg_send![alloc, initWithDelegate: std::ptr::null_mut::<AnyObject>(), queue: std::ptr::null_mut::<AnyObject>()]
+                    };
+                    m as usize
+                });
             }
             Perm::Notifications => {
                 if !bundled() {

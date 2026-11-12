@@ -549,7 +549,10 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
     let p = ui.painter().clone();
     let mut y = area.top();
     let mut opt_head = false;
-    let row_h = 46.0;
+    // rows shrink a little when the list wouldn't fit (8 permissions + Optional)
+    let n = list.len().max(1) as f32;
+    let head = if list.iter().any(|r| r.optional) { 26.0 } else { 0.0 };
+    let row_h = ((area.height() - head - 6.0 * n) / n).clamp(38.0, 46.0);
     let mut ask: Option<Perm> = None;
     for (k, r) in list.iter().enumerate() {
         if r.optional && !opt_head {
