@@ -34,7 +34,7 @@ tar = "0.4"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSValue", "NSObject", "NSProcessInfo", "NSGeometry", "NSArray", "NSString", "NSFileManager", "NSURL", "NSError", "NSData", "NSDictionary", "NSBundle", "NSSet"] }
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSView", "NSVisualEffectView", "NSResponder", "NSColor", "NSRunningApplication", "NSWorkspace", "NSGraphics", "NSGlassEffectView", "NSAppearance", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphicsContext", "NSFontDescriptor", "NSPasteboard", "NSScreen", "objc2-core-foundation", "objc2-quartz-core", "NSEvent"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSView", "NSVisualEffectView", "NSResponder", "NSColor", "NSRunningApplication", "NSWorkspace", "NSGraphics", "NSGlassEffectView", "NSAppearance", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphicsContext", "NSFontDescriptor", "NSPasteboard", "NSScreen", "NSCursor", "objc2-core-foundation", "objc2-quartz-core", "NSEvent"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotificationSettings", "UNNotificationResponse", "UNNotification", "UNNotificationAction", "UNNotificationCategory"] }
 block2 = "0.6"

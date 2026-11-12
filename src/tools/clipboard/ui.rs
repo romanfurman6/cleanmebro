@@ -415,9 +415,7 @@ fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     glass_card(&p, list, R_CARD, 0.0, false);
     if ids.is_empty() {
         let msg = if c.store.entries.is_empty() { "Nothing copied yet" } else { "Nothing matches" };
-        p.text(list.center() - Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT());
-        let hint = if c.store.entries.is_empty() { "Nothing copied yet" } else { "No matches" };
-        p.text(list.center() + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM());
+        p.text(list.center(), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT());
     } else {
         list_rows(c, ui, list, &ids);
     }
@@ -430,8 +428,9 @@ fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
 /// A line of the history list.
 pub(super) enum Row {
     Head(String),
-    /// An entry and its one-line title, worked out once per change.
-    Item(u64, String),
+    /// An entry, its one-line title and the title's search matches (char
+    /// ranges), worked out once per change.
+    Item(u64, String, Vec<(usize, usize)>),
 }
 
 /// The list's rows for the visible ids: Pinned, then one group per day.
@@ -448,6 +447,7 @@ fn grouped_rows(c: &Clipboard, ids: &[u64]) -> std::sync::Arc<Vec<Row>> {
     let by_id: HashMap<u64, &Entry> = c.store.entries.iter().map(|e| (e.id, e)).collect();
     let mut rows = Vec::new();
     let mut last: Option<String> = None;
+    let q = super::search::Query::new(&c.search);
     for id in ids {
         let Some(e) = by_id.get(id) else { continue };
         let head = if e.pinned { "Pinned".to_string() } else { day_label(e.time().date_naive()) };
@@ -455,7 +455,9 @@ fn grouped_rows(c: &Clipboard, ids: &[u64]) -> std::sync::Arc<Vec<Row>> {
             rows.push(Row::Head(head.clone()));
             last = Some(head);
         }
-        rows.push(Row::Item(*id, e.title()));
+        let title = e.title();
+        let marks = if q.is_empty() { Vec::new() } else { super::search::marks(&title, &q) };
+        rows.push(Row::Item(*id, title, marks));
     }
     let rows = std::sync::Arc::new(rows);
     *c.rows_memo.borrow_mut() = Some((key, rows.clone()));
@@ -477,7 +479,7 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
                     p.text(Pos2::new(area.left() + 14.0, y + 18.0), Align2::LEFT_CENTER, t, bold(11.0), TEXT_FAINT());
                     y += 28.0;
                 }
-                Row::Item(id, title) => {
+                Row::Item(id, title, marks) => {
                     let r = Rect::from_min_size(Pos2::new(area.left() + 4.0, y), Vec2::new(area.width() - 8.0, ROW_H));
                     // up to a thousand rows: only those in view are drawn
                     if !ui.is_rect_visible(r) {
@@ -506,7 +508,11 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
                     }
                     let tx = th.right() + 10.0;
                     let f = if e.kind == Kind::Code { mono(12.0) } else { font(13.0) };
-                    text_fit(&p, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, title, f, TEXT(), right - tx);
+                    if marks.is_empty() {
+                        text_fit(&p, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, title, f, TEXT(), right - tx);
+                    } else {
+                        marked_fit(&p, Pos2::new(tx, r.center().y), title, marks, f, right - tx);
+                    }
                     if resp.clicked() {
                         c.selected = Some(e.id);
                     }
@@ -518,6 +524,51 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
             }
         }
     });
+}
+
+/// One line of text with its search matches highlighted, cut with "…" to `max_w`.
+fn marked_fit(p: &egui::Painter, pos: Pos2, text: &str, marks: &[(usize, usize)], f: egui::FontId, max_w: f32) {
+    let chars: Vec<char> = text.chars().collect();
+    let job = |n: usize| {
+        let mut job = egui::text::LayoutJob::default();
+        let plain = egui::TextFormat { font_id: f.clone(), color: TEXT(), ..Default::default() };
+        let hit = egui::TextFormat { font_id: f.clone(), color: TEXT(), background: with_alpha(TINT(), 0.35), ..Default::default() };
+        let mut i = 0;
+        for &(a, b) in marks {
+            let (a, b) = (a.min(n), b.min(n));
+            if a > i {
+                job.append(&chars[i..a].iter().collect::<String>(), 0.0, plain.clone());
+            }
+            if b > a {
+                job.append(&chars[a..b].iter().collect::<String>(), 0.0, hit.clone());
+            }
+            i = i.max(b);
+        }
+        if n > i {
+            job.append(&chars[i..n].iter().collect::<String>(), 0.0, plain.clone());
+        }
+        if n < chars.len() {
+            job.append("…", 0.0, plain);
+        }
+        p.layout_job(job)
+    };
+    // same cap and binary search as text_fit: never lay out a whole long clip
+    let cap = ((max_w.max(0.0) / (f.size * 0.25).max(1.0)) as usize).saturating_add(2).min(chars.len());
+    let mut g = job(cap);
+    if g.size().x > max_w {
+        let (mut lo, mut hi) = (1usize, cap);
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+            if job(mid).size().x <= max_w {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        g = job(lo);
+    }
+    let rect = Align2::LEFT_CENTER.anchor_size(pos, g.size());
+    p.galley(rect.min, g, TEXT());
 }
 
 /// The selected entry: a big preview, facts and actions.
@@ -695,7 +746,7 @@ fn settings_page(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     let mut child = ui.new_child(UiBuilder::new().max_rect(body));
     ScrollArea::vertical().id_salt("clip-settings").auto_shrink([false, false]).show(&mut child, |ui| {
         let rows = c.settings.ignore.len().max(1);
-        let h = (500.0f32).max(330.0 + rows as f32 * ROW_H + 120.0);
+        let h = (500.0f32).max(330.0 + (rows + 2) as f32 * ROW_H + 120.0);
         let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h), Sense::hover());
         let p = ui.painter().clone();
         let gap = 20.0;
@@ -796,19 +847,27 @@ fn right_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
     let mut y = col.top();
 
     p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Privacy", bold(15.0), TEXT());
-    let card = Rect::from_min_size(Pos2::new(x0, y + 28.0), Vec2::new(w, 64.0 + ROW_H + 4.0));
-    glass_card(p, card, R_CARD, 0.0, false);
-    let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, card.top() + 30.0), Vec2::new(30.0, 18.0));
-    p.text(Pos2::new(card.left() + 12.0, card.top() + 20.0), Align2::LEFT_CENTER, "Record passwords (until quit)", font(13.0), TEXT());
-    paragraph(p, Pos2::new(card.left() + 12.0, card.top() + 31.0), "", font(11.0), TEXT_FAINT(), sw.left() - card.left() - 24.0);
-    if switch(ui, sw, id.with("concealed"), c.settings.record_concealed, true).clicked() {
-        c.settings.record_concealed = !c.settings.record_concealed;
-        changed = true;
+    let card = card_rows(p, x0, y + 28.0, w, 4);
+    let switches = [
+        ("Record passwords (until quit)", c.settings.record_concealed),
+        ("Record tokens and card numbers", c.settings.record_secrets),
+        ("Record from other devices", c.settings.record_remote),
+    ];
+    for (k, (l, on)) in switches.into_iter().enumerate() {
+        label(p, card, k, l);
+        let sw = Rect::from_center_size(Pos2::new(card.right() - 27.0, row_y(card, k)), Vec2::new(30.0, 18.0));
+        if switch(ui, sw, id.with(("psw", k)), on, true).clicked() {
+            let s = &mut c.settings;
+            match k {
+                0 => s.record_concealed = !s.record_concealed,
+                1 => s.record_secrets = !s.record_secrets,
+                _ => s.record_remote = !s.record_remote,
+            }
+            changed = true;
+        }
     }
-    let ly = card.top() + 64.0;
-    p.line_segment([Pos2::new(card.left() + 12.0, ly), Pos2::new(card.right() - 12.0, ly)], Stroke::new(1.0, white(13)));
-    let ry = ly + ROW_H / 2.0;
-    p.text(Pos2::new(card.left() + 12.0, ry), Align2::LEFT_CENTER, "Pause recording", font(13.0), TEXT());
+    let ry = row_y(card, 3);
+    label(p, card, 3, "Pause recording");
     let mut x = card.right() - 12.0;
     if c.paused() {
         let bw = button_width(p, "Resume", BTN_PRIMARY) - 6.0;

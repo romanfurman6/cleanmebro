@@ -45,6 +45,11 @@ pub fn spawn(shared: Arc<Shared>, tx: Sender<Clip>, ctx: egui::Context) {
                 if clip.transient {
                     continue;
                 }
+                // one word copied while a password field has the keyboard is
+                // most likely that password, even when the app didn't mark it
+                if clip.secure && !super::privacy::terminal(&clip.bundle) && clip.files.is_empty() && clip.png.is_none() && clip.text.as_deref().is_some_and(super::privacy::password_shaped) {
+                    clip.concealed = true;
+                }
                 if clip.concealed {
                     if !shared.concealed.load(Ordering::Relaxed) {
                         continue;

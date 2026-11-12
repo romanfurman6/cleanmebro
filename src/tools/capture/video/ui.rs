@@ -617,15 +617,19 @@ fn transcript(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     // under the list: cut the picked lines, captions, copy and save
     let fy = r.bottom() - foot + 8.0;
     let picked = v.picked.map(|(a, b)| b - a + 1).unwrap_or(0);
-    let cut = Rect::from_min_size(Pos2::new(r.left(), fy), Vec2::new(r.width(), 28.0));
+    let half = (r.width() - 8.0) / 2.0;
+    let cut = Rect::from_min_size(Pos2::new(r.left(), fy), Vec2::new(half, 28.0));
     let label = match picked {
-        0 => "Click a line (⇧ for more) to cut it".to_string(),
-        1 => "Cut this line".to_string(),
-        n => format!("Cut these {n} lines"),
+        0 | 1 => "Cut line".to_string(),
+        n => format!("Cut {n} lines"),
     };
-    if pill_button(ui, cut, &label, if picked > 0 { BTN_PRIMARY } else { BTN_SECONDARY }, picked > 0).clicked() {
+    if pill_button(ui, cut, &label, if picked > 0 { BTN_PRIMARY } else { BTN_SECONDARY }, picked > 0).on_hover_text("Click a line, ⇧-click for more").clicked() {
         v.cut_selection();
         v.picked = None;
+    }
+    let pauses = Rect::from_min_size(Pos2::new(cut.right() + 8.0, fy), Vec2::new(half, 28.0));
+    if pill_button(ui, pauses, "Cut pauses", BTN_SECONDARY, true).on_hover_text("Cut silences and um, uh, е-е").clicked() {
+        v.cut_pauses();
     }
     let by = cut.bottom() + 10.0;
     let cb = Rect::from_min_size(Pos2::new(r.left(), by + 6.0), Vec2::splat(16.0));
