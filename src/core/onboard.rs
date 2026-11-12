@@ -485,7 +485,7 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
             let ib = Rect::from_min_size(Pos2::new(r.left() + 12.0, r.center().y - 17.0), Vec2::splat(34.0));
             p.rect_filled(ib, 9.0, lerp_color(white(16), BLUE(), s));
             let b = app.tools[i].badge();
-            icon(&p, b.icon, ib.shrink(8.0), lerp_color(TEXT_MUTED(), Color32::WHITE, s));
+            icon(&p, b.icon, ib.shrink(8.0), lerp_color(TEXT_MUTED(), ON_ACTION, s));
             let tx = ib.right() + 10.0;
             text_fit(&p, Pos2::new(tx, r.top() + 15.0), Align2::LEFT_TOP, app.tools[i].name(), bold(13.0), lerp_color(TEXT_MUTED(), TEXT(), s), r.right() - tx - 24.0);
             // what it will ask for
