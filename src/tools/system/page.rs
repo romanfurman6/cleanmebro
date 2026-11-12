@@ -123,7 +123,7 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
         SheetAction::Open(tool) => cx.open_page(tool, ""),
         SheetAction::SpeedTest => {
             // a test already under way just shows again
-            monitor::start_speed_test(mon.clone(), ui.ctx().clone());
+            monitor::start_speed_test(mon.clone(), ui.ctx().clone(), monitor::SpeedMode::Quick);
             super::speed::open(ui.ctx());
         }
         SheetAction::MeasureFolders => monitor::measure_folders(mon.clone(), ui.ctx().clone()),
@@ -145,8 +145,8 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
             P::Forget(key) => monitor::forget_device(mon, &key),
         }
     }
-    if super::speed::modal(ui, &s.speed) {
-        monitor::start_speed_test(mon.clone(), ui.ctx().clone());
+    if let Some(mode) = super::speed::modal(ui, &s.speed) {
+        monitor::start_speed_test(mon.clone(), ui.ctx().clone(), mode);
     }
 }
 
