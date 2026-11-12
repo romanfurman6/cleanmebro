@@ -696,11 +696,8 @@ fn secs_index(v: Option<u32>, choices: &[u32]) -> usize {
 
 /// One line of text input in a settings card (`secret` hides what's typed).
 fn field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, secret: bool) -> egui::Response {
-    ui.painter().rect_filled(r, 6.0, white(15));
-    let tr = r.shrink2(Vec2::new(8.0, 0.0));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let te = egui::TextEdit::singleline(text).hint_text(egui::RichText::new(hint).color(TEXT_FAINT())).frame(egui::Frame::NONE).font(font(12.0)).text_color(TEXT()).password(secret).desired_width(tr.width());
-    child.add(te)
+    let id = ui.scope_id().with(("field", if secret { "secret" } else { hint }));
+    text_input(ui, r, id, text, hint, FieldStyle { secret, ..Default::default() })
 }
 
 /// Sharing: upload recordings to the person's S3-compatible storage
@@ -776,7 +773,7 @@ pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     let fw = (card.width() * 0.6).min(280.0);
     let frect = |card: Rect, k: usize| {
         let y = row_y(card, k);
-        Rect::from_min_max(Pos2::new(card.right() - 12.0 - fw, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0))
+        Rect::from_min_max(Pos2::new(card.right() - 6.0 - fw, y - sp::CONTROL_H / 2.0), Pos2::new(card.right() - 6.0, y + sp::CONTROL_H / 2.0))
     };
     field(ui, frect(card, 0), &mut s.endpoint, "fsn1.your-objectstorage.com", false);
     field(ui, frect(card, 1), &mut s.bucket, "my-bucket", false);
