@@ -33,6 +33,9 @@
       if (row.scrollWidth > row.clientWidth) row.scrollTo({ left: navs[i].offsetLeft - row.offsetLeft - 12, behavior: 'smooth' });
     };
     navs.forEach((b, i) => b.addEventListener('click', () => { held = true; show(i); }));
+    // play.js: anything done inside the window stops the cycling; other parts can open a tool
+    app.addEventListener('pointerdown', () => { held = true; });
+    window.cmShow = key => { const i = navs.findIndex(b => b.dataset.p === key); if (i >= 0) { held = true; show(i); } };
     let inView = false;
     new IntersectionObserver(es => { inView = es[0].isIntersecting; }, { threshold: 0.4 }).observe(app);
     if (!still) setInterval(() => { if (!held && inView && !document.hidden) show((sel + 1) % navs.length); }, 4000);
@@ -44,7 +47,8 @@
       hl = Math.max(6, Math.min(70, hl + (Math.random() - 0.5) * 12));
       if (hb) { const b = hb.firstElementChild; hb.appendChild(b); const h = 30 + hl; b.style.height = h + '%'; b.className = h > 90 ? 'hot' : ''; }
       if (hc) hc.innerHTML = Math.round(hl) + '<small>%</small>';
-      const fmt = n => n.toLocaleString('en-US').replace(',', ' '), avg = 1900 + Math.round(hl * 20), MAX = 6000;
+      const fmt = n => n.toLocaleString('en-US').replace(',', ' '), MAX = 6000;
+      const avg = window.cmFanTarget ? Math.round(window.cmFanTarget + (Math.random() - 0.5) * 60) : 1900 + Math.round(hl * 20);
       if (fr) fr.textContent = fmt(avg);
       if (sbr) sbr.textContent = fmt(avg);
       if (fp) fp.textContent = Math.round(avg / MAX * 100) + '%';
