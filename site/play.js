@@ -24,6 +24,18 @@
     if (tg && !tg.closest('[data-own]')) { tg.classList.toggle('off'); tg.dispatchEvent(new CustomEvent('flip', { bubbles: true })); }
   });
 
+  // ---------- Sharing: copy a link, open it, delete it ----------
+  (() => {
+    const p = pane('sharing'); if (!p) return;
+    const n = $('#sh-n', p);
+    p.addEventListener('click', e => {
+      const b = e.target.closest('.rb'); if (!b) return;
+      const row = b.closest('.shr'), k = [...row.querySelectorAll('.rb')].indexOf(b);
+      if (k === 0) { b.classList.add('ok'); setTimeout(() => b.classList.remove('ok'), 1200); }
+      if (k === 2) { row.classList.add('gone'); setTimeout(() => { row.remove(); n.textContent = $$('.shr', p).length; }, 250); }
+    });
+  })();
+
   // ---------- Cleanup ----------
   (() => {
     const p = pane('cleanup'); if (!p) return;
@@ -413,27 +425,6 @@
     });
   })();
 
-  // ---------- What else each tool does ----------
-  const FEATS = {
-    cleanup: ['Empties the Trash first', 'Xcode, simulators, build output', 'Check with AI', 'Remembers what you keep', 'Move to Trash or delete now', 'Never touches Documents or .git'],
-    diskmap: ['Live while it scans', 'Any folder', 'Largest files', 'Hover preview', 'Keyboard navigation', 'Updates as files change'],
-    uninstall: ['Finds leftovers', 'Stops helpers first', 'Package receipts', 'Reset an app', 'Root-owned apps', 'Drop an app on the widget'],
-    startup: ['Login items, agents, daemons', 'Signature check', 'Flags suspicious items', 'Tracks what changed', 'Cron jobs and extensions'],
-    health: ['Charge limit', 'Power in watts', 'Top processes', 'Speed test', 'Per-app traffic', 'Bluetooth batteries', 'Low battery alerts'],
-    claude: ['Claude, Codex, Gemini, OpenCode', 'Pace and forecast', 'Cost at API prices', 'Limit alerts', 'Number in the menu bar'],
-    fans: ['Quiet, Fixed, Curve, Max', 'Chip temperatures', 'Last hour of rpm'],
-    capture: ['Area, window, screen', 'Text from the screen', 'Blur or cover text', 'Arrows, frames, steps', 'Color picker and ruler', 'Pin on screen', 'Share link'],
-    video: ['Display, window or area', 'Camera bubble', 'Mic and system audio', 'Smooth cursor', 'Trim and cut pauses', 'Transcript', 'Share link'],
-    clipboard: ['Search with highlights', 'Text, code, links, images, colors', 'Pins', 'Skips passwords and tokens', 'Quick paste ⌘1–9', 'Pause for 15 min'],
-    dictation: ['⌥D in any app', 'Types at the caret', 'Runs on your Mac', 'Stops after silence', 'Your own words', 'Ukrainian, English and more'],
-    awake: ['While Claude Code works', 'Screen on or off', 'Own shortcut', 'cmdmeow:// links', 'Week of awake time'],
-    displays: ['Brightness and volume over DDC', 'Keyboard keys work', 'Dims when DDC can’t', 'Several displays'],
-  };
-  const strip = el('div', 'feats'); strip.setAttribute('aria-live', 'polite');
-  app.parentElement.after(strip);
-  const paint = () => { const k = ($('.pane.on') || $('.pane')).dataset.p; strip.innerHTML = (FEATS[k] || []).map(f => `<span>${f}</span>`).join(''); };
-  new MutationObserver(paint).observe($('.main'), { subtree: true, attributes: true, attributeFilter: ['hidden'] });
-  paint();
 
   // One bar: the menu bar icons jump into Cmd+Meow, each becomes a live widget
   (() => {
@@ -442,9 +433,8 @@
     ap.forEach((ic, k) => ic.style.setProperty('--k', k));
     const wOf = i => wg.find(w => +w.dataset.i === i);
     const label = async t => { n.classList.add('flip'); await sleep(300); n.textContent = t; n.classList.remove('flip'); };
-    const vb = $$('#verbs span'), lit = i => { const v = vb.find(v => +v.dataset.i === i); if (v) v.classList.add('on'); };
-    const reset = () => { bars.className = 'bars'; vb.forEach(v => v.classList.remove('on')); ap.forEach(ic => ic.classList.remove('out')); wg.forEach(w => w.classList.remove('on')); n.textContent = '11 apps'; };
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { bars.classList.add('b-one', 'b-open'); ap.forEach(ic => ic.classList.add('out')); wg.forEach(w => w.classList.add('on')); vb.forEach(v => v.classList.add('on')); n.textContent = '1 app'; return; }
+    const reset = () => { bars.className = 'bars'; ap.forEach(ic => ic.classList.remove('out')); wg.forEach(w => w.classList.remove('on')); n.textContent = '11 apps'; };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { bars.classList.add('b-one', 'b-open'); ap.forEach(ic => ic.classList.add('out')); wg.forEach(w => w.classList.add('on')); n.textContent = '1 app'; return; }
     const ORDER = [5, 0, 9, 3, 7, 2, 10, 6, 1, 8, 4];
     let gen = 0, on = false;
     const fly = (ic, w, i) => {
@@ -458,7 +448,7 @@
         { transform: `translate(${dx * 0.35 + side}px, ${lift}px) scale(1.7) rotate(${tilt}deg)`, offset: 0.32, easing: 'cubic-bezier(.5,0,.3,1)' },
         { transform: `translate(${dx}px, ${dy}px) scale(1.05) rotate(0deg)` }
       ], { duration: 820 + (i * 53) % 220, fill: 'forwards' });
-      return new Promise(r => { an.onfinish = () => { f.remove(); w.classList.add('on'); lit(+w.dataset.i); r(); }; });
+      return new Promise(r => { an.onfinish = () => { f.remove(); w.classList.add('on'); r(); }; });
     };
     const play = async id => {
       reset(); await sleep(700); if (id !== gen) return;
@@ -489,13 +479,13 @@
   const go = { Clean: 'cleanup', Screenshot: 'capture', Claude: 'awake', Clipboard: 'clipboard', 'Macintosh HD': 'diskmap', Memory: 'health', CPU: 'health', Battery: 'health', 'Home Wi-Fi': 'health', 'Claude Max': 'claude', Fans: 'fans' };
   document.querySelectorAll('.app.pnl .wd').forEach(w => {
     const k = (w.querySelector('.dm, .kh b, .cl3 > span:last-child') || {}).textContent;
-    const to = go[(k || '').trim()]; if (!to) return;
+    const to = w.dataset.to || go[(k || '').trim()]; if (!to) return;
     w.classList.add('link'); w.setAttribute('role', 'button'); w.tabIndex = 0;
     const open = () => { window.cmShow && window.cmShow(to); app.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
     w.addEventListener('click', open); w.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
   });
   // Keyboard: span controls in the window act like buttons
-  const CTL = '.act, .btn2, .gch, .seg > i, .tg, .fc, .mic, .stb, .fr .ck';
+  const CTL = '.rb, .act, .btn2, .gch, .seg > i, .tg, .fc, .mic, .stb, .fr .ck';
   const arm = () => $$(CTL, app).forEach(c => {
     if (c.tabIndex < 0) { c.tabIndex = 0; c.setAttribute('role', c.classList.contains('tg') ? 'switch' : 'button'); }
     if (c.classList.contains('tg')) c.setAttribute('aria-checked', String(!c.classList.contains('off')));

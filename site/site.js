@@ -73,7 +73,7 @@
     setInterval(() => {
       if (document.hidden) return;
       k = (k + 1) % names.length;
-      const out = cur, next = word(names[k]);
+      const out = cur, next = word(names[k]); out.classList.add('out');
       [...out.children].forEach((c, i) => c.animate(
         [{ transform: 'none', opacity: 1, filter: 'blur(0)' }, { transform: 'translateY(-55%) rotateX(80deg)', opacity: 0, filter: 'blur(6px)' }],
         { duration: 380, delay: i * 22, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'forwards' }));
