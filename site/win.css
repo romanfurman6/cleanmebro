@@ -654,3 +654,7 @@
 }
 @media (max-width: 600px) { .switcher .pane[data-p=video] .tb .seg { margin-left: 0; } .switcher .blk b { white-space: nowrap; font-size: 11px; } }
 @media (max-width: 600px) { .switcher .vst { grid-template-columns: minmax(0, 1fr); padding: 12px; } .switcher .vst > div { min-width: 0; } .switcher .hsw > div { gap: 8px; } }
+
+/* Focus: no ring after a mouse click; a lime ring only for the keyboard */
+.app [tabindex]:focus, .pnl [tabindex]:focus, .wd:focus { outline: none; }
+.app [tabindex]:focus-visible, .pnl [tabindex]:focus-visible, .wd:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
