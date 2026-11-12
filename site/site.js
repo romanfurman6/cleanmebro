@@ -33,27 +33,52 @@
       if (row.scrollWidth > row.clientWidth) row.scrollTo({ left: navs[i].offsetLeft - row.offsetLeft - 12, behavior: 'smooth' });
     };
     navs.forEach((b, i) => b.addEventListener('click', () => { held = true; show(i); }));
+    // play.js: anything done inside the window stops the cycling; other parts can open a tool
+    app.addEventListener('pointerdown', () => { held = true; });
+    window.cmShow = key => { const i = navs.findIndex(b => b.dataset.p === key); if (i >= 0) { held = true; show(i); } };
     let inView = false;
     new IntersectionObserver(es => { inView = es[0].isIntersecting; }, { threshold: 0.4 }).observe(app);
     if (!still) setInterval(() => { if (!held && inView && !document.hidden) show((sel + 1) % navs.length); }, 4000);
     // Live numbers inside the window
-    const hb = $('hc-bars'), hc = $('hc-cpu'), fr = $('fc-rpm');
-    const leg = $('hc-leg'), sbr = $('sb-rpm'), fp = $('fc-pct'), fl = $('fc-l'), frr = $('fc-r'), flb = $('fc-lb'), frb = $('fc-rb');
+    const hb = $('hc-bars'), hc = $('hc-cpu'), leg = $('hc-leg'), sbr = $('sb-rpm');
     let hl = 16;
+    const fanTick = still => {
+      const avg = window.cmFanDraw ? window.cmFanDraw(hl, still) : 1900 + hl * 20;
+      if (sbr) sbr.textContent = Math.round(avg).toLocaleString('en-US').replace(',', ' ');
+    };
+    window.cmFanTick = () => fanTick(true);
     if (!still) setInterval(() => {
       hl = Math.max(6, Math.min(70, hl + (Math.random() - 0.5) * 12));
       if (hb) { const b = hb.firstElementChild; hb.appendChild(b); const h = 30 + hl; b.style.height = h + '%'; b.className = h > 90 ? 'hot' : ''; }
-      if (hc) hc.innerHTML = Math.round(hl) + '<small>%</small>';
-      const fmt = n => n.toLocaleString('en-US').replace(',', ' '), avg = 1900 + Math.round(hl * 20), MAX = 6000;
-      if (fr) fr.textContent = fmt(avg);
-      if (sbr) sbr.textContent = fmt(avg);
-      if (fp) fp.textContent = Math.round(avg / MAX * 100) + '%';
-      [[fl, flb, avg - 85], [frr, frb, avg + 85]].forEach(([t, b, v]) => { if (t) t.textContent = fmt(v) + ' rpm'; if (b) b.style.width = (v / MAX * 100).toFixed(1) + '%'; });
+      if (hc) hc.textContent = Math.round(hl);
+      fanTick();
       if (leg) { const u = Math.round(hl * 0.7); leg.innerHTML = `User ${u}%&nbsp;&nbsp; System ${Math.round(hl) - u}%&nbsp;&nbsp; Idle ${100 - Math.round(hl)}%`; }
     }, 900);
   }
 
   if (still) return;
+
+  // Hero: the app it replaces rolls over, letter by letter
+  const swap = $('swap');
+  if (swap) {
+    const names = ['CleanMyMac', 'Loom', 'CleanShot X', 'Paste', 'iStat Menus', 'Wispr Flow', 'DaisyDisk'];
+    const word = t => { const w = document.createElement('span'); w.className = 'w'; [...t].forEach(ch => { const c = document.createElement('span'); c.className = 'c'; c.textContent = ch; w.append(c); }); return w; };
+    let k = 0, cur = swap.querySelector('.w');
+    cur.replaceWith(cur = word(names[0]));
+    setInterval(() => {
+      if (document.hidden) return;
+      k = (k + 1) % names.length;
+      const out = cur, next = word(names[k]); out.classList.add('out');
+      [...out.children].forEach((c, i) => c.animate(
+        [{ transform: 'none', opacity: 1, filter: 'blur(0)' }, { transform: 'translateY(-55%) rotateX(80deg)', opacity: 0, filter: 'blur(6px)' }],
+        { duration: 380, delay: i * 22, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'forwards' }));
+      setTimeout(() => out.remove(), 380 + out.children.length * 22);
+      swap.append(next); cur = next;
+      [...next.children].forEach((c, i) => c.animate(
+        [{ transform: 'translateY(60%) rotateX(-85deg)', opacity: 0, filter: 'blur(6px)' }, { transform: 'none', opacity: 1, filter: 'blur(0)' }],
+        { duration: 620, delay: 140 + i * 28, easing: 'cubic-bezier(.2,1.4,.4,1)', fill: 'backwards' }));
+    }, 2400);
+  }
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // CPU in the menu bar and the panel, a new sample every 0.8s
@@ -76,8 +101,9 @@
   setInterval(() => {
     secs++;
     const h = Math.floor(secs / 3600), m = Math.floor(secs / 60) % 60, s = secs % 60;
+    if (!awT) return;
     awT.textContent = `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    ring.setAttribute('stroke-dashoffset', (125.7 * (1 - (secs % 7200) / 7200)).toFixed(1));
+    ring.setAttribute('stroke-dashoffset', (119.4 * (1 - (secs % 7200) / 7200)).toFixed(1));
   }, 1000);
 
   // Clean Up: a scan counts up, then starts over
@@ -137,5 +163,5 @@
     await sleep(1600);
     toast.classList.remove('on'); snap.classList.remove('on'); cur.style.transform = 'translate(-40px,-30px)';
   }
-  (async () => { await sleep(1800); for (;;) { await shoot(); await sleep(3800); } })();
+  if (snap) (async () => { await sleep(1800); for (;;) { await shoot(); await sleep(3800); } })();
 })();
