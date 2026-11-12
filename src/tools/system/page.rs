@@ -327,7 +327,7 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
     for (k, (v, label, col)) in [(human_rate(s.net_down), "download", TEXT()), (human_rate(s.net_up), "upload", TEAL())].into_iter().enumerate() {
         let x = r.left() + k as f32 * colw;
         text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &v, ty::lead(), col, colw - sp::S);
-        p.text(Pos2::new(x, y + 20.0), Align2::LEFT_TOP, label, ty::caption(), ty::caption_color());
+        p.text(Pos2::new(x, y + 25.0), Align2::LEFT_TOP, label, ty::caption(), ty::caption_color());
     }
     let mut rows = vec![(None, "Today".to_string(), format!("{} in · {} out", human_bytes(s.net_recv_total), human_bytes(s.net_sent_total)))];
     if !s.wifi.signal.is_empty() {
@@ -344,7 +344,7 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
     rows.push((None, "Speed".to_string(), speed));
     let bottom = Rect::from_min_max(r.min, Pos2::new(r.right(), r.bottom() - 26.0 - sp::M));
     let lt = legend(p, bottom, &rows);
-    let gr = Rect::from_min_max(Pos2::new(r.left(), y + 34.0 + sp::M), Pos2::new(r.right(), lt - sp::M));
+    let gr = Rect::from_min_max(Pos2::new(r.left(), y + 40.0 + sp::M), Pos2::new(r.right(), lt - sp::M));
     if gr.height() > 20.0 {
         tile::spark(p, gr, &s.net_history, TEAL(), None);
     }
