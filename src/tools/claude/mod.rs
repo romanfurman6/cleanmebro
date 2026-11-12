@@ -62,10 +62,10 @@ impl Tool for Claude {
         ID
     }
     fn name(&self) -> &'static str {
-        "AI Tool"
+        "AI Usage"
     }
     fn about(&self) -> &'static str {
-        "Plan limits and token use of Claude Code or Codex"
+        "Limits, pace and token use of Claude, Codex, Gemini and OpenCode"
     }
     fn badge(&self) -> Badge {
         badge()

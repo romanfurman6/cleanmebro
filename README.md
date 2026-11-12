@@ -56,12 +56,12 @@ Every tool can be turned off, and the panel is a grid of widgets you arrange
 yourself.
 
 <p align="center">
-  <img src="docs/images/lens.png" width="760" alt="Disk Map">
+  <img src="docs/images/disk-map.png" width="760" alt="Disk Map">
 </p>
 
 <table align="center">
   <tr>
-    <td valign="top"><img src="docs/images/panel.png" width="290" alt="The menu bar panel"></td>
+    <td valign="top"><img src="docs/images/menu-panel.png" width="290" alt="The menu bar panel"></td>
     <td valign="top">
       <img src="docs/images/ai-usage.png" width="500" alt="AI Usage"><br>
       <img src="docs/images/clipboard.png" width="500" alt="Clipboard history">

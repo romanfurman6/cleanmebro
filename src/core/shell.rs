@@ -1007,7 +1007,7 @@ mod tests {
         assert!(link_matches("lens", "Disk Map", "lens"));
         assert!(link_matches("keep_awake", "Keep Awake", "keep-awake"));
         assert!(link_matches("keep_awake", "Keep Awake", "keep_awake"));
-        assert!(link_matches("claude", "AI Tool", "ai-tool"));
+        assert!(link_matches("claude", "AI Usage", "ai-usage"));
         assert!(!link_matches("lens", "Disk Map", "disk"));
     }
 }

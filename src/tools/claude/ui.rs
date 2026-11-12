@@ -42,7 +42,7 @@ pub fn widget(ui: &mut Ui, r: Rect, size: Size, cl: &UsageInfo, all: &[UsageInfo
         _ => {
             let resp = tile::card(ui, r, id, sel);
             let p = ui.painter();
-            let body = tile::head(p, r, Icon::Gauge, tint::CLAUDE(), &cl.plan_title(), &status(cl));
+            let body = tile::head(p, r, Icon::Gauge, tint::CLAUDE(), "AI Usage", &status(cl));
             for (k, (label, l)) in [("Session", cl.session()), ("Week", cl.weekly())].into_iter().enumerate() {
                 let lr = Rect::from_min_size(Pos2::new(body.left(), body.top() + k as f32 * 22.0), Vec2::new(body.width(), 22.0));
                 let v = l.map(|l| format!("{:.0}% · {}", l.pct, short_reset(&l.resets).trim_start_matches("resets "))).unwrap_or_default();
@@ -103,7 +103,7 @@ pub fn card(p: &egui::Painter, r: Rect, cl: &UsageInfo, t: f64) {
     let (fresh, fc) = super::parts::fresh(cl);
     let (status, scol) = if cl.limits.is_empty() || fresh.is_empty() { (status, white(166)) } else { (fresh, fc) };
     let sw = text_fit(p, Pos2::new(x1, hy), Align2::RIGHT_CENTER, &status, ty::label(), scol, 170.0).width();
-    text_fit(p, Pos2::new(x0, hy), Align2::LEFT_CENTER, &cl.plan_title(), ty::title(), TEXT(), (x1 - sw - 12.0) - x0);
+    text_fit(p, Pos2::new(x0, hy), Align2::LEFT_CENTER, "AI Usage", ty::title(), TEXT(), (x1 - sw - 12.0) - x0);
     if cl.limits.is_empty() && cl.loading {
         spinner(p, Pos2::new(x1 - 8.0, r.top() + 56.0), 7.0, t, TEXT_DIM());
     }
@@ -141,7 +141,7 @@ pub fn detail(all: &backend::All, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time);
     let sub = if cl.loading { "Updating…".to_string() } else { super::parts::fresh(&cl).0 };
-    if sheet_header(ui, rect, Icon::Gauge, tint::CLAUDE(), &cl.plan_title(), &sub) {
+    if sheet_header(ui, rect, Icon::Gauge, tint::CLAUDE(), "AI Usage", &sub) {
         cx.close_detail();
     }
     let rb = Rect::from_center_size(Pos2::new(rect.right() - 27.0 - 34.0, rect.top() + 29.0), Vec2::splat(26.0));
