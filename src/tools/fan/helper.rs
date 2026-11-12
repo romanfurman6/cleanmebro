@@ -12,6 +12,9 @@
 //! It also holds the battery's charge limit ([`crate::kit::charge`]): the
 //! policy is kept in [`CHARGE_FILE`] so it holds while the app is closed and
 //! after a restart, and charging is switched back on when the helper stops.
+//! The helper can't run while the Mac sleeps, so with a limit set it
+//! switches charging off just before sleep ([`sleep_watch`]) and decides
+//! again on wake: no climbing past the limit overnight.
 
 pub use crate::kit::helper::*;
 #[cfg(target_os = "macos")]
@@ -60,6 +63,9 @@ pub fn serve(uid: u32) -> ! {
     ctl.auto();
     let mut probe = Probe::open();
     let charger = Charger::open();
+    if charger.is_some() {
+        sleep_watch::start();
+    }
     let mut policy: Option<Policy> = std::fs::read_to_string(CHARGE_FILE).ok().and_then(|t| serde_json::from_str::<Policy>(&t).ok()).map(Policy::sanitize);
     let mut cstate = charge::State::default();
     // charging was switched off by this helper and must come back on
@@ -153,7 +159,14 @@ pub fn serve(uid: u32) -> ! {
                 let _ = (&stream).write_all(s.as_bytes());
             }
         }
-        if (touched || policy.is_some_and(|p| p.active())) && charge_at.elapsed() >= CHARGE_EVERY {
+        let active = policy.is_some_and(|p| p.active());
+        sleep_watch::LIMIT_ON.store(active, Ordering::SeqCst);
+        if sleep_watch::SLEPT.swap(false, Ordering::SeqCst) {
+            // charging was switched off for sleep: decide again now
+            touched = true;
+            charge_at = Instant::now() - CHARGE_EVERY;
+        }
+        if (touched || active) && charge_at.elapsed() >= CHARGE_EVERY {
             charge_at = Instant::now();
             tick_charge(charger.as_ref(), policy, &mut cstate, &mut touched);
         }
@@ -199,6 +212,77 @@ pub fn serve(uid: u32) -> ! {
             }
         }
         *manual = any || *manual;
+    }
+}
+
+/// Switches charging off just before the Mac sleeps while a limit is set.
+/// A thread of its own runs a CFRunLoop for the system power messages.
+#[cfg(target_os = "macos")]
+mod sleep_watch {
+    use super::super::probe::mac::Charger;
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+    /// A limit is set (written by the main loop).
+    pub static LIMIT_ON: AtomicBool = AtomicBool::new(false);
+    /// Charging was switched off for sleep; the main loop decides again.
+    pub static SLEPT: AtomicBool = AtomicBool::new(false);
+    static ROOT_PORT: AtomicU32 = AtomicU32::new(0);
+
+    const CAN_SYSTEM_SLEEP: u32 = 0xE000_0270;
+    const SYSTEM_WILL_SLEEP: u32 = 0xE000_0280;
+
+    type Callback = extern "C" fn(refcon: *mut c_void, service: u32, msg: u32, arg: *mut c_void);
+
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" {
+        fn IORegisterForSystemPower(refcon: *mut c_void, port: *mut *mut c_void, cb: Callback, notifier: *mut u32) -> u32;
+        fn IONotificationPortGetRunLoopSource(port: *mut c_void) -> *const c_void;
+        fn IOAllowPowerChange(kernel_port: u32, id: isize) -> i32;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFRunLoopDefaultMode: *const c_void;
+        fn CFRunLoopGetCurrent() -> *const c_void;
+        fn CFRunLoopAddSource(rl: *const c_void, source: *const c_void, mode: *const c_void);
+        fn CFRunLoopRun();
+    }
+
+    extern "C" fn on_power(refcon: *mut c_void, _service: u32, msg: u32, arg: *mut c_void) {
+        let charger = unsafe { &*(refcon as *const Charger) };
+        let port = ROOT_PORT.load(Ordering::SeqCst);
+        match msg {
+            CAN_SYSTEM_SLEEP => unsafe {
+                IOAllowPowerChange(port, arg as isize);
+            },
+            SYSTEM_WILL_SLEEP => {
+                if LIMIT_ON.load(Ordering::SeqCst) && charger.set(true) {
+                    SLEPT.store(true, Ordering::SeqCst);
+                }
+                unsafe { IOAllowPowerChange(port, arg as isize) };
+            }
+            _ => {}
+        }
+    }
+
+    pub fn start() {
+        let _ = std::thread::Builder::new().name("sleep-watch".into()).spawn(|| {
+            let Some(charger) = Charger::open() else { return };
+            // lives as long as the helper
+            let refcon = Box::into_raw(Box::new(charger)) as *mut c_void;
+            unsafe {
+                let mut port: *mut c_void = std::ptr::null_mut();
+                let mut notifier = 0u32;
+                let root = IORegisterForSystemPower(refcon, &mut port, on_power, &mut notifier);
+                if root == 0 || port.is_null() {
+                    return;
+                }
+                ROOT_PORT.store(root, Ordering::SeqCst);
+                CFRunLoopAddSource(CFRunLoopGetCurrent(), IONotificationPortGetRunLoopSource(port), kCFRunLoopDefaultMode);
+                CFRunLoopRun();
+            }
+        });
     }
 }
 
