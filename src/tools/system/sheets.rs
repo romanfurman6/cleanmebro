@@ -259,21 +259,18 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             let devs = super::devices::lowest_first(&s.devices);
             let mut sp = Spec::new(Icon::Bluetooth, tint::NEUTRAL(), "Devices", super::devices_ui::note(&devs));
             for d in &devs {
-                match d.battery() {
-                    Some(b) => sp.legend.push(Legend { color: super::devices::color(b), label: format!("{} · {}", d.name, d.kind.label()), value: format!("{b}%"), value_col: super::devices::text_color(b) }),
-                    None => sp.legend.push(Legend { color: TEXT_FAINT(), label: d.name.clone(), value: "no battery data".into(), value_col: TEXT_FAINT() }),
+                let mut label = format!("{} · {}", d.name, d.detail());
+                if d.charging && d.live() {
+                    label.push_str(" · charging");
                 }
-                if d.split() {
-                    for (label, v) in d.parts() {
-                        if let Some(v) = v {
-                            sp.legend.push(Legend { color: with_alpha(super::devices::color(v), 0.55), label: format!("    {label}"), value: format!("{v}%"), value_col: TEXT_DIM() });
-                        }
-                    }
+                match d.battery() {
+                    Some(b) if d.live() => sp.legend.push(Legend { color: super::devices::color(b), label, value: format!("{b}%"), value_col: super::devices::text_color(b) }),
+                    Some(b) => sp.legend.push(Legend { color: with_alpha(super::devices::color(b), 0.4), label, value: format!("{b}%"), value_col: TEXT_FAINT() }),
+                    None => sp.legend.push(Legend { color: TEXT_FAINT(), label: d.name.clone(), value: "–".into(), value_col: TEXT_FAINT() }),
                 }
             }
-            let (low, crit) = (m::BT_LOW_BATTERY_MAX_PCT + 1, m::BT_CRITICAL_BATTERY_MAX_PCT + 1);
-            sp.switches.push(("Low battery alerts", format!("macOS notification below {low}% and {crit}%"), crate::kit::notify::shown(s.bt_prefs.alerts), Action::ToggleAlerts));
-            sp.switches.push(("Show in menu bar", format!("Only while a device is below {low}%"), s.bt_prefs.menu_bar, Action::ToggleMenuBar));
+            sp.switches.push(("Low battery alerts", String::new(), crate::kit::notify::shown(s.bt_prefs.alerts), Action::ToggleAlerts));
+            sp.switches.push(("Show in menu bar", String::new(), s.bt_prefs.menu_bar, Action::ToggleMenuBar));
             sp.buttons = vec![("Bluetooth Settings", BTN_SECONDARY, Action::OpenBluetooth)];
             sp
         }
@@ -316,57 +313,6 @@ pub fn sheet(ui: &mut Ui, rect: Rect, kind: Sheet, s: &Snapshot) -> Action {
     action
 }
 
-/// One section of the Mac Health page: the sheet's content without the
-/// sheet frame. Its header (chip, title, subtitle, buttons on the right)
-/// sits on one line above the cards.
-pub struct Section {
-    sp: Spec,
-    kind: Sheet,
-}
-
-/// Height of a section's header line on the page.
-pub const SECTION_HEAD_H: f32 = 46.0;
-
-impl Section {
-    pub fn new(kind: Sheet, s: &Snapshot) -> Self {
-        Section { sp: spec(kind, s), kind }
-    }
-
-    /// Total height at width `w` (header + content), measured off-screen.
-    pub fn height(&self, p: &egui::Painter, ctx: &egui::Context, s: &Snapshot, w: f32) -> f32 {
-        let hidden = p.with_clip_rect(Rect::NOTHING);
-        SECTION_HEAD_H + body(&hidden, ctx, &self.sp, self.kind, s, 0.0, w, 0.0) + switches_h(&self.sp)
-    }
-
-    /// Draw the section at `r` (its width and top; the height comes from
-    /// [`Section::height`]) and report what was clicked.
-    pub fn show(&self, ui: &mut Ui, r: Rect, s: &Snapshot) -> Action {
-        let p = ui.painter().clone();
-        tool_chip(&p, Rect::from_min_size(r.min + Vec2::new(0.0, 2.0), Vec2::splat(30.0)), self.sp.icon, self.sp.chip);
-        let right = r.right();
-        // buttons first so the titles can stop short of them
-        let mut bx = right;
-        let mut action = Action::None;
-        for (label, kind_, act) in self.sp.buttons.iter().rev() {
-            let bw = button_width(&p, label, *kind_);
-            let br = Rect::from_min_size(Pos2::new(bx - bw, r.top() + 2.0), Vec2::new(bw, 28.0));
-            let enabled = !busy(*act, s);
-            if pill_button(ui, br, if enabled { label } else { busy_label(*act) }, *kind_, enabled).clicked() {
-                action = *act;
-            }
-            bx -= bw + 8.0;
-        }
-        let tw = (bx - r.left() - 40.0 - 8.0).max(60.0);
-        text_fit(&p, r.min + Vec2::new(40.0, 0.0), Align2::LEFT_TOP, &self.sp.title, bold(15.0), TEXT(), tw);
-        text_fit(&p, r.min + Vec2::new(40.0, 19.0), Align2::LEFT_TOP, &self.sp.sub, font(12.0), TEXT_DIM(), tw);
-        let h = body(&p, ui.ctx(), &self.sp, self.kind, s, r.left(), r.width(), r.top() + SECTION_HEAD_H);
-        let sw = switches(ui, &self.sp, r.left(), r.width(), r.top() + SECTION_HEAD_H + h + 14.0);
-        if sw != Action::None {
-            action = sw;
-        }
-        action
-    }
-}
 
 /// Legends this wide get two columns.
 const LEGEND_TWO_COLUMNS_MIN: f32 = 400.0;
@@ -481,10 +427,6 @@ fn body(p: &egui::Painter, ctx: &egui::Context, sp: &Spec, kind: Sheet, s: &Snap
 
 const SWITCH_ROW_H: f32 = 48.0;
 
-/// Height of the switches card plus the gap above it (0 without switches).
-fn switches_h(sp: &Spec) -> f32 {
-    if sp.switches.is_empty() { 0.0 } else { 14.0 + 8.0 + sp.switches.len() as f32 * SWITCH_ROW_H }
-}
 
 /// The on/off rows of a sheet in one card starting at `y`.
 fn switches(ui: &mut Ui, sp: &Spec, x0: f32, w: f32, y: f32) -> Action {
@@ -505,8 +447,12 @@ fn switches(ui: &mut Ui, sp: &Spec, x0: f32, w: f32, y: f32) -> Action {
             action = *act;
         }
         let tw = sr.left() - rr.left() - 24.0;
-        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, label, font(13.0), TEXT(), tw);
-        text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y + 2.0), Align2::LEFT_TOP, hint, font(12.0), TEXT_FAINT(), tw);
+        if hint.is_empty() {
+            text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y), Align2::LEFT_CENTER, label, font(13.0), TEXT(), tw);
+        } else {
+            text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, label, font(13.0), TEXT(), tw);
+            text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y + 2.0), Align2::LEFT_TOP, hint, font(12.0), TEXT_FAINT(), tw);
+        }
     }
     action
 }
