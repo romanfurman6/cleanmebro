@@ -172,11 +172,8 @@ pub fn page(d: &mut Displays, ui: &mut Ui, r: Rect) {
     let screens = d.screens();
     let ours: Vec<Screen> = screens.iter().filter(|s| s.adjustable()).cloned().collect();
     if ours.is_empty() {
-        let er = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1.min(x0 + 520.0), y + 140.0));
-        glass_card(&p, er, R_CARD, 0.0, false);
-        icon(&p, Icon::Display, Rect::from_center_size(er.center() - Vec2::new(0.0, 14.0), Vec2::splat(30.0)), TEXT_FAINT());
-        p.text(er.center() + Vec2::new(0.0, 24.0), Align2::CENTER_CENTER, "No external display", ty::body(), TEXT_DIM());
-        y = er.bottom() + 16.0;
+        empty(ui, &p, r, color);
+        return;
     }
     // cards no wider than CARD_W; side by side when there's room
     const CARD_W: f32 = 520.0;
@@ -220,6 +217,32 @@ pub fn page(d: &mut Displays, ui: &mut Ui, r: Rect) {
         st.keys = !st.keys;
         d.set_settings(st);
     }
+}
+
+/// No external display: what the page is for and how to get one here.
+fn empty(ui: &mut Ui, p: &egui::Painter, r: Rect, color: Color32) {
+    let c = Pos2::new(r.center().x, r.top() + r.height() * 0.38);
+    p.circle_filled(c, 34.0, white(12));
+    icon(p, Icon::Display, Rect::from_center_size(c, Vec2::splat(30.0)), lift(color));
+    p.text(c + Vec2::new(0.0, 56.0), Align2::CENTER_CENTER, "No external display", bold(17.0), TEXT());
+    let w = (r.width() - 48.0).min(380.0);
+    let h = paragraph_centered(p, c + Vec2::new(0.0, 80.0), "Connect a monitor over USB-C, DisplayPort or HDMI. Its brightness and speaker volume show up here, and your Mac's keys control them.", font(13.0), TEXT_DIM(), w);
+    let label = "Display Settings";
+    let bw = button_width(p, label, BTN_SECONDARY);
+    let br = Rect::from_center_size(Pos2::new(c.x, c.y + 80.0 + h + 30.0), Vec2::new(bw, 30.0));
+    if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
+        let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.Displays-Settings.extension").spawn();
+    }
+}
+
+/// `text` wrapped to `w` and centred under `top`; returns its height.
+fn paragraph_centered(p: &egui::Painter, top: Pos2, text: &str, f: egui::FontId, col: Color32, w: f32) -> f32 {
+    let mut job = egui::text::LayoutJob::simple(text.to_string(), f, col, w);
+    job.halign = egui::Align::Center;
+    let g = p.layout_job(job);
+    let h = g.size().y;
+    p.galley(Pos2::new(top.x, top.y), g, col);
+    h
 }
 
 // ---------------------------------------------------------------- the level after a key
