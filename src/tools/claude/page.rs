@@ -444,7 +444,12 @@ fn all_page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let cols = if infos.len() > 2 { 2 } else { infos.len().max(1) };
     let cw = (x1 - x0 - GAP * (cols as f32 - 1.0)) / cols as f32;
     let ch = 168.0;
-    let menu = ai::alerts::closest(&infos).map(|(i, _)| i.provider);
+    // the chip only when the menu bar shows a number at all
+    let menu = match settings::get().menu_bar.as_str() {
+        "off" => None,
+        "closest" => ai::alerts::closest(&infos).map(|(i, _)| i.provider),
+        id => infos.iter().find(|i| ai::meta(i.provider).id == id).map(|i| i.provider),
+    };
     for (k, info) in infos.iter().enumerate() {
         let cr = Rect::from_min_size(Pos2::new(x0 + (k % cols) as f32 * (cw + GAP), y + (k / cols) as f32 * (ch + GAP)), Vec2::new(cw, ch));
         provider_card(ui, cr, info, menu == Some(info.provider), show_usd);

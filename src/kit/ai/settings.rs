@@ -36,6 +36,10 @@ pub struct Settings {
     /// Where Claude's limits come from: "statusline" (Claude Code's own
     /// status line, when the hook is installed) or "cli" (`claude /usage`).
     pub claude_source: String,
+    /// Settings format: 1 turned the menu bar number off by default. A
+    /// file without it is older (0), not the struct default.
+    #[serde(default)]
+    pub version: u8,
 }
 
 impl Default for Settings {
@@ -50,8 +54,10 @@ impl Default for Settings {
             notify_reset: true,
             notify_unused: true,
             show_outages: true,
-            menu_bar: "closest".into(),
+            // the icon alone; a number there is opt-in
+            menu_bar: "off".into(),
             claude_source: "statusline".into(),
+            version: 1,
         }
     }
 }
@@ -68,7 +74,16 @@ fn path() -> PathBuf {
 
 fn cell() -> &'static Mutex<Settings> {
     static S: OnceLock<Mutex<Settings>> = OnceLock::new();
-    S.get_or_init(|| Mutex::new(crate::kit::fs::load_json(&path())))
+    S.get_or_init(|| {
+        let mut s: Settings = crate::kit::fs::load_json(&path());
+        // before version 1 the menu bar showed the closest limit by default
+        if s.version < 1 {
+            s.menu_bar = "off".into();
+            s.version = 1;
+            crate::kit::fs::save_json(&path(), &s, true);
+        }
+        Mutex::new(s)
+    })
 }
 
 /// The current settings.
@@ -88,6 +103,13 @@ pub fn update(save: bool, f: impl FnOnce(&mut Settings)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_without_version_is_old() {
+        let s: Settings = serde_json::from_str(r#"{"menu_bar":"closest"}"#).unwrap();
+        assert_eq!((s.version, s.menu_bar.as_str()), (0, "closest"));
+        assert_eq!(Settings::default().version, 1);
+    }
 
     #[test]
     fn old_files_keep_their_provider_and_get_defaults() {
