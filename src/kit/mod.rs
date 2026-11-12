@@ -21,5 +21,6 @@ pub mod plist;
 pub mod sync;
 pub mod sound;
 pub mod tile;
+pub mod url_scheme;
 pub mod viewport;
 pub mod whisper;
