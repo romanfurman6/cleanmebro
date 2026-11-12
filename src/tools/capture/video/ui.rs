@@ -238,7 +238,7 @@ fn picture(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     }
     if let Some(text) = v.caption().filter(|_| shown.is_none()) {
         let wrap = (fit.width() * 0.8).max(120.0);
-        let g = p.layout(text.to_string(), bold(17.0), Color32::WHITE, wrap);
+        let g = p.layout(text.to_string(), bold(15.0), Color32::WHITE, wrap);
         let box_ = Rect::from_center_size(Pos2::new(fit.center().x, fit.bottom() - 24.0 - g.size().y / 2.0), g.size() + Vec2::new(20.0, 10.0));
         p.rect_filled(box_, 6.0, Color32::from_black_alpha(170));
         p.galley(box_.center() - g.size() / 2.0, g, Color32::WHITE);
@@ -348,7 +348,7 @@ fn timeline(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     while t <= d + 1e-6 {
         let x = x_of(t);
         p.line_segment([Pos2::new(x, r.top() + 20.0), Pos2::new(x, r.top() + 25.0)], Stroke::new(1.0, white(60)));
-        p.text(Pos2::new(x, r.top() + 12.0), Align2::CENTER_CENTER, tick_label(t), font(10.5), TEXT_FAINT());
+        p.text(Pos2::new(x, r.top() + 12.0), Align2::CENTER_CENTER, tick_label(t), font(11.0), TEXT_FAINT());
         t += step;
     }
 
@@ -519,10 +519,10 @@ fn look_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     let mut y = r.top();
     let row_h = 34.0;
     let label = |y: f32, text: &str| {
-        p.text(Pos2::new(r.left(), y + row_h / 2.0), Align2::LEFT_CENTER, text, font(12.5), TEXT_SOFT());
+        p.text(Pos2::new(r.left(), y + row_h / 2.0), Align2::LEFT_CENTER, text, font(12.0), TEXT_SOFT());
     };
     let head = |y: f32, text: &str| {
-        p.text(Pos2::new(r.left(), y + 10.0), Align2::LEFT_CENTER, text, bold(13.5), TEXT());
+        p.text(Pos2::new(r.left(), y + 10.0), Align2::LEFT_CENTER, text, bold(13.0), TEXT());
     };
     let seg_rect = |y: f32, w: f32| Rect::from_min_max(Pos2::new(r.right() - w, y + 5.0), Pos2::new(r.right(), y + row_h - 5.0));
     let sw_rect = |y: f32| Rect::from_min_size(Pos2::new(r.right() - 30.0, y + row_h / 2.0 - 9.0), Vec2::new(30.0, 18.0));
@@ -675,7 +675,7 @@ fn job_row(v: &mut Viewer, ui: &mut Ui, r: Rect, label: &str) -> f32 {
         _ => format!("{:.0}%", frac * 100.0),
     };
     spinner(&p, Pos2::new(r.left() + 8.0, r.top() + 10.0), 6.0, ui.input(|i| i.time), ACCENT());
-    p.text(Pos2::new(r.left() + 22.0, r.top() + 10.0), Align2::LEFT_CENTER, label, font(12.5), TEXT());
+    p.text(Pos2::new(r.left() + 22.0, r.top() + 10.0), Align2::LEFT_CENTER, label, font(12.0), TEXT());
     p.text(Pos2::new(r.right(), r.top() + 10.0), Align2::RIGHT_CENTER, detail, font(12.0), TEXT_FAINT());
     bar(&p, Rect::from_min_size(Pos2::new(r.left(), r.top() + 26.0), Vec2::new(r.width(), 6.0)), frac, ACCENT());
     let stop = Rect::from_min_size(Pos2::new(r.left(), r.top() + 42.0), Vec2::new(70.0, 26.0));
@@ -713,7 +713,7 @@ fn transcript(v: &mut Viewer, ui: &mut Ui, r: Rect) {
         }
         y = error_row(v, &p, r, y);
         // what's needed to start: a model (downloaded once), then Transcribe
-        p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Speech to text, on this Mac", bold(13.5), TEXT());
+        p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Speech to text, on this Mac", bold(13.0), TEXT());
         y += 22.0;
         y += paragraph(&p, Pos2::new(r.left(), y), "Whisper runs here; the sound never leaves the Mac. The model is downloaded once.", font(12.0), TEXT_DIM(), r.width()) + 12.0;
         for m in Model::ALL {
@@ -726,8 +726,8 @@ fn transcript(v: &mut Viewer, ui: &mut Ui, r: Rect) {
             }
             let size = if m.ready() { "Downloaded".to_string() } else { human_bytes(m.bytes()) };
             p.text(Pos2::new(row.left() + 12.0, row.top() + 16.0), Align2::LEFT_CENTER, m.name(), bold(13.0), TEXT());
-            p.text(Pos2::new(row.right() - 12.0, row.top() + 16.0), Align2::RIGHT_CENTER, size, font(11.5), if m.ready() { GREEN() } else { TEXT_FAINT() });
-            text_fit(&p, Pos2::new(row.left() + 12.0, row.top() + 34.0), Align2::LEFT_CENTER, m.about(), font(11.5), TEXT_DIM(), row.width() - 24.0);
+            p.text(Pos2::new(row.right() - 12.0, row.top() + 16.0), Align2::RIGHT_CENTER, size, font(12.0), if m.ready() { GREEN() } else { TEXT_FAINT() });
+            text_fit(&p, Pos2::new(row.left() + 12.0, row.top() + 34.0), Align2::LEFT_CENTER, m.about(), font(12.0), TEXT_DIM(), row.width() - 24.0);
             if resp.clicked() && !on {
                 v.prefs.model = m;
                 v.save_prefs();
@@ -835,7 +835,7 @@ fn transcript(v: &mut Viewer, ui: &mut Ui, r: Rect) {
 fn voice_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
     let mut y = r.top();
-    p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Clean up voice", bold(13.5), TEXT());
+    p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Clean up voice", bold(13.0), TEXT());
     y += 22.0;
     let about = if v.tracks >= 3 {
         "Takes background noise out of the microphone; system sound stays as it was. Runs on this Mac."
@@ -854,7 +854,7 @@ fn voice_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     y = error_row(v, &p, r, y);
 
     // strength
-    p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Strength", font(12.5), TEXT_SOFT());
+    p.text(Pos2::new(r.left(), y + 8.0), Align2::LEFT_CENTER, "Strength", font(12.0), TEXT_SOFT());
     let pct = v.prefs.strength;
     p.text(Pos2::new(r.right(), y + 8.0), Align2::RIGHT_CENTER, if pct >= 0.99 { "Full".to_string() } else { format!("{:.0} dB", super::voice::atten_db(pct)) }, font(12.0), TEXT_FAINT());
     y += 22.0;
@@ -904,7 +904,7 @@ fn voice_tab(v: &mut Viewer, ui: &mut Ui, r: Rect) {
             }
             y = w.bottom() + 10.0;
         }
-        paragraph(&p, Pos2::new(r.left(), y), "What plays is what Save writes into the video.", font(11.5), TEXT_FAINT(), r.width());
+        paragraph(&p, Pos2::new(r.left(), y), "What plays is what Save writes into the video.", font(12.0), TEXT_FAINT(), r.width());
     }
 }
 

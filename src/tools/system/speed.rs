@@ -161,7 +161,7 @@ fn content(ui: &mut Ui, m: Rect, s: &SpeedTest) -> (Option<SpeedMode>, bool) {
         let ang = A0 + SPAN * k;
         let dir = Vec2::angled(ang);
         let lit = k <= frac + 1e-3 && frac > 0.0;
-        p.text(c + dir * (DIAL_R - 26.0), Align2::CENTER_CENTER, stop_label(*v), font(10.0), if lit { TEXT_SOFT() } else { TEXT_MUTED() });
+        p.text(c + dir * (DIAL_R - 26.0), Align2::CENTER_CENTER, stop_label(*v), font(11.0), if lit { TEXT_SOFT() } else { TEXT_MUTED() });
     }
     // the filled arc fades in from the start; a soft glow rides the tip
     if frac > 0.002 {

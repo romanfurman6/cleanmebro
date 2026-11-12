@@ -158,8 +158,20 @@ pub mod sp {
     pub const L: f32 = 16.0;
     /// Between sections.
     pub const XL: f32 = 24.0;
-    /// A row in a list.
+    /// Around empty states, between page sections.
+    pub const XXL: f32 = 32.0;
+    /// A row in a list (icon, name, detail).
     pub const ROW_H: f32 = 44.0;
+    /// A settings row: label left, control right, hairline between.
+    pub const SETTINGS_ROW_H: f32 = 40.0;
+    /// A row with a bar under its name and value (models, projects, folders).
+    pub const BAR_ROW_H: f32 = 36.0;
+    /// Buttons, segmented controls and fields inside cards…
+    pub const CONTROL_H: f32 = 28.0;
+    /// …and in page headers.
+    pub const HEADER_CONTROL_H: f32 = 32.0;
+    /// Content starts this far from the window edge on every page.
+    pub const PAGE_EDGE: f32 = 24.0;
     /// A legend row.
     pub const LEGEND_H: f32 = 22.0;
 }
@@ -715,12 +727,13 @@ pub const PAGE_FOOTER_H: f32 = 60.0;
 /// hairline. Returns the rect for buttons on the right (vertically centred).
 pub fn page_header(p: &Painter, r: Rect, title: &str, sub: &str, sub_col: Color32) -> Rect {
     let cy = r.top() + PAGE_HEADER_H / 2.0;
-    let t = p.text(Pos2::new(r.left() + 20.0, cy), Align2::LEFT_CENTER, title, ty::lead(), TEXT());
+    let t = p.text(Pos2::new(r.left() + sp::PAGE_EDGE, cy), Align2::LEFT_CENTER, title, ty::lead(), TEXT());
     // status sits on the same line as the title, like a macOS toolbar
     let sub_col = if sub_col == TEXT_DIM() { ty::caption_color() } else { sub_col };
     text_fit(p, Pos2::new(t.right() + 10.0, cy + 1.0), Align2::LEFT_CENTER, sub, ty::label(), sub_col, (r.right() - 260.0 - t.right()).max(40.0));
     p.line_segment([Pos2::new(r.left(), r.top() + PAGE_HEADER_H), Pos2::new(r.right(), r.top() + PAGE_HEADER_H)], Stroke::new(1.0, Color32::from_black_alpha(115)));
-    Rect::from_min_max(Pos2::new(r.right() - 20.0, cy - 13.0), Pos2::new(r.right() - 20.0, cy + 13.0))
+    let h = sp::HEADER_CONTROL_H / 2.0;
+    Rect::from_min_max(Pos2::new(r.right() - sp::PAGE_EDGE, cy - h), Pos2::new(r.right() - sp::PAGE_EDGE, cy + h))
 }
 
 /// A window page's footer strip (darker, with a top hairline). Returns its rect.

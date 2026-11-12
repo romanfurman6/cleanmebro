@@ -18,7 +18,7 @@ use egui::{Align2, Color32, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui,
 use std::f32::consts::{PI, TAU};
 
 const HERO_H: f32 = 120.0;
-const ROW_H: f32 = 34.0;
+const ROW_H: f32 = sp::SETTINGS_ROW_H;
 const SESSION_H: f32 = 24.0;
 /// Most working sessions listed in the panel card.
 const CARD_SESSIONS: usize = 3;

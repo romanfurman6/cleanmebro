@@ -258,7 +258,7 @@ fn start(app: &mut App, ui: &mut Ui, r: Rect) {
     let bytes = app.lens.bytes.load(Ordering::Relaxed);
     let files = app.lens.files.load(Ordering::Relaxed);
     p.text(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), Align2::LEFT_TOP, format!("Mapping {name}"), bold(13.0), TEXT_DIM());
-    let g = p.layout_no_wrap(human_bytes(bytes), bold(26.0), TEXT());
+    let g = p.layout_no_wrap(human_bytes(bytes), bold(28.0), TEXT());
     let gw = g.size().x;
     p.galley(Pos2::new(pr.left() + 16.0, pr.top() + 36.0), g, TEXT());
     p.text(Pos2::new(pr.left() + 24.0 + gw, pr.top() + 55.0), Align2::LEFT_CENTER, format!("measured · {} files", group_digits(files)), font(13.0), TEXT_DIM());
@@ -422,7 +422,7 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     // order (re-sorted at most every 1.5 s), the packing is redone at most
     // once a second, and every bubble glides to its new place and size, so
     // nothing jumps while sizes grow
-    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, r.bottom() - 16.0));
+    let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, hr.bottom() + 16.0), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - 16.0));
     let fr = Rect::from_min_max(Pos2::new(body.left(), body.bottom() - INFO_H), body.max);
     let area = Rect::from_min_max(body.min, Pos2::new(body.right(), fr.top() - 8.0));
     let ordered: Vec<&scan::LiveRow> = app.lens_order.iter().filter_map(|pa| rows.iter().find(|x| &x.path == pa)).collect();
@@ -574,7 +574,7 @@ fn live_bubble(p: &egui::Painter, c: Pos2, rad: f32, name: &str, bytes: u64, bas
 /// Bubbles drawn on their own; the rest fold into one grey "Other" bubble.
 const MAX_BUBBLES: usize = 18;
 const LIST_W: f32 = 320.0;
-const ROW_H: f32 = 32.0;
+const ROW_H: f32 = sp::BAR_ROW_H;
 /// How long a zoom into a bubble takes, seconds.
 const ZOOM_SECS: f64 = 0.35;
 
@@ -737,7 +737,7 @@ fn bubbles(app: &mut App, ui: &mut Ui, pa: Rect, node: &Node, here: &str, free: 
             }
             (Some(kd), _) if rad >= 30.0 => {
                 text_fit(&bp, c - Vec2::new(0.0, 1.0), Align2::CENTER_BOTTOM, &kd.name, bold(11.0), txt, rad * 1.7);
-                text_fit(&bp, c + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, &human_bytes(kd.bytes), font(10.0), with_alpha(TEXT_SOFT(), alpha), rad * 1.7);
+                text_fit(&bp, c + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, &human_bytes(kd.bytes), font(11.0), with_alpha(TEXT_SOFT(), alpha), rad * 1.7);
             }
             (Some(kd), _) if rad >= 16.0 => {
                 let isz = (rad * 0.8).min(24.0);
@@ -975,7 +975,7 @@ fn rings(app: &mut App, ui: &mut Ui, pa: Rect, root: &Node, node: &Node, here: &
         let w = arc.min(ring_w * 1.7) * 0.85;
         let ta = k.max(0.2);
         text_fit(&p, at - Vec2::new(0.0, 1.0), Align2::CENTER_BOTTOM, &s.name, bold(11.0), with_alpha(TEXT(), ta), w);
-        text_fit(&p, at + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, &human_bytes(s.bytes), font(10.0), with_alpha(TEXT_SOFT(), ta), w);
+        text_fit(&p, at + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, &human_bytes(s.bytes), font(11.0), with_alpha(TEXT_SOFT(), ta), w);
     }
     // the middle: the folder, or what's hovered
     let center_hot = on_center && can_up;
@@ -1124,7 +1124,7 @@ fn other_sheet(app: &mut App, ui: &mut Ui, r: Rect, node: &Node) -> Option<PathB
     p.rect_filled(m.translate(Vec2::new(0.0, 10.0)).expand(6.0), 18.0, Color32::from_black_alpha(70));
     p.rect_filled(m, 14.0, POPOVER());
     p.rect_stroke(m, 14.0, Stroke::new(1.0, white(31)), StrokeKind::Inside);
-    text_fit(&p, m.min + Vec2::new(22.0, 20.0), Align2::LEFT_TOP, &node.name, bold(17.0), TEXT(), m.width() - 90.0);
+    text_fit(&p, m.min + Vec2::new(22.0, 20.0), Align2::LEFT_TOP, &node.name, bold(15.0), TEXT(), m.width() - 90.0);
     p.text(m.min + Vec2::new(22.0, 44.0), Align2::LEFT_TOP, format!("{} · {} items", human_bytes(node.bytes), group_digits(node.items)), font(12.0), TEXT_DIM());
     let xr = Rect::from_center_size(Pos2::new(m.right() - 26.0, m.top() + 30.0), Vec2::splat(24.0));
     let mut close = round_button(ui, xr, Icon::Close, "Close").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
@@ -1308,7 +1308,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
         return Act::None;
     }
 
-    let body = Rect::from_min_max(Pos2::new(r.left() + 20.0, hr.bottom() + 16.0), Pos2::new(r.right() - 20.0, r.bottom() - 16.0));
+    let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, hr.bottom() + 16.0), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - 16.0));
     let picked_total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     let list_w = (body.width() * 0.36).clamp(260.0, LIST_W);
     let lr = Rect::from_min_max(body.min, Pos2::new(body.left() + list_w, body.bottom()));
@@ -1668,7 +1668,7 @@ fn review(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     p.rect_stroke(m, 14.0, Stroke::new(1.0, white(31)), StrokeKind::Inside);
     let total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     let title = format!("Move {} item{} ({}) to the Trash?", n, if n == 1 { "" } else { "s" }, human_bytes(total));
-    text_fit(&p, m.min + Vec2::new(22.0, 22.0), Align2::LEFT_TOP, &title, bold(17.0), TEXT(), m.width() - 44.0);
+    text_fit(&p, m.min + Vec2::new(22.0, 22.0), Align2::LEFT_TOP, &title, bold(15.0), TEXT(), m.width() - 44.0);
     text_fit(&p, m.min + Vec2::new(22.0, 48.0), Align2::LEFT_TOP, "System folders and code projects are skipped", font(13.0), TEXT_DIM(), m.width() - 44.0);
     let list = Rect::from_min_size(m.min + Vec2::new(22.0, 82.0), Vec2::new(m.width() - 44.0, rows as f32 * 34.0 + 8.0));
     p.rect_filled(list, 10.0, Color32::from_black_alpha(46));

@@ -155,7 +155,7 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel
                 let t = Tone::of(d);
                 // ring, then the device's name, then its charge
                 ring_cell(p, Pos2::new(cx, r.top() + 26.0), 16.0, d, 13.0);
-                text_fit(p, Pos2::new(cx, r.bottom() - 21.0), Align2::CENTER_BOTTOM, &d.name, font(10.0), t.c(TEXT_DIM()), cw - 6.0);
+                text_fit(p, Pos2::new(cx, r.bottom() - 21.0), Align2::CENTER_BOTTOM, &d.name, font(11.0), t.c(TEXT_DIM()), cw - 6.0);
                 text_fit(p, Pos2::new(cx, r.bottom() - 7.0), Align2::CENTER_BOTTOM, &pct_text(d.battery()), bold(11.0), t.text(d.battery()), cw - 4.0);
             }
         }
@@ -191,7 +191,7 @@ fn device_line_sub(p: &egui::Painter, lr: Rect, d: &Device, sub: &str) {
     let t = Tone::of(d);
     let cy = lr.center().y;
     device_glyph(p, d, Rect::from_center_size(Pos2::new(lr.left() + 9.0, cy), Vec2::splat(17.0)), t.c(TEXT_SOFT()));
-    let vr = pct_with_bolt(p, Pos2::new(lr.right(), cy), Align2::RIGHT_CENTER, b, d.charging && d.live(), bold(12.5), t.text(b));
+    let vr = pct_with_bolt(p, Pos2::new(lr.right(), cy), Align2::RIGHT_CENTER, b, d.charging && d.live(), bold(12.0), t.text(b));
     // the bar only when the name still has room next to it
     let bw = if lr.width() >= 300.0 { 64.0 } else { 0.0 };
     let bx1 = vr.left() - 10.0;
@@ -200,7 +200,7 @@ fn device_line_sub(p: &egui::Painter, lr: Rect, d: &Device, sub: &str) {
     }
     let tx = lr.left() + 26.0;
     let tw = bx1 - bw - tx - if bw > 0.0 { 10.0 } else { 0.0 };
-    text_fit(p, Pos2::new(tx, cy - 1.0), Align2::LEFT_BOTTOM, &d.name, font(12.5), t.c(TEXT()), tw);
+    text_fit(p, Pos2::new(tx, cy - 1.0), Align2::LEFT_BOTTOM, &d.name, font(12.0), t.c(TEXT()), tw);
     text_fit(p, Pos2::new(tx, cy + 1.0), Align2::LEFT_TOP, sub, font(11.0), TEXT_FAINT(), tw);
 }
 
@@ -262,7 +262,7 @@ pub enum PageAction {
 }
 
 const ROW_GAP: f32 = 8.0;
-const SWITCH_H: f32 = 44.0;
+const SWITCH_H: f32 = sp::SETTINGS_ROW_H;
 const LINE_H: f32 = 44.0;
 const LINE_GAP: f32 = 6.0;
 

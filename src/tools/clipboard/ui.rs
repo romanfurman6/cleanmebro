@@ -14,7 +14,7 @@ use std::time::Instant;
 
 /// Most recent clips listed in the Large widget.
 const PANEL_ROWS: usize = 8;
-const ROW_H: f32 = 36.0;
+const ROW_H: f32 = sp::SETTINGS_ROW_H;
 
 // ---------------------------------------------------------------- shared bits
 
@@ -681,7 +681,7 @@ pub fn preview(c: &mut Clipboard, _ui: &mut Ui, p: &egui::Painter, r: Rect, e: &
             let chip = Rect::from_center_size(band.center(), Vec2::splat(44.0));
             clip.rect_filled(chip, 12.0, app_color(&host));
             clip.text(chip.center(), Align2::CENTER_CENTER, letter, bold(22.0), Color32::WHITE);
-            text_fit(&clip, Pos2::new(inner.left(), band.bottom() + 12.0), Align2::LEFT_TOP, &host, bold(14.0), TEXT(), inner.width());
+            text_fit(&clip, Pos2::new(inner.left(), band.bottom() + 12.0), Align2::LEFT_TOP, &host, bold(13.0), TEXT(), inner.width());
             paragraph(&clip, Pos2::new(inner.left(), band.bottom() + 34.0), t, font(12.0), ACCENT(), inner.width());
         }
         Kind::File => {
@@ -783,7 +783,7 @@ fn left_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
     for (r, s, delta) in [(minus, "−", -50i64), (plus, "+", 50)] {
         let resp = ui.interact(r, id.with(("step", s)), Sense::click());
         p.rect_filled(r, 6.0, white(if resp.hovered() { 34 } else { 20 }));
-        p.text(r.center(), Align2::CENTER_CENTER, s, bold(14.0), TEXT());
+        p.text(r.center(), Align2::CENTER_CENTER, s, bold(13.0), TEXT());
         if resp.clicked() {
             let step = if c.settings.keep <= 50 && delta < 0 || c.settings.keep < 50 { delta.signum() * 10 } else { delta };
             c.settings.keep = (c.settings.keep as i64 + step).clamp(KEEP_MIN as i64, KEEP_MAX as i64) as usize;

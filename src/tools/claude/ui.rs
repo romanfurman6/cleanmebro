@@ -186,7 +186,7 @@ pub fn detail(all: &backend::All, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let stats = [("last 5 hours", cl.local.tokens_5h), ("today", cl.local.tokens_today), ("7 days", cl.local.tokens_7d)];
     for (i, (k, v)) in stats.iter().enumerate() {
         let x = ar.left() + 12.0 + i as f32 * ((w - 24.0) / 3.0);
-        p.text(Pos2::new(x, ar.top() + 36.0), Align2::LEFT_TOP, backend::human_tokens(*v), bold(18.0), TEXT());
+        p.text(Pos2::new(x, ar.top() + 36.0), Align2::LEFT_TOP, backend::human_tokens(*v), bold(22.0), TEXT());
         p.text(Pos2::new(x, ar.top() + 60.0), Align2::LEFT_TOP, *k, font(11.0), TEXT_FAINT());
     }
     let week: Vec<crate::kit::ai::Day> = cl.local.days.iter().rev().take(7).rev().copied().collect();

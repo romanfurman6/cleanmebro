@@ -139,7 +139,7 @@ pub fn widget(mon: &monitor::Shared, id: &str, size: Size, ui: &mut Ui, r: Rect,
             let resp = tile::card(ui, r, wid, sel);
             let p = ui.painter();
             let body = tile::head(p, r, mt.glyph, col, &mt.label, "");
-            let big = p.text(Pos2::new(body.left(), body.bottom() - 12.0), Align2::LEFT_BOTTOM, &mt.big, bold(26.0), TEXT());
+            let big = p.text(Pos2::new(body.left(), body.bottom() - 12.0), Align2::LEFT_BOTTOM, &mt.big, bold(28.0), TEXT());
             p.text(Pos2::new(big.right() + 4.0, big.bottom() - 5.0), Align2::LEFT_BOTTOM, &mt.unit, font(13.0), TEXT_DIM());
             if s.disk_total > 0 {
                 p.text(Pos2::new(body.right(), big.bottom() - 5.0), Align2::RIGHT_BOTTOM, format!("of {}", human_bytes(s.disk_total)), font(12.0), TEXT_DIM());
@@ -233,7 +233,7 @@ fn row_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, r: Rect) {
 /// a graph or bar that uses the width, then the breakdown. Bars in a list
 /// are scaled to the list's largest item so they read as a comparison.
 fn medium_body(s: &Snapshot, id: &str, mt: &Metric, p: &egui::Painter, body: Rect) {
-    let big = p.text(body.left_top(), Align2::LEFT_TOP, &mt.big, bold(26.0), TEXT());
+    let big = p.text(body.left_top(), Align2::LEFT_TOP, &mt.big, bold(28.0), TEXT());
     let unit = p.text(Pos2::new(big.right() + 4.0, big.bottom() - 5.0), Align2::LEFT_BOTTOM, &mt.unit, font(13.0), TEXT_DIM());
     // right of the number: a live graph where there is history
     let beside = Rect::from_min_max(Pos2::new(unit.right() + 16.0, big.top() + 4.0), Pos2::new(body.right(), big.bottom() - 2.0));

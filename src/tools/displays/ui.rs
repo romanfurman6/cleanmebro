@@ -224,7 +224,7 @@ fn empty(ui: &mut Ui, p: &egui::Painter, r: Rect, color: Color32) {
     let c = Pos2::new(r.center().x, r.top() + r.height() * 0.38);
     p.circle_filled(c, 34.0, white(12));
     icon(p, Icon::Display, Rect::from_center_size(c, Vec2::splat(30.0)), lift(color));
-    p.text(c + Vec2::new(0.0, 56.0), Align2::CENTER_CENTER, "No external display", bold(17.0), TEXT());
+    p.text(c + Vec2::new(0.0, 56.0), Align2::CENTER_CENTER, "No external display", bold(15.0), TEXT());
     let w = (r.width() - 48.0).min(380.0);
     let h = paragraph_centered(p, c + Vec2::new(0.0, 80.0), "Connect a monitor over USB-C, DisplayPort or HDMI. Its brightness and speaker volume show up here, and your Mac's keys control them.", font(13.0), TEXT_DIM(), w);
     let label = "Display Settings";
