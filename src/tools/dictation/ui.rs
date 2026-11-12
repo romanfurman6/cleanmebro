@@ -300,11 +300,13 @@ fn settings_page(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
     record_key(d, ui, cx);
     let mut child = ui.new_child(UiBuilder::new().max_rect(body));
     ScrollArea::vertical().id_salt("dict-settings").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), 520.0), Sense::hover());
-        let p = ui.painter().clone();
         let gap = 20.0;
+        let colw = (body.width() - 48.0 - gap) / 2.0;
+        // the Speaking card, then Words, which grows with the list
+        let left_h = 16.0 + 28.0 + 4.0 * ROW_H + 8.0 + 28.0 + 28.0 + words_card_h(ui.painter(), &d.settings.words, colw) + 24.0;
+        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), left_h.max(520.0)), Sense::hover());
+        let p = ui.painter().clone();
         let x0 = area.left() + 24.0;
-        let colw = (area.width() - 48.0 - gap) / 2.0;
         let mut changed = left_col(d, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())));
         changed |= right_col(d, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())));
         if changed {
@@ -454,6 +456,82 @@ fn left_col(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, col: Rect) -> boo
         changed = true;
     }
 
+    changed |= words_card(d, ui, p, x0, card.bottom() + 28.0, col.width());
+    changed
+}
+
+const CHIP_H: f32 = 24.0;
+const CHIP_GAP: f32 = 6.0;
+/// Room in a chip for its ×.
+const CHIP_X: f32 = 20.0;
+
+/// Where each word's chip goes in a `w`-wide area: wrapped into rows.
+fn chip_rects(p: &egui::Painter, words: &[String], w: f32) -> Vec<Rect> {
+    let (mut x, mut y) = (0.0f32, 0.0f32);
+    words
+        .iter()
+        .map(|t| {
+            let cw = (p.layout_no_wrap(t.clone(), font(12.0), TEXT()).size().x + 10.0 + CHIP_X).min(w);
+            if x > 0.0 && x + cw > w {
+                x = 0.0;
+                y += CHIP_H + CHIP_GAP;
+            }
+            let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(cw, CHIP_H));
+            x += cw + CHIP_GAP;
+            r
+        })
+        .collect()
+}
+
+fn words_card_h(p: &egui::Painter, words: &[String], colw: f32) -> f32 {
+    let chips = chip_rects(p, words, colw - 24.0);
+    ROW_H + 8.0 + chips.last().map(|r| r.bottom() + 12.0).unwrap_or(0.0)
+}
+
+/// The person's own words: a field to add one, the list as chips with ×.
+/// Returns whether the list changed.
+fn words_card(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, x0: f32, top: f32, w: f32) -> bool {
+    let id = ui.scope_id().with("dict-words");
+    let mut changed = false;
+    p.text(Pos2::new(x0, top), Align2::LEFT_TOP, "Words", bold(15.0), TEXT());
+    let card = Rect::from_min_size(Pos2::new(x0, top + 28.0), Vec2::new(w, words_card_h(p, &d.settings.words, w)));
+    glass_card(p, card, R_CARD, 0.0, false);
+
+    let y = card.top() + 4.0 + ROW_H / 2.0;
+    let ar = Rect::from_min_max(Pos2::new(card.right() - 12.0 - 56.0, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0));
+    let fr = Rect::from_min_max(Pos2::new(card.left() + 12.0, y - 13.0), Pos2::new(ar.left() - 8.0, y + 13.0));
+    p.rect_filled(fr, 6.0, white(15));
+    let tr = fr.shrink2(Vec2::new(8.0, 0.0));
+    let mut child = ui.new_child(UiBuilder::new().max_rect(tr).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let te = egui::TextEdit::singleline(&mut d.word_draft).hint_text(egui::RichText::new("Name, brand or term").color(TEXT_FAINT())).frame(egui::Frame::NONE).font(font(12.0)).text_color(TEXT()).desired_width(tr.width()).id(id.with("field"));
+    let resp = child.add(te);
+    let entered = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    let can_add = !d.word_draft.trim().is_empty();
+    if (pill_button(ui, ar, "Add", BTN_SECONDARY, can_add).clicked() || entered) && d.settings.add_word(&d.word_draft) {
+        d.word_draft.clear();
+        changed = true;
+        if entered {
+            resp.request_focus();
+        }
+    }
+
+    let origin = Pos2::new(card.left() + 12.0, card.top() + 4.0 + ROW_H + 4.0);
+    let mut remove = None;
+    for (k, (word, r)) in d.settings.words.iter().zip(chip_rects(p, &d.settings.words, w - 24.0)).enumerate() {
+        let r = r.translate(origin.to_vec2());
+        let xr = Rect::from_center_size(Pos2::new(r.right() - CHIP_X / 2.0 - 2.0, r.center().y), Vec2::splat(16.0));
+        let x = ui.interact(xr, id.with(("x", k)), Sense::click());
+        p.rect_filled(r, CHIP_H / 2.0, white(if x.hovered() { 26 } else { 18 }));
+        text_fit(p, Pos2::new(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, word, font(12.0), TEXT(), r.width() - 10.0 - CHIP_X);
+        p.text(xr.center(), Align2::CENTER_CENTER, "×", font(13.0), if x.hovered() { TEXT() } else { TEXT_FAINT() });
+        if x.on_hover_text("Remove").clicked() {
+            remove = Some(k);
+        }
+    }
+    if let Some(k) = remove {
+        d.settings.words.remove(k);
+        changed = true;
+    }
     changed
 }
 
