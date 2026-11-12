@@ -58,6 +58,35 @@ pub fn open(url: &str) {
     p.push((host, action));
 }
 
+/// Links to `host` as commands for a tool to pick up in its `tick`: `read`
+/// turns an action into a command (None = unknown action). Links arrive
+/// outside a ui pass, while the tool is busy elsewhere, so they wait here.
+pub struct Inbox<C> {
+    queue: std::sync::Arc<Mutex<Vec<C>>>,
+}
+
+impl<C: Send + 'static> Inbox<C> {
+    pub fn new(host: &'static str, ctx: Option<egui::Context>, read: fn(&str) -> Option<C>) -> Self {
+        let queue = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let q = queue.clone();
+        route(host, move |action| {
+            let Some(c) = read(action) else { return false };
+            q.lock().unwrap_or_else(|e| e.into_inner()).push(c);
+            // wake the app even with every window hidden, as a hotkey does
+            if let Some(ctx) = &ctx {
+                ctx.request_repaint();
+            }
+            true
+        });
+        Inbox { queue }
+    }
+
+    /// Commands that came in since the last call, oldest first.
+    pub fn take(&self) -> Vec<C> {
+        std::mem::take(&mut *self.queue.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
 fn answer(host: &str, action: &str, f: &(impl Fn(&str) -> bool + ?Sized)) {
     if !f(action) {
         eprintln!("[url] {host} doesn't know \"{action}\"");
@@ -145,5 +174,20 @@ mod tests {
         open("cmdmeow://test-early/on");
         assert_eq!(hits.load(Ordering::SeqCst), 2);
         assert!(PENDING.lock().unwrap().iter().any(|(h, _)| h == "other-host"));
+    }
+
+    #[test]
+    fn inbox_keeps_known_actions_in_order() {
+        open("cmdmeow://test-inbox/two");
+        let inbox = Inbox::new("test-inbox", None, |a| match a {
+            "one" => Some(1),
+            "two" => Some(2),
+            _ => None,
+        });
+        open("cmdmeow://test-inbox/one");
+        open("cmdmeow://test-inbox/nope");
+        open("cmdmeow://Test-Inbox/Two/");
+        assert_eq!(inbox.take(), vec![2, 1, 2]);
+        assert!(inbox.take().is_empty());
     }
 }

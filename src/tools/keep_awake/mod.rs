@@ -15,8 +15,9 @@ use crate::core::tool::{Badge, Cx, MenuItem, Size, Tool, ToolEnv, ToolId, View, 
 use crate::kit::glass::{tint, Icon};
 use egui::{Rect, Ui};
 use engine::{now, Engine, State};
+use crate::kit::hotkeys::{Keys, Shortcut};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const ID: ToolId = "keep_awake";
 const CARD: &str = "card";
@@ -33,13 +34,64 @@ pub struct KeepAwake {
     engine: Shared,
     /// Sample data for screenshots: the clock is frozen at this time.
     demo_now: Option<i64>,
+    pub keys: KeyRec,
+}
+
+/// The switch's shortcut: what is bound, and the recorder on the page.
+#[derive(Default)]
+pub struct KeyRec {
+    keys: Option<Keys<()>>,
+    bound: Option<Shortcut>,
+    pub error: Option<String>,
+    /// Recording a new shortcut on the page.
+    pub recording: bool,
+    /// When the recorder was last drawn; it stops once the page is gone.
+    pub seen: Option<Instant>,
+}
+
+impl KeyRec {
+    /// Bind `want` (None while recording or off). Cheap when nothing changed.
+    fn bind(&mut self, ctx: &egui::Context, want: Option<Shortcut>) {
+        if self.recording && self.seen.is_some_and(|t| t.elapsed() > Duration::from_secs(1)) {
+            self.recording = false;
+        }
+        let want = if self.recording { None } else { want };
+        if self.bound == want && (self.keys.is_some() || want.is_none()) {
+            return;
+        }
+        if self.keys.is_none() {
+            self.keys = Keys::new(ctx.clone());
+        }
+        let Some(keys) = self.keys.as_mut() else {
+            self.error = Some("Shortcuts are unavailable".into());
+            return;
+        };
+        self.error = None;
+        match &want {
+            Some(s) => self.error = keys.apply(&[((), s.clone())]).into_iter().next().map(|(_, e)| e),
+            None => keys.clear(),
+        }
+        self.bound = want;
+    }
+
+    fn pressed(&self) -> bool {
+        self.keys.as_ref().is_some_and(|k| !k.poll().is_empty())
+    }
+
+    fn release(&mut self) {
+        if let Some(k) = self.keys.as_mut() {
+            k.clear();
+        }
+        self.bound = None;
+        self.recording = false;
+    }
 }
 
 impl KeepAwake {
     pub fn new(env: &ToolEnv) -> Self {
         if env.demo {
             let (engine, t) = demo_engine(State::Claude);
-            return KeepAwake { engine: Arc::new(Mutex::new(engine)), demo_now: Some(t) };
+            return KeepAwake { engine: Arc::new(Mutex::new(engine)), demo_now: Some(t), keys: KeyRec::default() };
         }
         let engine: Shared = Arc::new(Mutex::new(Engine::new(Some(engine::data_dir()))));
         url_routes(&engine, &env.ctx);
@@ -49,7 +101,7 @@ impl KeepAwake {
             .name("keep-awake".into())
             .spawn(move || watch(shared, ctx))
             .ok();
-        KeepAwake { engine, demo_now: None }
+        KeepAwake { engine, demo_now: None, keys: KeyRec::default() }
     }
 
     fn now(&self) -> i64 {
@@ -224,8 +276,19 @@ impl Tool for KeepAwake {
     fn set_on(&mut self, on: bool) {
         let t = self.now();
         self.engine.lock_ok().set_enabled(on, t);
+        if !on {
+            self.keys.release();
+        }
     }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
+        if self.demo_now.is_none() {
+            let want = self.engine.lock_ok().settings.shortcut.clone();
+            self.keys.bind(ctx, want);
+            if self.keys.pressed() {
+                self.toggle();
+                crate::kit::activity::repaint(ctx);
+            }
+        }
         // steam and countdowns move while awake and on screen; the watcher
         // thread does the rest (hidden, these frames would only burn CPU)
         if crate::kit::activity::visible() && self.state().awake() {

@@ -65,6 +65,28 @@ enum Cmd {
     Done,
 }
 
+/// `cmdmeow://dictation/<action>`. A link has no key to hold, so it always
+/// starts hands-free: it stops after silence, by the shortcut, or by `stop`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Link {
+    Toggle,
+    Start,
+    Stop,
+    Cancel,
+}
+
+impl Link {
+    fn read(action: &str) -> Option<Link> {
+        match action {
+            "toggle" => Some(Link::Toggle),
+            "start" => Some(Link::Start),
+            "stop" => Some(Link::Stop),
+            "cancel" => Some(Link::Cancel),
+            _ => None,
+        }
+    }
+}
+
 /// What the pill says once the talking is over.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Note {
@@ -120,6 +142,7 @@ pub struct Dictation {
     keys: Option<Keys<Cmd>>,
     esc: Option<Keys<Cmd>>,
     esc_bound: bool,
+    links: Option<crate::kit::url_scheme::Inbox<Link>>,
     bound: Option<Shortcut>,
     key_error: Option<String>,
     /// Recording a new shortcut on the Settings tab.
@@ -172,6 +195,7 @@ impl Dictation {
             keys: None,
             esc: None,
             esc_bound: false,
+            links: (!env.demo).then(|| crate::kit::url_scheme::Inbox::new("dictation", Some(env.ctx.clone()), Link::read)),
             bound: None,
             key_error: None,
             recording_key: false,
@@ -356,6 +380,23 @@ impl Dictation {
         self.phase = Phase::Working { job: self.next_job };
     }
 
+    fn follow(&mut self, link: Link) {
+        let listening = matches!(self.phase, Phase::Listening { .. });
+        match link {
+            Link::Toggle if listening => self.finish(),
+            Link::Toggle | Link::Start => {
+                if matches!(self.phase, Phase::Idle | Phase::Showing { .. }) {
+                    self.start();
+                    if let Phase::Listening { tapped, .. } = &mut self.phase {
+                        *tapped = true;
+                    }
+                }
+            }
+            Link::Stop => self.finish(),
+            Link::Cancel => self.cancel(),
+        }
+    }
+
     fn cancel(&mut self) {
         if let Phase::Listening { mic, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
             let _ = mic.stop();
@@ -468,6 +509,10 @@ impl Dictation {
         }
         if !cancels.is_empty() {
             self.cancel();
+        }
+        let links = self.links.as_ref().map(|l| l.take()).unwrap_or_default();
+        for l in links {
+            self.follow(l);
         }
         let stop_after = self.settings.stop_after_silence();
         if let Phase::Listening { mic, since, tapped, heard, ending } = &mut self.phase {
@@ -679,6 +724,10 @@ impl Tool for Dictation {
     }
     fn set_on(&mut self, on: bool) {
         self.on = on;
+        // links that came while off aren't run late
+        if let Some(l) = &self.links {
+            l.take();
+        }
         if !on {
             self.cancel();
             self.paste_at = None;
@@ -722,6 +771,23 @@ impl Tool for Dictation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_name_their_action() {
+        assert_eq!(Link::read("toggle"), Some(Link::Toggle));
+        assert_eq!(Link::read("start"), Some(Link::Start));
+        assert_eq!(Link::read("stop"), Some(Link::Stop));
+        assert_eq!(Link::read("cancel"), Some(Link::Cancel));
+        assert_eq!(Link::read("talk"), None);
+    }
+
+    #[test]
+    fn stop_and_cancel_links_do_nothing_while_idle() {
+        let mut d = demo();
+        d.follow(Link::Stop);
+        d.follow(Link::Cancel);
+        assert!(matches!(d.phase, Phase::Idle));
+    }
 
     fn demo() -> Dictation {
         Dictation::new(&ToolEnv { ctx: egui::Context::default(), demo: true })
