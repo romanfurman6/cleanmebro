@@ -36,7 +36,9 @@ pub struct Settings {
     /// Where Claude's limits come from: "statusline" (Claude Code's own
     /// status line, when the hook is installed) or "cli" (`claude /usage`).
     pub claude_source: String,
-    /// Settings format: 1 turned the menu bar number off by default.
+    /// Settings format: 1 turned the menu bar number off by default. A
+    /// file without it is older (0), not the struct default.
+    #[serde(default)]
     pub version: u8,
 }
 
@@ -101,6 +103,13 @@ pub fn update(save: bool, f: impl FnOnce(&mut Settings)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_without_version_is_old() {
+        let s: Settings = serde_json::from_str(r#"{"menu_bar":"closest"}"#).unwrap();
+        assert_eq!((s.version, s.menu_bar.as_str()), (0, "closest"));
+        assert_eq!(Settings::default().version, 1);
+    }
 
     #[test]
     fn old_files_keep_their_provider_and_get_defaults() {
