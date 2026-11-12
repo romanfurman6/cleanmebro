@@ -125,9 +125,8 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .mbx::before { content: ""; position: absolute; inset: 0 0 auto; height: 32px; background: rgba(10,14,10,.45); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
 .mbx .mn { position: absolute; left: 16px; top: 0; height: 32px; display: flex; align-items: center; gap: 18px; color: rgba(255,255,255,.92); }
 .mbx .mn span { font-weight: 400; }
-.mbx .icons { position: absolute; left: calc(50% + 100px); right: 14px; top: 0; height: 32px; overflow: hidden; display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
+.mbx .icons { position: absolute; left: 260px; right: 14px; top: 0; height: 32px; overflow: hidden; display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
 .mbx .clk { flex: none; margin-left: 8px; color: rgba(255,255,255,.95); white-space: nowrap; }
-.notch { position: absolute; left: 50%; top: 0; width: 200px; height: 32px; transform: translateX(-50%); background: #000; border-radius: 0 0 14px 14px; }
 .mi2 { flex: none; display: grid; place-items: center; width: 26px; height: 24px; border-radius: 6px; color: rgba(255,255,255,.9); }
 .mi2 .i { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .mi2.bat i { width: 20px; height: 10px; border-radius: 3px; box-shadow: inset 0 0 0 1.4px rgba(255,255,255,.85); background: linear-gradient(90deg, #fff 0 62%, transparent 0) 2px 2px/16px 6px no-repeat; }
@@ -170,7 +169,7 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 
 @media (max-width: 1100px) { .jobs { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) {
-  .jobs { grid-template-columns: 1fr; gap: 20px; } .mbx .mn span { display: none; } .notch { display: none; } .mbx .icons { left: 70px; right: 10px; gap: 0; } .mi2 { width: 22px; } .mbx .mi2.sy { display: none; }
+  .jobs { grid-template-columns: 1fr; gap: 20px; } .mbx .mn span { display: none; } .mbx .icons { left: 70px; right: 10px; gap: 0; } .mi2 { width: 22px; } .mbx .mi2.sy { display: none; }
   .tl { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .tl li { padding: 18px; } .kc { min-width: 72px; height: 64px; font-size: 28px; } .tl b { font-size: 15px; }
   .repl h2, .trust h2, .inst h2 { font-size: 34px; line-height: 40px; }
   .repl, .inst { padding-top: 64px; } .inst { padding-bottom: 72px; }
