@@ -50,6 +50,10 @@ impl Seen {
         }
         let before = self.devices.len();
         self.devices.retain(|s| s.seen.is_some_and(|t| now.saturating_sub(t) < FORGET_AFTER));
+        // a name-only copy of a connected device ("AirPods Max" next to
+        // "Roman's AirPods Max" with its address) is the same one, seen
+        // before its address was known
+        self.devices.retain(|s| !(s.address.is_empty() && live.iter().any(|d| d.live() && !d.address.is_empty() && d.kind == s.kind && ends_with_name(&d.name, &s.name))));
         changed || self.devices.len() != before
     }
 
@@ -67,6 +71,12 @@ impl Seen {
     pub fn forget(&mut self, key: &str) {
         self.devices.retain(|d| d.key() != key);
     }
+}
+
+/// `long` ends with `short` as whole words, ignoring case ("Roman's AirPods Max", "AirPods Max").
+fn ends_with_name(long: &str, short: &str) -> bool {
+    let (l, sh) = (long.to_lowercase(), short.to_lowercase());
+    l != sh && l.ends_with(&sh) && l[..l.len() - sh.len()].ends_with([' ', '\u{a0}'])
 }
 
 /// Each device's charge over the last week: (unix seconds, percent).
@@ -178,6 +188,18 @@ mod tests {
         assert_eq!((away[0].main, away[0].seen, away[0].charging), (Some(38), Some(300), false));
         assert!(s.update(&[], 300 + FORGET_AFTER), "forgotten after a month");
         assert!(s.devices.is_empty());
+    }
+
+    #[test]
+    fn drops_a_name_only_copy_of_a_connected_device() {
+        let mut s = Seen::default();
+        s.update(&[dev("AirPods Max", 80)], 1);
+        let mut real = dev("Roman\u{2019}s AirPods Max", 76);
+        real.address = "70-f9".into();
+        s.update(&[real.clone()], 2);
+        assert!(s.away(&[real]).is_empty(), "the copy is gone");
+        assert!(ends_with_name("Roman's AirPods Max", "airpods max"));
+        assert!(!ends_with_name("MyAirPods Max", "AirPods Max"));
     }
 
     #[test]
