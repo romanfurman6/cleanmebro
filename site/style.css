@@ -109,7 +109,7 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .toast { background: rgba(15,28,13,.94); }
 
 /* Message: subline and facts under the headline */
-.hero .sub { margin-top: 20px; max-width: 500px; font-size: 19px; line-height: 29px; color: rgba(255,255,255,.86); text-shadow: 0 1px 16px rgba(0,0,0,.4); }
+.hero .sub { margin-top: 20px; max-width: 500px; font-size: 19px; line-height: 29px; font-weight: 500; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.55), 0 2px 18px rgba(0,0,0,.65); }
 .facts { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 28px; padding-top: 18px; font-size: 14px; line-height: 20px; color: rgba(255,255,255,.72); }
 .facts > span { display: inline-flex; align-items: center; gap: 7px; } .facts > span::before { content: ""; width: 5px; height: 5px; border-radius: 3px; background: var(--lime); }
 .facts .ver { font-size: 14px; }
@@ -152,7 +152,7 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .trust { padding-top: 24px; }
 .tl { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; margin-top: 36px; }
 .tl li { display: flex; flex-direction: column; gap: 8px; }
-.ph2i { fill: none; stroke: var(--lime); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 6px; }
+
 .tl b { font-weight: 500; font-size: 17px; } .tl span { color: var(--ink2); font-size: 15px; line-height: 23px; }
 .inst { padding-top: 104px; padding-bottom: 112px; }
 .steps { list-style: none; counter-reset: s; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin-top: 36px; }
