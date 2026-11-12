@@ -224,7 +224,8 @@ struct Plan {
 
 fn plan(mode: SpeedMode) -> Plan {
     match mode {
-        SpeedMode::Quick => Plan { pings: 5, phase: Duration::from_secs(4), grace: Duration::from_millis(1000), down: 4, up: 3 },
+        // about 6 s: few pings, short phases, enough streams to fill the line fast
+        SpeedMode::Quick => Plan { pings: 3, phase: Duration::from_millis(2500), grace: Duration::from_millis(600), down: 6, up: 4 },
         SpeedMode::Full => Plan { pings: m::SPEED_TEST_PINGS, phase: m::SPEED_TEST_PHASE, grace: m::SPEED_TEST_GRACE, down: m::SPEED_TEST_STREAMS_DOWN, up: m::SPEED_TEST_STREAMS_UP },
     }
 }
