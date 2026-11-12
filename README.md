@@ -55,19 +55,15 @@ Needs macOS 12 or later, Apple silicon or Intel.
 Every tool can be turned off, and the panel is a grid of widgets you arrange
 yourself.
 
-<p align="center">
-  <img src="docs/images/disk-map.png" width="760" alt="Disk Map">
-</p>
+![Disk Map](docs/images/disk-map.png)
 
-<table align="center">
-  <tr>
-    <td valign="top"><img src="docs/images/menu-panel.png" width="290" alt="The menu bar panel"></td>
-    <td valign="top">
-      <img src="docs/images/ai-usage.png" width="500" alt="AI Usage"><br>
-      <img src="docs/images/clipboard.png" width="500" alt="Clipboard history">
-    </td>
-  </tr>
-</table>
+![AI Usage](docs/images/ai-usage.png)
+
+![Clipboard history](docs/images/clipboard.png)
+
+<p align="center">
+  <img src="docs/images/menu-panel.png" width="380" alt="The menu bar panel">
+</p>
 
 ### Instead of
 
