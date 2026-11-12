@@ -60,7 +60,7 @@ impl Tool for System {
     }
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};
-        vec![Need::may(Perm::FullDisk), Need::may(Perm::Notifications)]
+        vec![Need::may(Perm::FullDisk), Need::may(Perm::Bluetooth), Need::may(Perm::Notifications)]
     }
 
     fn section(&self) -> &'static str {
