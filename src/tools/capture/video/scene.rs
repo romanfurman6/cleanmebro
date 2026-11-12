@@ -51,6 +51,52 @@ pub struct Recorded {
     pub fps: u32,
 }
 
+/// Builds a [`Track`] from samples taken while recording (about 120 a
+/// second). A cursor that sits still adds nothing until it moves again;
+/// then its last still sample goes in first, so the glide starts when the
+/// hand did, not back when it stopped.
+#[derive(Clone, Debug, Default)]
+pub struct Logger {
+    track: Track,
+    still: Option<(f64, f32, f32)>,
+    down: bool,
+}
+
+impl Logger {
+    pub fn sample(&mut self, t: f64, x: f32, y: f32, down: bool) {
+        if down && !self.down {
+            self.track.clicks.push(t);
+        }
+        self.down = down;
+        if self.track.moves.last().is_some_and(|m| m.0 >= t) {
+            return;
+        }
+        match self.track.moves.last() {
+            Some(&(_, lx, ly)) if (lx - x).abs() < 1e-5 && (ly - y).abs() < 1e-5 => self.still = Some((t, x, y)),
+            _ => {
+                if let Some(s) = self.still.take() {
+                    self.track.moves.push(s);
+                }
+                self.track.moves.push((t, x, y));
+            }
+        }
+    }
+
+    pub fn shape(&mut self, t: f64, shape: Shape) {
+        let now = self.track.shapes.last().map(|s| s.1).unwrap_or_default();
+        if now != shape {
+            self.track.shapes.push((t, shape));
+        }
+    }
+
+    pub fn finish(mut self) -> Track {
+        if let Some(s) = self.still.take() {
+            self.track.moves.push(s);
+        }
+        self.track
+    }
+}
+
 // ---------------------------------------------------------------- style
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -782,5 +828,25 @@ mod tests {
             out[i] < 120
         });
         assert!(dark, "caption box drawn");
+    }
+
+    #[test]
+    fn the_logger_keeps_moves_and_presses_and_skips_stillness() {
+        let mut l = Logger::default();
+        l.sample(0.0, 0.1, 0.1, false);
+        for i in 1..100 {
+            l.sample(i as f64 / 100.0, 0.1, 0.1, i >= 50 && i < 60);
+        }
+        l.sample(1.0, 0.2, 0.1, false);
+        l.sample(1.01, 0.2, 0.1, true);
+        l.shape(0.5, Shape::Arrow);
+        l.shape(0.6, Shape::Text);
+        let t = l.finish();
+        assert_eq!(t.moves, vec![(0.0, 0.1, 0.1), (0.99, 0.1, 0.1), (1.0, 0.2, 0.1), (1.01, 0.2, 0.1)]);
+        assert_eq!(t.clicks, vec![0.5, 1.01]);
+        assert_eq!(t.shapes, vec![(0.6, Shape::Text)]);
+        // the glide starts at 0.99, not at 0
+        let p = Path::new(&t, false);
+        assert_eq!(p.at(0.5), Some((0.1, 0.1)));
     }
 }

@@ -32,6 +32,9 @@ pub struct Config {
     pub mic: Option<Option<String>>,
     /// Our window that stays in the video (the camera bubble).
     pub keep_window: Option<u32>,
+    /// Log the cursor on its own instead of baking it into the picture:
+    /// what's recorded, in global points (x, y, w, h; top-left origin).
+    pub cursor_log: Option<[f64; 4]>,
     pub path: PathBuf,
 }
 
@@ -42,6 +45,8 @@ pub struct Stopped {
     pub size: (u32, u32),
     /// A frame from near the end, small.
     pub thumb: Option<image::RgbaImage>,
+    /// The cursor, when it was logged on its own.
+    pub cursor: Option<crate::tools::capture::video::scene::Track>,
 }
 
 pub type Reply<T> = Box<dyn FnOnce(Result<T, String>) + Send + 'static>;
@@ -82,6 +87,8 @@ mod imp {
     use super::super::mixer::{self, Mixer, Pcm, Src};
     use super::super::timeline::Clock;
     use super::{Config, Reply, Stopped, Target};
+    use crate::tools::capture::video::scene::{Logger, Shape};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use block2::RcBlock;
     use dispatch2::DispatchQueue;
     use objc2::rc::Retained;
@@ -182,6 +189,28 @@ mod imp {
         fn CMClockGetTime(clock: *const c_void) -> RawTime;
     }
 
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGEventCreate(source: *const c_void) -> *const c_void;
+        fn CGEventGetLocation(event: *const c_void) -> CGPoint;
+        fn CGEventSourceButtonState(state: i32, button: u32) -> bool;
+    }
+
+    /// The mouse in global points (top-left origin) and whether the left
+    /// button is down. Any thread.
+    fn mouse_now() -> Option<(f64, f64, bool)> {
+        unsafe {
+            let e = CGEventCreate(std::ptr::null());
+            if e.is_null() {
+                return None;
+            }
+            let p = CGEventGetLocation(e);
+            CFRelease(e);
+            // kCGEventSourceStateCombinedSessionState, kCGMouseButtonLeft
+            Some((p.x, p.y, CGEventSourceButtonState(0, 0)))
+        }
+    }
+
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
         fn CFRelease(p: *const c_void);
@@ -279,6 +308,8 @@ mod imp {
         failed: Option<String>,
         done: bool,
         stats: Stats,
+        /// The cursor, when it's logged on its own.
+        cursor: Option<Logger>,
     }
 
     // The writer objects are thread-safe for the use here (one serial queue
@@ -654,6 +685,8 @@ mod imp {
         shared: Arc<Mutex<Shared>>,
         path: std::path::PathBuf,
         size: (u32, u32),
+        /// Ends the cursor sampler.
+        sampling: Arc<AtomicBool>,
     }
 
     // Only handed between threads; ScreenCaptureKit and AVFoundation objects
@@ -700,7 +733,8 @@ mod imp {
 
         /// Stop and finish the file; `done` runs on a background thread.
         pub fn stop(self, done: Reply<Stopped>) {
-            let Session { stream, output, shared, path, size } = self;
+            let Session { stream, output, shared, path, size, sampling } = self;
+            sampling.store(false, Ordering::Relaxed);
             let cell = Mutex::new(Some(SendBox((done, output, shared, path))));
             let block = RcBlock::new(move |_err: *mut NSError| {
                 let Some(SendBox((done, _output, shared, path))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
@@ -711,6 +745,7 @@ mod imp {
 
         /// Stop and throw the file away.
         pub fn discard(self) {
+            self.sampling.store(false, Ordering::Relaxed);
             let path = self.path.clone();
             if let Ok(mut s) = self.shared.lock() {
                 s.done = true;
@@ -745,6 +780,7 @@ mod imp {
         s.drain(true);
         let secs = s.clock.length(host_now()).max(s.last_video);
         let thumb = s.thumb.take();
+        let cursor = s.cursor.take().map(Logger::finish);
         unsafe {
             s.video.markAsFinished();
             if let Some(a) = &s.audio {
@@ -757,12 +793,12 @@ mod imp {
         }
         let writer = s.writer.clone();
         drop(s);
-        let cell = Mutex::new(Some(SendBox((done, thumb, writer.clone(), shared))));
+        let cell = Mutex::new(Some(SendBox((done, thumb, cursor, writer.clone(), shared))));
         let block = RcBlock::new(move || {
-            let Some(SendBox((done, thumb, writer, _shared))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
+            let Some(SendBox((done, thumb, cursor, writer, _shared))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
             rlog!("finished: status {:?} error {:?}", unsafe { writer.status() }, unsafe { writer.error() }.map(|e| ns_err(&e)));
             if unsafe { writer.status() } == AVAssetWriterStatus::Completed {
-                done(Ok(Stopped { path: path.clone(), secs, size, thumb }));
+                done(Ok(Stopped { path: path.clone(), secs, size, thumb, cursor }));
             } else {
                 let why = unsafe { writer.error() }.map(|e| ns_err(&e)).unwrap_or_else(|| "the video file couldn't be finished".into());
                 done(Err(why));
@@ -825,9 +861,9 @@ mod imp {
             conf.setMinimumFrameInterval(CMTime { value: 1, timescale: cfg.fps.max(1) as i32, flags: CMTimeFlags::Valid, epoch: 0 });
             conf.setPixelFormat(PIXELS_420V);
             conf.setQueueDepth(6);
-            conf.setShowsCursor(cfg.cursor);
+            conf.setShowsCursor(cfg.cursor && cfg.cursor_log.is_none());
             if responds(any(&*conf), sel!(setShowMouseClicks:)) {
-                conf.setShowMouseClicks(cfg.clicks);
+                conf.setShowMouseClicks(cfg.clicks && cfg.cursor_log.is_none());
             }
             if let Target::Area { rect, .. } = &cfg.target {
                 conf.setSourceRect(CGRect { origin: CGPoint { x: rect[0], y: rect[1] }, size: CGSize { width: rect[2], height: rect[3] } });
@@ -925,6 +961,7 @@ mod imp {
                 failed: None,
                 done: false,
                 stats: Stats::default(),
+                cursor: cfg.cursor_log.map(|_| Logger::default()),
             }));
             rlog!("start: {:?} {}x{} @{} fps, system audio {}, mic {:?} (capture mic: {mic}), audio input {}, separate tracks {}", cfg.target, cfg.size.0, cfg.size.1, cfg.fps, cfg.system_audio, cfg.mic, shared.lock().map(|s| s.audio.is_some()).unwrap_or(false), shared.lock().map(|s| s.parts.is_some()).unwrap_or(false));
             let output = Output::new(shared.clone());
@@ -944,7 +981,12 @@ mod imp {
     }
 
     fn run(stream: Retained<SCStream>, output: Retained<Output>, shared: Arc<Mutex<Shared>>, cfg: Config, reply: Reply<Session>) {
-        let session = Session { stream: stream.clone(), output, shared, path: cfg.path.clone(), size: cfg.size };
+        let sampling = Arc::new(AtomicBool::new(true));
+        if let Some(region) = cfg.cursor_log {
+            let (shared, sampling) = (shared.clone(), sampling.clone());
+            let _ = std::thread::Builder::new().name("cmdmeow-cursor".into()).spawn(move || sample_cursor(shared, region, sampling));
+        }
+        let session = Session { stream: stream.clone(), output, shared, path: cfg.path.clone(), size: cfg.size, sampling };
         let cell = Mutex::new(Some(SendBox((session, reply))));
         let block = RcBlock::new(move |err: *mut NSError| {
             let Some(SendBox((session, reply))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
@@ -959,5 +1001,63 @@ mod imp {
             }
         });
         unsafe { stream.startCaptureWithCompletionHandler(Some(&block)) };
+    }
+
+    /// Logs the cursor about 120 times a second, as a share of `region`,
+    /// on the video's clock (paused stretches skipped), until told to stop.
+    fn sample_cursor(shared: Arc<Mutex<Shared>>, region: [f64; 4], on: Arc<AtomicBool>) {
+        let [rx, ry, rw, rh] = region;
+        let step = std::time::Duration::from_micros(8_333);
+        let mut n = 0u32;
+        while on.load(Ordering::Relaxed) {
+            n = n.wrapping_add(1);
+            if n % 12 == 0 {
+                // about 10 times a second, the shape (AppKit: main thread)
+                let shared = shared.clone();
+                DispatchQueue::main().exec_async(move || {
+                    let shape = cursor_shape();
+                    if let Ok(mut s) = shared.lock() {
+                        if let (Some(t), false) = (s.clock.map(host_now()), s.done) {
+                            if let Some(l) = &mut s.cursor {
+                                l.shape(t, shape);
+                            }
+                        }
+                    }
+                });
+            }
+            if let Some((x, y, down)) = mouse_now() {
+                let now = host_now();
+                let Ok(mut s) = shared.lock() else { return };
+                if s.done {
+                    return;
+                }
+                if let Some(t) = s.clock.map(now) {
+                    if let Some(l) = &mut s.cursor {
+                        l.sample(t, ((x - rx) / rw.max(1.0)) as f32, ((y - ry) / rh.max(1.0)) as f32, down);
+                    }
+                }
+            }
+            std::thread::sleep(step);
+        }
+    }
+
+    /// The system cursor's shape, told apart by hot spot and size. Main
+    /// thread.
+    fn cursor_shape() -> Shape {
+        use objc2_app_kit::NSCursor;
+        #[allow(deprecated)]
+        let Some(now) = NSCursor::currentSystemCursor() else { return Shape::Arrow };
+        let key = |c: &NSCursor| {
+            let (h, s) = (c.hotSpot(), c.image().size());
+            [h.x, h.y, s.width, s.height].map(|v| (v * 4.0).round() as i32)
+        };
+        let k = key(&now);
+        if k == key(&NSCursor::IBeamCursor()) {
+            Shape::Text
+        } else if k == key(&NSCursor::pointingHandCursor()) {
+            Shape::Hand
+        } else {
+            Shape::Arrow
+        }
     }
 }

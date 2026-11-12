@@ -837,7 +837,7 @@ impl Tool for Capture {
             self.video = None;
             if self.rec.live().is_some() {
                 self.rec.stop();
-            } else if !matches!(self.rec.phase, record::Phase::Saving) {
+            } else if !matches!(self.rec.phase, record::Phase::Saving | record::Phase::Rendering(_)) {
                 self.rec.cancel();
             }
             if let Some(mut ew) = self.editor.take() {
