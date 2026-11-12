@@ -116,6 +116,7 @@ jobs:
           if [[ -n "${SIGN_ID:-}" ]]; then codesign --sign "$SIGN_ID" --keychain "$SIGN_KEYCHAIN" --timestamp CmdMeow.dmg; fi
 
       - name: Notarize and staple
+        id: notarize
         if: steps.sign.outputs.enabled == 'true'
         env:
           NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
@@ -125,12 +126,28 @@ jobs:
           cd target/bundle
           echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
           # Notarizing the dmg also covers the app inside it.
-          xcrun notarytool submit CmdMeow.dmg --wait --timeout 30m \
-            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+          set +e
+          OUT="$(xcrun notarytool submit CmdMeow.dmg --wait --timeout 30m \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" 2>&1)"
+          RC=$?
+          set -e
           rm "$RUNNER_TEMP/notary.p8"
+          echo "$OUT"
+          if [[ $RC -ne 0 ]]; then
+            # Apple refuses every submission while the team's agreement is
+            # pending; ship Developer ID signed (same identity, so macOS
+            # permissions survive the later notarized update) instead of nothing.
+            if grep -q "required agreement is missing or has expired" <<<"$OUT"; then
+              echo "::warning::Apple agreement pending: release is Developer ID signed but not notarized"
+              echo "notarized=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            exit $RC
+          fi
           xcrun stapler staple CmdMeow.dmg
           xcrun stapler staple CmdMeow.app
           spctl -a -vv -t exec CmdMeow.app
+          echo "notarized=true" >> "$GITHUB_OUTPUT"
 
       - name: Make zip and checksums
         run: |
@@ -147,7 +164,7 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
             Download **CmdMeow.dmg** (or CmdMeow.zip), move Cmd+Meow to Applications.
-            ${{ steps.sign.outputs.enabled != 'true' && 'This build is not notarized: open it the first time with right-click › Open, or run `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`.' || '' }}
+            ${{ steps.notarize.outputs.notarized != 'true' && 'This build is not notarized yet: the first time, open it, then System Settings › Privacy & Security › Open Anyway (or run `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`).' || '' }}
           files: |
             target/bundle/CmdMeow.zip
             target/bundle/CmdMeow.dmg
