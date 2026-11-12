@@ -43,7 +43,7 @@
     const first = $$('.shr', list).find(r => $('.cn b', r).textContent.endsWith(video ? '.mp4' : '.png')) || $('.shr', list); if (!first) return;
     const r = first.cloneNode(true); r.classList.remove('gone'); r.classList.add('new');
     const d = new Date(), hm = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    $('.cn b', r).textContent = name; $('.cn code', r).textContent = `Nov 12, ${hm} · cmdmeow.furman.cat/${video ? 'play' : 'view'}/#${Math.random().toString(36).slice(2, 7)}`;
+    $('.cn b', r).textContent = name; $('.cn code', r).textContent = `Nov 12, ${hm} · cmdmeow.com/${video ? 'play' : 'view'}/#${Math.random().toString(36).slice(2, 7)}`;
     list.prepend(r); $('#sh-n', p).textContent = $$('.shr', p).length;
   };
 
@@ -609,7 +609,7 @@
   (() => {
     const p = pane('dictation'); if (!p) return;
     const list = $('.dcl', p), sett = $('.dst', p), sub = $('.tb .dm', p);
-    const lines = ['Сьогодні після обіду викладемо нову версію на сайт.', 'Remind me to answer Alex about the release notes tomorrow morning.', 'Додай у README розділ про встановлення.'];
+    const lines = ['We’ll ship the new version to the site this afternoon.', 'Remind me to answer Alex about the release notes tomorrow morning.', 'Add an install section to the README.'];
     let n = 0, busy = false, words = 69;
     const idle = () => { sub.classList.remove('live'); sub.textContent = `⌥D · Parakeet v3 · ${words} words today`; };
     const tab = name => { $$('.tb .seg > *', p).forEach(o => { const want = o.textContent === name; if (want !== (o.tagName === 'B')) o.replaceWith(el(want ? 'b' : 'i', null, o.innerHTML)); }); list.hidden = name !== 'History'; sett.hidden = name === 'History'; };
@@ -725,7 +725,7 @@
 
 
   // Hero panel: a widget opens its tool in the window
-  const go = { Clean: 'cleanup', Screenshot: 'capture', Claude: 'awake', Clipboard: 'clipboard', 'Macintosh HD': 'diskmap', Memory: 'health', CPU: 'health', Battery: 'health', 'Home Wi-Fi': 'health', 'Claude Max': 'claude', Fans: 'fans' };
+  const go = { Clean: 'cleanup', Screenshot: 'capture', Claude: 'awake', Clipboard: 'clipboard', 'Macintosh HD': 'diskmap', Memory: 'health', CPU: 'health', Battery: 'health', 'Home Wi-Fi': 'health', 'AI Usage': 'claude', Fans: 'fans' };
   document.querySelectorAll('.app.pnl .wd').forEach(w => {
     const k = (w.querySelector('.dm, .kh b, .cl3 > span:last-child') || {}).textContent;
     const to = w.dataset.to || go[(k || '').trim()]; if (!to) return;
