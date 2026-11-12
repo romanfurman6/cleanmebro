@@ -32,10 +32,19 @@ pub struct Config {
     pub mic: Option<Option<String>>,
     /// Our window that stays in the video (the camera bubble).
     pub keep_window: Option<u32>,
-    /// Log the cursor on its own instead of baking it into the picture:
-    /// what's recorded, in global points (x, y, w, h; top-left origin).
-    pub cursor_log: Option<[f64; 4]>,
+    /// Keep the cursor and/or the camera out of the picture and record
+    /// them on their own, for drawing after Stop.
+    pub overlay: Option<Overlay>,
     pub path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Overlay {
+    /// What's recorded, in global points (x, y, w, h; top-left origin).
+    pub region: [f64; 4],
+    pub cursor: bool,
+    /// The camera's frames as a second (switched off) video track.
+    pub camera: bool,
 }
 
 /// A finished recording.
@@ -45,8 +54,8 @@ pub struct Stopped {
     pub size: (u32, u32),
     /// A frame from near the end, small.
     pub thumb: Option<image::RgbaImage>,
-    /// The cursor, when it was logged on its own.
-    pub cursor: Option<crate::tools::capture::video::scene::Track>,
+    /// What was recorded on its own (cursor, camera), for rendering.
+    pub recorded: Option<crate::tools::capture::video::scene::Recorded>,
 }
 
 pub type Reply<T> = Box<dyn FnOnce(Result<T, String>) + Send + 'static>;
@@ -87,7 +96,7 @@ mod imp {
     use super::super::mixer::{self, Mixer, Pcm, Src};
     use super::super::timeline::Clock;
     use super::{Config, Reply, Stopped, Target};
-    use crate::tools::capture::video::scene::{Logger, Shape};
+    use crate::tools::capture::video::scene::{CameraSpot, Logger, Recorded, Shape};
     use std::sync::atomic::{AtomicBool, Ordering};
     use block2::RcBlock;
     use dispatch2::DispatchQueue;
@@ -310,6 +319,12 @@ mod imp {
         stats: Stats,
         /// The cursor, when it's logged on its own.
         cursor: Option<Logger>,
+        /// The camera's own track, and where its bubble was.
+        camera: Option<(Retained<AVAssetWriterInput>, Retained<AVAssetWriterInputPixelBufferAdaptor>)>,
+        camera_last: f64,
+        camera_frames: u64,
+        spots: Vec<CameraSpot>,
+        overlay: Option<super::Overlay>,
     }
 
     // The writer objects are thread-safe for the use here (one serial queue
@@ -355,6 +370,43 @@ mod imp {
             if now - self.stats.printed_at >= 1.0 {
                 self.stats.printed_at = now;
                 rlog!("{:?} mixer pos {} writer status {:?}", self.stats, self.mixer.position(), unsafe { self.writer.status() });
+            }
+        }
+
+        /// A camera frame (host clock times, like the screen's).
+        fn on_camera(&mut self, sb: &CMSampleBuffer) {
+            if self.done || self.failed.is_some() {
+                return;
+            }
+            let raw = sb as *const CMSampleBuffer as *const c_void;
+            let Some(t) = unsafe { CMSampleBufferGetPresentationTimeStamp(raw) }.secs() else { return };
+            let Some(vt) = self.clock.map(t) else { return };
+            let Some((input, adaptor)) = &self.camera else { return };
+            if self.camera_frames > 0 && vt <= self.camera_last {
+                return;
+            }
+            let pb = unsafe { CMSampleBufferGetImageBuffer(raw) };
+            if pb.is_null() || !unsafe { input.isReadyForMoreMediaData() } {
+                return;
+            }
+            let pixels = unsafe { &*(pb as *const CVPixelBuffer) };
+            if unsafe { adaptor.appendPixelBuffer_withPresentationTime(pixels, cm_time(vt)) } {
+                self.camera_last = vt;
+                self.camera_frames += 1;
+            }
+        }
+
+        /// Where the camera bubble is now (main thread).
+        fn note_bubble(&mut self) {
+            let Some(o) = self.overlay.filter(|o| o.camera) else { return };
+            let Some(t) = self.clock.map(host_now()) else { return };
+            let Some((r, shown)) = super::super::camera::bubble() else { return };
+            let [rx, ry, rw, rh] = o.region;
+            let c = r.center();
+            let spot = (t, ((c.x as f64 - rx) / rw.max(1.0)) as f32, ((c.y as f64 - ry) / rh.max(1.0)) as f32, if shown { (r.width() as f64 / rw.max(1.0)) as f32 } else { 0.0 });
+            let same = self.spots.last().is_some_and(|l| (l.1 - spot.1).abs() < 1e-4 && (l.2 - spot.2).abs() < 1e-4 && (l.3 - spot.3).abs() < 1e-4);
+            if !same {
+                self.spots.push(spot);
             }
         }
 
@@ -735,6 +787,7 @@ mod imp {
         pub fn stop(self, done: Reply<Stopped>) {
             let Session { stream, output, shared, path, size, sampling } = self;
             sampling.store(false, Ordering::Relaxed);
+            super::super::camera::set_sink(None);
             let cell = Mutex::new(Some(SendBox((done, output, shared, path))));
             let block = RcBlock::new(move |_err: *mut NSError| {
                 let Some(SendBox((done, _output, shared, path))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
@@ -746,6 +799,7 @@ mod imp {
         /// Stop and throw the file away.
         pub fn discard(self) {
             self.sampling.store(false, Ordering::Relaxed);
+            super::super::camera::set_sink(None);
             let path = self.path.clone();
             if let Ok(mut s) = self.shared.lock() {
                 s.done = true;
@@ -780,8 +834,18 @@ mod imp {
         s.drain(true);
         let secs = s.clock.length(host_now()).max(s.last_video);
         let thumb = s.thumb.take();
-        let cursor = s.cursor.take().map(Logger::finish);
+        let camera = s.camera.take();
+        let recorded = s.overlay.map(|_| Recorded {
+            cursor: s.cursor.take().map(Logger::finish),
+            camera: camera.is_some() && s.camera_frames > 0,
+            camera_spots: std::mem::take(&mut s.spots),
+            fps: 0,
+        });
+        rlog!("overlay: camera frames {}, spots {}", s.camera_frames, recorded.as_ref().map(|r| r.camera_spots.len()).unwrap_or(0));
         unsafe {
+            if let Some((c, _)) = &camera {
+                c.markAsFinished();
+            }
             s.video.markAsFinished();
             if let Some(a) = &s.audio {
                 a.markAsFinished();
@@ -793,12 +857,12 @@ mod imp {
         }
         let writer = s.writer.clone();
         drop(s);
-        let cell = Mutex::new(Some(SendBox((done, thumb, cursor, writer.clone(), shared))));
+        let cell = Mutex::new(Some(SendBox((done, thumb, recorded, writer.clone(), shared))));
         let block = RcBlock::new(move || {
-            let Some(SendBox((done, thumb, cursor, writer, _shared))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
+            let Some(SendBox((done, thumb, recorded, writer, _shared))) = cell.lock().ok().and_then(|mut c| c.take()) else { return };
             rlog!("finished: status {:?} error {:?}", unsafe { writer.status() }, unsafe { writer.error() }.map(|e| ns_err(&e)));
             if unsafe { writer.status() } == AVAssetWriterStatus::Completed {
-                done(Ok(Stopped { path: path.clone(), secs, size, thumb, cursor }));
+                done(Ok(Stopped { path: path.clone(), secs, size, thumb, recorded }));
             } else {
                 let why = unsafe { writer.error() }.map(|e| ns_err(&e)).unwrap_or_else(|| "the video file couldn't be finished".into());
                 done(Err(why));
@@ -861,9 +925,9 @@ mod imp {
             conf.setMinimumFrameInterval(CMTime { value: 1, timescale: cfg.fps.max(1) as i32, flags: CMTimeFlags::Valid, epoch: 0 });
             conf.setPixelFormat(PIXELS_420V);
             conf.setQueueDepth(6);
-            conf.setShowsCursor(cfg.cursor && cfg.cursor_log.is_none());
+            conf.setShowsCursor(cfg.cursor && !cfg.overlay.is_some_and(|o| o.cursor));
             if responds(any(&*conf), sel!(setShowMouseClicks:)) {
-                conf.setShowMouseClicks(cfg.clicks && cfg.cursor_log.is_none());
+                conf.setShowMouseClicks(cfg.clicks && !cfg.overlay.is_some_and(|o| o.cursor));
             }
             if let Target::Area { rect, .. } = &cfg.target {
                 conf.setSourceRect(CGRect { origin: CGPoint { x: rect[0], y: rect[1] }, size: CGSize { width: rect[2], height: rect[3] } });
@@ -939,6 +1003,25 @@ mod imp {
             } else {
                 None
             };
+            // the camera, 720p, on its own track (off, so players show the screen)
+            let camera_track = if cfg.overlay.is_some_and(|o| o.camera) {
+                let (cw, ch, cb, kf) = (num(1280.0), num(720.0), num(4_000_000.0), num(60.0));
+                let ccomp = dict(&[("AverageBitRate", any(&*cb)), ("MaxKeyFrameInterval", any(&*kf)), ("ProfileLevel", any(&*profile))]);
+                let fill = NSString::from_str("AVVideoScalingModeResizeAspectFill");
+                let cset = dict(&[("AVVideoCodecKey", any(&*codec)), ("AVVideoWidthKey", any(&*cw)), ("AVVideoHeightKey", any(&*ch)), ("AVVideoScalingModeKey", any(&*fill)), ("AVVideoCompressionPropertiesKey", any(&*ccomp))]);
+                let c = AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(AVMediaTypeVideo.ok_or("no video")?, Some(&cset));
+                c.setExpectsMediaDataInRealTime(true);
+                c.setMarksOutputTrackAsEnabled(false);
+                if writer.canAddInput(&c) {
+                    writer.addInput(&c);
+                    let a = AVAssetWriterInputPixelBufferAdaptor::assetWriterInputPixelBufferAdaptorWithAssetWriterInput_sourcePixelBufferAttributes(&c, None);
+                    Some((c, a))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             if !writer.startWriting() {
                 return Err(writer.error().map(|e| ns_err(&e)).unwrap_or_else(|| "Couldn't start the video file".into()));
             }
@@ -961,7 +1044,12 @@ mod imp {
                 failed: None,
                 done: false,
                 stats: Stats::default(),
-                cursor: cfg.cursor_log.map(|_| Logger::default()),
+                cursor: cfg.overlay.filter(|o| o.cursor).map(|_| Logger::default()),
+                camera: camera_track,
+                camera_last: 0.0,
+                camera_frames: 0,
+                spots: Vec::new(),
+                overlay: cfg.overlay,
             }));
             rlog!("start: {:?} {}x{} @{} fps, system audio {}, mic {:?} (capture mic: {mic}), audio input {}, separate tracks {}", cfg.target, cfg.size.0, cfg.size.1, cfg.fps, cfg.system_audio, cfg.mic, shared.lock().map(|s| s.audio.is_some()).unwrap_or(false), shared.lock().map(|s| s.parts.is_some()).unwrap_or(false));
             let output = Output::new(shared.clone());
@@ -982,9 +1070,17 @@ mod imp {
 
     fn run(stream: Retained<SCStream>, output: Retained<Output>, shared: Arc<Mutex<Shared>>, cfg: Config, reply: Reply<Session>) {
         let sampling = Arc::new(AtomicBool::new(true));
-        if let Some(region) = cfg.cursor_log {
+        if let Some(o) = cfg.overlay {
+            if o.camera {
+                let shared = shared.clone();
+                super::super::camera::set_sink(Some(Box::new(move |sb: &CMSampleBuffer| {
+                    if let Ok(mut s) = shared.lock() {
+                        s.on_camera(sb);
+                    }
+                })));
+            }
             let (shared, sampling) = (shared.clone(), sampling.clone());
-            let _ = std::thread::Builder::new().name("cmdmeow-cursor".into()).spawn(move || sample_cursor(shared, region, sampling));
+            let _ = std::thread::Builder::new().name("cmdmeow-overlay".into()).spawn(move || sample_overlay(shared, o, sampling));
         }
         let session = Session { stream: stream.clone(), output, shared, path: cfg.path.clone(), size: cfg.size, sampling };
         let cell = Mutex::new(Some(SendBox((session, reply))));
@@ -1003,10 +1099,11 @@ mod imp {
         unsafe { stream.startCaptureWithCompletionHandler(Some(&block)) };
     }
 
-    /// Logs the cursor about 120 times a second, as a share of `region`,
-    /// on the video's clock (paused stretches skipped), until told to stop.
-    fn sample_cursor(shared: Arc<Mutex<Shared>>, region: [f64; 4], on: Arc<AtomicBool>) {
-        let [rx, ry, rw, rh] = region;
+    /// Logs the cursor about 120 times a second, as a share of the
+    /// region, on the video's clock (paused stretches skipped), and its
+    /// shape and the camera bubble 10 times a second, until told to stop.
+    fn sample_overlay(shared: Arc<Mutex<Shared>>, o: super::Overlay, on: Arc<AtomicBool>) {
+        let [rx, ry, rw, rh] = o.region;
         let step = std::time::Duration::from_micros(8_333);
         let mut n = 0u32;
         while on.load(Ordering::Relaxed) {
@@ -1015,17 +1112,21 @@ mod imp {
                 // about 10 times a second, the shape (AppKit: main thread)
                 let shared = shared.clone();
                 DispatchQueue::main().exec_async(move || {
-                    let shape = cursor_shape();
+                    let shape = o.cursor.then(cursor_shape);
                     if let Ok(mut s) = shared.lock() {
-                        if let (Some(t), false) = (s.clock.map(host_now()), s.done) {
+                        if s.done {
+                            return;
+                        }
+                        if let (Some(t), Some(shape)) = (s.clock.map(host_now()), shape) {
                             if let Some(l) = &mut s.cursor {
                                 l.shape(t, shape);
                             }
                         }
+                        s.note_bubble();
                     }
                 });
             }
-            if let Some((x, y, down)) = mouse_now() {
+            if let Some((x, y, down)) = mouse_now().filter(|_| o.cursor) {
                 let now = host_now();
                 let Ok(mut s) = shared.lock() else { return };
                 if s.done {

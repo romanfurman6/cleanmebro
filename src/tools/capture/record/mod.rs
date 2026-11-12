@@ -373,7 +373,8 @@ impl Recorder {
         let out = free_path(&folder, &Settings::recording_name(chrono::Local::now()));
         // the cursor on its own (drawn smooth after Stop): the raw video
         // goes to the recording's project, the rendered one to the folder
-        let logged = s.cursor;
+        let camera = self.camera.is_some();
+        let logged = s.cursor || camera;
         self.pending = None;
         let path = if logged {
             let project = compose::Project::for_output(&projects_dir(), &out);
@@ -398,8 +399,9 @@ impl Recorder {
             clicks: s.clicks,
             system_audio: s.system_audio,
             mic,
-            keep_window: self.camera.as_ref().map(|c| c.window_number()),
-            cursor_log: logged.then(|| [r.left() as f64, r.top() as f64, r.width() as f64, r.height() as f64]),
+            // the camera goes on its own track, not in the picture
+            keep_window: if camera { None } else { self.camera.as_ref().map(|c| c.window_number()) },
+            overlay: logged.then(|| engine::Overlay { region: [r.left() as f64, r.top() as f64, r.width() as f64, r.height() as f64], cursor: s.cursor, camera }),
             path,
         };
         let tx = self.tx.clone();
@@ -500,7 +502,8 @@ impl Recorder {
     /// Draw the look into the raw recording on a thread; the result comes
     /// back as [`Event::Rendered`]. Main thread (for the cursor pictures).
     fn render(&mut self, st: Stopped, p: Pending) {
-        let meta = compose::Meta { out: p.out.clone(), recorded: Recorded { cursor: st.cursor.clone(), camera: false, camera_spots: Vec::new(), fps: p.fps }, style: p.style, ppp: p.ppp };
+        let recorded = Recorded { fps: p.fps, ..st.recorded.clone().unwrap_or_default() };
+        let meta = compose::Meta { out: p.out.clone(), recorded, style: p.style, ppp: p.ppp };
         p.project.save(&meta);
         let job = compose::Job { raw: st.path.clone(), out: p.out.clone(), meta, lines: Vec::new(), pictures: compose::cursor_pictures() };
         let progress = Arc::new(compose::Progress::default());
@@ -515,7 +518,7 @@ impl Recorder {
                     (st.size, Some(e))
                 }
             };
-            let done = Stopped { path: job.out.clone(), secs: st.secs, size, thumb: st.thumb, cursor: None };
+            let done = Stopped { path: job.out.clone(), secs: st.secs, size, thumb: st.thumb, recorded: None };
             let _ = tx.send(Event::Rendered(done, err));
             ctx.request_repaint();
         });
@@ -648,7 +651,7 @@ pub fn probe(secs: f64, system_audio: bool, mic: bool) {
         system_audio,
         mic: mic_ok.then_some(None),
         keep_window: None,
-        cursor_log: None,
+        overlay: None,
         path,
     };
     let (tx, rx) = channel();

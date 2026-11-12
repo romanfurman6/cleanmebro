@@ -558,7 +558,12 @@ impl Compositor {
             return;
         }
         let Some(src) = tiny_skia::PixmapRef::from_bytes(cam, cw, ch) else { return };
-        let (c, d) = camera_rect(cs, &self.lay, camera_spot_at(&self.recorded.camera_spots, f.source_t));
+        let spot = camera_spot_at(&self.recorded.camera_spots, f.source_t);
+        // the bubble was hidden then
+        if spot.is_some_and(|s| s.2 <= 0.0) {
+            return;
+        }
+        let (c, d) = camera_rect(cs, &self.lay, spot);
         let r = egui::Rect::from_center_size(c, egui::vec2(d, d));
         // fill the bubble: scale the shorter side to the diameter, center
         let k = d / cw.min(ch) as f32;
