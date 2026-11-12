@@ -109,7 +109,7 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .toast { background: rgba(15,28,13,.94); }
 
 /* Message: subline and facts under the headline */
-.hero .sub { margin-top: 22px; max-width: 560px; font-size: 22px; line-height: 32px; font-weight: 500; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.55), 0 2px 18px rgba(0,0,0,.65); }
+.hero .sub { margin-top: 24px; max-width: 640px; font-size: 28px; line-height: 36px; letter-spacing: -.01em; font-weight: 500; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.55), 0 2px 18px rgba(0,0,0,.65); }
 .swap { position: relative; display: inline-block; vertical-align: top; color: var(--lime); font-weight: 600; white-space: nowrap; perspective: 600px; }
 .swap .w { display: inline-block; } .swap .w.out { position: absolute; left: 0; top: 0; }
 .swap .c { display: inline-block; white-space: pre; transform-origin: 50% 100%; will-change: transform, opacity, filter; }
@@ -224,7 +224,7 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
   .tl { grid-template-columns: minmax(0, 1fr); gap: 12px; } .tl li { padding: 18px; gap: 18px; } .tl .tx span { font-size: 14px; line-height: 20px; } .kc { min-width: 0; width: 88px; height: 64px; font-size: 26px; } .tl b { font-size: 15px; }
   .repl h2, .trust h2, .inst h2 { font-size: 34px; line-height: 40px; }
   .repl, .inst { padding-top: 64px; } .inst { padding-bottom: 72px; }
-  .hero .sub { font-size: 17px; line-height: 26px; }
+  .hero .sub { font-size: 21px; line-height: 28px; }
 }
 .foot .tm { display: block; margin-top: 6px; font-size: 12px; line-height: 18px; color: rgba(255,255,255,.4); }
 .jt em { font-style: normal; font-size: 12.5px; line-height: 18px; color: rgba(255,155,122,.85); }

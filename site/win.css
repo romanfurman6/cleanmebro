@@ -430,7 +430,7 @@
 /* Hero panel on the app's 4-column widget grid: 1:1, 1:2, 1:4, 2:4 */
 .pg4 { --cell: calc((100% - 24px) / 4); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 76px; gap: 8px; }
 .pw { min-width: 0; overflow: hidden; padding: 9px 10px; } .pw.s11 { padding: 9px 8px 8px; } .pw.s11 .dm { font-size: 10.5px; letter-spacing: -.1px; }
-.pc { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 17px; color: var(--lime); background: rgba(200,240,90,.14); box-shadow: inset 0 0 0 1px rgba(200,240,90,.3); }
+.pc { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 15px; color: var(--lime); background: rgba(200,240,90,.14); box-shadow: inset 0 0 0 1px rgba(200,240,90,.3); }
 .pw.s12 { grid-column: span 2; } .pw.s14 { grid-column: span 4; } .pw.s24 { grid-column: span 4; grid-row: span 2; }
 .pw .dm { font-size: 11px; line-height: 14px; } .pw b { font-weight: 400; white-space: nowrap; }
 .pw.s11 { display: flex; flex-direction: column; justify-content: space-between; }
@@ -438,9 +438,9 @@
 .pi { position: relative; display: inline-flex; color: var(--g); }
 .rdot { position: absolute; top: -2px; right: -5px; width: 6px; height: 6px; border-radius: 3px; background: #FF5F57; animation: blink 1.6s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .25; } }
-.pw.row { display: flex; align-items: center; gap: 9px; } .pw.row > div { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.pw.row { display: flex; align-items: center; gap: 7px; } .pw.row > div { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .pw .rg { position: relative; display: grid; place-items: center; flex: none; } .pw .rg > .i { position: absolute; color: var(--t2); }
-.pw .act.sm { flex: none; height: 24px; padding: 0 9px; font-size: 11.5px; }
+.pw .act.sm { flex: none; height: 24px; padding: 0 8px; font-size: 11.5px; }
 .pw .tr { flex: none; }
 .pw.aw { align-items: center; justify-content: center; gap: 4px; } .pw.aw .rg > .i { color: var(--lav); } .pw.aw b { font-size: 12px; }
 .clp { display: flex; flex-direction: column; justify-content: space-between; } .clp .kh { margin-bottom: 2px; }
