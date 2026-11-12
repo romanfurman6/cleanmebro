@@ -6,13 +6,24 @@
 
 <p align="center">
   <a href="https://cmdmeow.furman.cat">Website</a> ·
-  <a href="https://github.com/romanfurman6/cmdmeow/releases/latest">Download</a> ·
+  <a href="https://github.com/romanfurman6/cmdmeow/releases/latest/download/CmdMeow.dmg">Download v0.1.1</a> ·
   <a href="https://github.com/romanfurman6/cmdmeow/actions/workflows/macos.yml">Latest build</a>
 </p>
 
 A macOS menu bar app that keeps a Mac in shape: cleaner, uninstaller, startup
-items, disk map, fan control, screenshots and screen recording, clipboard
-history and keep-awake in one place. Written in Rust; everything runs locally.
+items, disk map, Mac health, AI usage, fan control, screenshots and screen
+recording, dictation, clipboard history, external display brightness and
+keep-awake in one place. Written in Rust; everything runs locally.
+
+## Install
+
+Latest version: **0.1.1** ([release notes]({R}/tag/v0.1.1)).
+
+1. Download [CmdMeow.dmg]({R}/latest/download/CmdMeow.dmg) and move Cmd+Meow to Applications. Needs macOS 12 or later.
+2. The app is signed with a Developer ID but not notarized yet, so macOS blocks the first launch.
+   Open it once, then go to System Settings › Privacy & Security and click **Open Anyway**.
+   Or run `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`.
+3. First-run setup asks for the permissions each tool needs.
 
 <p align="center">
   <img src="docs/images/panel.png" width="380" alt="The menu bar panel">
@@ -21,11 +32,14 @@ history and keep-awake in one place. Written in Rust; everything runs locally.
 ## What it does
 
 - **Cleanup** finds caches, logs and other junk; Claude can review each path (never file contents). Items go to the Trash.
-- **Disk Map** shows what takes space as a treemap.
+- **Disk Map** shows what takes space as live bubbles, with the largest files and a drill-down into any folder.
 - **Uninstaller** removes apps with their leftovers; **Startup** turns off what starts with your Mac.
-- **Capture** takes screenshots with an editor and records the screen with audio and camera.
+- **Mac Health**: CPU, memory, disk, battery (charge limit, power in watts, top processes), Wi-Fi with a speed test, and Bluetooth device batteries.
+- **AI Tool** shows usage for Claude, Codex, Gemini and OpenCode: plan limits, pace and forecast, cost at API prices, alerts.
+- **Screenshot** has an editor (marks, blur, text from the screen); **Video** records the screen with camera, mic and system audio. **Sharing** uploads either to your own S3 storage and copies a link to the [share page](https://cmdmeow.furman.cat/view/).
+- **Dictation** (⌥D) types what you say at the caret; speech recognition runs on the Mac.
 - **Displays** sets brightness and speaker volume of external monitors (DDC/CI, or dimming the picture when a monitor can't be reached), from the panel or the keyboard's own keys.
-- **Clipboard**, **Fan Control**, **Keep Awake** and **Claude** limits round it out. Any tool can be turned off.
+- **Clipboard**, **Fan Control** and **Keep Awake** (also while Claude Code works) round it out. Any tool can be turned off.
 - Links for scripts, Raycast or Shortcuts (`open cmdmeow://…`; the Dev build answers `cmdmeow-dev://`):
   - `awake/on`, `awake/off`, `awake/toggle`
   - `capture/area`, `window`, `screen`, `delayed`, `text`, `color`, `ruler`, `record`, `history`
@@ -39,7 +53,7 @@ history and keep-awake in one place. Written in Rust; everything runs locally.
 
 - macOS (uses AppKit for the glass material and menu bar behavior)
 - Rust stable (edition 2021)
-- Optional: [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) signed in, for the Claude card and the AI judge
+- Optional: [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) signed in, for Claude limits in AI Tool and the Cleanup AI judge
 
 ## Build and run
 
@@ -95,8 +109,10 @@ without them the release is ad-hoc signed and users must right-click › Open.
 The signed app runs with the hardened runtime and `assets/CmdMeow.entitlements`
 (microphone, camera, Apple Events).
 
-The app is ad-hoc signed, not notarized. On first launch, right-click it and
-choose **Open**, or run `xattr -dr com.apple.quarantine CmdMeow.app`.
+Current releases (0.1.0, 0.1.1) are Developer ID signed but not notarized:
+Apple hasn't finished setting up the developer account yet, and
+`release.yml` publishes without notarization (the release name says so) until
+it can. See [Install](#install) for the first launch.
 
 Coming from CleanMeBro (the old name; bundle id is now
 `com.romanfurman6.cmdmeow`): the new bundle id makes it a new app to macOS. Grant
@@ -173,19 +189,22 @@ cmdmeow/
 │   │   ├── native.rs        macOS: glass material, menu-bar app, thermal state, Trash
 │   │   ├── fs.rs            folder sizes, protected paths, move to Trash, disk space
 │   │   ├── claude_code.rs   Claude Code CLI and project discovery
+│   │   ├── ai/              AI usage providers and API prices
 │   │   └── mechanics.rs     numbers/thresholds from docs/MECHANICS.md
 │   └── tools/
 │       ├── mod.rs           the tool list (the only place that names tools)
 │       ├── system/          Mac Health: readings, widgets, detail sheets
 │       ├── cleanup/         junk rules, AI judge, removal, --scan-report
-│       ├── lens/            Disk Map: folder measuring and treemap
+│       ├── lens/            Disk Map: folder measuring and live bubbles
 │       ├── uninstaller/     apps, leftovers, drop-to-uninstall widget
 │       ├── startup/         login items, launch agents and daemons
-│       ├── capture/         screenshots, editor, screen recording, sharing
+│       ├── capture/         Screenshot, Video and Sharing (one engine, three tools)
+│       ├── dictation/       speech to text at the caret
 │       ├── clipboard/       clipboard history and quick paste
 │       ├── fan/             fan speeds, temperatures, helper
 │       ├── keep_awake/      keep the Mac awake, also while Claude works
-│       └── claude/          Claude limits: card, sheet, page, tray title
+│       ├── displays/        brightness and volume of external displays
+│       └── claude/          AI Tool: usage of Claude, Codex, Gemini, OpenCode
 ├── vendor/eframe/        eframe 0.37 with one patch (see Cargo.toml)
 ├── docs/
 │   ├── images/          README screenshots
