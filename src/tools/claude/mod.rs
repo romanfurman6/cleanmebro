@@ -6,6 +6,8 @@
 use crate::kit::sync::LockExt;
 pub mod backend;
 mod page;
+mod parts;
+pub mod settings_ui;
 mod ui;
 
 use crate::core::tool::{Action, Badge, Cx, MenuItem, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
@@ -17,13 +19,37 @@ pub const ID: ToolId = "claude";
 const LIMITS: &str = "limits";
 
 pub struct Claude {
-    info: backend::Shared,
+    all: backend::All,
     demo: bool,
 }
 
 impl Claude {
     pub fn new(env: &ToolEnv) -> Self {
-        Claude { info: backend::start(env.ctx.clone(), env.demo), demo: env.demo }
+        Claude { all: backend::start(env.ctx.clone(), env.demo), demo: env.demo }
+    }
+}
+
+impl Claude {
+    /// The provider shown on the page and in the widget.
+    fn info(&self) -> UsageInfo {
+        backend::current(&self.all).lock_ok().clone()
+    }
+
+    /// Next to the menu-bar icon: the limit closest to running out across
+    /// every provider that's on, or one provider's session, or for an API
+    /// key this month's dollars.
+    fn menu_bar(&self) -> Option<String> {
+        let set = ai::settings::get();
+        let infos = backend::enabled(&self.all);
+        let pick = match set.menu_bar.as_str() {
+            "off" => return None,
+            "closest" => ai::alerts::closest(&infos).map(|(i, l)| (i.clone(), Some(l.pct))),
+            id => infos.iter().find(|i| ai::meta(i.provider).id == id).map(|i| (i.clone(), i.session().map(|l| l.pct))),
+        };
+        match pick {
+            Some((_, Some(pct))) => Some(format!("{pct:.0}%")),
+            _ => infos.iter().find(|i| i.is_api() && i.local.usd_month > 0.0).map(|i| format!("${:.0}", i.local.usd_month)),
+        }
     }
 }
 
@@ -54,13 +80,14 @@ impl Tool for Claude {
         if widget != LIMITS {
             return;
         }
-        let cl = self.info.lock_ok().clone();
-        if ui::widget(ui, rect, size, &cl, cx.is_detail_open(ID, LIMITS)).clicked() {
+        let cl = self.info();
+        let all = backend::enabled(&self.all);
+        if ui::widget(ui, rect, size, &cl, &all, cx.is_detail_open(ID, LIMITS)).clicked() {
             cx.toggle_detail(ID, LIMITS);
         }
     }
     fn detail_ui(&mut self, _detail: &str, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        ui::detail(&self.info, ui, rect, cx);
+        ui::detail(&self.all, ui, rect, cx);
     }
     fn set_on(&mut self, on: bool) {
         crate::kit::claude_code::set_tool_on(on);
@@ -72,13 +99,13 @@ impl Tool for Claude {
         true
     }
     fn sidebar_meta(&self) -> String {
-        self.info.lock_ok().session().map(|l| format!("{:.0}%", l.pct)).unwrap_or_default()
+        self.menu_bar().unwrap_or_default()
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-        page::page(&self.info, self.demo, ui, rect, cx);
+        page::page(&self.all, self.demo, ui, rect, cx);
     }
     fn recommendations(&self) -> Vec<Recommendation> {
-        let info = self.info.lock_ok();
+        let info = self.info();
         let Some(l) = info.session().filter(|l| l.pct >= 80.0) else { return Vec::new() };
         vec![Recommendation {
             priority: 60,
@@ -89,7 +116,7 @@ impl Tool for Claude {
         }]
     }
     fn tray_title(&self) -> Option<String> {
-        self.info.lock_ok().session().map(|l| format!("{:.0}%", l.pct))
+        self.menu_bar()
     }
     fn menu_items(&self) -> Vec<MenuItem> {
         vec![MenuItem { id: "refresh", label: format!("Refresh {} limits", ai::selected_meta().name) }]
@@ -104,13 +131,23 @@ impl Tool for Claude {
         match view {
             "claude-detail" => Some(View::Detail(LIMITS)),
             "claude" => Some(View::Page),
-            "codex" | "codex-detail" => {
-                backend::select(&self.info, true, ai::index_of("codex"));
-                Some(if view == "codex" { View::Page } else { View::Detail(LIMITS) })
+            "codex" | "codex-detail" | "gemini" | "all" => {
+                backend::select(ai::index_of(view.trim_end_matches("-detail")), true);
+                Some(if view.ends_with("-detail") { View::Detail(LIMITS) } else { View::Page })
+            }
+            "claude-api" => {
+                let mut g = self.all[0].lock_ok();
+                g.billing = ai::Billing::Api;
+                g.plan.clear();
+                g.limits.clear();
+                ai::settings::update(false, |s| {
+                    s.budgets.insert(ai::claude::NAME.into(), 500.0);
+                });
+                Some(View::Page)
             }
             "claude-missing" => {
                 let error = Some(format!("Claude Code isn't installed on this Mac. {}", crate::kit::claude_code::Availability::NotInstalled.how()));
-                *self.info.lock_ok() = UsageInfo { provider: ai::claude::NAME, loading: false, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
+                *self.all[0].lock_ok() = UsageInfo { provider: ai::claude::NAME, loading: false, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
                 Some(View::Page)
             }
             _ => None,

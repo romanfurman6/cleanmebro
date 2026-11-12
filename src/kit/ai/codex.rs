@@ -6,12 +6,10 @@
 //! that turn.
 
 use crate::kit::sync::LockExt;
-use super::{find, recent_jsonl, Limit, LocalTokens, LogCache, Provider, Shared, UsageEntry, UsageInfo};
-use crate::kit::activity::Kick;
+use super::{find, recent_jsonl, Billing, Limit, LocalTokens, LogCache, ParseCtx, Provider, Shared, UsageEntry, UsageInfo};
 use crate::kit::claude_code as cc;
 use chrono::{DateTime, Local, TimeZone};
 use serde_json::Value;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub const NAME: &str = "Codex";
@@ -43,18 +41,18 @@ impl Provider for Codex {
     fn enabled(&self) -> bool {
         cc::tool_on()
     }
-    fn wake(&self) -> Option<&'static Kick> {
-        Some(cc::recheck())
-    }
     fn fetch_account(&mut self, s: &Shared) {
         let home = home();
         let installed = bin().is_some() || home.join("sessions").is_dir();
         let logged_in = home.join("auth.json").is_file();
+        let billing = billing(&std::fs::read(home.join("auth.json")).unwrap_or_default());
         let latest = if installed { latest_limits(&home.join("sessions")) } else { None };
         let mut g = s.lock_ok();
         g.installed = installed;
         g.logged_in = logged_in;
         g.signed_out = installed && !logged_in;
+        g.billing = billing;
+        g.source = "Local";
         if !installed {
             g.limits.clear();
             // checked: keeps the setup screen up while the next check runs
@@ -148,14 +146,14 @@ fn window(w: &Value, at: DateTime<Local>) -> Option<Limit> {
     let now = Local::now().timestamp();
     match resets {
         // the window rolled over since that request: nothing used in it yet
-        Some(r) if r <= now => Some(Limit { label, pct: 0.0, resets: String::new() }),
-        Some(r) => Some(Limit { label, pct, resets: reset_text(r) }),
-        None => Some(Limit { label, pct, resets: String::new() }),
+        Some(r) if r <= now => Some(Limit { label, pct: 0.0, resets: String::new(), resets_at: None, window_secs: minutes * 60 }),
+        Some(r) => Some(Limit { label, pct, resets: reset_text(r), resets_at: Some(r), window_secs: minutes * 60 }),
+        None => Some(Limit { label, pct, resets: String::new(), resets_at: None, window_secs: minutes * 60 }),
     }
 }
 
 /// "9:10pm" today, "Nov 8 at 5pm" on another day, like Claude's `/usage`.
-fn reset_text(ts: i64) -> String {
+pub fn reset_text(ts: i64) -> String {
     let Some(t) = Local.timestamp_opt(ts, 0).single() else { return String::new() };
     let time = if t.format("%M").to_string() == "00" { t.format("%-I%P").to_string() } else { t.format("%-I:%M%P").to_string() };
     if t.date_naive() == Local::now().date_naive() {
@@ -166,30 +164,55 @@ fn reset_text(ts: i64) -> String {
     }
 }
 
-/// The tokens of one turn (fresh input + output; cached input isn't
-/// counted, like cache reads for Claude). Codex can repeat a count, so
-/// each running total counts once.
-fn usage_entry(line: &[u8], seen: &mut HashSet<Vec<u8>>) -> Option<UsageEntry> {
+/// Subscription (signed in with ChatGPT) or API key, from `auth.json`.
+pub fn billing(auth: &[u8]) -> Billing {
+    let v: Value = serde_json::from_slice(auth).unwrap_or(Value::Null);
+    let mode = v["auth_mode"].as_str().unwrap_or("").to_lowercase();
+    if mode.contains("chatgpt") || (mode.is_empty() && v["tokens"].is_object()) {
+        Billing::Subscription
+    } else if mode.contains("api") || v["OPENAI_API_KEY"].as_str().is_some_and(|k| !k.is_empty()) {
+        Billing::Api
+    } else {
+        Billing::Unknown
+    }
+}
+
+/// The tokens of one turn: fresh input, cached input (read from the cache)
+/// and output. Codex can repeat a count, so each running total counts once.
+/// The model comes from the turn's `turn_context` line, the project from the
+/// session's `session_meta`.
+fn usage_entry(line: &[u8], ctx: &mut ParseCtx) -> Option<UsageEntry> {
+    if find(line, b"\"session_meta\"").is_some() || find(line, b"\"turn_context\"").is_some() {
+        let v: Value = serde_json::from_slice(line).ok()?;
+        let p = &v["payload"];
+        if let Some(cwd) = p["cwd"].as_str() {
+            ctx.project = super::intern(cwd);
+        }
+        if let Some(m) = p["model"].as_str() {
+            ctx.model = super::intern(m);
+        }
+        return None;
+    }
     find(line, b"\"token_count\"")?;
     find(line, b"\"last_token_usage\"")?;
     let v: Value = serde_json::from_slice(line).ok()?;
     let info = &v["payload"]["info"];
     let total = info["total_token_usage"]["total_tokens"].as_i64()?;
-    if !seen.insert(total.to_le_bytes().to_vec()) {
+    if !ctx.ids.insert(total.to_le_bytes().to_vec()) {
         return None;
     }
     let ts = v["timestamp"].as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok())?.timestamp();
     let last = &info["last_token_usage"];
     let g = |k: &str| last[k].as_i64().unwrap_or(0).max(0) as u64;
-    let out = g("output_tokens");
-    Some((ts, g("input_tokens").saturating_sub(g("cached_input_tokens")) + out, out))
+    let cached = g("cached_input_tokens").min(g("input_tokens"));
+    Some(UsageEntry { ts, input: g("input_tokens") - cached, output: g("output_tokens"), cache_read: cached, model: ctx.model, project: ctx.project, ..Default::default() })
 }
 
 pub fn demo_info() -> UsageInfo {
     let now = Local::now();
     let limits = vec![
-        Limit { label: "Current session".into(), pct: 42.0, resets: reset_text(now.timestamp() + 2 * 3600 + 600) },
-        Limit { label: "Current week (all models)".into(), pct: 18.0, resets: reset_text(now.timestamp() + 4 * 86_400) },
+        Limit { label: "Current session".into(), pct: 71.0, resets: reset_text(now.timestamp() + 3600 + 600), resets_at: Some(now.timestamp() + 3600 + 600), window_secs: 5 * 3600 },
+        Limit { label: "Current week (all models)".into(), pct: 34.0, resets: reset_text(now.timestamp() + 4 * 86_400), resets_at: Some(now.timestamp() + 4 * 86_400), window_secs: 7 * 86_400 },
     ];
     UsageInfo {
         provider: NAME,
@@ -199,7 +222,12 @@ pub fn demo_info() -> UsageInfo {
         limits,
         note: "Codex reports its limits with each request, so these are as of your last one.".into(),
         fetched: Some(now),
-        local: LocalTokens { tokens_5h: 840_000, tokens_today: 1_900_000, tokens_7d: 9_600_000, output_7d: 410_000, requests_today: 212, daily: vec![900_000, 1_700_000, 600_000, 2_100_000, 1_300_000, 1_100_000, 1_900_000] },
+        local: {
+            let home = dirs::home_dir().unwrap_or_default();
+            super::demo_local(&[("gpt-5.1-codex", 4), ("gpt-5-mini", 1)], &[&home.join("Projects/cmdmeow").display().to_string(), &home.join("work/api-gateway").display().to_string()], 1.6)
+        },
+        billing: Billing::Subscription,
+        source: "Local",
         data_bytes: 1_300_000_000,
         ..Default::default()
     }
@@ -230,9 +258,11 @@ mod tests {
         read_on(&f, body.len() as u64, &mut log, usage_entry);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(log.entries.len(), 2);
-        assert_eq!(log.entries[0].1, 250);
-        assert_eq!(log.entries[0].2, 50);
-        assert_eq!(log.entries[1].1, 520);
+        assert_eq!(log.entries[0].tokens(), 250);
+        assert_eq!(log.entries[0].output, 50);
+        assert_eq!(log.entries[0].cache_read, 800);
+        assert_eq!(log.entries[1].tokens(), 520);
+        assert_eq!(super::super::name(log.entries[0].project), "/tmp/p");
     }
 
     #[test]
@@ -246,6 +276,8 @@ mod tests {
         assert_eq!(l.limits.len(), 2);
         assert_eq!(l.limits[0].label, "Current session");
         assert_eq!(l.limits[0].pct, 25.0);
+        assert_eq!(l.limits[0].resets_at, Some(future));
+        assert_eq!(l.limits[0].window_secs, 300 * 60);
         assert!(!l.limits[0].resets.is_empty());
         // the weekly window reset since: shown as unused
         assert_eq!(l.limits[1].label, "Current week (all models)");
@@ -254,6 +286,24 @@ mod tests {
         info.limits = l.limits;
         assert_eq!(info.session().unwrap().pct, 25.0);
         assert_eq!(info.weekly().unwrap().pct, 0.0);
+    }
+
+    #[test]
+    fn model_from_turn_context() {
+        let mut ctx = ParseCtx::default();
+        assert!(usage_entry(b"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/w\",\"model\":\"gpt-5.1-codex\"}}", &mut ctx).is_none());
+        let line = token_line("2026-11-10T10:00:01Z", 7, 1_000_000, 0, 1_000_000, "null");
+        let e = usage_entry(line.as_bytes(), &mut ctx).unwrap();
+        assert_eq!(super::super::name(e.model), "gpt-5.1-codex");
+        assert!((e.usd().unwrap() - 11.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn chatgpt_or_api_key() {
+        assert_eq!(billing(b"{\"auth_mode\":\"chatgpt\",\"tokens\":{}}"), Billing::Subscription);
+        assert_eq!(billing(b"{\"OPENAI_API_KEY\":null,\"tokens\":{\"id_token\":\"x\"}}"), Billing::Subscription);
+        assert_eq!(billing(b"{\"OPENAI_API_KEY\":\"sk-x\"}"), Billing::Api);
+        assert_eq!(billing(b""), Billing::Unknown);
     }
 
     #[test]

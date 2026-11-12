@@ -64,8 +64,8 @@ pub fn settings_page(app: &mut App, ui: &mut Ui, r: Rect) {
     let top = Rect::from_min_size(r.min, Vec2::new(r.width(), TOP_H));
     hairline(&p, top.left_bottom(), top.right_bottom());
     p.text(Pos2::new(top.left() + 24.0, top.center().y), Align2::LEFT_CENTER, "Settings", bold(15.0), TEXT());
-    let tabs = Rect::from_center_size(top.center(), Vec2::new(270.0, 28.0));
-    if let Some(t) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &["Widgets", "Tools", "General"], app.settings_tab) {
+    let tabs = Rect::from_center_size(top.center(), Vec2::new(360.0, 28.0));
+    if let Some(t) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &["Widgets", "Tools", "General", "AI Usage"], app.settings_tab) {
         app.settings_tab = t;
         app.drag = None;
     }
@@ -73,7 +73,11 @@ pub fn settings_page(app: &mut App, ui: &mut Ui, r: Rect) {
     match app.settings_tab {
         0 => widgets_tab(app, ui, body),
         1 => tools_tab(app, ui, body),
-        _ => general_tab(app, ui, body),
+        2 => general_tab(app, ui, body),
+        _ => {
+            let demo = app.demo;
+            scroll_body(ui, body, "settings-ai", |ui, body| crate::tools::claude::settings_ui::list(ui, body, demo));
+        }
     }
 }
 

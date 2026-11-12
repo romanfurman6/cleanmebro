@@ -1,65 +1,61 @@
-//! The AI usage page in the full window: a Claude / Codex switch, plan
-//! limits, local token use and, for Claude, the Claude Code projects on
-//! this Mac (which ones count as "in use" and are protected by Cleanup).
+//! The AI usage page in the full window. One provider: its limits with
+//! pace and forecast, what the use would cost at API prices (what the plan
+//! saved, or the month's budget for an API key), a day chart to hover, and
+//! use by model and project. "All": a card per provider side by side.
 
-use crate::kit::sync::LockExt;
-use super::backend as claude;
+use super::backend::{self, All};
+use super::parts::{self, Measure};
 use super::ui::CLEANUP;
 use crate::core::tool::Cx;
-use crate::kit::ai::{self, UsageInfo};
+use crate::kit::ai::{self, history, settings, Billing, Day, UsageInfo};
 use crate::kit::claude_code::{self as cc, Availability};
 use crate::kit::glass::*;
-use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
+use crate::kit::sync::LockExt;
+use chrono::Datelike;
+use egui::{Align2, Pos2, Rect, Ui, Vec2};
 
-/// Bar colour for a usage percentage: Claude's tint, amber from 70%, red from 90%.
-pub fn usage_color(pct: f32) -> Color32 {
-    if pct >= 90.0 {
-        RED()
-    } else if pct >= 70.0 {
-        AMBER()
-    } else {
-        CLAUDE()
-    }
-}
+pub use parts::usage_color;
 
-/// Seven daily token bars; today (the last) is solid, the rest faded.
-pub fn day_bars(p: &egui::Painter, r: Rect, daily: &[u64], gap: f32) {
-    let maxd = daily.iter().copied().max().unwrap_or(1).max(1) as f32;
-    let n = daily.len().max(1) as f32;
-    let bw = (r.width() - gap * (n - 1.0)) / n;
-    for (i, v) in daily.iter().enumerate() {
-        let h = (r.height() * (*v as f32 / maxd)).max(2.0);
-        let x = r.left() + i as f32 * (bw + gap);
-        let br = Rect::from_min_max(Pos2::new(x, r.bottom() - h), Pos2::new(x + bw, r.bottom()));
-        let last = i + 1 == daily.len();
-        p.rect_filled(br, 2.0, if last { CLAUDE() } else { white(46) });
-    }
-}
+const GAP: f32 = sp::L;
 
-/// The Claude / Codex switch, right-aligned in `area`. Returns its left edge.
-fn picker(info: &claude::Shared, demo: bool, ui: &mut Ui, area: Rect) -> f32 {
-    let labels: Vec<&str> = ai::PROVIDERS.iter().map(|m| m.name).collect();
-    let w = 64.0 * labels.len() as f32;
+/// The provider switch, right-aligned in `area`: "All" and every provider
+/// that's on. Returns its left edge.
+fn picker(demo: bool, ui: &mut Ui, area: Rect) -> f32 {
+    let set = settings::get();
+    let mut idx: Vec<usize> = vec![ai::ALL];
+    idx.extend((0..ai::ALL).filter(|i| set.is_on(ai::PROVIDERS[*i].id)));
+    let labels: Vec<&str> = idx.iter().map(|i| ai::PROVIDERS.get(*i).map(|m| m.name).unwrap_or("All")).collect();
+    let w = 72.0 * labels.len() as f32;
     let rect = Rect::from_min_max(Pos2::new(area.right() - w, area.top()), area.max);
-    if let Some(i) = segmented(ui, rect, ui.scope_id().with("ai-provider"), &labels, ai::selected()) {
-        claude::select(info, demo, i);
+    let cur = idx.iter().position(|i| *i == ai::selected()).unwrap_or(0);
+    if let Some(k) = segmented(ui, rect, ui.scope_id().with("ai-provider"), &labels, cur) {
+        backend::select(idx[k], demo);
     }
     rect.left()
 }
 
-/// The page when the assistant is missing or signed out: what's wrong, how
-/// to turn it on, and that the rest of the app works without it.
-fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+/// Header: title, status, refresh, the provider switch. Returns the left
+/// edge of the controls.
+fn header(ui: &mut Ui, r: Rect, sub: &str, sub_col: egui::Color32, loading: bool, demo: bool, cx: &mut Cx) -> f32 {
+    let p = ui.painter().clone();
+    let btns = page_header(&p, r, "AI Tool", sub, sub_col);
+    let rb = Rect::from_center_size(Pos2::new(btns.right() - 13.0, btns.center().y), Vec2::splat(26.0));
+    if loading {
+        spinner(&p, rb.center(), 6.0, ui.ctx().input(|i| i.time), TEXT_DIM());
+        animate(ui.ctx());
+    } else if round_button(ui, rb, Icon::Refresh, "Refresh").clicked() {
+        backend::request_refresh();
+        cx.toast("Checking your AI tools…");
+    }
+    picker(demo, ui, Rect::from_min_max(btns.min, Pos2::new(rb.left() - sp::M, btns.bottom())))
+}
+
+/// The page when the assistant is missing or signed out.
+fn not_set_up(a: Availability, cl: &UsageInfo, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
     let m = ai::meta(cl.provider);
     let short = if a == Availability::SignedOut { format!("{} signed out", m.name) } else { format!("{} not installed", m.name) };
-    let btns = page_header(&p, r, "AI Tool", &short, TEXT_DIM());
-    let w = button_width(&p, "Refresh", BTN_SECONDARY);
-    let rb = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
-    if pill_button(ui, rb, "Refresh", BTN_SECONDARY, !cl.loading).clicked() {
-        claude::request_refresh();
-    }
-    picker(info, demo, ui, Rect::from_min_max(btns.min, Pos2::new(rb.left() - sp::M, btns.bottom())));
+    header(ui, r, &short, TEXT_DIM(), cl.loading, demo, cx);
     let colw = 480.0f32.min(r.width() - 48.0);
     let x = r.center().x - colw / 2.0;
     let mut y = r.top() + PAGE_HEADER_H + 56.0;
@@ -67,18 +63,7 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
     y += 56.0 + 20.0;
     let title = if a == Availability::SignedOut { format!("{} isn't signed in", m.name) } else { format!("{} isn't installed", m.name) };
     p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, title, bold(20.0), TEXT());
-    y += 32.0;
-    let verb = if a == Availability::SignedOut { "Sign in" } else { "Install it" };
-    let intro = if m.id == "claude" {
-        format!("{verb} to see plan limits, token use and projects here")
-    } else {
-        format!("{verb} to see {} limits and token use here", m.name)
-    };
-    let g = p.layout(intro, font(13.0), TEXT_DIM(), colw);
-    let gh = g.size().y;
-    p.galley(Pos2::new(r.center().x - g.size().x / 2.0, y), g, TEXT_DIM());
-    y += gh + 20.0;
-
+    y += 32.0 + 12.0;
     let steps: &[&str] = if a == Availability::SignedOut { m.sign_in_steps } else { m.install_steps };
     let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(colw, 12.0 + steps.len() as f32 * 34.0));
     glass_card(&p, card, R_CARD, 0.0, false);
@@ -90,8 +75,6 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
         text_fit(&p, Pos2::new(card.left() + 44.0, cy), Align2::LEFT_CENTER, s, font(13.0), TEXT_SOFT(), colw - 58.0);
     }
     y = card.bottom() + 20.0;
-
-    // buttons, centred
     let primary = "Check again";
     let get = format!("Get {}", if m.id == "claude" { "Claude Code" } else { m.name });
     let second = if a == Availability::SignedOut { "Open Terminal" } else { get.as_str() };
@@ -108,194 +91,436 @@ fn not_set_up(a: Availability, cl: &UsageInfo, info: &claude::Shared, demo: bool
         }
     }
     if pill_button(ui, pr, primary, BTN_PRIMARY, true).clicked() {
-        claude::request_refresh();
+        backend::request_refresh();
         cx.toast(format!("Looking for {}…", m.name));
     }
-    y += 32.0 + 18.0;
-    p.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, "", font(12.0), TEXT_FAINT());
 }
 
-pub fn page(info: &claude::Shared, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
-    let cl = info.lock_ok().clone();
-    if let Some(a) = cl.unavailable() {
-        not_set_up(a, &cl, info, demo, ui, r, cx);
+pub fn page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+    if ai::shows_all() {
+        all_page(all, demo, ui, r, cx);
         return;
     }
-    let is_claude = ai::meta(cl.provider).id == "claude";
+    let cl = backend::current(all).lock_ok().clone();
+    if let Some(a) = cl.unavailable() {
+        not_set_up(a, &cl, demo, ui, r, cx);
+        return;
+    }
+    let meta = ai::meta(cl.provider);
     let p = ui.painter().clone();
+    let (fresh, fresh_col) = parts::fresh(&cl);
     let mut sub = cl.plan_title();
-    match (&cl.fetched, cl.loading) {
-        (_, true) => sub.push_str(" · updating limits…"),
-        (Some(f), _) => sub.push_str(&format!(" · limits updated {}", f.format("%H:%M"))),
-        _ => {}
+    if cl.is_api() {
+        sub.push_str(" · API key");
     }
-    if cl.data_bytes > 0 {
-        sub.push_str(&format!(" · all {} data on this Mac {}", cl.provider, human_bytes(cl.data_bytes)));
+    if !fresh.is_empty() {
+        sub.push_str(&format!(" · {fresh}"));
     }
-    let btns = page_header(&p, r, "AI Tool", &sub, TEXT_DIM());
-    let w = button_width(&p, "Refresh limits", BTN_SECONDARY);
-    let rb = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
-    if pill_button(ui, rb, "Refresh limits", BTN_SECONDARY, !cl.loading).clicked() {
-        claude::request_refresh();
-        cx.toast(format!("Asking {} for your limits…", cl.provider));
-    }
-    picker(info, demo, ui, Rect::from_min_max(btns.min, Pos2::new(rb.left() - sp::M, btns.bottom())));
+    let left = header(ui, r, &sub, if cl.stale { AMBER() } else { TEXT_DIM() }, cl.loading, demo, cx);
+    parts::incident_chip(&p, Pos2::new(left - sp::M, r.top() + PAGE_HEADER_H / 2.0), Align2::RIGHT_CENTER, &cl);
+    let _ = fresh_col;
 
+    let is_claude = meta.id == "claude";
+    let show_usd = settings::get().show_cost;
     let x0 = r.left() + 20.0;
     let x1 = r.right() - 20.0;
     let y = r.top() + PAGE_HEADER_H + 1.0 + sp::L;
-    let gap = sp::L;
+    let cw = (x1 - x0 - 3.0 * GAP) / 4.0;
+    let ch = 158.0;
+    let slot = |k: usize, span: usize| Rect::from_min_size(Pos2::new(x0 + k as f32 * (cw + GAP), y), Vec2::new(cw * span as f32 + GAP * (span as f32 - 1.0), ch));
 
-    // row 1: a ring per plan limit, then today's tokens (4 columns)
-    let cw = (x1 - x0 - 3.0 * gap) / 4.0;
-    let ch = 150.0;
-    let mut col = 0;
-    if cl.limits.is_empty() {
-        let lr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(cw * 3.0 + gap * 2.0, ch));
+    // row 1
+    if cl.is_api() {
+        budget_card(ui, slot(0, 2), &cl);
+        today_card(&p, slot(2, 1), &cl, show_usd);
+        avg_card(&p, slot(3, 1), &cl);
+    } else if !cl.limits.is_empty() {
+        let n = cl.limits.len().min(3);
+        for (k, l) in cl.limits.iter().take(n).enumerate() {
+            limit_card(&p, slot(k, 1), l);
+        }
+        let rest = Rect::from_min_max(slot(n, 1).min, Pos2::new(x1, y + ch));
+        if show_usd && cl.billing == Billing::Subscription && cl.plan_usd().is_some() {
+            saved_card(&p, rest, &cl);
+        } else {
+            today_card(&p, rest, &cl, show_usd);
+        }
+    } else if meta.limits && (cl.loading || cl.error.is_some()) {
+        let lr = slot(0, 3);
         glass_card(&p, lr, R_CARD, 0.0, false);
-        let msg = cl.error.clone().unwrap_or_else(|| if cl.loading { format!("Asking {} for your limits…", cl.provider) } else { "No limits yet.".into() });
+        let msg = cl.error.clone().unwrap_or_else(|| format!("Asking {} for your limits…", cl.provider));
         p.text(lr.min + Vec2::splat(sp::L), Align2::LEFT_TOP, "Plan limits", ty::title(), TEXT());
         paragraph(&p, lr.min + Vec2::new(sp::L, sp::L + 16.0 + sp::M), &msg, ty::body(), TEXT_SOFT(), lr.width() - 2.0 * sp::L);
-        if cl.loading {
-            spinner(&p, Pos2::new(lr.right() - 24.0, lr.top() + 24.0), 6.0, ui.ctx().input(|i| i.time), TEXT_DIM());
-            crate::kit::glass::animate(ui.ctx());
-        }
-        col = 3;
+        today_card(&p, slot(3, 1), &cl, show_usd);
+    } else {
+        // tokens only
+        let l = &cl.local;
+        stat_card(&p, slot(0, 1), "Today", &ai::human_tokens(l.tokens_today), &money_line(show_usd, l.usd_today, l.requests_today));
+        stat_card(&p, slot(1, 1), "7 days", &ai::human_tokens(l.tokens_7d), &if show_usd { format!("{} at API prices", parts::usd(l.usd_7d)) } else { String::new() });
+        let t30: u64 = l.days.iter().rev().take(30).map(|d| d.tokens).sum();
+        stat_card(&p, slot(2, 1), "30 days", &ai::human_tokens(t30), &if show_usd { format!("{} at API prices", parts::usd(l.usd_30d)) } else { String::new() });
+        stat_card(&p, slot(3, 1), "Last 5 hours", &ai::human_tokens(l.tokens_5h), "");
     }
-    for l in cl.limits.iter().take(3) {
-        let cr = Rect::from_min_size(Pos2::new(x0 + col as f32 * (cw + gap), y), Vec2::new(cw, ch));
+
+    // row 2: the chart, then models over projects
+    let y2 = y + ch + GAP;
+    let bottom = r.bottom() - if is_claude { PAGE_FOOTER_H } else { 0.0 } - sp::L;
+    let chart = Rect::from_min_max(Pos2::new(x0, y2), Pos2::new(x0 + cw * 2.0 + GAP, bottom));
+    chart_card(ui, chart, &cl, meta.id, show_usd, demo);
+    let col = Rect::from_min_max(Pos2::new(chart.right() + GAP, y2), Pos2::new(x1, bottom));
+    let half = (col.height() - GAP) / 2.0;
+    let home = dirs::home_dir().unwrap_or_default().display().to_string();
+    for (k, (title, rows)) in [("Models", &cl.local.models), ("Projects", &cl.local.projects)].into_iter().enumerate() {
+        let cr = Rect::from_min_size(Pos2::new(col.left(), col.top() + k as f32 * (half + GAP)), Vec2::new(col.width(), half));
         glass_card(&p, cr, R_CARD, 0.0, false);
         let inner = cr.shrink(sp::L);
-        text_fit(&p, inner.left_top(), Align2::LEFT_TOP, &claude::short_label(&l.label), ty::title(), TEXT(), inner.width());
-        let rr = 36.0;
-        let c = Pos2::new(inner.left() + rr + 5.0, inner.bottom() - rr - 5.0);
-        crate::kit::tile::ring(&p, c, rr, 9.0, l.pct / 100.0, usage_color(l.pct));
-        p.text(c, Align2::CENTER_CENTER, format!("{:.0}%", l.pct), ty::lead(), TEXT());
-        let tx = c.x + rr + sp::L;
-        if !l.resets.is_empty() {
-            p.text(Pos2::new(tx, c.y - 2.0), Align2::LEFT_BOTTOM, "Resets", ty::label(), ty::caption_color());
-            text_fit(&p, Pos2::new(tx, c.y + 2.0), Align2::LEFT_TOP, l.resets.split(" (").next().unwrap_or(&l.resets), ty::lead(), TEXT(), inner.right() - tx);
+        p.text(inner.left_top(), Align2::LEFT_TOP, title, ty::title(), TEXT());
+        p.text(inner.right_top(), Align2::RIGHT_TOP, "30 days", ty::caption(), ty::caption_color());
+        let list = Rect::from_min_max(Pos2::new(inner.left(), inner.top() + 16.0 + sp::M), inner.max);
+        if rows.is_empty() {
+            p.text(list.left_top(), Align2::LEFT_TOP, "–", ty::body(), TEXT_FAINT());
         }
-        col += 1;
+        parts::share_rows(&p, list, rows, show_usd, &home);
     }
-    // today takes the slots no limit uses (Codex has two, Claude three)
-    let tr = Rect::from_min_max(Pos2::new(x0 + col as f32 * (cw + gap), y), Pos2::new(x1, y + ch));
-    glass_card(&p, tr, R_CARD, 0.0, false);
-    let ti = tr.shrink(sp::L);
-    p.text(ti.left_top(), Align2::LEFT_TOP, "Tokens today", ty::title(), TEXT());
-    p.text(Pos2::new(ti.left(), ti.top() + 16.0 + sp::M), Align2::LEFT_TOP, claude::human_tokens(cl.local.tokens_today), ty::hero(), TEXT());
-    let req = if cl.local.requests_today > 0 { format!("{} requests", cl.local.requests_today) } else { String::new() };
-    text_fit(&p, Pos2::new(ti.left(), ti.bottom()), Align2::LEFT_BOTTOM, &format!("{} in 7 days{}", claude::human_tokens(cl.local.tokens_7d), if req.is_empty() { String::new() } else { format!(" · {req}") }), ty::label(), white(166), ti.width());
-
-    // row 2: the week as bars, and the projects
-    let y2 = y + ch + gap;
-    let bottom = r.bottom() - if is_claude { PAGE_FOOTER_H } else { 0.0 } - sp::L;
-    let unit = (x1 - x0 - gap) / 2.6;
-    // other assistants have no project list: the week takes the whole row
-    let wr = Rect::from_min_max(Pos2::new(x0, y2), Pos2::new(if is_claude { x0 + unit * 1.0 } else { x1 }, bottom));
-    // projects take what their rows need; what's left explains the limits
-    let rows_h = if cl.projects.is_empty() { 64.0 } else { cl.projects.len() as f32 * sp::ROW_H };
-    let want = sp::L + 34.0 + sp::S + rows_h + sp::S;
-    let contrib_min = 120.0;
-    let split = bottom - y2 - want - gap >= contrib_min && !cl.contrib.is_empty();
-    let pr = Rect::from_min_max(Pos2::new(wr.right() + gap, y2), Pos2::new(x1, if split { y2 + want } else { bottom }));
-    glass_card(&p, wr, R_CARD, 0.0, false);
-    let wi = wr.shrink(sp::L);
-    p.text(wi.left_top(), Align2::LEFT_TOP, "Tokens, last 7 days", ty::title(), TEXT());
-    let br = Rect::from_min_max(Pos2::new(wi.left(), wi.top() + 16.0 + sp::M), Pos2::new(wi.right(), wi.bottom() - 18.0));
-    day_bars(&p, br, &cl.local.daily, 6.0);
-    p.text(Pos2::new(wi.left(), wi.bottom()), Align2::LEFT_BOTTOM, "7 days ago", ty::caption(), ty::caption_color());
-    p.text(Pos2::new(wi.right(), wi.bottom()), Align2::RIGHT_BOTTOM, "today", ty::caption(), ty::caption_color());
 
     if is_claude {
-    glass_card(&p, pr, R_CARD, 0.0, false);
-    let pi = pr.shrink(sp::L);
-    p.text(pi.left_top(), Align2::LEFT_TOP, "Claude Code projects", ty::title(), TEXT());
-    let used = cl.projects.iter().filter(|p| p.in_use()).count();
-    p.text(pi.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, format!("{} on this Mac · {} in use", cl.projects.len(), used), ty::caption(), ty::caption_color());
-    let list = Rect::from_min_max(Pos2::new(pr.left(), pi.top() + 34.0 + sp::S), Pos2::new(pr.right(), pr.bottom() - sp::S));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(list).layout(egui::Layout::top_down(egui::Align::Min)));
-    child.set_clip_rect(list);
-    let home = dirs::home_dir().unwrap_or_default().display().to_string();
-    ScrollArea::vertical().id_salt("claude-projects").auto_shrink([false, false]).show(&mut child, |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        if cl.projects.is_empty() {
-            let (row, _) = ui.allocate_exact_size(Vec2::new(list.width(), 64.0), Sense::hover());
-            let pp = ui.painter();
-            let msg = if demo { "No Claude Code projects on this Mac yet." } else { "Looking for Claude Code projects…" };
-            pp.text(Pos2::new(row.left() + sp::L, row.top() + sp::M), Align2::LEFT_TOP, msg, ty::body(), TEXT_SOFT());
-            text_fit(pp, Pos2::new(row.left() + sp::L, row.top() + sp::M + 20.0), Align2::LEFT_TOP, "", ty::label(), ty::caption_color(), row.width() - 2.0 * sp::L);
+        let f = page_footer(&p, r, 12.0);
+        if cl.data_bytes > 0 {
+            text_fit(&p, Pos2::new(f.left() + 24.0, f.center().y), Align2::LEFT_CENTER, &format!("{} data on this Mac {}", cl.provider, human_bytes(cl.data_bytes)), ty::label(), TEXT_DIM(), f.width() / 2.0);
         }
-        for (k, pj) in cl.projects.iter().enumerate() {
-            let (row, _) = ui.allocate_exact_size(Vec2::new(list.width(), sp::ROW_H), Sense::hover());
-            let pp = ui.painter();
-            if k > 0 {
-                pp.line_segment([Pos2::new(row.left() + sp::L, row.top()), Pos2::new(row.right() - sp::L, row.top())], egui::Stroke::new(1.0, white(15)));
-            }
-            let (dot, label) = if pj.in_use() {
-                (GREEN(), "in use")
-            } else if !pj.cwd_exists {
-                (AMBER(), "folder gone")
-            } else {
-                (white(51), "idle")
-            };
-            pp.circle_filled(Pos2::new(row.left() + sp::L + 4.0, row.center().y), 4.0, dot);
-            let x = row.left() + sp::L + 8.0 + sp::M;
-            let sr = pp.text(Pos2::new(row.right() - sp::L, row.center().y), Align2::RIGHT_CENTER, human_bytes(pj.bytes), ty::body(), TEXT());
-            let idle = pj.days_idle();
-            let when = if idle < 1.0 { "today".to_string() } else if idle < 2.0 { "yesterday".to_string() } else { format!("{} days ago", idle as u64) };
-            let path = pj.cwd.as_ref().map(|c| c.display().to_string().replacen(&home, "~", 1)).unwrap_or_else(|| "unknown folder".into());
-            let nw = sr.left() - x - sp::L;
-            text_fit(pp, Pos2::new(x, row.center().y - 1.0), Align2::LEFT_BOTTOM, &middle_ellipsis(&path, 70), mono(12.0), TEXT(), nw);
-            text_fit(pp, Pos2::new(x, row.center().y + 1.0), Align2::LEFT_TOP, &format!("{label} · {when}"), ty::caption(), ty::caption_color(), nw);
-        }
-    });
-    }
-    if split {
-        let ur = Rect::from_min_max(Pos2::new(pr.left(), pr.bottom() + gap), Pos2::new(x1, bottom));
-        glass_card(&p, ur, R_CARD, 0.0, false);
-        let ui_ = ur.shrink(sp::L);
-        p.text(ui_.left_top(), Align2::LEFT_TOP, "What uses your limits", ty::title(), TEXT());
-        let c = &cl.contrib[0];
-        p.text(ui_.left_top() + Vec2::new(0.0, 16.0 + sp::XS), Align2::LEFT_TOP, &c.title, ty::caption(), ty::caption_color());
-        // each line that leads with a share ("95% of …") becomes a row:
-        // the share big on the left, the rest beside it over a bar
-        let ly = ui_.top() + 34.0 + sp::M;
-        let n = c.lines.len().max(1) as f32;
-        let rh = ((ui_.bottom() - ly) / n).clamp(30.0, 60.0);
-        for (k, l) in c.lines.iter().enumerate() {
-            let row = Rect::from_min_size(Pos2::new(ui_.left(), ly + k as f32 * rh), Vec2::new(ui_.width(), rh));
-            if row.bottom() > ui_.bottom() + 1.0 {
-                break;
-            }
-            let l = l.trim();
-            let share = l.split_once('%').and_then(|(a, rest)| a.trim().parse::<f32>().ok().map(|v| (v, rest.trim())));
-            match share {
-                Some((v, rest)) => {
-                    let vw = 64.0;
-                    text_fit(&p, Pos2::new(row.left(), row.center().y), Align2::LEFT_CENTER, &format!("{v:.0}%"), ty::number(), TEXT(), vw);
-                    let x = row.left() + vw + sp::M;
-                    let w = row.right() - x;
-                    text_fit(&p, Pos2::new(x, row.center().y - 2.0), Align2::LEFT_BOTTOM, rest, ty::body(), TEXT_SOFT(), w);
-                    bar(&p, Rect::from_min_size(Pos2::new(x, row.center().y + 4.0), Vec2::new(w, 6.0)), v / 100.0, BLUE());
-                }
-                None => {
-                    text_fit(&p, Pos2::new(row.left(), row.center().y), Align2::LEFT_CENTER, l, ty::body(), TEXT_SOFT(), row.width());
-                }
-            }
+        let bl = "Review in Cleanup";
+        let bw = button_width(&p, bl, BTN_PRIMARY);
+        let br = Rect::from_min_size(Pos2::new(f.right() - 24.0 - bw, f.center().y - 16.0), Vec2::new(bw, 32.0));
+        if pill_button(ui, br, bl, BTN_PRIMARY, true).clicked() {
+            cx.open_page(CLEANUP, "claude");
         }
     }
+}
 
-    // footer
-    if !is_claude {
+fn money_line(show_usd: bool, usd: f64, req: u64) -> String {
+    let mut parts_: Vec<String> = Vec::new();
+    if show_usd && usd > 0.0 {
+        parts_.push(parts::usd(usd));
+    }
+    if req > 0 {
+        parts_.push(format!("{req} requests"));
+    }
+    parts_.join(" · ")
+}
+
+/// A plain number card: title, big value, one line under it.
+fn stat_card(p: &egui::Painter, r: Rect, title: &str, value: &str, line: &str) {
+    glass_card(p, r, R_CARD, 0.0, false);
+    let i = r.shrink(sp::L);
+    p.text(i.left_top(), Align2::LEFT_TOP, title, ty::title(), TEXT());
+    text_fit(p, Pos2::new(i.left(), i.top() + 16.0 + sp::M), Align2::LEFT_TOP, value, ty::hero(), TEXT(), i.width());
+    text_fit(p, i.left_bottom(), Align2::LEFT_BOTTOM, line, ty::label(), TEXT_DIM(), i.width());
+}
+
+/// One plan limit: ring with the even-use tick, pace, forecast.
+fn limit_card(p: &egui::Painter, cr: Rect, l: &ai::Limit) {
+    glass_card(p, cr, R_CARD, 0.0, false);
+    let inner = cr.shrink(sp::L);
+    text_fit(p, inner.left_top(), Align2::LEFT_TOP, &backend::short_label(&l.label), ty::title(), TEXT(), inner.width() * 0.6);
+    text_fit(p, inner.right_top(), Align2::RIGHT_TOP, &parts::reset_when(l), ty::label(), TEXT_DIM(), inner.width() * 0.4);
+    let rr = 34.0;
+    let c = Pos2::new(inner.left() + rr + 5.0, inner.bottom() - rr - 5.0);
+    parts::pace_ring(p, c, rr, 9.0, l);
+    p.text(c, Align2::CENTER_CENTER, format!("{:.0}%", l.pct), ty::lead(), TEXT());
+    let tx = c.x + rr + sp::L;
+    let w = inner.right() - tx;
+    if let Some((s, col)) = parts::pace_label(l) {
+        text_fit(p, Pos2::new(tx, c.y - 2.0), Align2::LEFT_BOTTOM, s, ty::title(), col, w);
+    }
+    text_fit(p, Pos2::new(tx, c.y + 2.0), Align2::LEFT_TOP, &parts::forecast(l), ty::label(), TEXT_DIM(), w);
+}
+
+/// A subscription: the 30 days at API prices against the plan's price.
+fn saved_card(p: &egui::Painter, r: Rect, cl: &UsageInfo) {
+    glass_card(p, r, R_CARD, 0.0, false);
+    let i = r.shrink(sp::L);
+    let plan = cl.plan_usd().unwrap_or(0.0);
+    let api = cl.local.usd_30d;
+    let saved = api - plan;
+    p.text(i.left_top(), Align2::LEFT_TOP, "Saved · 30 days", ty::title(), TEXT());
+    let hero = if saved > 0.0 { parts::usd(saved) } else { "$0".into() };
+    let hr = text_fit(p, Pos2::new(i.left(), i.top() + 16.0 + sp::M), Align2::LEFT_TOP, &hero, ty::hero(), if saved > 0.0 { GREEN() } else { TEXT() }, i.width());
+    if plan > 0.0 {
+        text_fit(p, Pos2::new(hr.right() + sp::S, hr.bottom() - 4.0), Align2::LEFT_BOTTOM, &format!("{:.1}× plan", api / plan), ty::label(), TEXT_DIM(), i.right() - hr.right());
+    }
+    let rows = [("At API prices", parts::usd(api)), ("You paid", parts::usd(plan))];
+    for (k, (a, b)) in rows.iter().enumerate() {
+        let yy = i.bottom() - (1 - k) as f32 * 20.0;
+        p.text(Pos2::new(i.left(), yy), Align2::LEFT_BOTTOM, *a, ty::label(), TEXT_DIM());
+        p.text(Pos2::new(i.right(), yy), Align2::RIGHT_BOTTOM, b, ty::label(), TEXT());
+    }
+}
+
+/// Tokens and dollars today.
+fn today_card(p: &egui::Painter, r: Rect, cl: &UsageInfo, show_usd: bool) {
+    let l = &cl.local;
+    let mut line = vec![format!("{} in 7 days", ai::human_tokens(l.tokens_7d))];
+    if l.requests_today > 0 {
+        line.push(format!("{} req", l.requests_today));
+    }
+    let value = if show_usd && cl.is_api() { parts::usd(l.usd_today) } else { ai::human_tokens(l.tokens_today) };
+    let title = if show_usd && !cl.is_api() && l.usd_today > 0.0 { format!("Today · {}", parts::usd(l.usd_today)) } else { "Today".into() };
+    stat_card(p, r, &title, &value, &line.join(" · "));
+}
+
+/// Average per day this month and the budget's even share.
+fn avg_card(p: &egui::Painter, r: Rect, cl: &UsageInfo) {
+    let month = cl.local.month();
+    let n = month.len().max(1) as f64;
+    let avg = cl.local.usd_month / n;
+    let line = budget(cl).map(|b| format!("Budget pace {}", parts::usd(b / days_in_month() as f64))).unwrap_or_default();
+    stat_card(p, r, "Avg / day", &parts::usd(avg), &line);
+}
+
+fn budget(cl: &UsageInfo) -> Option<f64> {
+    settings::get().budgets.get(cl.provider).copied().filter(|b| *b > 0.0)
+}
+
+fn days_in_month() -> u32 {
+    let t = chrono::Local::now().date_naive();
+    let next = if t.month() == 12 { chrono::NaiveDate::from_ymd_opt(t.year() + 1, 1, 1) } else { chrono::NaiveDate::from_ymd_opt(t.year(), t.month() + 1, 1) };
+    next.and_then(|n| n.pred_opt()).map(|d| d.day()).unwrap_or(30)
+}
+
+/// An API key: this month's spend against the budget, with pace and when
+/// it runs out. The budget is typed right on the card.
+fn budget_card(ui: &mut Ui, r: Rect, cl: &UsageInfo) {
+    let p = ui.painter().clone();
+    glass_card(&p, r, R_CARD, 0.0, false);
+    let i = r.shrink(sp::L);
+    let today = chrono::Local::now().date_naive();
+    let spent = cl.local.usd_month;
+    let b = budget(cl);
+    p.text(i.left_top(), Align2::LEFT_TOP, format!("{} budget", today.format("%B")), ty::title(), TEXT());
+    // the budget field, top right
+    let fr = Rect::from_min_size(Pos2::new(i.right() - 84.0, i.top() - 4.0), Vec2::new(84.0, 22.0));
+    let id = ui.scope_id().with(("ai-budget", cl.provider));
+    let mut text = ui.ctx().data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| b.map(|v| format!("{v:.0}")).unwrap_or_default());
+    p.rect_filled(fr, R_SMALL, white(15));
+    p.text(Pos2::new(fr.left() + sp::S, fr.center().y), Align2::LEFT_CENTER, "$", ty::label(), TEXT_DIM());
+    let edit = egui::TextEdit::singleline(&mut text).hint_text("Budget").frame(egui::Frame::NONE).align(egui::Align2::RIGHT_CENTER).font(ty::label()).text_color(TEXT());
+    let resp = ui.put(fr.shrink2(Vec2::new(sp::S, 2.0)), edit);
+    if resp.changed() {
+        ui.ctx().data_mut(|d| d.insert_temp(id, text.clone()));
+    }
+    if resp.lost_focus() {
+        let v = text.trim().trim_start_matches('$').parse::<f64>().unwrap_or(0.0).max(0.0);
+        let name = cl.provider.to_string();
+        settings::update(true, |s| {
+            if v > 0.0 {
+                s.budgets.insert(name, v);
+            } else {
+                s.budgets.remove(&name);
+            }
+        });
+        ui.ctx().data_mut(|d| d.remove::<String>(id));
+    }
+    let hr = text_fit(&p, Pos2::new(i.left(), i.top() + 16.0 + sp::M), Align2::LEFT_TOP, &parts::usd(spent), ty::hero(), TEXT(), i.width() / 2.0);
+    let dim = days_in_month();
+    let day = today.day();
+    let Some(b) = b else { return };
+    let start = chrono::Local::now().timestamp() - (day as i64 - 1) * 86_400;
+    let pc = ai::pace::of((spent / b * 100.0) as f32, start, start + dim as i64 * 86_400, chrono::Local::now().timestamp());
+    if let Some(pc) = pc {
+        let (s, c) = match pc.state {
+            ai::pace::State::Ahead => ("Ahead of pace", RED()),
+            ai::pace::State::OnPace => ("On pace", TEXT()),
+            ai::pace::State::Room => ("Room to spare", GREEN()),
+        };
+        p.text(Pos2::new(hr.right() + sp::M, hr.bottom() - 4.0), Align2::LEFT_BOTTOM, s, ty::title(), c);
+    }
+    let br = Rect::from_min_size(Pos2::new(i.left(), hr.bottom() + sp::M), Vec2::new(i.width(), 8.0));
+    let frac = (spent / b) as f32;
+    bar(&p, br, frac.clamp(0.01, 1.0), if frac >= 0.9 { RED() } else if frac >= 0.7 { AMBER() } else { CLAUDE() });
+    let x = br.left() + br.width() * day as f32 / dim as f32;
+    p.line_segment([Pos2::new(x, br.top() - 3.0), Pos2::new(x, br.bottom() + 3.0)], egui::Stroke::new(1.5, TEXT()));
+    p.text(i.left_bottom(), Align2::LEFT_BOTTOM, format!("Day {day} of {dim}"), ty::label(), TEXT_DIM());
+    let per_day = spent / day.max(1) as f64;
+    let by_end = per_day * dim as f64;
+    let mut f = format!("~{} by {}", parts::usd(by_end), today.format("%b ").to_string() + &dim.to_string());
+    if per_day > 0.0 && by_end > b {
+        let out_day = (b / per_day).ceil() as u32;
+        f = format!("Budget out {} {out_day} · {f}", today.format("%b"));
+    }
+    text_fit(&p, i.right_bottom(), Align2::RIGHT_BOTTOM, &f, ty::label(), if by_end > b { RED() } else { TEXT_DIM() }, i.width() * 0.65);
+}
+
+/// History: the limit window as a line, or tokens / dollars per day.
+fn chart_card(ui: &mut Ui, r: Rect, cl: &UsageInfo, id: &str, show_usd: bool, demo: bool) {
+    let p = ui.painter().clone();
+    glass_card(&p, r, R_CARD, 0.0, false);
+    let i = r.shrink(sp::L);
+    let has_limit = !cl.is_api() && cl.weekly().or(cl.session()).is_some_and(|l| l.resets_at.is_some() && l.window_secs > 0);
+    let mut tabs: Vec<&str> = Vec::new();
+    if has_limit {
+        tabs.push("Limit");
+    }
+    if show_usd && cl.is_api() {
+        tabs.push("Spend");
+    }
+    tabs.push("Tokens");
+    if show_usd && !cl.is_api() {
+        tabs.push("API price");
+    }
+    let key = ui.scope_id().with(("ai-chart-tab", id));
+    let mut tab = ui.ctx().data_mut(|d| d.get_temp::<usize>(key)).unwrap_or(0).min(tabs.len() - 1);
+    let title = match tabs[tab] {
+        "Limit" => "History",
+        "Spend" => "Spend · this month",
+        _ => "Last 30 days",
+    };
+    p.text(i.left_top(), Align2::LEFT_TOP, title, ty::title(), TEXT());
+    let tw = 76.0 * tabs.len() as f32;
+    let tr = Rect::from_min_size(Pos2::new(i.right() - tw, i.top() - 4.0), Vec2::new(tw, 24.0));
+    if let Some(k) = segmented(ui, tr, key.with("seg"), &tabs, tab) {
+        tab = k;
+        ui.ctx().data_mut(|d| d.insert_temp(key, k));
+    }
+    let body = Rect::from_min_max(Pos2::new(i.left(), i.top() + 24.0 + sp::M), i.max);
+    match tabs[tab] {
+        "Limit" => {
+            let Some(l) = cl.weekly().filter(|l| l.resets_at.is_some()).or(cl.session()) else { return };
+            p.text(Pos2::new(tr.left() - sp::M, i.top() + 8.0), Align2::RIGHT_CENTER, backend::short_label(&l.label), ty::label(), TEXT_DIM());
+            let mut samples = history::with(id, |h| (h.window(l), false));
+            if demo {
+                samples = demo_samples(l);
+            }
+            parts::limit_chart(ui, body, l, &samples);
+        }
+        "Spend" => {
+            let pace = budget(cl).map(|b| b / days_in_month() as f64);
+            let days: Vec<Day> = cl.local.month().to_vec();
+            parts::day_chart(ui, body, &days, Measure::Usd, pace, id);
+        }
+        other => {
+            let days: Vec<Day> = cl.local.days.iter().rev().take(30).rev().copied().collect();
+            let m = if other == "Tokens" { Measure::Tokens } else { Measure::Usd };
+            parts::day_chart(ui, body, &days, m, None, id);
+        }
+    }
+}
+
+/// A made-up climb to the limit's current use, for screenshots.
+fn demo_samples(l: &ai::Limit) -> Vec<(i64, f32)> {
+    let (Some(end), now) = (l.resets_at, parts::now()) else { return Vec::new() };
+    let start = end - l.window_secs;
+    let steps = 40;
+    (0..steps)
+        .map(|k| {
+            let t = start + (now - start) * k / steps;
+            let f = k as f32 / steps as f32;
+            // busy days and quiet nights
+            let wave = (f * 14.0).sin() * 0.04;
+            (t, (l.pct * (f.powf(1.3) + wave).clamp(0.0, 1.0)).max(0.0))
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------- all
+
+/// Every provider that's on, side by side, and the dollars of all of them.
+fn all_page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+    let infos = backend::enabled(all);
+    let p = ui.painter().clone();
+    let show_usd = settings::get().show_cost;
+    let today: f64 = infos.iter().map(|i| i.local.usd_today).sum();
+    let sub = if show_usd { format!("{} today", parts::usd(today)) } else { String::new() };
+    let loading = infos.iter().any(|i| i.loading);
+    header(ui, r, &sub, TEXT_DIM(), loading, demo, cx);
+    let x0 = r.left() + 20.0;
+    let x1 = r.right() - 20.0;
+    let mut y = r.top() + PAGE_HEADER_H + 1.0 + sp::L;
+    let cols = if infos.len() > 2 { 2 } else { infos.len().max(1) };
+    let cw = (x1 - x0 - GAP * (cols as f32 - 1.0)) / cols as f32;
+    let ch = 168.0;
+    let menu = ai::alerts::closest(&infos).map(|(i, _)| i.provider);
+    for (k, info) in infos.iter().enumerate() {
+        let cr = Rect::from_min_size(Pos2::new(x0 + (k % cols) as f32 * (cw + GAP), y + (k / cols) as f32 * (ch + GAP)), Vec2::new(cw, ch));
+        provider_card(ui, cr, info, menu == Some(info.provider), show_usd);
+    }
+    y += infos.len().div_ceil(cols) as f32 * (ch + GAP);
+    // dollars of every provider per day
+    let bottom = r.bottom() - sp::L;
+    if bottom - y < 120.0 || !show_usd {
         return;
     }
-    let f = page_footer(&p, r, 12.0);
-    let bl = "Review in Cleanup";
-    let bw = button_width(&p, bl, BTN_PRIMARY);
-    let br = Rect::from_min_size(Pos2::new(f.right() - 24.0 - bw, f.center().y - 16.0), Vec2::new(bw, 32.0));
-    text_fit(&p, Pos2::new(f.left() + 24.0, f.center().y), Align2::LEFT_CENTER, "", font(13.0), TEXT_DIM(), br.left() - f.left() - 40.0);
-    if pill_button(ui, br, bl, BTN_PRIMARY, true).clicked() {
-        cx.open_page(CLEANUP, "claude");
+    let cr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, bottom));
+    glass_card(&p, cr, R_CARD, 0.0, false);
+    let i = cr.shrink(sp::L);
+    p.text(i.left_top(), Align2::LEFT_TOP, "At API prices · 30 days", ty::title(), TEXT());
+    let mut days: Vec<Day> = Vec::new();
+    for info in &infos {
+        for d in info.local.days.iter().rev().take(30) {
+            match days.iter_mut().find(|x| x.date == d.date) {
+                Some(x) => {
+                    x.tokens += d.tokens;
+                    x.usd += d.usd;
+                    x.requests += d.requests;
+                }
+                None => days.push(*d),
+            }
+        }
     }
+    days.sort_by_key(|d| d.date);
+    parts::day_chart(ui, Rect::from_min_max(Pos2::new(i.left(), i.top() + 16.0 + sp::M), i.max), &days, Measure::Usd, None, "all");
+}
+
+/// One provider in the "All" view.
+fn provider_card(ui: &mut Ui, cr: Rect, info: &UsageInfo, menu: bool, show_usd: bool) {
+    let p = ui.painter().clone();
+    let resp = ui.interact(cr, ui.scope_id().with(("ai-all", info.provider)), egui::Sense::click());
+    glass_card(&p, cr, R_CARD, if resp.hovered() { 1.0 } else { 0.0 }, false);
+    if resp.clicked() {
+        backend::select(ai::index_of(ai::meta(info.provider).id), false);
+    }
+    let i = cr.shrink(sp::L);
+    let tr = text_fit(&p, i.left_top(), Align2::LEFT_TOP, &info.plan_title(), ty::title(), TEXT(), i.width() * 0.5);
+    let mut x = tr.right() + sp::S;
+    if menu {
+        x = chip(&p, Pos2::new(x, tr.center().y), Align2::LEFT_CENTER, "Menu bar", (with_alpha(BLUE(), 0.16), ACCENT())).right() + sp::S;
+    }
+    if let Some(c) = parts::incident_chip(&p, Pos2::new(x, tr.center().y), Align2::LEFT_CENTER, info) {
+        let _ = c;
+    }
+    let (f, fc) = parts::fresh(info);
+    text_fit(&p, i.right_top(), Align2::RIGHT_TOP, &f, ty::label(), fc, i.width() * 0.3);
+    let mut y = i.top() + 16.0 + sp::M;
+    if let Some(e) = info.unavailable() {
+        let s = if e == Availability::SignedOut { "Signed out" } else { "Not installed" };
+        p.text(Pos2::new(i.left(), y), Align2::LEFT_TOP, s, ty::body(), TEXT_DIM());
+        return;
+    }
+    if info.limits.is_empty() {
+        let l = &info.local;
+        for (k, (lab, v)) in [("Today", l.tokens_today), ("7 days", l.tokens_7d), ("5 hours", l.tokens_5h)].iter().enumerate() {
+            let xx = i.left() + k as f32 * i.width() / 3.0;
+            p.text(Pos2::new(xx, y), Align2::LEFT_TOP, ai::human_tokens(*v), ty::number(), TEXT());
+            p.text(Pos2::new(xx, y + 28.0), Align2::LEFT_TOP, *lab, ty::caption(), ty::caption_color());
+        }
+    }
+    for l in info.limits.iter().take(2) {
+        let row = Rect::from_min_size(Pos2::new(i.left(), y), Vec2::new(i.width(), 38.0));
+        text_fit(&p, row.left_top(), Align2::LEFT_TOP, &backend::short_label(&l.label), ty::label(), TEXT_SOFT(), 120.0);
+        p.text(Pos2::new(row.right(), row.top()), Align2::RIGHT_TOP, format!("{:.0}%", l.pct), ty::title(), TEXT());
+        let fc = parts::forecast(l);
+        let col = if fc.starts_with("Out") { RED() } else { TEXT_DIM() };
+        text_fit(&p, Pos2::new(row.right() - 44.0, row.top() + 1.0), Align2::RIGHT_TOP, &fc, ty::label(), col, row.width() - 170.0);
+        parts::pace_bar(&p, Rect::from_min_size(Pos2::new(row.left(), row.top() + 22.0), Vec2::new(row.width(), 5.0)), l);
+        y += 38.0;
+    }
+    let l = &info.local;
+    let mut line = Vec::new();
+    if show_usd {
+        line.push(format!("{} today", parts::usd(l.usd_today)));
+    }
+    line.push(format!("{} tok", ai::human_tokens(l.tokens_today)));
+    if show_usd {
+        line.push(format!("{} / 7d", parts::usd(l.usd_7d)));
+    }
+    text_fit(&p, i.left_bottom(), Align2::LEFT_BOTTOM, &line.join(" · "), ty::label(), TEXT_DIM(), i.width());
 }
