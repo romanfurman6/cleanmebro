@@ -464,14 +464,13 @@
       bars.classList.add('b-wig'); await sleep(900); if (id !== gen) return;
       bars.classList.add('b-one'); await sleep(420); bars.classList.add('b-open'); await sleep(380); if (id !== gen) return;
       bars.classList.remove('b-wig');
-      const all = [];
+      const all = []; bars.classList.add('b-eat');
       for (const [k, i] of ORDER.entries()) {
         if (id !== gen) return;
         all.push(fly(ap[i], wOf(i), k));
-        bars.classList.remove('b-hit'); void bars.offsetWidth; bars.classList.add('b-hit');
         await sleep(70 + (k * 29) % 70);
       }
-      await Promise.all(all); if (id !== gen) return;
+      await Promise.all(all); bars.classList.remove('b-eat'); if (id !== gen) return;
       label('1 app');
       await sleep(4200); if (id !== gen) return;
       bars.classList.remove('b-open'); await sleep(2000); if (id === gen) play(id);
