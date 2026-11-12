@@ -91,7 +91,7 @@
 .ct { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 8px; }
 .ct > span:first-child { flex: 1; }
 .ct.on { background: rgba(255,255,255,.08); }
-.cnt { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 8px; background: var(--ap); color: var(--on-lime); font: 600 10px/1 inherit; font-style: normal; }
+.cnt { display: inline-block; min-width: 20px; height: 18px; padding: 0 7px; border-radius: 9px; background: var(--ap); color: var(--on-lime); font: 700 11px/18px -apple-system, BlinkMacSystemFont, "Geist", sans-serif; font-style: normal; text-align: center; font-variant-numeric: tabular-nums; }
 .crs { min-width: 0; }
 .crh { display: flex; gap: 14px; align-items: center; height: 26px; font-size: 11.5px; }
 .crh .dm { flex: 1; }
@@ -319,7 +319,7 @@
 .gchs { display: flex; gap: 8px; flex-wrap: wrap; }
 .gch { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 9px; background: var(--card); box-shadow: inset 0 0 0 1px var(--ln); cursor: pointer; white-space: nowrap; font-size: 12.5px; }
 .gch > i { width: 6px; height: 6px; border-radius: 3px; background: var(--lime); } .gch[data-g="All"] > i { background: rgba(255,255,255,.6); }
-.gch .dm { font-size: 12px; } .gch .cnt { font-size: 10px; }
+.gch .dm { font-size: 12px; } .gch .cnt { font-size: 11px; }
 .gch.on { background: rgba(200,240,90,.1); box-shadow: inset 0 0 0 1px rgba(200,240,90,.45); }
 .cu2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .cuL, .cuR { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
