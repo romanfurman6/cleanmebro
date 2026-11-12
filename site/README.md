@@ -1,6 +1,6 @@
 # Website
 
-Static site for https://cmdmeow.furman.cat, deployed by `.github/workflows/pages.yml`
+Static site for https://cmdmeow.com, deployed by `.github/workflows/pages.yml`
 on every push to `main` that touches `site/`.
 
 - `index.html`, `style.css`: the landing page. `app.css` styles the app mock-ups, `desk.jpg` / `desk-1376.jpg` are the desktop wallpaper behind them.
