@@ -32,7 +32,7 @@
     const vis = r => !r.hidden;
     const sum = rows => rows.reduce((a, r) => a + parse($('.sz', r).textContent), 0);
     const upd = () => {
-      const safe = $$('.sfr', sfl), on = safe.filter(r => vis(r) && !$('.ck', r).classList.contains('off'));
+      const safe = $$('.sfr', sfl), on = safe.filter(r => !$('.ck', r).classList.contains('off'));
       const v = sum(on); sel.textContent = fmt(v) + ' selected'; go.textContent = v ? 'Clean ' + fmt(v) : 'Clean'; go.classList.toggle('dim', !v);
       $('#cu-safe', p).textContent = `${safe.filter(vis).length} · ${fmt(sum(safe.filter(vis)))}`;
       const kept = $$('.sfr', kpl); $('#cu-kept', p).textContent = `${kept.length} · ${fmt(sum(kept))}`;
@@ -40,6 +40,7 @@
       $('.sh2.ap .num', p).textContent = `${ask.length} · ${fmt(ask.reduce((a, r) => a + parse(r.dataset.s), 0))}`;
     };
     const decide = (card, allow) => {
+      if (card.classList.contains('gone')) return;
       const name = $('.cn b', card).firstChild.textContent.trim(), size = card.dataset.s;
       card.classList.add('gone'); setTimeout(() => { card.remove(); upd(); }, 300);
       if (allow) { const r = el('div', 'sfr in', `<span class="ck">${CK}</span><span class="nm">${name}</span><span class="num sz">${size}</span>`); r.dataset.g = card.dataset.g; sfl.prepend(r); }
@@ -84,7 +85,9 @@
       ['Pictures', 22500, [['Photos Library', 21000], ['Screenshots', 1500]]],
       ['Documents', 14100, [['Taxes', 2100], ['Books', 6000], ['Scans', 6000]]],
       ['Music', 6300], ['Desktop', 2100], ['.cargo', 4200]]) };
-    const picked = new Set(['Movies']);
+    const picked = new Set(root.c.filter(c => c.n === 'Movies'));
+    const kid = n => path[path.length - 1].c.find(c => c.n === n);
+    const flip = node => { if (node) picked.has(node) ? picked.delete(node) : picked.add(node); };
     let path = [root];
     // Greedy circle packing: biggest in the middle, the rest on a spiral around it
     const pack = items => {
@@ -105,7 +108,7 @@
       const node = path[path.length - 1];
       const items = [...node.c].sort((a, b) => b.s - a.s);
       svg.innerHTML = pack(items).map(b => {
-        const pk = picked.has(b.n) ? ' pk' : '', dk = b.c ? '' : ' leaf';
+        const pk = items.some(i => i.n === b.n && picked.has(i)) ? ' pk' : '', dk = b.c ? '' : ' leaf';
         const fo = b.c && b.r > 20 ? `<path class="fo" transform="translate(${(b.x - 10).toFixed(1)} ${(b.y - (b.r > 34 ? 30 : 22)).toFixed(1)})" d="M1 3.5h6l2 2h10v10.5H1z"/>` : '';
         const label = b.r > 34 ? `<text x="${b.x}" y="${b.y + 8}" text-anchor="middle"><tspan x="${b.x}" class="bn">${b.n}</tspan><tspan x="${b.x}" dy="14" class="bv">${fmt(b.s)}</tspan></text>`
           : b.r > 22 ? `<text x="${b.x}" y="${b.y + 6}" text-anchor="middle" class="sm"><tspan x="${b.x}">${b.n.slice(0, 11)}</tspan><tspan x="${b.x}" dy="11">${fmt(b.s)}</tspan></text>` : '';
@@ -115,19 +118,25 @@
       hdr.textContent = `${crumbs} · ${fmt(node.s)}`;
       back.textContent = path.length > 1 ? 'Back' : 'Start over';
       side.innerHTML = `<div class="fh">${ICON('M3.5 6.5h6l2 2h9v10h-17z')}<div><b>${node.n}</b><span class="dm">${fmt(node.s)}</span></div></div>` +
-        items.slice(0, 9).map(i => `<div class="fr" data-n="${i.n}"><span class="ck${picked.has(i.n) ? '' : ' off'}">${picked.has(i.n) ? ICON('M5 12.5l4.5 4.5L19 7') : ''}</span>${ICON(i.c ? 'M3.5 6.5h6l2 2h9v10h-17z' : 'M6 3.5h8l4 4v13H6z')}<span>${i.n}</span><span class="num dm">${fmt(i.s)}</span></div>`).join('');
-      const all = []; const walk = n => { if (picked.has(n.n)) all.push(n.s); (n.c || []).forEach(walk); }; walk(root);
+        items.slice(0, 9).map(i => `<div class="fr" data-n="${i.n}"><span class="ck${picked.has(i) ? '' : ' off'}">${picked.has(i) ? ICON('M5 12.5l4.5 4.5L19 7') : ''}</span>${ICON(i.c ? 'M3.5 6.5h6l2 2h9v10h-17z' : 'M6 3.5h8l4 4v13H6z')}<span>${i.n}</span><span class="num dm">${fmt(i.s)}</span></div>`).join('');
+      const all = []; const walk = n => { if (picked.has(n)) return all.push(n.s); (n.c || []).forEach(walk); }; walk(root);
       foot.firstElementChild.innerHTML = `<b class="num">${fmt(all.reduce((a, b) => a + b, 0))}</b> <span class="dm">${all.length} item${all.length === 1 ? '' : 's'} picked</span>`;
     };
     const open = n => { const node = path[path.length - 1].c.find(c => c.n === n); if (node && node.c) { path.push(node); draw(); } };
-    svg.addEventListener('click', e => { const g = e.target.closest('.bb'); if (!g) return; const n = g.dataset.n; const node = path[path.length - 1].c.find(c => c.n === n); if (node && node.c) open(n); else { picked.has(n) ? picked.delete(n) : picked.add(n); draw(); } });
+    svg.addEventListener('click', e => { const g = e.target.closest('.bb'); if (!g) return; const n = g.dataset.n; const node = path[path.length - 1].c.find(c => c.n === n); if (node && node.c) open(n); else { flip(node); draw(); } });
     side.addEventListener('click', e => {
       const r = e.target.closest('.fr'); if (!r) return;
-      if (e.target.closest('.ck')) { const n = r.dataset.n; picked.has(n) ? picked.delete(n) : picked.add(n); return draw(); }
+      if (e.target.closest('.ck')) { flip(kid(r.dataset.n)); return draw(); }
       open(r.dataset.n);
     });
     back.addEventListener('click', () => { path = path.length > 1 ? path.slice(0, -1) : [root]; draw(); });
     $('.fb .btn2', p).addEventListener('click', () => { picked.clear(); draw(); });
+    const trash = $('.fb .act', p);
+    if (trash) trash.addEventListener('click', async () => {
+      if (!picked.size || trash.dataset.busy) return; trash.dataset.busy = 1; const o = trash.textContent; trash.textContent = 'Moved to Trash';
+      const prune = n => { if (!n.c) return 0; let cut = 0; n.c = n.c.filter(c => picked.has(c) ? (cut += c.s, false) : true); n.c.forEach(c => { const d = prune(c); c.s -= d; cut += d; }); return cut; };
+      root.s -= prune(root); picked.clear(); draw(); await sleep(1200); trash.textContent = o; delete trash.dataset.busy;
+    });
     draw();
   })();
 
@@ -210,7 +219,7 @@
     dev.addEventListener('click', () => {
       let sh = $('.devs', p);
       if (sh) { sh.remove(); dev.textContent = 'Devices…'; return; }
-      const d = (n, v, extra) => `<div class="dv"><b>${n}</b>${extra || ''}<span class="dvb"><i style="width:${v}%"></i></span><span class="num">${v}%</span></div>`;
+      const d = (n, v, extra) => `<div class="dv"><b>${n}</b>${extra || '<span></span>'}<span class="dvb"><i style="width:${v}%"></i></span><span class="num">${v}%</span></div>`;
       sh = el('div', 'card devs', `<div class="kh"><b>Devices</b><span class="dm">Bluetooth</span></div>${d('AirPods Pro · Left', 82)}${d('AirPods Pro · Right', 79)}${d('AirPods Pro · Case', 44, '<span class="chip ok">Charging</span>')}${d('Magic Keyboard', 63)}${d('MX Master 3S', 18, '<span class="chip warn">Low</span>')}${d('DualSense', 71)}`);
       grid.append(sh); dev.textContent = 'Close';
     });
@@ -245,7 +254,7 @@
     const spin = $('.spin', p);
     p.addEventListener('pick', e => {
       const t = { Auto: 0, Quiet: 1500, Fixed: 3200, Max: 5800 }[e.detail];
-      window.cmFanTarget = t || undefined;
+      window.cmFanTarget = t || undefined; if (window.cmFanTick) window.cmFanTick();
       spin.style.animationDuration = t ? (6000 / t).toFixed(2) + 's' : '';
     });
   })();
@@ -331,6 +340,8 @@
         r.hidden = !(okK && okQ);
         $('.t', r).innerHTML = q && okQ ? r.dataset.t.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), m => `<mark>${m}</mark>`) : r.dataset.t;
       });
+      const cur = rows.find(r => r.classList.contains('on'));
+      if (!cur || cur.hidden) { const f = rows.find(r => !r.hidden); if (f) show(f); else { rows.forEach(r => r.classList.remove('on')); det.innerHTML = ''; } }
       $$('.ch', p).forEach(h => { let n = h.nextElementSibling, any = false; while (n && !n.classList.contains('ch')) { if (!n.hidden) any = true; n = n.nextElementSibling; } h.hidden = !any; });
     };
     inp.addEventListener('input', apply);
@@ -344,7 +355,12 @@
       det.innerHTML = `<div class="kh"><span><i class="ld"></i>${label}</span><span class="dm">${at}</span></div>${big}${k === 'Links' ? `<b>${t.split('/')[0]}</b><span class="url">https://${t}</span>` : ''}<div class="kv2"><span class="dm">From</span><span>${src}</span><span class="dm">Copied</span><span>once</span><span class="dm">Content</span><span>${t.length} characters</span></div><div class="cb2"><span class="act">Copy</span><span class="btn2">Copy as plain text</span>${k === 'Links' ? '<span class="btn2">Open link</span>' : ''}<span class="btn2">${$('.pn', r) ? 'Unpin' : 'Pin'}</span></div>`;
     };
     rows.forEach(r => r.addEventListener('click', () => show(r)));
-    det.addEventListener('click', async e => { const b = e.target.closest('.act, .btn2'); if (!b) return; const o = b.textContent; if (/Copy/.test(o)) { b.textContent = 'Copied'; await sleep(1000); b.textContent = o; } });
+    det.addEventListener('click', async e => { const b = e.target.closest('.act, .btn2'); if (!b) return; const o = b.textContent; if (/Copy/.test(o)) { b.textContent = 'Copied'; await sleep(1000); b.textContent = o; return; }
+      const r = rows.find(x => x.classList.contains('on')); if (!r || !/pin/i.test(o)) return;
+      const pn = $('.pn', r);
+      if (pn) pn.remove(); else { const w = el('span', null, ICON('M9 3h6l-1 6 3.5 3.5h-11L10 9zM12 12.5V21')); const ic = w.firstElementChild; ic.classList.add('pn'); $('.t', r).after(ic); }
+      show(r); apply();
+    });
     const pause = $$('.tb .btn2', p).find(b => /Pause/.test(b.textContent)), st = $('.tb .dm', p);
     if (pause) pause.addEventListener('click', () => { const on = pause.textContent.startsWith('Pause'); pause.textContent = on ? 'Resume' : 'Pause 15 min'; st.textContent = on ? 'Paused · 15 min left' : 'Recording · 8 items · 2 pinned'; });
   })();
@@ -377,19 +393,14 @@
   (() => {
     const p = pane('awake'); if (!p) return;
     const big = $('.tg.big', p), h = $('.aw-h', p), ring = $('.ahero .ring circle:last-child', p), why = $('.ahero span', p);
-    const set = () => { const on = !big.classList.contains('off') || why.dataset.claude !== '0'; };
-    big.addEventListener('flip', () => {
-      const on = !big.classList.contains('off');
-      h.textContent = on ? 'Awake' : 'Awake for Claude';
-      why.textContent = on ? 'Until you turn it off' : 'Claude is working · 2 sessions';
-      ring.setAttribute('stroke', on ? '#C8F05A' : '#C8F05A');
-      ring.setAttribute('stroke-dashoffset', on ? '0' : '96.1');
-    });
-    $$('.opt .or', p).forEach(r => r.addEventListener('flip', () => {
-      if (!/while Claude/.test(r.textContent)) return;
-      const off = $('.tg', r).classList.contains('off');
-      if (big.classList.contains('off')) { h.textContent = off ? 'Asleep' : 'Awake for Claude'; why.textContent = off ? 'Your Mac sleeps as usual' : 'Claude is working · 2 sessions'; ring.setAttribute('stroke-dashoffset', off ? '282.7' : '96.1'); }
-    }));
+    const cl = $$('.opt .or', p).find(r => /while Claude/.test(r.textContent));
+    const set = () => {
+      const man = !big.classList.contains('off'), ai = cl && !$('.tg', cl).classList.contains('off');
+      h.textContent = man ? 'Awake' : ai ? 'Awake for Claude' : 'Asleep';
+      why.textContent = man ? 'Until you turn it off' : ai ? 'Claude is working · 2 sessions' : 'Your Mac sleeps as usual';
+      ring.setAttribute('stroke-dashoffset', man ? '0' : ai ? '96.1' : '282.7');
+    };
+    big.addEventListener('flip', set); if (cl) cl.addEventListener('flip', set);
   })();
 
   // ---------- Displays: drag the sliders ----------
@@ -434,6 +445,14 @@
     const to = go[(k || '').trim()]; if (!to) return;
     w.classList.add('link'); w.setAttribute('role', 'button'); w.tabIndex = 0;
     const open = () => { window.cmShow && window.cmShow(to); app.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
-    w.addEventListener('click', open); w.addEventListener('keydown', e => { if (e.key === 'Enter') open(); });
+    w.addEventListener('click', open); w.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
   });
+  // Keyboard: span controls in the window act like buttons
+  const CTL = '.act, .btn2, .gch, .seg > i, .tg, .fc, .mic, .stb, .fr .ck';
+  const arm = () => $$(CTL, app).forEach(c => {
+    if (c.tabIndex < 0) { c.tabIndex = 0; c.setAttribute('role', c.classList.contains('tg') ? 'switch' : 'button'); }
+    if (c.classList.contains('tg')) c.setAttribute('aria-checked', String(!c.classList.contains('off')));
+  });
+  arm(); new MutationObserver(arm).observe(app, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+  app.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches(CTL)) { e.preventDefault(); e.target.click(); } });
 })();

@@ -146,7 +146,7 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .jt { display: flex; flex-direction: column; min-width: 0; } .jt b { font-weight: 500; font-size: 15.5px; line-height: 21px; }
 .jt span { font-size: 13px; line-height: 19px; color: rgba(255,255,255,.55); }
 .jt kbd { font: 500 11px -apple-system, var(--sans); padding: 1px 5px; border-radius: 4px; background: rgba(255,255,255,.08); color: rgba(255,255,255,.75); margin-left: 4px; }
-@media (prefers-reduced-motion: reduce) { .before .mi2 { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .before .mi2, .feats span { animation: none; } }
 
 /* Feature strip under the window */
 .feats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; min-height: 32px; }
