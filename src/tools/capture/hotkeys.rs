@@ -17,4 +17,13 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), n);
     }
+
+    #[test]
+    fn every_command_has_its_own_link() {
+        use super::super::settings::Command;
+        for c in Command::ALL {
+            assert_eq!(Command::from_slug(c.slug()), Some(c));
+        }
+        assert_eq!(Command::from_slug("nope"), None);
+    }
 }

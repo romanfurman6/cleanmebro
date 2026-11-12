@@ -81,6 +81,8 @@ pub struct App {
     pub perm_watch: super::onboard::PermWatch,
     /// Keep the panel hidden at launch (setup opens instead).
     start_hidden: bool,
+    /// `cmdmeow://open/<tool>[/<route>]` links, as (tool, route).
+    links: Option<crate::kit::url_scheme::Inbox<(String, String)>>,
 }
 
 impl App {
@@ -159,6 +161,7 @@ impl App {
             setup: first_run.then(|| super::onboard::Setup::new(super::onboard::saved_step())),
             perm_watch: Default::default(),
             start_hidden: first_run,
+            links: (!demo).then(|| crate::kit::url_scheme::Inbox::new("open", Some(ctx.clone()), open_link)),
         };
         app.widgets = prefs.resolve(&app.available_widgets());
         for i in 0..app.tools.len() {
@@ -516,8 +519,45 @@ impl App {
     }
 }
 
+/// `cmdmeow://open/disk-map` → ("disk-map", ""); `open/capture/history` →
+/// ("capture", "history"). The tool is matched later, when the tools are known.
+fn open_link(action: &str) -> Option<(String, String)> {
+    let (tool, route) = action.split_once('/').unwrap_or((action, ""));
+    (!tool.is_empty()).then(|| (tool.to_string(), route.to_string()))
+}
+
+/// A tool named in a link: its id (`keep_awake`) or its name written as a
+/// link (`keep-awake`, `disk-map`, `mac-health`).
+fn link_matches(id: &str, name: &str, wanted: &str) -> bool {
+    let slug = |s: &str| s.to_ascii_lowercase().replace([' ', '_'], "-");
+    slug(id) == slug(wanted) || slug(name) == slug(wanted)
+}
+
+impl App {
+    /// Open the window where a `cmdmeow://open/…` link points. `settings`
+    /// opens Settings; a tool that's off or has no page is ignored.
+    fn follow_links(&mut self, ctx: &egui::Context) {
+        let Some(links) = &self.links else { return };
+        for (tool, route) in links.take() {
+            if tool == "settings" {
+                self.open_settings(ctx, route == "tools");
+                continue;
+            }
+            let found = (0..self.tools.len()).find(|&i| link_matches(self.tools[i].id(), self.tools[i].name(), &tool));
+            match found.filter(|&i| self.tool_on(i) && self.tools[i].has_page()) {
+                Some(i) => {
+                    self.tools[i].open_page(&route);
+                    self.open_window(ctx, i);
+                }
+                None => eprintln!("[url] no tool page \"{tool}\" to open"),
+            }
+        }
+    }
+}
+
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.follow_links(ctx);
         // tools poll their background work; some need frames while hidden
         let mut tools_need_frames = false;
         for i in 0..self.tools.len() {
@@ -947,4 +987,26 @@ fn install_fonts(ctx: &egui::Context) {
         s.spacing.scroll.floating = true;
         s.visuals.widgets.noninteractive.fg_stroke.color = TEXT();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{link_matches, open_link};
+
+    #[test]
+    fn open_links_name_a_tool_and_a_route() {
+        assert_eq!(open_link("disk-map"), Some(("disk-map".into(), "".into())));
+        assert_eq!(open_link("capture/history"), Some(("capture".into(), "history".into())));
+        assert_eq!(open_link(""), None);
+    }
+
+    #[test]
+    fn tools_match_by_id_or_name() {
+        assert!(link_matches("lens", "Disk Map", "disk-map"));
+        assert!(link_matches("lens", "Disk Map", "lens"));
+        assert!(link_matches("keep_awake", "Keep Awake", "keep-awake"));
+        assert!(link_matches("keep_awake", "Keep Awake", "keep_awake"));
+        assert!(link_matches("claude", "AI Tool", "ai-tool"));
+        assert!(!link_matches("lens", "Disk Map", "disk"));
+    }
 }

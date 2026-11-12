@@ -25,7 +25,12 @@ history and keep-awake in one place. Written in Rust; everything runs locally.
 - **Uninstaller** removes apps with their leftovers; **Startup** turns off what starts with your Mac.
 - **Capture** takes screenshots with an editor and records the screen with audio and camera.
 - **Clipboard**, **Fan Control**, **Keep Awake** and **Claude** limits round it out. Any tool can be turned off.
-- Keep Awake can be switched from scripts, Raycast or Shortcuts: `open cmdmeow://awake/on` (also `/off`, `/toggle`).
+- Links for scripts, Raycast or Shortcuts (`open cmdmeow://…`; the Dev build answers `cmdmeow-dev://`):
+  - `awake/on`, `awake/off`, `awake/toggle`
+  - `capture/area`, `window`, `screen`, `delayed`, `text`, `color`, `ruler`, `record`, `history`
+  - `dictation/toggle`, `start`, `stop`, `cancel`
+  - `open/<tool>` with an optional page, e.g. `open/disk-map`, `open/capture/settings`, `open/settings`
+- Keep Awake's switch can also get its own shortcut on its page.
 
 ![Disk Map](docs/images/lens.png)
 

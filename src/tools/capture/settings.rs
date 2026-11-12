@@ -37,6 +37,25 @@ impl Command {
         }
     }
 
+    /// Its name in links: `cmdmeow://capture/<slug>`.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Command::Area => "area",
+            Command::Window => "window",
+            Command::Screen => "screen",
+            Command::Delayed => "delayed",
+            Command::Text => "text",
+            Command::Color => "color",
+            Command::Ruler => "ruler",
+            Command::History => "history",
+            Command::Record => "record",
+        }
+    }
+
+    pub fn from_slug(s: &str) -> Option<Command> {
+        Command::ALL.into_iter().find(|c| c.slug() == s)
+    }
+
     /// Shortcut on first launch. ⌘⇧3/4/5 belong to macOS, so they're avoided.
     pub fn default_shortcut(self) -> Option<Shortcut> {
         let key = match self {
