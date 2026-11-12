@@ -130,6 +130,30 @@ pub fn put_file(b: &Bucket, key: &str, file: &Path, content_type: &str, public: 
     Err(explain(status, &text))
 }
 
+/// Remove `key` from the bucket. Blocks.
+pub fn delete(b: &Bucket, key: &str) -> Result<(), String> {
+    // SHA-256 of an empty body
+    const EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    let amz_date = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let mut headers: Vec<(String, String)> = vec![("host".into(), b.bucket_host()), ("x-amz-content-sha256".into(), EMPTY.into()), ("x-amz-date".into(), amz_date.clone())];
+    let path = format!("/{}", encode(key, false));
+    let auth = authorization(b, "DELETE", &path, "", &mut headers, EMPTY, &amz_date);
+    let agent = ureq::Agent::new_with_config(ureq::Agent::config_builder().http_status_as_error(false).timeout_connect(Some(Duration::from_secs(20))).build());
+    let mut req = agent.delete(&format!("https://{}{}", b.bucket_host(), path));
+    for (k, v) in &headers {
+        if k != "host" {
+            req = req.header(k, v);
+        }
+    }
+    let resp = req.header("authorization", &auth).call().map_err(|e| format!("Couldn't delete: {e}"))?;
+    let status = resp.status().as_u16();
+    if (200..300).contains(&status) || status == 404 {
+        return Ok(());
+    }
+    let text = resp.into_body().read_to_string().unwrap_or_default();
+    Err(explain(status, &text))
+}
+
 /// A link that works for `secs` even when the bucket is private (S3 allows
 /// up to 7 days).
 pub fn presign_get(b: &Bucket, key: &str, secs: u64, now: chrono::DateTime<chrono::Utc>) -> String {

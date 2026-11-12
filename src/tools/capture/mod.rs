@@ -42,6 +42,8 @@ const CARD: &str = "capture";
 /// The Video tool's id and its widget: recording lives in the same state
 /// as screenshots (one engine, one settings file), shown as its own tool.
 pub const VIDEO_ID: ToolId = "video";
+/// The Sharing page: the storage both use, and what's been shared.
+pub const SHARING_ID: ToolId = "sharing";
 const VIDEO_CARD: &str = "record";
 pub use tools::tools;
 
@@ -381,7 +383,7 @@ impl Capture {
             }
         };
         self.files_at = None;
-        if self.settings.share.auto && self.settings.share.ready() {
+        if self.settings.share.auto && self.settings.share.ready(share::VIDEO_ACCOUNT) {
             self.share(st.path.clone());
         }
         if self.settings.rec.open_editor {
@@ -396,9 +398,33 @@ impl Capture {
     /// Upload `path` for a link (again, if it was shared before: the link
     /// stays the same).
     fn share(&mut self, path: PathBuf) {
-        if let Err(e) = self.uploads.start(&self.settings.share, path, &self.ctx) {
+        let (s, account) = self.share_for(&path);
+        if let Err(e) = self.uploads.start(&s, account, path, &self.ctx) {
             self.hud(e);
         }
+    }
+
+    /// The sharing settings for `path`: the one storage, with the video's
+    /// or the screenshot's folder and switches.
+    fn share_for(&self, path: &std::path::Path) -> (share::Settings, &'static str) {
+        if !share::is_image(path) {
+            return (self.settings.share.clone(), share::VIDEO_ACCOUNT);
+        }
+        let own = &self.settings.shot_share;
+        let s = share::Settings { auto: own.auto, copy_link: own.copy_link, folder: own.folder.clone(), ..self.settings.share.clone() };
+        (s, share::VIDEO_ACCOUNT)
+    }
+
+    /// Remove a shared file from the storage, then forget it here.
+    fn delete_shared(&mut self, path: PathBuf, key: String) {
+        let b = self.settings.share.bucket(share::VIDEO_ACCOUNT);
+        self.in_background(move || match share::s3::delete(&b, &key) {
+            Ok(()) => {
+                share::forget(&path);
+                Some(Done::Note("Deleted from your storage".into()))
+            }
+            Err(e) => Some(Done::Note(e)),
+        });
     }
 
     /// Copy the link of `path`: shared already, or upload it first.
@@ -420,7 +446,7 @@ impl Capture {
         for (path, r) in self.uploads.poll() {
             match r {
                 Ok(link) => {
-                    if self.settings.share.copy_link {
+                    if self.share_for(&path).0.copy_link {
                         self.copy_text(&link);
                         self.hud("Uploaded · link copied");
                     } else {
@@ -594,6 +620,14 @@ impl Capture {
         self.forget_dropped_thumbs();
         if self.settings.sound && crate::kit::sound::on() {
             mac::play_shutter();
+        }
+        // upload each screenshot (the history copy: a PNG that's there now)
+        if let Some(id) = id {
+            let path = self.store.path(id);
+            let (s, account) = self.share_for(&path);
+            if s.auto && s.ready(account) {
+                self.share(path);
+            }
         }
         let (copied, saved) = (self.settings.copy, self.settings.save);
         if copied || saved {
