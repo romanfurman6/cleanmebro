@@ -18,6 +18,7 @@ pub mod record;
 mod render;
 mod settings;
 mod store;
+mod tools;
 mod ui;
 pub mod share;
 pub mod video;
@@ -38,6 +39,13 @@ use store::{Kind, Store};
 
 pub const ID: ToolId = "capture";
 const CARD: &str = "capture";
+/// The Video tool's id and its widget: recording lives in the same state
+/// as screenshots (one engine, one settings file), shown as its own tool.
+pub const VIDEO_ID: ToolId = "video";
+/// The Sharing page: the storage both use, and what's been shared.
+pub const SHARING_ID: ToolId = "sharing";
+const VIDEO_CARD: &str = "record";
+pub use tools::tools;
 
 /// What a grab is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +89,13 @@ enum Done {
 pub enum Tab {
     History,
     Folder,
+    Settings,
+}
+
+/// The Video page's tabs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VTab {
+    Recordings,
     Settings,
 }
 
@@ -141,6 +156,10 @@ pub struct Capture {
     files_at: Option<Instant>,
     files_busy: bool,
     tab: Tab,
+    vtab: VTab,
+    /// Which of the two tools are on: Screenshot (`shot_on`) and Video.
+    shot_on: bool,
+    video_on: bool,
     /// Recording a new shortcut for this command.
     recording: Option<Command>,
     filter: usize,
@@ -200,6 +219,9 @@ impl Capture {
             files_at: None,
             files_busy: false,
             tab: Tab::History,
+            vtab: VTab::Recordings,
+            shot_on: true,
+            video_on: true,
             recording: None,
             filter: 0,
             confirm_clear: None,
@@ -226,8 +248,52 @@ impl Capture {
 
     /// Register the shortcuts from settings (not while one is being recorded).
     fn apply_keys(&mut self) {
+        let (shot, video) = (self.shot_on, self.video_on);
         if let Some(k) = &mut self.keys {
-            self.key_errors = k.apply(&self.settings.bound());
+            // only the keys of the tools that are on
+            let bound: Vec<_> = self.settings.bound().into_iter().filter(|(c, _)| if *c == Command::Record { video } else { shot }).collect();
+            self.key_errors = k.apply(&bound);
+        }
+    }
+
+    /// Turn Screenshot and/or Video on or off. Both off is the old "off";
+    /// one of them off drops its keys and closes what belongs to it.
+    fn set_parts(&mut self, shot: Option<bool>, video: Option<bool>) {
+        let was = self.shot_on || self.video_on;
+        if let Some(v) = shot {
+            self.shot_on = v;
+        }
+        if let Some(v) = video {
+            self.video_on = v;
+        }
+        let any = self.shot_on || self.video_on;
+        if !any {
+            Tool::set_on(self, false);
+            return;
+        }
+        if !was {
+            Tool::set_on(self, true);
+        }
+        if shot == Some(false) {
+            self.queue.retain(|(c, _)| *c == Command::Record);
+            self.countdown = None;
+            self.preview = None;
+            self.pins.clear();
+            self.overlay = None;
+            if let Some(mut ew) = self.editor.take() {
+                self.commit_edit(&mut ew.ed);
+            }
+        }
+        if video == Some(false) {
+            self.queue.retain(|(c, _)| *c != Command::Record);
+            if self.rec.live().is_some() {
+                self.rec.stop();
+            } else if !matches!(self.rec.phase, record::Phase::Saving | record::Phase::Rendering(_)) {
+                self.rec.cancel();
+            }
+        }
+        if self.recording.is_none() {
+            self.apply_keys();
         }
     }
 
@@ -317,7 +383,7 @@ impl Capture {
             }
         };
         self.files_at = None;
-        if self.settings.share.auto && self.settings.share.ready() {
+        if self.settings.share.auto && self.settings.share.ready(share::VIDEO_ACCOUNT) {
             self.share(st.path.clone());
         }
         if self.settings.rec.open_editor {
@@ -332,9 +398,33 @@ impl Capture {
     /// Upload `path` for a link (again, if it was shared before: the link
     /// stays the same).
     fn share(&mut self, path: PathBuf) {
-        if let Err(e) = self.uploads.start(&self.settings.share, path, &self.ctx) {
+        let (s, account) = self.share_for(&path);
+        if let Err(e) = self.uploads.start(&s, account, path, &self.ctx) {
             self.hud(e);
         }
+    }
+
+    /// The sharing settings for `path`: the one storage, with the video's
+    /// or the screenshot's folder and switches.
+    fn share_for(&self, path: &std::path::Path) -> (share::Settings, &'static str) {
+        if !share::is_image(path) {
+            return (self.settings.share.clone(), share::VIDEO_ACCOUNT);
+        }
+        let own = &self.settings.shot_share;
+        let s = share::Settings { auto: own.auto, copy_link: own.copy_link, folder: own.folder.clone(), ..self.settings.share.clone() };
+        (s, share::VIDEO_ACCOUNT)
+    }
+
+    /// Remove a shared file from the storage, then forget it here.
+    fn delete_shared(&mut self, path: PathBuf, key: String) {
+        let b = self.settings.share.bucket(share::VIDEO_ACCOUNT);
+        self.in_background(move || match share::s3::delete(&b, &key) {
+            Ok(()) => {
+                share::forget(&path);
+                Some(Done::Note("Deleted from your storage".into()))
+            }
+            Err(e) => Some(Done::Note(e)),
+        });
     }
 
     /// Copy the link of `path`: shared already, or upload it first.
@@ -356,7 +446,7 @@ impl Capture {
         for (path, r) in self.uploads.poll() {
             match r {
                 Ok(link) => {
-                    if self.settings.share.copy_link {
+                    if self.share_for(&path).0.copy_link {
                         self.copy_text(&link);
                         self.hud("Uploaded · link copied");
                     } else {
@@ -530,6 +620,14 @@ impl Capture {
         self.forget_dropped_thumbs();
         if self.settings.sound && crate::kit::sound::on() {
             mac::play_shutter();
+        }
+        // upload each screenshot (the history copy: a PNG that's there now)
+        if let Some(id) = id {
+            let path = self.store.path(id);
+            let (s, account) = self.share_for(&path);
+            if s.auto && s.ready(account) {
+                self.share(path);
+            }
         }
         let (copied, saved) = (self.settings.copy, self.settings.save);
         if copied || saved {

@@ -139,8 +139,12 @@ pub struct Settings {
     pub frame: super::render::Frame,
     /// Screen recording.
     pub rec: RecSettings,
-    /// Uploading recordings for a link.
+    /// The storage (set up on the Sharing page), and the videos' folder
+    /// and switches.
     pub share: super::share::Settings,
+    /// Screenshots: only their folder and switches are used; the storage
+    /// is `share`'s.
+    pub shot_share: super::share::Settings,
 }
 
 /// Frame rates the recorder offers.
@@ -237,6 +241,7 @@ impl Default for Settings {
             frame: Default::default(),
             rec: RecSettings::default(),
             share: Default::default(),
+            shot_share: super::share::Settings::shots(),
         }
     }
 }
@@ -280,6 +285,10 @@ impl Settings {
     /// Keep values in range after loading a file someone edited by hand.
     fn sanitize(mut self) -> Self {
         self.keep = self.keep.clamp(KEEP_MIN, KEEP_MAX);
+        // the first default folder; videos and screenshots now sit side by side
+        if self.share.folder.trim() == "recordings/" {
+            self.share.folder = super::share::VIDEO_FOLDER.into();
+        }
         if !DELAYS.contains(&self.delay) {
             self.delay = 0;
         }

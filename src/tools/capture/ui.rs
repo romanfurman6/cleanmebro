@@ -5,7 +5,7 @@ use super::icons::{self, Ico};
 use super::settings::{After, Command, Format, Shortcut, KEEP_MAX, KEEP_MIN};
 use super::folder::{self, FileShot};
 use super::store::{Kind, Shot};
-use super::{mac, record, Capture, Tab, ID};
+use super::{mac, record, Capture, Tab, VTab, ID, SHARING_ID, VIDEO_ID};
 use crate::core::tool::{Cx, Size};
 use crate::kit::tile;
 use crate::kit::glass::*;
@@ -35,8 +35,11 @@ fn key_label(c: &Capture, cmd: Command) -> String {
 
 // ---------------------------------------------------------------- panel
 
-/// The widget's actions: grab an area, a window, or record the screen.
-const MODES: [(Command, &str); 3] = [(Command::Area, "Area"), (Command::Window, "Window"), (Command::Record, "Record")];
+/// The Screenshot widget's actions: an area, a window or the whole screen.
+const MODES: [(Command, &str); 3] = [(Command::Area, "Area"), (Command::Window, "Window"), (Command::Screen, "Screen")];
+/// The shortcuts each tool's settings list.
+const SHOT_KEYS: [Command; 8] = [Command::Area, Command::Window, Command::Screen, Command::Delayed, Command::Text, Command::Color, Command::Ruler, Command::History];
+const VIDEO_KEYS: [Command; 1] = [Command::Record];
 
 /// The Capture widget at `size`.
 pub fn widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
@@ -45,7 +48,7 @@ pub fn widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
         Size::S11 => {
             let sub = if c.busy { "Capturing…".to_string() } else { key_label(c, Command::Area) };
             let sub = if sub.is_empty() { "Area".to_string() } else { sub };
-            if tile::small(ui, rect, id, Icon::Crop, tint::CAPTURE(), "Capture", &sub, false).on_hover_text("Capture an area").clicked() {
+            if tile::small(ui, rect, id, Icon::Crop, tint::CAPTURE(), "Screenshot", &sub, false).on_hover_text("Capture an area").clicked() {
                 c.queue.push((Command::Area, c.settings.delay));
             }
         }
@@ -55,9 +58,9 @@ pub fn widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx)
             let mut x0 = rect.left() + 8.0;
             if size == Size::S12 {
                 tool_chip(&p, Rect::from_min_size(Pos2::new(x0 + 2.0, rect.top() + 9.0), Vec2::splat(18.0)), Icon::Crop, tint::CAPTURE());
-                p.text(Pos2::new(x0 + 26.0, rect.top() + 18.0), Align2::LEFT_CENTER, "Capture", font(11.0), TEXT_DIM());
+                p.text(Pos2::new(x0 + 26.0, rect.top() + 18.0), Align2::LEFT_CENTER, "Screenshot", font(11.0), TEXT_DIM());
                 let r = Rect::from_min_max(Pos2::new(x0, rect.top() + 32.0), Pos2::new(rect.right() - 8.0, rect.bottom() - 8.0));
-                modes(c, ui, &p, id, r, &[MODES[0], MODES[2]], false);
+                modes(c, ui, &p, id, r, &[MODES[0], MODES[1]], false);
             } else {
                 // the round chip every other row has
                 let chip = tile::row_chip(rect);
@@ -126,7 +129,7 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let x1 = rect.right() - 12.0;
     let mut y = rect.top() + 10.0;
     tool_chip(&p, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(20.0)), Icon::Crop, tint::CAPTURE());
-    p.text(Pos2::new(x0 + 28.0, y + 10.0), Align2::LEFT_CENTER, "Capture", bold(13.0), TEXT());
+    p.text(Pos2::new(x0 + 28.0, y + 10.0), Align2::LEFT_CENTER, "Screenshot", bold(13.0), TEXT());
     let hl = link(ui, Pos2::new(x1, y + 10.0), Align2::RIGHT_CENTER, "History", 12.0);
     let h_left = hl.rect.left();
     if hl.clicked() {
@@ -143,7 +146,7 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
 
     // the newest images in the screenshot folder; history when it has none
     c.refresh_files();
-    let items: Vec<Item> = if c.files.is_empty() { c.store.shots.iter().take(4).map(Item::from_shot).collect() } else { c.files.iter().take(4).map(|f| Item::from_file(c, f)).collect() };
+    let items: Vec<Item> = if c.files.is_empty() { c.store.shots.iter().filter(|s| s.kind != Kind::Recording).take(4).map(Item::from_shot).collect() } else { c.files.iter().take(4).map(|f| Item::from_file(c, f)).collect() };
     // the folder is chosen in Capture's settings; here it's only a label
     let label = "Recent".to_string();
     let lr = ui.interact(Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, 13.0)), id.with("recent-label"), Sense::click());
@@ -204,8 +207,8 @@ pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
     let sub = match c.tab {
         Tab::History => {
-            let n = c.store.shots.len();
-            format!("{n} capture{} · {} · saving to {}", if n == 1 { "" } else { "s" }, human_bytes(c.store.bytes_on_disk()), c.shown_folder())
+            let n = c.store.shots.iter().filter(|s| s.kind != Kind::Recording).count();
+            format!("{n} screenshot{} · {} · saving to {}", if n == 1 { "" } else { "s" }, human_bytes(c.store.bytes_on_disk()), c.shown_folder())
         }
         Tab::Folder => {
             c.refresh_files();
@@ -215,7 +218,7 @@ pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         }
         Tab::Settings => "".into(),
     };
-    let btns = page_header(&p, r, "Capture", &sub, TEXT_DIM());
+    let btns = page_header(&p, r, "Screenshot", &sub, TEXT_DIM());
     let mut right = btns.right();
     if c.tab != Tab::Settings {
         let label = "Capture area";
@@ -243,15 +246,18 @@ pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     }
 }
 
-const FILTERS: [&str; 6] = ["All", "Area", "Window", "Screen", "Pinned", "Videos"];
+const FILTERS: [&str; 5] = ["All", "Area", "Window", "Screen", "Pinned"];
 
 fn passes(filter: usize, s: &Shot) -> bool {
+    if s.kind == Kind::Recording {
+        // recordings live on the Video page
+        return false;
+    }
     match filter {
         1 => s.kind == Kind::Area || s.kind == Kind::Edited,
         2 => s.kind == Kind::Window,
         3 => s.kind == Kind::Screen,
         4 => s.pinned,
-        5 => s.kind == Kind::Recording,
         _ => true,
     }
 }
@@ -322,6 +328,8 @@ impl Item {
 enum Act {
     Copy,
     Edit,
+    /// Upload (or reuse the last upload) and copy the link.
+    Link,
     Pin,
     Reveal,
     Delete,
@@ -341,6 +349,7 @@ fn run_act(c: &mut Capture, act: Act, it: &Item) {
             Act::Copy => c.hud(if record::sys::copy_file(v) { "Copied the video" } else { "Couldn't copy" }),
             Act::Reveal => mac::reveal(v),
             Act::Pin => c.hud("Videos can't be pinned"),
+            Act::Link => c.copy_link(v.clone()),
             Act::Delete => {}
         }
         if act != Act::Delete {
@@ -386,6 +395,11 @@ fn run_act(c: &mut Capture, act: Act, it: &Item) {
             }
         }
         (Act::Reveal, Src::File) => mac::reveal(&it.path),
+        (Act::Link, Src::Shot(id)) => {
+            let path = c.store.path(*id);
+            c.copy_link(path);
+        }
+        (Act::Link, Src::File) => c.copy_link(it.path.clone()),
         (Act::Delete, Src::Shot(id)) => {
             c.store.remove(*id);
             c.forget_dropped_thumbs();
@@ -471,25 +485,29 @@ fn tile_ui(ui: &mut Ui, p: &egui::Painter, r: Rect, it: &Item, tex: Option<egui:
         let bar = Rect::from_min_max(Pos2::new(r.left() + 1.0, r.bottom() - 38.0), Pos2::new(r.right() - 1.0, r.bottom() - 1.0));
         p.rect_filled(bar, egui::CornerRadius { nw: 0, ne: 0, sw: 7, se: 7 }, Color32::from_rgba_unmultiplied(20, 20, 22, 225));
         let delete_tip = if it.src == Src::File { "Move to Trash" } else { "Delete" };
-        let acts: [(Ico, &str, Act); 5] = [
+        let video = it.video.is_some();
+        let mut acts: Vec<(Ico, &str, Act)> = vec![
             (Ico::Copy, "Copy", Act::Copy),
-            (if it.video.is_some() { Ico::Scissors } else { Ico::Edit }, if it.video.is_some() { "Play and edit" } else { "Edit" }, Act::Edit),
-            (Ico::Pin, "Pin on screen", Act::Pin),
-            (Ico::Folder, "Show in Finder", Act::Reveal),
-            (Ico::Trash, delete_tip, Act::Delete),
+            (if video { Ico::Scissors } else { Ico::Edit }, if video { "Play and edit" } else { "Edit" }, Act::Edit),
+            (Ico::Link, "Copy link", Act::Link),
         ];
-        let bw = 26.0;
-        let total = acts.len() as f32 * bw + (acts.len() - 1) as f32 * 4.0;
+        if !video {
+            acts.push((Ico::Pin, "Pin on screen", Act::Pin));
+        }
+        acts.extend([(Ico::Folder, "Show in Finder", Act::Reveal), (Ico::Trash, delete_tip, Act::Delete)]);
+        let gap = 3.0;
+        let bw = ((bar.width() - 12.0 - (acts.len() - 1) as f32 * gap) / acts.len() as f32).min(26.0);
+        let total = acts.len() as f32 * bw + (acts.len() - 1) as f32 * gap;
         let mut x = bar.center().x - total / 2.0;
         for (ico, tip, a) in acts {
             let br = Rect::from_min_size(Pos2::new(x, bar.center().y - 13.0), Vec2::splat(bw));
             let b = ui.interact(br, id.with(tip), Sense::click());
             p.rect_filled(br, 6.0, white(if b.hovered() { 46 } else { 26 }));
-            icons::draw(p, ico, br.shrink(6.0), if a == Act::Delete && b.hovered() { RED() } else { TEXT() });
+            icons::draw(p, ico, br.shrink((bw * 0.23).min(6.0)), if a == Act::Delete && b.hovered() { RED() } else { TEXT() });
             if b.on_hover_text(tip).clicked() {
                 out = Some(a);
             }
-            x += bw + 4.0;
+            x += bw + gap;
         }
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -527,9 +545,10 @@ fn history(c: &mut Capture, ui: &mut Ui, body: Rect) {
     let list = Rect::from_min_max(Pos2::new(body.left(), fy + 38.0), body.max);
     let items: Vec<Item> = c.store.shots.iter().filter(|s| passes(c.filter, s)).map(Item::from_shot).collect();
     if items.is_empty() {
-        let msg = if c.store.shots.is_empty() { "No captures yet" } else { "Nothing here with this filter" };
+        let none = !c.store.shots.iter().any(|s| s.kind != Kind::Recording);
+        let msg = if none { "No screenshots yet" } else { "Nothing here with this filter" };
         p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT());
-        if c.store.shots.is_empty() {
+        if none {
             let hint = match c.settings.shortcut(Command::Area) {
                 Some(s) => format!("Press {} to capture an area", s.display()),
                 None => "Captures land here.".into(),
@@ -686,14 +705,16 @@ fn field(ui: &mut Ui, r: Rect, text: &mut String, hint: &str, secret: bool) -> e
 
 /// Sharing: upload recordings to the person's S3-compatible storage
 /// (Hetzner Object Storage…) and copy the link.
-fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
-    use super::share::{secret, LinkKind};
+/// Sharing in Screenshot or Video settings: the two switches, and where
+/// the storage is set up (the Sharing page). Returns the bottom.
+fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect, shots: bool, cx: &mut Cx) -> f32 {
+    use super::share::VIDEO_ACCOUNT;
     let x0 = col.left();
-    let id = ui.scope_id().with("share");
+    let id = ui.scope_id().with(("share", shots));
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Sharing", bold(15.0), TEXT());
-    let card = card_rows(p, x0, col.top() + 28.0, col.width(), 9);
-    let mut s = c.settings.share.clone();
-    let labels = ["Upload each recording", "Copy the link when done", "Link", "Endpoint", "Bucket", "Folder", "Access key", "Secret key", "Region"];
+    let mut s = if shots { c.settings.shot_share.clone() } else { c.settings.share.clone() };
+    let labels = [if shots { "Upload each screenshot" } else { "Upload each recording" }, "Copy the link when done", "Storage"];
+    let card = card_rows(p, x0, col.top() + 28.0, col.width(), labels.len());
     for (k, l) in labels.iter().enumerate() {
         p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT());
     }
@@ -707,26 +728,66 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
             }
         }
     }
+    // where it goes, and the way to change it
     let y = row_y(card, 2);
-    if let Some(i) = segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - 210.0, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0)), id.with("link"), &["Public", "Expires in 7 days"], (s.link == LinkKind::Week) as usize) {
-        s.link = if i == 1 { LinkKind::Week } else { LinkKind::Public };
+    let lr = link(ui, Pos2::new(card.right() - 14.0, y), Align2::RIGHT_CENTER, "Sharing ›", 12.0);
+    if lr.clicked() {
+        cx.open_page(SHARING_ID, "");
     }
-    let fw = (card.width() * 0.6).min(260.0);
-    let frect = |k: usize| {
+    let st = &c.settings.share;
+    let (where_, col_) = if st.ready(VIDEO_ACCOUNT) { (format!("{}/{}", st.bucket(VIDEO_ACCOUNT).bucket_host(), s.folder.trim_start_matches('/')), TEXT_DIM()) } else { ("Not set up".to_string(), AMBER()) };
+    text_fit(p, Pos2::new(lr.rect.left() - 10.0, y), Align2::RIGHT_CENTER, &where_, font(12.0), col_, card.width() * 0.55);
+    if (shots && s != c.settings.shot_share) || (!shots && s != c.settings.share) {
+        if shots {
+            c.settings.shot_share = s;
+        } else {
+            c.settings.share = s;
+        }
+        c.save_settings();
+    }
+    card.bottom()
+}
+
+/// The Sharing page: the one storage, a folder for screenshots and one for
+/// videos, and everything shared so far.
+pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
+    use super::share::{secret, LinkKind, SHOT_FOLDER, VIDEO_ACCOUNT, VIDEO_FOLDER};
+    let p = ui.painter().clone();
+    let shared = super::share::all();
+    let ready = c.settings.share.ready(VIDEO_ACCOUNT);
+    let sub = if ready { format!("{} shared · {}", shared.len(), c.settings.share.bucket(VIDEO_ACCOUNT).bucket_host()) } else { "Set up your storage to get links for screenshots and recordings".into() };
+    page_header(&p, r, "Sharing", &sub, if ready { TEXT_DIM() } else { AMBER() });
+    let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
+    let gap = 20.0;
+    let x0 = body.left() + 24.0;
+    let colw = ((body.width() - 48.0 - gap) / 2.0).max(300.0);
+    let id = ui.scope_id().with("sharing-page");
+
+    // left: the storage and the folders
+    let mut s = c.settings.share.clone();
+    let mut shot = c.settings.shot_share.clone();
+    let mut y = body.top() + 16.0;
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Storage", bold(15.0), TEXT());
+    let labels = ["Endpoint", "Bucket", "Access key", "Secret key", "Region", "Link"];
+    let card = card_rows(&p, x0, y + 28.0, colw, labels.len());
+    for (k, l) in labels.iter().enumerate() {
+        p.text(Pos2::new(card.left() + 14.0, row_y(card, k)), Align2::LEFT_CENTER, *l, font(13.0), TEXT());
+    }
+    let fw = (card.width() * 0.6).min(280.0);
+    let frect = |card: Rect, k: usize| {
         let y = row_y(card, k);
         Rect::from_min_max(Pos2::new(card.right() - 12.0 - fw, y - 12.0), Pos2::new(card.right() - 12.0, y + 12.0))
     };
-    field(ui, frect(3), &mut s.endpoint, "fsn1.your-objectstorage.com", false);
-    field(ui, frect(4), &mut s.bucket, "my-bucket", false);
-    field(ui, frect(5), &mut s.folder, "recordings/", false);
-    field(ui, frect(6), &mut s.access_key, "Access key", false);
+    field(ui, frect(card, 0), &mut s.endpoint, "fsn1.your-objectstorage.com", false);
+    field(ui, frect(card, 1), &mut s.bucket, "my-bucket", false);
+    field(ui, frect(card, 2), &mut s.access_key, "Access key", false);
     // the secret goes straight to the Keychain and is never shown back
-    let has_secret = *c.has_secret.get_or_insert_with(|| secret::get().is_some());
-    let resp = field(ui, frect(7), &mut c.share_secret, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
+    let has_secret = *c.has_secret.get_or_insert_with(|| secret::get(VIDEO_ACCOUNT).is_some());
+    let resp = field(ui, frect(card, 3), &mut c.share_secret, if has_secret { "Saved in the Keychain" } else { "Secret key" }, true);
     if resp.lost_focus() && !c.share_secret.is_empty() {
         let v = std::mem::take(&mut c.share_secret);
         let v = v.trim();
-        match secret::set(v) {
+        match secret::set(VIDEO_ACCOUNT, v) {
             Ok(()) if v.is_empty() => c.has_secret = Some(false),
             Ok(()) => {
                 c.has_secret = Some(true);
@@ -735,17 +796,81 @@ fn sharing(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) {
             Err(e) => c.hud(format!("Couldn't save to the Keychain: {e}")),
         }
     }
-    field(ui, frect(8), &mut s.region, "From the endpoint", false);
-    let note = if s.ready() {
-        let b = s.bucket();
-        format!("Links look like https://{}/{}…", b.bucket_host(), s.folder.trim_start_matches('/'))
-    } else {
-        "S3-compatible storage".into()
-    };
-    paragraph(p, Pos2::new(x0, card.bottom() + 10.0), &note, font(12.0), TEXT_FAINT(), col.width());
-    if s != c.settings.share {
+    field(ui, frect(card, 4), &mut s.region, "From the endpoint", false);
+    let ly = row_y(card, 5);
+    if let Some(i) = segmented(ui, Rect::from_min_max(Pos2::new(card.right() - 12.0 - 210.0, ly - 12.0), Pos2::new(card.right() - 12.0, ly + 12.0)), id.with("link"), &["Public", "Expires in 7 days"], (s.link == LinkKind::Week) as usize) {
+        s.link = if i == 1 { LinkKind::Week } else { LinkKind::Public };
+    }
+    let h = paragraph(&p, Pos2::new(x0, card.bottom() + 10.0), "Any S3-compatible storage: Hetzner, Cloudflare R2, AWS, MinIO. Public links never expire; their names are random.", font(12.0), TEXT_FAINT(), colw);
+    y = card.bottom() + 10.0 + h + 24.0;
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Folders", bold(15.0), TEXT());
+    let fcard = card_rows(&p, x0, y + 28.0, colw, 2);
+    for (k, (ico, l)) in [(Icon::Crop, "Screenshots"), (Icon::Camera, "Videos")].into_iter().enumerate() {
+        let ry = row_y(fcard, k);
+        icon(&p, ico, Rect::from_center_size(Pos2::new(fcard.left() + 21.0, ry), Vec2::splat(15.0)), TEXT_DIM());
+        p.text(Pos2::new(fcard.left() + 38.0, ry), Align2::LEFT_CENTER, l, font(13.0), TEXT());
+    }
+    field(ui, frect(fcard, 0), &mut shot.folder, SHOT_FOLDER, false);
+    field(ui, frect(fcard, 1), &mut s.folder, VIDEO_FOLDER, false);
+    paragraph(&p, Pos2::new(x0, fcard.bottom() + 10.0), "Upload on save and copying the link are switched in Screenshot and Video settings.", font(12.0), TEXT_FAINT(), colw);
+    if s != c.settings.share || shot != c.settings.shot_share {
         c.settings.share = s;
+        c.settings.shot_share = shot;
         c.save_settings();
+    }
+
+    // right: what's been shared
+    let rx = x0 + colw + gap;
+    let rw = body.right() - 24.0 - rx;
+    let ty = body.top() + 16.0;
+    p.text(Pos2::new(rx, ty), Align2::LEFT_TOP, "Shared", bold(15.0), TEXT());
+    let list = Rect::from_min_max(Pos2::new(rx, ty + 28.0), Pos2::new(rx + rw, body.bottom() - 16.0));
+    if shared.is_empty() {
+        let er = Rect::from_min_size(list.min, Vec2::new(rw, 90.0));
+        glass_card(&p, er, R_CARD, 0.0, false);
+        p.text(er.center() - Vec2::new(0.0, 9.0), Align2::CENTER_CENTER, "Nothing shared yet", bold(13.0), TEXT_SOFT());
+        p.text(er.center() + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, "Copy link on a screenshot or recording uploads it", font(12.0), TEXT_FAINT());
+        return;
+    }
+    let row_h = 54.0;
+    let mut act: Option<(usize, u8)> = None;
+    let mut child = ui.new_child(UiBuilder::new().max_rect(list));
+    ScrollArea::vertical().id_salt("shared-list").auto_shrink([false, false]).show(&mut child, |ui| {
+        let (area, _) = ui.allocate_exact_size(Vec2::new(rw, shared.len() as f32 * (row_h + 6.0)), Sense::hover());
+        let p = ui.painter().clone();
+        for (k, (path, sh)) in shared.iter().enumerate() {
+            let rr = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * (row_h + 6.0)), Vec2::new(rw, row_h));
+            glass_card(&p, rr, R_CARD, 0.0, false);
+            let img = super::share::is_image(path);
+            icon(&p, if img { Icon::Crop } else { Icon::Camera }, Rect::from_center_size(Pos2::new(rr.left() + 22.0, rr.center().y), Vec2::splat(16.0)), TEXT_DIM());
+            // buttons on the right: copy link, open, delete
+            let mut bx = rr.right() - 10.0;
+            for (j, (ico, tip)) in [(Icon::Trash, "Delete from your storage"), (Icon::Forward, "Open in the browser"), (Icon::Link, "Copy link")].into_iter().enumerate() {
+                let br = Rect::from_min_size(Pos2::new(bx - 28.0, rr.center().y - 14.0), Vec2::splat(28.0));
+                if round_button(ui, br, ico, tip).clicked() {
+                    act = Some((k, j as u8));
+                }
+                bx = br.left() - 4.0;
+            }
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let tw = bx - 10.0 - (rr.left() + 42.0);
+            text_fit(&p, Pos2::new(rr.left() + 42.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, &name, font(13.0), if path.exists() { TEXT() } else { TEXT_DIM() }, tw);
+            let when = if sh.at > 0 { chrono::DateTime::from_timestamp(sh.at, 0).map(|t| t.with_timezone(&chrono::Local).format("%b %-d, %H:%M · ").to_string()).unwrap_or_default() } else { String::new() };
+            text_fit(&p, Pos2::new(rr.left() + 42.0, rr.center().y + 2.0), Align2::LEFT_TOP, &format!("{when}{}", sh.link), mono(11.0), TEXT_FAINT(), tw);
+        }
+    });
+    if let Some((k, j)) = act {
+        let (path, sh) = shared[k].clone();
+        match j {
+            2 => {
+                c.copy_text(&sh.link);
+                c.hud("Link copied");
+            }
+            1 => {
+                let _ = std::process::Command::new("open").arg(&sh.link).spawn();
+            }
+            _ => c.delete_shared(path, sh.key),
+        }
     }
 }
 
@@ -762,10 +887,9 @@ fn settings_page(c: &mut Capture, ui: &mut Ui, body: Rect, cx: &mut Cx) {
         let gap = 20.0;
         let x0 = area.left() + 24.0;
         let colw = (area.width() - 48.0 - gap) / 2.0;
-        let below = shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())));
-        let ry = below + 28.0;
-        let sy = recording_options(c, ui, &p, Rect::from_min_size(Pos2::new(x0, ry), Vec2::new(colw, area.bottom() - ry)));
-        sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0, sy), Vec2::new(colw, area.bottom() - sy)));
+        let below = shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())), &SHOT_KEYS);
+        let sy = below + 28.0;
+        sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0, sy), Vec2::new(colw, area.bottom() - sy)), true, cx);
         options(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())));
     });
 }
@@ -805,11 +929,11 @@ fn record_keys(c: &mut Capture, ui: &mut Ui, cx: &mut Cx) {
 }
 
 /// Returns the bottom of what it drew.
-fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) -> f32 {
+fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect, list: &[Command]) -> f32 {
     let x0 = col.left();
     p.text(Pos2::new(x0, col.top()), Align2::LEFT_TOP, "Keyboard shortcuts", bold(15.0), TEXT());
-    let card = card_rows(p, x0, col.top() + 28.0, col.width(), Command::ALL.len());
-    for (k, cmd) in Command::ALL.iter().enumerate() {
+    let card = card_rows(p, x0, col.top() + 28.0, col.width(), list.len());
+    for (k, cmd) in list.iter().enumerate() {
         let y = row_y(card, k);
         icons::draw(p, command_icon(*cmd), Rect::from_center_size(Pos2::new(card.left() + 21.0, y), Vec2::splat(16.0)), TEXT_DIM());
         let lr = p.text(Pos2::new(card.left() + 38.0, y), Align2::LEFT_CENTER, cmd.label(), font(13.0), TEXT());
@@ -820,7 +944,7 @@ fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) -> f32 
         let bw = (g.size().x + 20.0).max(76.0);
         let clear = Rect::from_center_size(Pos2::new(card.right() - 22.0, y), Vec2::splat(20.0));
         let br = Rect::from_min_max(Pos2::new(clear.left() - 6.0 - bw, y - 12.0), Pos2::new(clear.left() - 6.0, y + 12.0));
-        let resp = ui.interact(br, ui.scope_id().with(("key", k)), Sense::click());
+        let resp = ui.interact(br, ui.scope_id().with(("key", *cmd as usize)), Sense::click());
         if rec {
             p.rect_filled(br, 6.0, with_alpha(BLUE(), 0.22));
             p.rect_stroke(br, 6.0, Stroke::new(1.0, ACCENT()), StrokeKind::Inside);
@@ -842,7 +966,7 @@ fn shortcuts(c: &mut Capture, ui: &mut Ui, p: &egui::Painter, col: Rect) -> f32 
             }
         }
         if cur.is_some() && !rec {
-            let cr = ui.interact(clear, ui.scope_id().with(("clear", k)), Sense::click());
+            let cr = ui.interact(clear, ui.scope_id().with(("clear", *cmd as usize)), Sense::click());
             if cr.hovered() {
                 p.circle_filled(clear.center(), 10.0, white(26));
             }
@@ -1027,5 +1151,163 @@ mod tests {
         assert!(!passes(2, &s(Kind::Area, false)));
         assert!(passes(4, &s(Kind::Window, true)));
         assert!(!passes(4, &s(Kind::Window, false)));
+    }
+}
+
+// ---------------------------------------------------------------- Video
+
+/// The Video widget at `size`: Record (Stop with the time while recording)
+/// and, at Medium, the latest recordings.
+pub fn video_widget(c: &mut Capture, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+    let id = ui.scope_id().with("w-video");
+    let rec = [(Command::Record, "Record")];
+    match size {
+        Size::S11 => {
+            let live = c.rec.tray().map(|t| t.trim_start_matches(['●', '❚', ' ']).to_string());
+            let sub = live.clone().unwrap_or_else(|| key_label(c, Command::Record));
+            let sub = if sub.is_empty() { "Record".to_string() } else { sub };
+            let tip = if live.is_some() { "Stop and save the recording" } else { "Record the screen" };
+            if tile::small(ui, rect, id, Icon::Camera, tint::CAPTURE(), "Video", &sub, live.is_some()).on_hover_text(tip).clicked() {
+                c.queue.push((Command::Record, 0));
+            }
+        }
+        Size::S12 | Size::S14 => {
+            let _ = tile::card(ui, rect, id, false);
+            let p = ui.painter().clone();
+            if size == Size::S12 {
+                let x0 = rect.left() + 8.0;
+                tool_chip(&p, Rect::from_min_size(Pos2::new(x0 + 2.0, rect.top() + 9.0), Vec2::splat(18.0)), Icon::Camera, tint::CAPTURE());
+                p.text(Pos2::new(x0 + 26.0, rect.top() + 18.0), Align2::LEFT_CENTER, "Video", font(11.0), TEXT_DIM());
+                let r = Rect::from_min_max(Pos2::new(x0, rect.top() + 32.0), Pos2::new(rect.right() - 8.0, rect.bottom() - 8.0));
+                modes(c, ui, &p, id, r, &rec, false);
+            } else {
+                let chip = tile::row_chip(rect);
+                p.circle_filled(chip.center(), 17.0, white(14));
+                icon(&p, Icon::Camera, Rect::from_center_size(chip.center(), Vec2::splat(18.0)), lift(tint::CAPTURE()));
+                let x0 = chip.right() + 10.0;
+                modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, rect.top() + 9.0), Pos2::new(rect.right() - 9.0, rect.bottom() - 9.0)), &rec, true);
+            }
+        }
+        _ => video_card(c, ui, rect, cx),
+    }
+}
+
+fn recordings(c: &Capture) -> Vec<Item> {
+    c.store.shots.iter().filter(|s| s.kind == Kind::Recording).map(Item::from_shot).collect()
+}
+
+/// The Medium Video widget: Record and the latest recordings.
+fn video_card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
+    let p = ui.painter().clone();
+    let id = ui.scope_id().with("video-card");
+    tile::paint_card(&p, rect, 0.0, false);
+    let x0 = rect.left() + 12.0;
+    let x1 = rect.right() - 12.0;
+    let mut y = rect.top() + 10.0;
+    tool_chip(&p, Rect::from_min_size(Pos2::new(x0, y), Vec2::splat(20.0)), Icon::Camera, tint::CAPTURE());
+    p.text(Pos2::new(x0 + 28.0, y + 10.0), Align2::LEFT_CENTER, "Video", bold(13.0), TEXT());
+    if link(ui, Pos2::new(x1, y + 10.0), Align2::RIGHT_CENTER, "Recordings", 12.0).clicked() {
+        c.vtab = VTab::Recordings;
+        cx.open_page(VIDEO_ID, "");
+    }
+    y += 30.0;
+    modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 52.0)), &[(Command::Record, "Record")], true);
+    y += 52.0 + 10.0;
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Recent", bold(11.0), TEXT_FAINT());
+    y += 18.0;
+    let items: Vec<Item> = recordings(c).into_iter().take(4).collect();
+    if items.is_empty() {
+        let r = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 48.0));
+        dashed_rect(&p, r, 6.0, white(40));
+        let hint = match c.settings.shortcut(Command::Record) {
+            Some(s) => format!("Press {} to record the screen", s.display()),
+            None => "No recordings yet.".into(),
+        };
+        text_fit(&p, r.center(), Align2::CENTER_CENTER, &hint, font(12.0), TEXT_FAINT(), r.width() - 16.0);
+        return;
+    }
+    let gap = 6.0;
+    let bw = (x1 - x0 - 3.0 * gap) / 4.0;
+    for (k, it) in items.iter().enumerate() {
+        let r = Rect::from_min_size(Pos2::new(x0 + k as f32 * (bw + gap), y), Vec2::new(bw, 48.0));
+        let resp = ui.interact(r, id.with(("recent", it.key)), Sense::click());
+        let tex = c.thumb_at(it.key, it.path.clone());
+        thumb(&p, r, tex, (it.w, it.h), 6.0);
+        p.rect_stroke(r, 6.0, Stroke::new(if resp.hovered() { 1.5 } else { 1.0 }, if resp.hovered() { ACCENT() } else { white(26) }), StrokeKind::Inside);
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if resp.on_hover_text(format!("{} · click to open", it.title)).clicked() {
+            run_act(c, Act::Edit, it);
+        }
+    }
+}
+
+/// The Video page: recordings, or the recording settings.
+pub fn video_page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
+    let p = ui.painter().clone();
+    let n = c.store.shots.iter().filter(|s| s.kind == Kind::Recording).count();
+    let sub = match c.vtab {
+        VTab::Recordings => format!("{n} recording{} · saving to {}", if n == 1 { "" } else { "s" }, c.shown_folder()),
+        VTab::Settings => String::new(),
+    };
+    let btns = page_header(&p, r, "Video", &sub, TEXT_DIM());
+    let mut right = btns.right();
+    if c.vtab == VTab::Recordings {
+        let live = c.rec.tray().map(|t| t.trim_start_matches(['●', '❚', ' ']).to_string());
+        let label = match &live {
+            Some(t) => format!("Stop · {t}"),
+            None => "Record screen".to_string(),
+        };
+        let w = button_width(&p, &label, BTN_PRIMARY) + 18.0;
+        let br = Rect::from_min_max(Pos2::new(right - w, btns.top() - 1.0), Pos2::new(right, btns.bottom() + 1.0));
+        if pill_button(ui, br, "", BTN_PRIMARY, true).clicked() {
+            c.queue.push((Command::Record, 0));
+        }
+        let dot = Pos2::new(br.left() + 18.0, br.center().y);
+        p.circle_filled(dot, 6.0, if live.is_some() { ON_ACTION } else { RED() });
+        p.text(Pos2::new(br.left() + 31.0, br.center().y), Align2::LEFT_CENTER, label, bold(13.0), ON_ACTION);
+        right = br.left() - 12.0;
+    }
+    let tabs = [VTab::Recordings, VTab::Settings];
+    let tr = Rect::from_min_max(Pos2::new(right - 200.0, btns.top()), Pos2::new(right, btns.bottom()));
+    let cur = tabs.iter().position(|t| *t == c.vtab).unwrap_or(0);
+    if let Some(i) = segmented(ui, tr, ui.scope_id().with("video-tab"), &["Recordings", "Settings"], cur) {
+        c.vtab = tabs[i];
+        stop_recording(c);
+    }
+    let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
+    match c.vtab {
+        VTab::Recordings => {
+            let list = Rect::from_min_max(Pos2::new(body.left(), body.top() + 12.0), body.max);
+            let items = recordings(c);
+            if items.is_empty() {
+                p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, "No recordings yet", bold(15.0), TEXT_SOFT());
+                let hint = match c.settings.shortcut(Command::Record) {
+                    Some(s) => format!("Press {} to record the screen", s.display()),
+                    None => "Recordings land here.".into(),
+                };
+                p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM());
+                return;
+            }
+            for (a, it) in grid(c, ui, list, &items, "video-history") {
+                run_act(c, a, &it);
+            }
+        }
+        VTab::Settings => {
+            record_keys(c, ui, cx);
+            let mut child = ui.new_child(UiBuilder::new().max_rect(body));
+            ScrollArea::vertical().id_salt("video-settings").auto_shrink([false, false]).show(&mut child, |ui| {
+                let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), 900.0), Sense::hover());
+                let p = ui.painter().clone();
+                let gap = 20.0;
+                let x0 = area.left() + 24.0;
+                let colw = (area.width() - 48.0 - gap) / 2.0;
+                let below = shortcuts(c, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())), &VIDEO_KEYS);
+                let ry = below + 28.0;
+                recording_options(c, ui, &p, Rect::from_min_size(Pos2::new(x0, ry), Vec2::new(colw, area.bottom() - ry)));
+                sharing(c, ui, &p, Rect::from_min_size(Pos2::new(x0 + colw + gap, area.top() + 16.0), Vec2::new(colw, area.height())), false, cx);
+            });
+        }
     }
 }

@@ -1,6 +1,15 @@
-//! Sharing a recording: upload it to the person's own S3-compatible storage
-//! (Hetzner Object Storage and the like) and copy the link. The secret key
-//! is kept in the Keychain; the rest is in Capture's settings.
+//! Sharing a recording or a screenshot: upload it to the person's own
+//! S3-compatible storage (Hetzner Object Storage and the like) and copy the
+//! link. One storage, set up on the Sharing page; screenshots and videos
+//! each have their folder (cmdmeow/screenshots/, cmdmeow/videos/) and their
+//! own "upload each" and "copy the link" switches. The secret key is kept
+//! in the Keychain.
+
+/// The Keychain account of the storage's secret key.
+pub const VIDEO_ACCOUNT: &str = "secret-key";
+/// Folders new storage settings start with.
+pub const VIDEO_FOLDER: &str = "cmdmeow/videos/";
+pub const SHOT_FOLDER: &str = "cmdmeow/screenshots/";
 
 pub mod s3;
 
@@ -24,7 +33,7 @@ pub enum LinkKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// Upload every recording as soon as it's saved.
+    /// Upload every recording (or screenshot) as soon as it's saved.
     pub auto: bool,
     /// Put the link on the clipboard when the upload is done.
     pub copy_link: bool,
@@ -34,24 +43,29 @@ pub struct Settings {
     pub region: String,
     pub bucket: String,
     pub access_key: String,
-    /// Folder inside the bucket ("recordings/"); may be empty.
+    /// Folder inside the bucket ("cmdmeow/videos/"); may be empty.
     pub folder: String,
     pub link: LinkKind,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { auto: false, copy_link: true, endpoint: String::new(), region: String::new(), bucket: String::new(), access_key: String::new(), folder: "recordings/".into(), link: LinkKind::Public }
+        Settings { auto: false, copy_link: true, endpoint: String::new(), region: String::new(), bucket: String::new(), access_key: String::new(), folder: VIDEO_FOLDER.into(), link: LinkKind::Public }
     }
 }
 
 impl Settings {
-    pub fn bucket(&self) -> s3::Bucket {
-        s3::Bucket::new(&self.endpoint, &self.region, &self.bucket, &self.access_key, &secret::get().unwrap_or_default())
+    /// Fresh settings for screenshots.
+    pub fn shots() -> Settings {
+        Settings { folder: SHOT_FOLDER.into(), ..Settings::default() }
+    }
+    /// The bucket, with the secret kept under `account`.
+    pub fn bucket(&self, account: &str) -> s3::Bucket {
+        s3::Bucket::new(&self.endpoint, &self.region, &self.bucket, &self.access_key, &secret::get(account).unwrap_or_default())
     }
     /// Everything filled in (the secret included).
-    pub fn ready(&self) -> bool {
-        self.bucket().ready()
+    pub fn ready(&self, account: &str) -> bool {
+        self.bucket(account).ready()
     }
 }
 
@@ -59,17 +73,20 @@ impl Settings {
 pub mod secret {
     use std::sync::Mutex;
 
-    static CACHE: Mutex<Option<Option<String>>> = Mutex::new(None);
+    use std::collections::HashMap;
 
-    pub fn get() -> Option<String> {
+    /// Per account: read once, then kept.
+    static CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
+
+    pub fn get(account: &str) -> Option<String> {
         let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        c.get_or_insert_with(keychain::get).clone()
+        c.get_or_insert_with(HashMap::new).entry(account.to_string()).or_insert_with(|| keychain::get(account)).clone()
     }
 
     /// Save it (empty removes it).
-    pub fn set(v: &str) -> Result<(), String> {
-        keychain::set(v)?;
-        *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Some(v.to_string()).filter(|s| !s.is_empty()));
+    pub fn set(account: &str, v: &str) -> Result<(), String> {
+        keychain::set(account, v)?;
+        CACHE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(account.to_string(), Some(v.to_string()).filter(|s| !s.is_empty()));
         Ok(())
     }
 
@@ -80,39 +97,40 @@ pub mod secret {
         }
         /// Where the key lived under the app's first name; moved over on first read.
         const OLD_SERVICE: &str = "CleanMeBro sharing";
-        const ACCOUNT: &str = "secret-key";
+        /// The account the first name used (videos only).
+        const OLD_ACCOUNT: &str = "secret-key";
 
-        fn read(service: &str) -> Option<String> {
-            security_framework::passwords::get_generic_password(service, ACCOUNT).ok().and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty())
+        fn read(service: &str, account: &str) -> Option<String> {
+            security_framework::passwords::get_generic_password(service, account).ok().and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty())
         }
-        pub fn get() -> Option<String> {
-            read(service()).or_else(|| {
-                if crate::kit::fs::is_dev() {
+        pub fn get(account: &str) -> Option<String> {
+            read(service(), account).or_else(|| {
+                if crate::kit::fs::is_dev() || account != OLD_ACCOUNT {
                     return None;
                 }
-                let v = read(OLD_SERVICE)?;
-                if set(&v).is_ok() {
-                    let _ = security_framework::passwords::delete_generic_password(OLD_SERVICE, ACCOUNT);
+                let v = read(OLD_SERVICE, OLD_ACCOUNT)?;
+                if set(account, &v).is_ok() {
+                    let _ = security_framework::passwords::delete_generic_password(OLD_SERVICE, OLD_ACCOUNT);
                 }
                 Some(v)
             })
         }
-        pub fn set(v: &str) -> Result<(), String> {
+        pub fn set(account: &str, v: &str) -> Result<(), String> {
             if v.is_empty() {
-                let _ = security_framework::passwords::delete_generic_password(service(), ACCOUNT);
+                let _ = security_framework::passwords::delete_generic_password(service(), account);
                 return Ok(());
             }
-            security_framework::passwords::set_generic_password(service(), ACCOUNT, v.as_bytes()).map_err(|e| e.to_string())
+            security_framework::passwords::set_generic_password(service(), account, v.as_bytes()).map_err(|e| e.to_string())
         }
     }
 
     /// Elsewhere (tests): only in memory.
     #[cfg(not(target_os = "macos"))]
     mod keychain {
-        pub fn get() -> Option<String> {
+        pub fn get(_account: &str) -> Option<String> {
             None
         }
-        pub fn set(_v: &str) -> Result<(), String> {
+        pub fn set(_account: &str, _v: &str) -> Result<(), String> {
             Ok(())
         }
     }
@@ -123,6 +141,24 @@ pub mod secret {
 pub struct Shared {
     pub key: String,
     pub link: String,
+    /// When it was uploaded (unix seconds); 0 for uploads from before.
+    #[serde(default)]
+    pub at: i64,
+}
+
+/// Everything shared, newest first: the local file and where it went.
+pub fn all() -> Vec<(PathBuf, Shared)> {
+    let mut v: Vec<(PathBuf, Shared)> = load_store().into_iter().map(|(p, s)| (PathBuf::from(p), s)).collect();
+    v.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| b.0.cmp(&a.0)));
+    v
+}
+
+/// Forget `path`'s upload here (the file in the bucket stays).
+pub fn forget(path: &Path) {
+    let mut all = load_store();
+    if all.remove(&path.display().to_string()).is_some() {
+        crate::kit::fs::save_json(&store_path(), &all, true);
+    }
 }
 
 fn store_path() -> PathBuf {
@@ -142,6 +178,11 @@ fn remember(path: &Path, s: Shared) {
     let mut all = load_store();
     all.insert(path.display().to_string(), s);
     crate::kit::fs::save_json(&store_path(), &all, true);
+}
+
+/// A picture (a screenshot), not a video: picks which sharing settings apply.
+pub fn is_image(path: &Path) -> bool {
+    content_type(path).starts_with("image/")
 }
 
 fn content_type(path: &Path) -> &'static str {
@@ -227,10 +268,10 @@ pub struct Uploads {
 
 impl Uploads {
     /// Upload `path` (again: the same name, so a link to it keeps working).
-    pub fn start(&mut self, s: &Settings, path: PathBuf, ctx: &egui::Context) -> Result<(), String> {
-        let b = s.bucket();
+    pub fn start(&mut self, s: &Settings, account: &str, path: PathBuf, ctx: &egui::Context) -> Result<(), String> {
+        let b = s.bucket(account);
         if !b.ready() {
-            return Err("Set up sharing in Capture settings first".into());
+            return Err(if is_image(&path) { "Set up sharing in Screenshot settings first".into() } else { "Set up sharing in Video settings first".into() });
         }
         self.stop(&path);
         let key = load_store().get(&path.display().to_string()).map(|x| x.key.clone()).unwrap_or_else(|| new_key(&s.folder, &path));
@@ -247,7 +288,7 @@ impl Uploads {
                         LinkKind::Week => s3::presign_get(&b, &key, 7 * 24 * 3600, chrono::Utc::now()),
                     };
                     let url = page_link(&file, &title_of(&path2));
-                    remember(&path2, Shared { key, link: url.clone() });
+                    remember(&path2, Shared { key, link: url.clone(), at: chrono::Utc::now().timestamp() });
                     url
                 });
                 let _ = tx.send(r);
