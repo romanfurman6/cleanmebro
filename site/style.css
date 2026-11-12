@@ -22,7 +22,7 @@ a { color: inherit; }
 .mbar .cat.on { background: rgba(255,255,255,.22); }
 
 .stage { position: relative; z-index: 2; max-width: 1360px; margin: 0 auto; height: clamp(720px, calc(100svh - 30px), 900px); }
-.hero { position: absolute; z-index: 4; left: 48px; top: 96px; max-width: 560px; }
+.hero { position: absolute; z-index: 4; left: 48px; top: 50%; transform: translateY(-50%); max-width: 560px; }
 h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2px 30px rgba(0,0,0,.35); }
 .cta { display: flex; gap: 12px; margin-top: 32px; flex-wrap: wrap; }
 .btn { display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 22px; border-radius: 12px; font-weight: 500; text-decoration: none; transition: background-color .15s, transform .15s; }
@@ -76,7 +76,7 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
   .stage { height: auto; display: flex; flex-direction: column; }
   .drop { position: relative; top: auto; right: auto; order: 2; display: flex; justify-content: center; padding: 40px 16px 0; }
   .awake-mini { position: relative; top: auto; right: auto; bottom: auto; order: 3; width: auto; max-width: 350px; margin: 12px auto 0; padding: 0 16px; box-sizing: content-box; }
-  .hero { position: relative; left: auto; top: auto; padding: 56px 16px 0; }
+  .hero { position: relative; left: auto; top: auto; transform: none; padding: 56px 16px 0; }
   h1 { font-size: 52px; line-height: 56px; }
   .switcher { padding-top: 64px; padding-bottom: 80px; }
 }

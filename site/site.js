@@ -84,6 +84,7 @@
   setInterval(() => {
     secs++;
     const h = Math.floor(secs / 3600), m = Math.floor(secs / 60) % 60, s = secs % 60;
+    if (!awT) return;
     awT.textContent = `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     ring.setAttribute('stroke-dashoffset', (125.7 * (1 - (secs % 7200) / 7200)).toFixed(1));
   }, 1000);
@@ -145,5 +146,5 @@
     await sleep(1600);
     toast.classList.remove('on'); snap.classList.remove('on'); cur.style.transform = 'translate(-40px,-30px)';
   }
-  (async () => { await sleep(1800); for (;;) { await shoot(); await sleep(3800); } })();
+  if (snap) (async () => { await sleep(1800); for (;;) { await shoot(); await sleep(3800); } })();
 })();
