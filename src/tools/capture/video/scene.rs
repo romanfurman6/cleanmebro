@@ -51,6 +51,47 @@ pub struct Recorded {
     pub fps: u32,
 }
 
+impl Recorded {
+    /// The same log for the video with `edl`'s cuts made: times move up,
+    /// what was cut goes, and each kept piece starts with where things were.
+    pub fn cut(&self, edl: &super::edit::Edl) -> Recorded {
+        let mut r = Recorded { cursor: None, camera: self.camera, camera_spots: Vec::new(), fps: self.fps };
+        let starts: Vec<(f64, f64)> = edl.keep.iter().map(|&(a, _)| (a, edl.edited_at(a))).collect();
+        if let Some(t) = &self.cursor {
+            let mut out = Track::default();
+            let mut moves: Vec<(f64, f32, f32)> = t.moves.iter().filter_map(|&(at, x, y)| edl.to_edited(at).map(|e| (e, x, y))).collect();
+            let mut shapes: Vec<(f64, Shape)> = t.shapes.iter().filter_map(|&(at, sh)| edl.to_edited(at).map(|e| (e, sh))).collect();
+            for &(a, e) in &starts {
+                if let Some((x, y)) = raw_at(&t.moves, a) {
+                    moves.push((e, x, y));
+                }
+                shapes.push((e, shape_at(&t.shapes, a)));
+            }
+            moves.sort_by(|p, q| p.0.total_cmp(&q.0));
+            moves.dedup_by(|q, p| (q.0 - p.0).abs() < 1e-9);
+            shapes.sort_by(|p, q| p.0.total_cmp(&q.0));
+            shapes.dedup_by(|q, p| q.1 == p.1);
+            if shapes.first().is_some_and(|s| s.1 == Shape::Arrow) {
+                shapes.remove(0);
+            }
+            out.moves = moves;
+            out.shapes = shapes;
+            out.clicks = t.clicks.iter().filter_map(|&at| edl.to_edited(at)).collect();
+            r.cursor = Some(out);
+        }
+        let mut spots: Vec<CameraSpot> = self.camera_spots.iter().filter_map(|&(at, x, y, d)| edl.to_edited(at).map(|e| (e, x, y, d))).collect();
+        for &(a, e) in &starts {
+            if let Some((x, y, d)) = camera_spot_at(&self.camera_spots, a) {
+                spots.push((e, x, y, d));
+            }
+        }
+        spots.sort_by(|p, q| p.0.total_cmp(&q.0));
+        spots.dedup_by(|q, p| (q.0 - p.0).abs() < 1e-9);
+        r.camera_spots = spots;
+        r
+    }
+}
+
 /// Builds a [`Track`] from samples taken while recording (about 120 a
 /// second). A cursor that sits still adds nothing until it moves again;
 /// then its last still sample goes in first, so the glide starts when the
@@ -853,5 +894,26 @@ mod tests {
         // the glide starts at 0.99, not at 0
         let p = Path::new(&t, false);
         assert_eq!(p.at(0.5), Some((0.1, 0.1)));
+    }
+
+    #[test]
+    fn cuts_move_the_logs_up() {
+        let mut edl = super::super::edit::Edl::new(10.0);
+        assert!(edl.cut(2.0, 4.0));
+        let rec = Recorded {
+            cursor: Some(Track { moves: vec![(0.0, 0.1, 0.1), (3.0, 0.5, 0.5), (5.0, 0.6, 0.6)], clicks: vec![1.0, 3.0, 6.0], shapes: vec![(3.0, Shape::Text)] }),
+            camera: true,
+            camera_spots: vec![(0.0, 0.8, 0.8, 0.1), (3.0, 0.2, 0.2, 0.1)],
+            fps: 60,
+        };
+        let c = rec.cut(&edl);
+        let t = c.cursor.unwrap();
+        assert_eq!(t.clicks, vec![1.0, 4.0]);
+        // the piece from 4 s starts where the cursor was then (between 0.5 and 0.6)
+        let at2 = t.moves.iter().find(|m| (m.0 - 2.0).abs() < 1e-9).expect("a move at the cut");
+        assert!((at2.1 - 0.55).abs() < 1e-4);
+        assert_eq!(t.moves.last().unwrap().0, 3.0);
+        assert_eq!(t.shapes, vec![(2.0, Shape::Text)]);
+        assert_eq!(c.camera_spots, vec![(0.0, 0.8, 0.8, 0.1), (2.0, 0.2, 0.2, 0.1)]);
     }
 }
