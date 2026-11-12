@@ -24,6 +24,7 @@ export SIGN_ID="${SIGN_ID:--}"
 export APP_NAME="CmdMeow Dev"
 export DISPLAY_NAME="Cmd+Meow Dev"
 export BUNDLE_ID="com.romanfurman6.cmdmeow.dev"
+export URL_SCHEME="cmdmeow-dev"
 export PROFILE="${PROFILE:-release}"
 
 DEST="/Applications/$APP_NAME.app"

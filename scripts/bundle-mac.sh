@@ -4,7 +4,7 @@
 #   scripts/bundle-mac.sh              # native arch
 #   UNIVERSAL=1 scripts/bundle-mac.sh  # Apple silicon + Intel in one binary
 #   TARGET=aarch64-apple-darwin scripts/bundle-mac.sh  # one explicit target
-#   SIGN_ID=... HARDENED=1 APP_NAME=... DISPLAY_NAME=... BUNDLE_ID=... PROFILE=debug override the defaults
+#   SIGN_ID=... HARDENED=1 APP_NAME=... DISPLAY_NAME=... BUNDLE_ID=... URL_SCHEME=... PROFILE=debug override the defaults
 #
 # Output: target/bundle/CmdMeow.app and target/bundle/CmdMeow-<version>-macos.zip
 set -euo pipefail
@@ -14,6 +14,8 @@ APP_NAME="${APP_NAME:-CmdMeow}"
 DISPLAY_NAME="${DISPLAY_NAME:-Cmd+Meow}"
 BIN="cmdmeow"
 BUNDLE_ID="${BUNDLE_ID:-com.romanfurman6.cmdmeow}"
+# Links into the app (cmdmeow://awake/on). The Dev build uses its own.
+URL_SCHEME="${URL_SCHEME:-cmdmeow}"
 VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
 # Build number (CFBundleVersion): commit count, so every build on main is higher
 # than the last. BUILD_NUMBER overrides it. The app shows it in Settings.
@@ -67,6 +69,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <!-- Menu bar app: no Dock icon until the full window opens. -->
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleURLTypes</key>
+  <array><dict>
+    <key>CFBundleURLName</key><string>$BUNDLE_ID</string>
+    <key>CFBundleURLSchemes</key><array><string>$URL_SCHEME</string></array>
+  </dict></array>
   <key>NSAppleEventsUsageDescription</key><string>$DISPLAY_NAME asks Finder to pick a folder for saved captures, and System Events for the apps that open at login.</string>
   <key>NSMicrophoneUsageDescription</key><string>$DISPLAY_NAME hears your voice for dictation, and in screen recordings when you turn the microphone on.</string>
   <key>NSCameraUsageDescription</key><string>$DISPLAY_NAME shows your camera in screen recordings when you turn the camera on.</string>

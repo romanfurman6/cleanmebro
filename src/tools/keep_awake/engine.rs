@@ -87,11 +87,12 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(dir: Option<PathBuf>) -> Self {
-        let (settings, log) = match &dir {
-            Some(d) => (load_settings(d), load_log(d, today_start(now()) - 6 * 86_400)),
-            None => (Settings::default(), Vec::new()),
+        let (settings, log, manual_since) = match &dir {
+            Some(d) => (load_settings(d), load_log(d, today_start(now()) - 6 * 86_400), load_switch(d)),
+            None => (Settings::default(), Vec::new(), None),
         };
-        Engine { settings, manual_since: None, sessions: Vec::new(), awake_since: None, log, open: None, claude_last: None, enabled: true, power: Power::default(), dir }
+        // the switch stays on across a quit, an update or a restart
+        Engine { settings, manual_since, sessions: Vec::new(), awake_since: None, log, open: None, claude_last: None, enabled: true, power: Power::default(), dir }
     }
 
     pub fn working(&self, now: i64) -> Vec<&Session> {
@@ -142,7 +143,8 @@ impl Engine {
             State::Manual => self.settings.manual_screen,
             State::Claude | State::WindDown { .. } => self.settings.claude_screen,
         };
-        self.power.apply(Want { system: st.awake(), display });
+        let reason = self.reason(st, now);
+        self.power.apply(Want { system: st.awake(), display }, &reason);
         match (st.awake(), self.awake_since) {
             (true, None) => self.awake_since = Some(now),
             (false, Some(_)) => self.awake_since = None,
@@ -155,20 +157,48 @@ impl Engine {
         }
     }
 
+    /// Who's keeping the Mac up, for `pmset -g assertions`.
+    fn reason(&self, st: State, now: i64) -> String {
+        match st {
+            State::Off => String::new(),
+            State::Manual => "by hand".into(),
+            State::Claude => {
+                let mut names: Vec<&str> = Vec::new();
+                for s in self.working(now) {
+                    if !names.contains(&s.project.as_str()) {
+                        names.push(&s.project);
+                    }
+                }
+                if names.is_empty() { "Claude".into() } else { format!("Claude: {}", names.join(", ")) }
+            }
+            State::WindDown { .. } => "Claude just finished".into(),
+        }
+    }
+
     pub fn set_manual(&mut self, on: bool, now: i64) {
         if on != self.manual_since.is_some() {
             crate::kit::sound::play(if on { crate::kit::sound::Cue::Awake } else { crate::kit::sound::Cue::Asleep });
         }
-        self.manual_since = if on { Some(self.manual_since.unwrap_or(now)) } else { None };
+        self.set_switch(if on { Some(self.manual_since.unwrap_or(now)) } else { None });
         self.step(now);
     }
 
     pub fn set_enabled(&mut self, on: bool, now: i64) {
         self.enabled = on;
         if !on {
-            self.manual_since = None;
+            self.set_switch(None);
         }
         self.step(now);
+    }
+
+    fn set_switch(&mut self, since: Option<i64>) {
+        if since == self.manual_since {
+            return;
+        }
+        self.manual_since = since;
+        if let Some(d) = &self.dir {
+            save_json(d, SWITCH_FILE, &since);
+        }
     }
 
     pub fn change(&mut self, now: i64, f: impl FnOnce(&mut Settings)) {
@@ -259,6 +289,13 @@ fn load_settings(dir: &Path) -> Settings {
     crate::kit::fs::load_json::<Settings>(&dir.join("settings.json")).sanitize()
 }
 
+/// When the switch was turned on, if it's on.
+const SWITCH_FILE: &str = "switch.json";
+
+fn load_switch(dir: &Path) -> Option<i64> {
+    crate::kit::fs::load_json::<Option<i64>>(&dir.join(SWITCH_FILE))
+}
+
 fn load_log(dir: &Path, day: i64) -> Vec<Span> {
     let v: Vec<Span> = crate::kit::fs::load_json(&dir.join("today.json"));
     v.into_iter().filter(|s| s.end > day).collect()
@@ -345,6 +382,47 @@ mod tests {
         assert_eq!(v.len(), 2);
         assert_eq!((v[0].start, v[0].end, v[0].claude), (t, t + 600, false));
         assert_eq!((v[1].start, v[1].claude), (t + 1000, true));
+    }
+
+    #[test]
+    fn switch_survives_a_restart() {
+        let dir = std::env::temp_dir().join(format!("cmdmeow-awake-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let mut e = Engine::new(Some(dir.clone()));
+            e.set_manual(true, 1000);
+        }
+        let mut e = Engine::new(Some(dir.clone()));
+        assert_eq!(e.manual_since, Some(1000));
+        e.step(2000);
+        assert_eq!(e.state(2000), State::Manual);
+        assert!(e.held().system);
+        e.set_manual(false, 2100);
+        drop(e);
+        assert_eq!(Engine::new(Some(dir.clone())).manual_since, None);
+        // turning the tool off in Settings turns the switch off for good
+        let mut e = Engine::new(Some(dir.clone()));
+        e.set_manual(true, 3000);
+        e.set_enabled(false, 3001);
+        drop(e);
+        assert_eq!(Engine::new(Some(dir.clone())).manual_since, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reason_names_who_keeps_it_up() {
+        let mut e = Engine::new(None);
+        e.step(1000);
+        assert_eq!(e.power.name(), "Cmd+Meow Keep Awake");
+        e.set_manual(true, 1000);
+        assert_eq!(e.power.name(), "Cmd+Meow Keep Awake (by hand)");
+        e.set_manual(false, 1001);
+        e.sessions = vec![session(1002), Session { project: "api".into(), last_write: 1002, tool_running: false }, session(1002)];
+        e.step(1003);
+        assert_eq!(e.power.name(), "Cmd+Meow Keep Awake (Claude: cmdmeow, api)");
+        e.step(1200);
+        assert_eq!(e.power.name(), "Cmd+Meow Keep Awake (Claude just finished)");
     }
 
     #[test]
