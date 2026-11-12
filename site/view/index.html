@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shared · Cmd+Meow</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#111318">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="view.css">
+</head>
+<body class="pl-body">
+
+<header class="pl-top">
+  <a class="brand" href="../">
+    <svg class="mark" viewBox="0 0 100 100" aria-hidden="true">
+      <g fill="#F3EFE6"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
+      <path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="#E8A33D" stroke-width="6.5" stroke-linecap="round"/>
+    </svg>
+    <span>Cmd+Meow</span>
+  </a>
+  <span class="pl-title" id="title"></span>
+  <div class="seg" id="modes" role="tablist" aria-label="Mode" hidden>
+    <button type="button" role="tab" id="m-view" aria-selected="true">View</button>
+    <button type="button" role="tab" id="m-edit" aria-selected="false">Edit</button>
+  </div>
+  <span class="pl-actions">
+    <button class="btn sm" type="button" id="copy" hidden>Copy link</button>
+    <a class="btn sm" id="dl" hidden target="_blank" rel="noopener">Open file</a>
+  </span>
+</header>
+
+<main class="pl-main" id="main">
+  <!-- Video -->
+  <div class="player" id="player" hidden tabindex="-1">
+    <video id="v" playsinline preload="metadata"></video>
+
+    <button class="pl-center" id="big" type="button" aria-label="Play">
+      <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M9 5.5v17l14-8.5z" fill="#fff"/></svg>
+    </button>
+    <div class="pl-spin" id="spin" hidden aria-hidden="true"></div>
+    <div class="pl-flash" id="flash" aria-hidden="true"></div>
+
+    <div class="pl-controls" id="controls">
+      <div class="pl-seek" id="seek" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00">
+        <div class="pl-rail">
+          <div class="pl-buf" id="buf"></div>
+          <div class="pl-prog" id="prog"></div>
+        </div>
+        <div class="pl-knob" id="knob"></div>
+        <div class="pl-tip num" id="tip">0:00</div>
+      </div>
+      <div class="pl-bar">
+        <button class="pl-btn" id="play" type="button" aria-label="Play">
+          <svg class="i-play" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M5 3v12l10-6z" fill="currentColor"/></svg>
+          <svg class="i-pause" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3h3v12h-3zM10.5 3h3v12h-3z" fill="currentColor"/></svg>
+        </button>
+        <button class="pl-btn" id="back" type="button" aria-label="Back 10 seconds">
+          <svg class="ic" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3.5 9a5.5 5.5 0 1 0 1.6-3.9M3.5 2.5v3h3"/></svg>
+        </button>
+        <button class="pl-btn" id="fwd" type="button" aria-label="Forward 10 seconds">
+          <svg class="ic" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14.5 9a5.5 5.5 0 1 1-1.6-3.9M14.5 2.5v3h-3"/></svg>
+        </button>
+        <span class="pl-time num"><span id="cur">0:00</span> <span class="dim">/ <span id="dur">0:00</span></span></span>
+
+        <span class="pl-sp"></span>
+
+        <div class="pl-vol">
+          <button class="pl-btn" id="mute" type="button" aria-label="Mute">
+            <svg class="ic i-vol" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 7v4h3l4 3.5v-11l-4 3.5zM12.5 6.5a3.5 3.5 0 0 1 0 5M14.5 4.5a6.5 6.5 0 0 1 0 9"/></svg>
+            <svg class="ic i-muted" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 7v4h3l4 3.5v-11l-4 3.5zM12.5 7l4 4M16.5 7l-4 4"/></svg>
+          </button>
+          <input id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+        </div>
+        <div class="pl-menu-wrap">
+          <button class="pl-btn pl-rate num" id="rate" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Playback speed">1×</button>
+          <div class="pl-menu" id="rates" role="menu" hidden>
+            <button type="button" role="menuitemradio" data-r="0.5">0.5×</button>
+            <button type="button" role="menuitemradio" data-r="1">1×</button>
+            <button type="button" role="menuitemradio" data-r="1.25">1.25×</button>
+            <button type="button" role="menuitemradio" data-r="1.5">1.5×</button>
+            <button type="button" role="menuitemradio" data-r="2">2×</button>
+          </div>
+        </div>
+        <button class="pl-btn" id="pip" type="button" aria-label="Picture in picture" hidden>
+          <svg class="ic" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M15.5 8V3.5h-13v11H8M10.5 10.5h5v4h-5z"/></svg>
+        </button>
+        <button class="pl-btn" id="fs" type="button" aria-label="Full screen">
+          <svg class="ic i-fs" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 6.5v-4h4M11.5 2.5h4v4M15.5 11.5v4h-4M6.5 15.5h-4v-4"/></svg>
+          <svg class="ic i-fsx" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M6.5 2.5v4h-4M15.5 6.5h-4v-4M11.5 15.5v-4h4M2.5 11.5h4v4"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Video edit: timeline -->
+  <section class="vt" id="vt" hidden>
+    <div class="vt-track" id="vt-track" tabindex="0" aria-label="Timeline">
+      <div class="vt-segs" id="vt-segs"></div>
+      <div class="vt-head" id="vt-head"></div>
+    </div>
+    <div class="tb">
+      <button class="tbb" type="button" id="vt-in" title="Cut before playhead (I)" aria-label="Cut before playhead">
+        <svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M9 3v12M3 5.5h3.5v7H3M12 9h3.5"/></svg>
+      </button>
+      <button class="tbb" type="button" id="vt-split" title="Split (S)" aria-label="Split at playhead">
+        <svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M9 2.5v13M2.5 6h4v6h-4M15.5 6h-4v6h4"/></svg>
+      </button>
+      <button class="tbb" type="button" id="vt-out" title="Cut after playhead (O)" aria-label="Cut after playhead">
+        <svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M9 3v12M15 5.5h-3.5v7H15M6 9H2.5"/></svg>
+      </button>
+      <button class="tbb" type="button" id="vt-del" title="Remove or restore piece (Delete)" aria-label="Remove or restore piece">
+        <svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M3.5 5h11M7 5V3.5h4V5M5 5l.7 9.5h6.6L13 5"/></svg>
+      </button>
+      <span class="tb-sep"></span>
+      <button class="tbb" type="button" id="vt-undo" title="Undo (⌘Z)" aria-label="Undo">
+        <svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M6 4.5 3 7.5l3 3M3 7.5h7.5a4 4 0 0 1 0 8H8"/></svg>
+      </button>
+      <button class="tbb" type="button" id="vt-redo" title="Redo (⇧⌘Z)" aria-label="Redo">
+        <svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M12 4.5l3 3-3 3M15 7.5H7.5a4 4 0 0 0 0 8H10"/></svg>
+      </button>
+      <span class="pl-sp"></span>
+      <span class="num vt-len" id="vt-len"></span>
+      <button class="btn sm p" type="button" id="vt-export">Save MP4</button>
+    </div>
+    <div class="prog" id="vt-prog" hidden>
+      <div class="prog-rail"><div class="prog-fill" id="vt-fill"></div></div>
+      <span class="num" id="vt-pct">0%</span>
+      <button class="btn xs" type="button" id="vt-cancel">Stop</button>
+    </div>
+  </section>
+
+  <!-- Image: view -->
+  <figure class="shot" id="shot" hidden>
+    <img id="img" alt="">
+  </figure>
+
+  <!-- Image: edit -->
+  <section class="ie" id="ie" hidden>
+    <div class="ie-stage" id="ie-stage">
+      <canvas id="ie-canvas"></canvas>
+      <input class="ie-text" id="ie-text" type="text" hidden spellcheck="false" autocomplete="off" aria-label="Text">
+    </div>
+    <div class="tb" id="ie-tools">
+      <div class="tb-group" role="radiogroup" aria-label="Tool">
+        <button class="tbb" type="button" data-tool="arrow" title="Arrow (A)" aria-label="Arrow"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M3.5 14.5 14 4M8 4h6v6"/></svg></button>
+        <button class="tbb" type="button" data-tool="line" title="Line (L)" aria-label="Line"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M3.5 14.5 14.5 3.5"/></svg></button>
+        <button class="tbb" type="button" data-tool="rect" title="Box (R)" aria-label="Box"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><rect x="3" y="4.5" width="12" height="9" rx="1.5"/></svg></button>
+        <button class="tbb" type="button" data-tool="pen" title="Pen (P)" aria-label="Pen"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M3 13c2-1 2.5-5 5-5s1.5 4 4 4 2.5-4 3-6"/></svg></button>
+        <button class="tbb" type="button" data-tool="mark" title="Highlighter (H)" aria-label="Highlighter"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M3 12.5h12" stroke-width="5" opacity=".45"/><path d="M3 12.5h12"/></svg></button>
+        <button class="tbb" type="button" data-tool="text" title="Text (T)" aria-label="Text"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M4 4.5h10M9 4.5v10"/></svg></button>
+        <button class="tbb" type="button" data-tool="crop" title="Crop (C)" aria-label="Crop"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M5 2v11h11M2 5h11v11"/></svg></button>
+      </div>
+      <span class="tb-sep"></span>
+      <div class="tb-group" id="ie-colors" role="radiogroup" aria-label="Colour"></div>
+      <span class="tb-sep"></span>
+      <div class="tb-group" id="ie-sizes" role="radiogroup" aria-label="Size">
+        <button class="tbb" type="button" data-size="0" aria-label="Thin"><span class="dot" style="--d:4px"></span></button>
+        <button class="tbb" type="button" data-size="1" aria-label="Medium"><span class="dot" style="--d:7px"></span></button>
+        <button class="tbb" type="button" data-size="2" aria-label="Thick"><span class="dot" style="--d:11px"></span></button>
+      </div>
+      <span class="tb-sep"></span>
+      <button class="tbb" type="button" id="ie-undo" title="Undo (⌘Z)" aria-label="Undo"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M6 4.5 3 7.5l3 3M3 7.5h7.5a4 4 0 0 1 0 8H8"/></svg></button>
+      <button class="tbb" type="button" id="ie-redo" title="Redo (⇧⌘Z)" aria-label="Redo"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M12 4.5l3 3-3 3M15 7.5H7.5a4 4 0 0 0 0 8H10"/></svg></button>
+      <span class="pl-sp"></span>
+      <button class="btn sm" type="button" id="ie-copy">Copy</button>
+      <button class="btn sm p" type="button" id="ie-save">Save PNG</button>
+    </div>
+  </section>
+
+  <p class="note" id="note" role="status" hidden></p>
+
+  <!-- No link or a bad link -->
+  <section class="pl-empty" id="empty" hidden>
+    <svg class="ic" width="40" height="40" viewBox="0 0 16 16" aria-hidden="true" style="color:var(--blue)"><path d="M1.5 3.5h13v9h-13zM6.5 6v4l3.5-2z"/></svg>
+    <h1 id="empty-h">Open a shot or a recording</h1>
+    <p class="sub" id="empty-p">Paste a Cmd+Meow link, or open a file from this computer.</p>
+    <form id="form" class="pl-form">
+      <label class="vh" for="url">Link</label>
+      <input id="url" type="url" required placeholder="https://…/shot.png" autocomplete="off" spellcheck="false">
+      <button class="btn p" type="submit">Open</button>
+    </form>
+    <label class="btn" for="file">Open a file…</label>
+    <input class="vh" id="file" type="file" accept="image/*,video/mp4,video/quicktime,video/webm">
+  </section>
+
+  <p class="pl-keys cap" id="keys" hidden>
+    <span class="kc">Space</span> play · <span class="kc">←</span><span class="kc">→</span> 5 s · <span class="kc">J</span><span class="kc">L</span> 10 s · <span class="kc">↑</span><span class="kc">↓</span> volume · <span class="kc">M</span> mute · <span class="kc">F</span> full screen · <span class="kc">,</span><span class="kc">.</span> frame
+  </p>
+</main>
+
+<script type="module" src="view.mjs"></script>
+</body>
+</html>
