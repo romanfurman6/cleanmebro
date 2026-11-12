@@ -472,6 +472,9 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
     let mut hovered: Option<(&scan::LiveRow, Color32)> = None;
     let mut hovered_at: Option<Rect> = None;
     let bp = p.with_clip_rect(area.expand(4.0));
+    // place every bubble first, then paint big to small: while the packing
+    // glides they can overlap, and a small one must stay on top of a big one
+    let mut placed: Vec<(usize, Pos2, f32)> = Vec::new();
     for (n, key) in keys.iter().enumerate() {
         let Some(&target) = targets.get(n) else { continue };
         // glide from last frame; a new bubble grows from its centre
@@ -479,16 +482,21 @@ fn mapping(app: &mut App, ui: &mut Ui, r: Rect, root: &Path, rows: &[scan::LiveR
         let rr = lerp_rect(prev, target, k);
         drawn.insert(key.clone(), (rr, 0.0));
         let (c, rad) = (rr.center(), rr.width().min(rr.height()) / 2.0);
-        if rad < 1.0 {
-            continue;
+        if rad >= 1.0 {
+            placed.push((n, c, rad));
         }
-        if *key == more {
+    }
+    placed.sort_by(|a, b| b.2.total_cmp(&a.2));
+    // the pointer belongs to the smallest (topmost) bubble under it
+    let hot = pointer.filter(|q| area.contains(*q)).and_then(|q| placed.iter().rev().find(|(_, c, rad)| (q - *c).length() <= *rad).map(|x| x.0));
+    for &(n, c, rad) in &placed {
+        if keys[n] == more {
             let bytes: u64 = rest.iter().map(|x| x.bytes).sum();
             live_bubble(&bp, c, rad, &format!("{} more", rest.len()), bytes, PURPLE(), rest.iter().any(|x| !x.done), false, now);
             continue;
         }
         let row = shown_rows[n];
-        let hov = pointer.is_some_and(|q| (q - c).length() <= rad && area.contains(q));
+        let hov = hot == Some(n);
         live_bubble(&bp, c, rad, &row.name, row.bytes, BLUE(), !row.done, hov, now);
         if hov {
             hovered = Some((row, BLUE()));
@@ -542,12 +550,13 @@ thread_local! {
     static LIVE_LAYOUT: std::cell::RefCell<Option<(f64, Rect, Vec<PathBuf>, Vec<Rect>)>> = const { std::cell::RefCell::new(None) };
 }
 
-/// One live bubble, in the finished map's look: a tinted circle with a
-/// hairline. Still measuring: fainter, with a spinner on top.
+/// One live bubble, in the finished map's look: an opaque tinted circle
+/// with a hairline. Still measuring: fainter, with a spinner on top.
 #[allow(clippy::too_many_arguments)]
 fn live_bubble(p: &egui::Painter, c: Pos2, rad: f32, name: &str, bytes: u64, base: Color32, busy: bool, hov: bool, now: f64) {
     let fill = if busy { 0.10 } else { 0.2 } + if hov { 0.12 } else { 0.0 };
-    p.circle_filled(c, rad, with_alpha(base, fill));
+    // opaque: one bubble over another hides it instead of showing through
+    p.circle_filled(c, rad, lerp_color(BG(), base, fill));
     crate::kit::glass::stroke_circle(p, c, rad, Stroke::new(1.0, with_alpha(base, if busy { 0.35 } else { 0.6 })));
     let txt = if busy { TEXT_SOFT() } else { TEXT() };
     if rad >= 30.0 {

@@ -1,76 +1,14 @@
-// Cmd+Meow player: plays the video passed as ?v=<url> (or #v=<url>) with custom controls.
-// Optional ?t=<title>. Only http(s) URLs are accepted.
-(function () {
-  'use strict';
-  var $ = function (id) { return document.getElementById(id); };
+// Cmd+Meow video player: custom controls over a <video>. view.mjs decides
+// what to load; this file only plays it.
+import { fmt } from './core.mjs';
+
+export function initPlayer(srcHref, onError) {
+  const $ = function (id) { return document.getElementById(id); };
   var player = $('player'), v = $('v'), seek = $('seek');
-
-  function param(name) {
-    var q = new URLSearchParams(location.search).get(name);
-    if (q) return q;
-    return new URLSearchParams(location.hash.replace(/^#/, '')).get(name);
-  }
-  function safeUrl(s) {
-    if (!s) return null;
-    try {
-      var u = new URL(s.trim());
-      return (u.protocol === 'https:' || u.protocol === 'http:') ? u : null;
-    } catch (e) { return null; }
-  }
-  function fmt(t) {
-    if (!isFinite(t) || t < 0) t = 0;
-    t = Math.floor(t);
-    var h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
-    return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
-  }
-  function fileName(u) {
-    var last = decodeURIComponent(u.pathname.split('/').pop() || '');
-    return last || u.hostname;
-  }
-
-  // ---- Empty state: paste a link -----------------------------------------
-  function showEmpty(title, text) {
-    $('empty').hidden = false;
-    player.hidden = true; $('keys').hidden = true;
-    if (title) $('empty-h').textContent = title;
-    if (text) $('empty-p').textContent = text;
-  }
-  $('form').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var u = safeUrl($('url').value);
-    if (!u) { $('url').setCustomValidity('Use an http or https link'); $('url').reportValidity(); return; }
-    location.search = '?v=' + encodeURIComponent(u.href);
-  });
-  $('url').addEventListener('input', function () { this.setCustomValidity(''); });
-
-  var src = safeUrl(param('v'));
-  if (!src) {
-    if (param('v')) showEmpty("This link can't be played", 'The video address is not a valid http or https URL.');
-    else showEmpty();
-    return;
-  }
-
-  // ---- Load ---------------------------------------------------------------
-  var title = param('t') || fileName(src);
-  document.title = title + ' · Cmd+Meow';
-  $('title').textContent = title;
-  $('dl').href = src.href; $('dl').hidden = false;
-  $('copy').hidden = false;
   player.hidden = false; $('keys').hidden = false;
   // A tiny start offset makes Safari paint the first frame as a poster.
-  v.src = src.href + (src.hash ? '' : '#t=0.001');
-
-  $('copy').addEventListener('click', function () {
-    var b = this;
-    navigator.clipboard.writeText(location.href).then(function () {
-      b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy link'; }, 1500);
-    });
-  });
-
-  v.addEventListener('error', function () {
-    showEmpty("Couldn't load the video", 'The link may have expired, or this browser can\'t play the format. Try opening the file directly.');
-    $('url').value = src.href;
-  });
+  v.src = srcHref + (srcHref.indexOf('#') >= 0 || srcHref.startsWith('blob:') ? '' : '#t=0.001');
+  v.addEventListener('error', function () { onError(); });
 
   // ---- Play / pause -------------------------------------------------------
   function toggle() { if (v.paused || v.ended) v.play(); else v.pause(); }
@@ -95,7 +33,7 @@
   }
   v.addEventListener('loadedmetadata', function () {
     $('dur').textContent = fmt(v.duration);
-    if (v.videoWidth && v.videoHeight) player.style.setProperty('--ar', (v.videoWidth / v.videoHeight).toFixed(4));
+    if (v.videoWidth && v.videoHeight) $('main').style.setProperty('--ar', (v.videoWidth / v.videoHeight).toFixed(4));
     seek.setAttribute('aria-valuemax', Math.floor(v.duration || 0));
     setProgress(v.currentTime);
   });
@@ -231,7 +169,7 @@
   document.addEventListener('keydown', function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     var tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea') return;
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
     if (!menu.hidden && e.key === 'Escape') { closeMenu(); rate.focus(); return; }
     var onButton = tag === 'button' || tag === 'a';
     var handled = true;
@@ -259,4 +197,5 @@
   // Seek bar as a slider when focused: arrows already handled globally.
 
   syncVol();
-})();
+  return { video: v, flash: flash, poke: poke };
+}

@@ -172,30 +172,41 @@ pub fn page(d: &mut Displays, ui: &mut Ui, r: Rect) {
     let screens = d.screens();
     let ours: Vec<Screen> = screens.iter().filter(|s| s.adjustable()).cloned().collect();
     if ours.is_empty() {
-        let er = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 140.0));
-        glass_card(&p, er, R_CARD, 0.0, false);
-        icon(&p, Icon::Display, Rect::from_center_size(er.center() - Vec2::new(0.0, 14.0), Vec2::splat(30.0)), TEXT_FAINT());
-        p.text(er.center() + Vec2::new(0.0, 24.0), Align2::CENTER_CENTER, "No external display", ty::body(), TEXT_DIM());
-        y = er.bottom() + 16.0;
+        empty(ui, &p, r, color);
+        return;
     }
-    for s in &ours {
-        let n = 1 + s.volume.is_some() as usize;
-        let cr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 52.0 + 40.0 * n as f32));
-        glass_card(&p, cr, R_CARD, 0.0, false);
-        let head = Pos2::new(cr.left() + 18.0, cr.top() + 26.0);
-        icon(&p, Icon::Display, Rect::from_center_size(head + Vec2::new(9.0, 0.0), Vec2::splat(18.0)), lift(color));
-        text_fit(&p, head + Vec2::new(30.0, 0.0), Align2::LEFT_CENTER, &s.name, ty::lead(), TEXT(), cr.width() - 66.0);
-        let mut ry = cr.top() + 52.0;
-        for c in [Ctl::Brightness, Ctl::Volume] {
-            if c == Ctl::Volume && s.volume.is_none() {
-                continue;
+    // cards no wider than CARD_W; side by side when there's room
+    const CARD_W: f32 = 520.0;
+    const MIN_W: f32 = 360.0;
+    const GAP: f32 = 12.0;
+    let avail = x1 - x0;
+    let cols = (((avail + GAP) / (MIN_W + GAP)).floor() as usize).clamp(1, ours.len().max(1));
+    let cw = ((avail - GAP * (cols - 1) as f32) / cols as f32).min(CARD_W);
+    let card_h = |s: &Screen| 52.0 + 40.0 * (1 + s.volume.is_some() as usize) as f32;
+    for row in ours.chunks(cols) {
+        let rh = row.iter().map(card_h).fold(0.0, f32::max);
+        for (k, s) in row.iter().enumerate() {
+            let cx = x0 + k as f32 * (cw + GAP);
+            let cr = Rect::from_min_size(Pos2::new(cx, y), Vec2::new(cw, rh));
+            glass_card(&p, cr, R_CARD, 0.0, false);
+            let head = Pos2::new(cr.left() + 18.0, cr.top() + 26.0);
+            icon(&p, Icon::Display, Rect::from_center_size(head + Vec2::new(9.0, 0.0), Vec2::splat(18.0)), lift(color));
+            text_fit(&p, head + Vec2::new(30.0, 0.0), Align2::LEFT_CENTER, &s.name, ty::lead(), TEXT(), cr.width() - 66.0);
+            let mut ry = cr.top() + 52.0;
+            for c in [Ctl::Brightness, Ctl::Volume] {
+                if c == Ctl::Volume && s.volume.is_none() {
+                    continue;
+                }
+                let row = Rect::from_min_max(Pos2::new(cr.left() + 18.0, ry), Pos2::new(cr.right() - 18.0, ry + 28.0));
+                control(d, ui, row, id.with(("ctl", s.id, c == Ctl::Volume)), s, c, color);
+                ry += 40.0;
             }
-            let row = Rect::from_min_max(Pos2::new(cr.left() + 18.0, ry), Pos2::new(cr.right() - 18.0, ry + 28.0));
-            control(d, ui, row, id.with(("ctl", s.id, c == Ctl::Volume)), s, c, color);
-            ry += 40.0;
         }
-        y = cr.bottom() + 12.0;
+        y += rh + GAP;
     }
+    // the keys card as wide as the cards above it
+    let shown = cols.min(ours.len()).max(1) as f32;
+    let x1 = (x0 + shown * cw + (shown - 1.0) * GAP).min(x1).max(x0 + cw.min(avail));
     // the keys
     let kr = Rect::from_min_max(Pos2::new(x0, y + 4.0), Pos2::new(x1, y + 56.0));
     glass_card(&p, kr, R_CARD, 0.0, false);
@@ -206,6 +217,32 @@ pub fn page(d: &mut Displays, ui: &mut Ui, r: Rect) {
         st.keys = !st.keys;
         d.set_settings(st);
     }
+}
+
+/// No external display: what the page is for and how to get one here.
+fn empty(ui: &mut Ui, p: &egui::Painter, r: Rect, color: Color32) {
+    let c = Pos2::new(r.center().x, r.top() + r.height() * 0.38);
+    p.circle_filled(c, 34.0, white(12));
+    icon(p, Icon::Display, Rect::from_center_size(c, Vec2::splat(30.0)), lift(color));
+    p.text(c + Vec2::new(0.0, 56.0), Align2::CENTER_CENTER, "No external display", bold(17.0), TEXT());
+    let w = (r.width() - 48.0).min(380.0);
+    let h = paragraph_centered(p, c + Vec2::new(0.0, 80.0), "Connect a monitor over USB-C, DisplayPort or HDMI. Its brightness and speaker volume show up here, and your Mac's keys control them.", font(13.0), TEXT_DIM(), w);
+    let label = "Display Settings";
+    let bw = button_width(p, label, BTN_SECONDARY);
+    let br = Rect::from_center_size(Pos2::new(c.x, c.y + 80.0 + h + 30.0), Vec2::new(bw, 30.0));
+    if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
+        let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.Displays-Settings.extension").spawn();
+    }
+}
+
+/// `text` wrapped to `w` and centred under `top`; returns its height.
+fn paragraph_centered(p: &egui::Painter, top: Pos2, text: &str, f: egui::FontId, col: Color32, w: f32) -> f32 {
+    let mut job = egui::text::LayoutJob::simple(text.to_string(), f, col, w);
+    job.halign = egui::Align::Center;
+    let g = p.layout_job(job);
+    let h = g.size().y;
+    p.galley(Pos2::new(top.x, top.y), g, col);
+    h
 }
 
 // ---------------------------------------------------------------- the level after a key

@@ -9,7 +9,7 @@ use egui::{Align2, Color32, Pos2, Rect, Sense, Ui, UiBuilder, Vec2, ViewportComm
 /// Tools that are planned but not built yet: shown dashed and disabled so
 /// it's clear where they will live. An installed tool with the same name hides
 /// its placeholder.
-const PLANNED: [(Icon, &str); 4] = [(Icon::Crop, "Capture"), (Icon::Clipboard, "Clipboard"), (Icon::Fan, "Fan Control"), (Icon::Cup, "Keep Awake")];
+const PLANNED: [(Icon, &str); 4] = [(Icon::Crop, "Screenshot"), (Icon::Clipboard, "Clipboard"), (Icon::Fan, "Fan Control"), (Icon::Cup, "Keep Awake")];
 
 /// `draw_lights`: paint traffic lights ourselves (screenshots; the real
 /// window has native ones).

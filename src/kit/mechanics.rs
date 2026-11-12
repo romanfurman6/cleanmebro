@@ -98,7 +98,7 @@ pub const SPEED_TEST_GRACE: std::time::Duration = std::time::Duration::from_mill
 pub const SPEED_TEST_STREAMS_DOWN: usize = 6;
 pub const SPEED_TEST_STREAMS_UP: usize = 4;
 /// Bytes per request: streams ask again until the phase ends.
-pub const SPEED_TEST_CHUNK_DOWN: u64 = 100_000_000;
+pub const SPEED_TEST_CHUNK_DOWN: u64 = 25_000_000;
 pub const SPEED_TEST_CHUNK_UP: u64 = 4_000_000;
 /// Round trips for ping and jitter, after one that opens the connection.
 pub const SPEED_TEST_PINGS: usize = 10;

@@ -74,8 +74,27 @@ pub enum SpeedPhase {
     Done,
 }
 
+/// How long a speed test runs: Quick (a few seconds, fewer streams) or
+/// Full (longer phases, more streams, more pings).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpeedMode {
+    #[default]
+    Quick,
+    Full,
+}
+
+impl SpeedMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            SpeedMode::Quick => "Quick test",
+            SpeedMode::Full => "Full test",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SpeedTest {
+    pub mode: SpeedMode,
     pub running: bool,
     pub phase: SpeedPhase,
     /// The rate of the transfer under way, in Mbps (for the gauge).

@@ -222,6 +222,10 @@ impl Tool for Displays {
     fn demo_view(&mut self, view: &str) -> Option<ShellView> {
         match view {
             "displays" => Some(ShellView::Page),
+            "displays-empty" => {
+                self.view.lock_ok().screens.retain(|s| !s.adjustable());
+                Some(ShellView::Page)
+            }
             _ => None,
         }
     }

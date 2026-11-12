@@ -27,7 +27,7 @@ pub enum Action {
     Close,
     /// Open another tool's page by id ("cleanup", "lens").
     Open(&'static str),
-    SpeedTest,
+    SpeedTest(super::monitor::SpeedMode),
     MeasureFolders,
     ToggleAlerts,
     ToggleMenuBar,
@@ -300,8 +300,8 @@ fn spec(kind: Sheet, s: &Snapshot) -> Spec {
             sp.facts.push(fact("Security", dash(&s.wifi.security), TEXT(), ""));
             sp.facts.push(fact("Channel", dash(&s.wifi.channel), TEXT(), ""));
             sp.facts.push(fact("Signal / noise", dash(&s.wifi.signal), TEXT(), ""));
-            let label = if s.speed.down_mbps.is_some() { "Test again" } else { "Test speed" };
-            sp.buttons = vec![(label, BTN_PRIMARY, Action::SpeedTest)];
+            use super::monitor::SpeedMode;
+            sp.buttons = vec![("Full test", BTN_SECONDARY, Action::SpeedTest(SpeedMode::Full)), ("Quick test", BTN_PRIMARY, Action::SpeedTest(SpeedMode::Quick))];
             sp
         }
         Sheet::Devices => {
@@ -350,7 +350,7 @@ fn watts(w: f32) -> String {
 /// Draw one sheet into `rect` and report what was clicked.
 /// A button whose work is already running.
 fn busy(act: Action, s: &Snapshot) -> bool {
-    (act == Action::SpeedTest && s.speed.running) || (act == Action::MeasureFolders && s.sizing) || (act == Action::InstallHelper && s.charge.installing)
+    (matches!(act, Action::SpeedTest(_)) && s.speed.running) || (act == Action::MeasureFolders && s.sizing) || (act == Action::InstallHelper && s.charge.installing)
 }
 
 fn busy_label(act: Action) -> &'static str {

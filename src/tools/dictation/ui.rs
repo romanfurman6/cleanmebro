@@ -493,7 +493,9 @@ fn words_card_h(p: &egui::Painter, words: &[String], colw: f32) -> f32 {
 fn words_card(d: &mut Dictation, ui: &mut Ui, p: &egui::Painter, x0: f32, top: f32, w: f32) -> bool {
     let id = ui.scope_id().with("dict-words");
     let mut changed = false;
-    p.text(Pos2::new(x0, top), Align2::LEFT_TOP, "Words", bold(15.0), TEXT());
+    let tr = p.text(Pos2::new(x0, top), Align2::LEFT_TOP, "Words", bold(15.0), TEXT());
+    // what it's for, beside the title
+    text_fit(p, Pos2::new(tr.right() + 10.0, tr.center().y + 1.0), Align2::LEFT_CENTER, "Names and terms to spell your way: \"клод\" or \"Clode\" becomes \"Claude\"", font(12.0), TEXT_FAINT(), x0 + w - tr.right() - 10.0);
     let card = Rect::from_min_size(Pos2::new(x0, top + 28.0), Vec2::new(w, words_card_h(p, &d.settings.words, w)));
     glass_card(p, card, R_CARD, 0.0, false);
 
