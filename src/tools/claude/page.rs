@@ -38,7 +38,7 @@ fn picker(demo: bool, ui: &mut Ui, area: Rect) -> f32 {
 /// edge of the controls.
 fn header(ui: &mut Ui, r: Rect, sub: &str, sub_col: egui::Color32, loading: bool, demo: bool, cx: &mut Cx) -> f32 {
     let p = ui.painter().clone();
-    let btns = page_header(&p, r, "AI Tool", sub, sub_col);
+    let btns = page_header(&p, r, "AI Usage", sub, sub_col);
     let rb = Rect::from_center_size(Pos2::new(btns.right() - 13.0, btns.center().y), Vec2::splat(26.0));
     if loading {
         spinner(&p, rb.center(), 6.0, ui.ctx().input(|i| i.time), TEXT_DIM());
