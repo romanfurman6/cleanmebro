@@ -556,6 +556,18 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
                 c.pin(id, img);
                 ew.ed.flash("Pinned on screen");
             }
+            Request::Share => {
+                // the history copy (with the marks) goes up; the editor stays
+                let img = ew.ed.rendered();
+                let path = match c.commit_rendered(&mut ew.ed, &img) {
+                    Some(id) => Some(c.store.path(id)),
+                    None => c.save_image(None, &img),
+                };
+                if let Some(path) = path {
+                    c.copy_link(path);
+                    ew.ed.flash("Uploading for a link…");
+                }
+            }
             Request::CopyText(t) => c.copy_text(&t),
             Request::Close => closed = true,
         }

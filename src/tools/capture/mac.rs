@@ -65,16 +65,18 @@ mod imp {
 
     /// Recognize text in an image file with Vision (on this Mac, offline).
     #[allow(unused_unsafe)]
-    pub fn recognize(path: &Path, w: f32, h: f32) -> Vec<TextLine> {
+    /// `fast`: Vision's quick pass, good for where text is (blur and erase
+    /// only need its boxes), rougher on the words themselves.
+    pub fn recognize(path: &Path, w: f32, h: f32, fast: bool) -> Vec<TextLine> {
         use objc2_vision::{VNImageRequestHandler, VNRecognizeTextRequest, VNRequest, VNRequestTextRecognitionLevel};
         let Some(path) = path.to_str() else { return Vec::new() };
         let url = NSURL::fileURLWithPath(&NSString::from_str(path));
         unsafe {
             let handler = VNImageRequestHandler::initWithURL_options(VNImageRequestHandler::alloc(), &url, &NSDictionary::new());
             let req = VNRecognizeTextRequest::new();
-            req.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
-            req.setUsesLanguageCorrection(true);
-            req.setAutomaticallyDetectsLanguage(true);
+            req.setRecognitionLevel(if fast { VNRequestTextRecognitionLevel::Fast } else { VNRequestTextRecognitionLevel::Accurate });
+            req.setUsesLanguageCorrection(!fast);
+            req.setAutomaticallyDetectsLanguage(!fast);
             let as_req: Retained<VNRequest> = Retained::into_super(Retained::into_super(req.clone()));
             let list = NSArray::from_retained_slice(&[as_req]);
             if handler.performRequests_error(&list).is_err() {
@@ -133,7 +135,7 @@ mod imp {
     pub fn copy_text(_text: &str) -> bool {
         false
     }
-    pub fn recognize(_path: &Path, _w: f32, _h: f32) -> Vec<TextLine> {
+    pub fn recognize(_path: &Path, _w: f32, _h: f32, _fast: bool) -> Vec<TextLine> {
         Vec::new()
     }
     pub fn float_window(_title: &str, _cover_screen: bool) {}
@@ -169,17 +171,22 @@ pub fn warm_ocr() {
 }
 
 pub fn recognize_image(img: &image::RgbaImage) -> Vec<TextLine> {
-    let lines = recognize_image_inner(img);
+    let lines = recognize_image_inner(img, false);
     OCR_READY.store(true, std::sync::atomic::Ordering::Relaxed);
     lines
 }
 
-fn recognize_image_inner(img: &image::RgbaImage) -> Vec<TextLine> {
+/// Where the text is in `img`, quickly (for blurring or erasing only text).
+pub fn text_boxes(img: &image::RgbaImage) -> Vec<TextLine> {
+    recognize_image_inner(img, true)
+}
+
+fn recognize_image_inner(img: &image::RgbaImage, fast: bool) -> Vec<TextLine> {
     let path = std::env::temp_dir().join(format!("cmdmeow-ocr-{}-{}.png", std::process::id(), rand_id()));
     if std::fs::write(&path, super::store::png_bytes(img)).is_err() {
         return Vec::new();
     }
-    let lines = recognize_file(&path);
+    let lines = recognize_path(&path, fast);
     let _ = std::fs::remove_file(&path);
     lines
 }
@@ -187,8 +194,12 @@ fn recognize_image_inner(img: &image::RgbaImage) -> Vec<TextLine> {
 /// Recognize text in an image file as it is (no decoding or re-encoding),
 /// lines in reading order.
 pub fn recognize_file(path: &Path) -> Vec<TextLine> {
+    recognize_path(path, false)
+}
+
+fn recognize_path(path: &Path, fast: bool) -> Vec<TextLine> {
     let Ok((w, h)) = image::image_dimensions(path) else { return Vec::new() };
-    let mut lines = imp::recognize(path, w as f32, h as f32);
+    let mut lines = imp::recognize(path, w as f32, h as f32, fast);
     sort_reading_order(&mut lines);
     OCR_READY.store(true, std::sync::atomic::Ordering::Relaxed);
     lines

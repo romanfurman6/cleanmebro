@@ -200,6 +200,8 @@ pub enum Request {
     Copy,
     Save,
     Pin,
+    /// Upload (or reuse the upload) and copy the link.
+    Share,
     Close,
     CopyText(String),
 }
@@ -436,12 +438,13 @@ impl Editor {
     fn toolbar(&mut self, ui: &mut Ui, bar: Rect) {
         let p = ui.painter().clone();
         let y = bar.center().y;
-        const RIGHT: [(&str, u8, Ico, &str); 3] = [
+        const RIGHT: [(&str, u8, Ico, &str); 4] = [
             ("Save  ⌘S", BTN_PRIMARY, Ico::Save, "Save to your captures folder (⌘S)"),
             ("Copy  ⌘C", BTN_SECONDARY, Ico::Copy, "Copy the picture with your marks (⌘C)"),
+            ("Share", BTN_SECONDARY, Ico::Link, "Upload it and copy the link (set up in Sharing)"),
             ("Pin", BTN_SECONDARY, Ico::Pin, "Pin: keep it floating on top"),
         ];
-        let labeled_w = |p: &egui::Painter, (label, kind, ic, _): (&str, u8, Ico, &str)| button_width(p, label, kind) - 6.0 + if ic == Ico::Pin { 18.0 } else { 0.0 };
+        let labeled_w = |p: &egui::Painter, (label, kind, ic, _): (&str, u8, Ico, &str)| button_width(p, label, kind) - 6.0 + if matches!(ic, Ico::Pin | Ico::Link) { 18.0 } else { 0.0 };
         let labeled_total: f32 = RIGHT.iter().map(|b| labeled_w(&p, *b)).sum::<f32>() + 2.0 * 8.0;
         let lay = BarLayout::fit(bar.width(), labeled_total);
 
@@ -478,7 +481,7 @@ impl Editor {
                 let resp = pill_button(ui, r, "", kind, true);
                 icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(14.0)), if kind == BTN_PRIMARY { on_color(BLUE()) } else { TEXT() });
                 resp
-            } else if ic == Ico::Pin {
+            } else if matches!(ic, Ico::Pin | Ico::Link) {
                 let resp = pill_button(ui, r, "", kind, true);
                 icons::draw(ui.painter(), ic, Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(14.0)), if kind == BTN_PRIMARY { on_color(BLUE()) } else { TEXT() });
                 ui.painter().text(Pos2::new(r.left() + 28.0, y), Align2::LEFT_CENTER, label, font(12.0), if kind == BTN_PRIMARY { on_color(BLUE()) } else { TEXT() });
@@ -487,7 +490,7 @@ impl Editor {
                 pill_button(ui, r, label, kind, true)
             };
             if resp.on_hover_text(tip).clicked() {
-                self.requests.push([Request::Save, Request::Copy, Request::Pin][k].clone());
+                self.requests.push([Request::Save, Request::Copy, Request::Share, Request::Pin][k].clone());
             }
         }
         let rr = Rect::from_min_size(Pos2::new(rx + 8.0 - UNDO_GAP - 30.0, y - 14.0), Vec2::new(30.0, 28.0));
@@ -1037,7 +1040,15 @@ impl Editor {
         self.ocr_busy = true;
         std::thread::spawn(move || {
             // tests check the editor, not Vision, which can take many seconds to load
-            let mut lines = if cfg!(test) { Vec::new() } else { mac::recognize_image(&crop) };
+            // blur / erase need only where the text is: the quick pass
+            let fast = matches!(job, Ocr::Mark(_));
+            let mut lines = if cfg!(test) {
+                Vec::new()
+            } else if fast {
+                mac::text_boxes(&crop)
+            } else {
+                mac::recognize_image(&crop)
+            };
             for l in lines.iter_mut() {
                 l.rect = l.rect.translate(Vec2::new(x as f32, y as f32));
             }
