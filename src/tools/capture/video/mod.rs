@@ -11,6 +11,7 @@
 
 pub mod edit;
 pub mod media;
+pub mod scene;
 pub mod sound;
 pub mod speech;
 pub mod voice;

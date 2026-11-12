@@ -266,7 +266,7 @@ pub fn frame_geom(w: f32, h: f32, f: &Frame, ppp: f32) -> FrameGeom {
 
 /// `img` on its frame.
 pub fn framed(img: &RgbaImage, f: &Frame, ppp: f32) -> RgbaImage {
-    use tiny_skia::{Color, FillRule, FilterQuality, GradientStop, LinearGradient, Paint, Pattern, Pixmap, PixmapPaint, Point, SpreadMode, Transform};
+    use tiny_skia::{Color, FillRule, FilterQuality, GradientStop, LinearGradient, Paint, Pattern, Pixmap, Point, SpreadMode, Transform};
     let (w, h) = img.dimensions();
     let g = frame_geom(w as f32, h as f32, f, ppp);
     let (ow, oh) = (g.size.x as u32, g.size.y as u32);
@@ -282,21 +282,7 @@ pub fn framed(img: &RgbaImage, f: &Frame, ppp: f32) -> RgbaImage {
     }
     let r = g.inner;
     if let Some((blur, dy)) = g.shadow {
-        // drawn at a quarter size, blurred, then scaled up: soft and cheap
-        let k = 4.0;
-        if let Some(mut sm) = Pixmap::new((ow as f32 / k).ceil() as u32 + 1, (oh as f32 / k).ceil() as u32 + 1) {
-            let sr = Rect::from_min_size(Pos2::new(r.min.x / k, (r.min.y + dy) / k), r.size() / k);
-            if let Some(path) = rounded(sr, g.radius / k) {
-                let mut paint = Paint::default();
-                paint.set_color_rgba8(0, 0, 0, 120);
-                paint.anti_alias = true;
-                sm.fill_path(&path, &paint, FillRule::Winding, t, None);
-            }
-            let (sw, sh) = (sm.width() as usize, sm.height() as usize);
-            blur_alpha(sm.data_mut(), sw, sh, (blur / k / 2.0).round().max(1.0) as usize);
-            let pp = PixmapPaint { quality: FilterQuality::Bilinear, ..Default::default() };
-            pm.draw_pixmap(0, 0, sm.as_ref(), &pp, Transform::from_scale(k, k), None);
-        }
+        soft_shadow(&mut pm, r.translate(Vec2::new(0.0, dy)), g.radius, blur);
     }
     let src = to_pixmap(img);
     if let (Some(src), Some(path)) = (src, rounded(r, g.radius)) {
@@ -307,6 +293,26 @@ pub fn framed(img: &RgbaImage, f: &Frame, ppp: f32) -> RgbaImage {
     let mut out = RgbaImage::new(ow, oh);
     from_pixmap(&pm, &mut out);
     out
+}
+
+/// A soft dark shadow of the rounded rect `r` drawn onto `pm`: drawn at a
+/// quarter size, blurred, then scaled up (soft and cheap).
+pub fn soft_shadow(pm: &mut tiny_skia::Pixmap, r: Rect, radius: f32, blur: f32) {
+    use tiny_skia::{FillRule, FilterQuality, Paint, Pixmap, PixmapPaint, Transform};
+    let k = 4.0;
+    let (ow, oh) = (pm.width(), pm.height());
+    let Some(mut sm) = Pixmap::new((ow as f32 / k).ceil() as u32 + 1, (oh as f32 / k).ceil() as u32 + 1) else { return };
+    let sr = Rect::from_min_size(Pos2::new(r.min.x / k, r.min.y / k), r.size() / k);
+    if let Some(path) = rounded(sr, radius / k) {
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(0, 0, 0, 120);
+        paint.anti_alias = true;
+        sm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+    }
+    let (sw, sh) = (sm.width() as usize, sm.height() as usize);
+    blur_alpha(sm.data_mut(), sw, sh, (blur / k / 2.0).round().max(1.0) as usize);
+    let pp = PixmapPaint { quality: FilterQuality::Bilinear, ..Default::default() };
+    pm.draw_pixmap(0, 0, sm.as_ref(), &pp, Transform::from_scale(k, k), None);
 }
 
 /// Three box-blur passes over a black-only premultiplied buffer's alpha.
@@ -760,11 +766,17 @@ pub fn measure(text: &str, size: f32) -> (f32, f32) {
 
 /// Blend `text` into a premultiplied pixmap, top-left at `pos`.
 fn glyphs(pm: &mut tiny_skia::Pixmap, text: &str, pos: Pos2, size: f32, color: Rgba8) {
+    let (w, h) = (pm.width(), pm.height());
+    glyphs_into(pm.data_mut(), w, h, text, pos, size, color);
+}
+
+/// Blend `text` into premultiplied 4-byte pixels (`w`×`h`, tight rows),
+/// top-left at `pos`. The color's first three bytes go in as they are.
+pub fn glyphs_into(data: &mut [u8], w: u32, h: u32, text: &str, pos: Pos2, size: f32, color: Rgba8) {
     use ab_glyph::{point, Font, ScaleFont};
     let Some(font) = label_font() else { return };
     let sf = font.as_scaled(size);
-    let (w, h) = (pm.width() as i64, pm.height() as i64);
-    let data = pm.data_mut();
+    let (w, h) = (w as i64, h as i64);
     let mut y = pos.y + sf.ascent();
     for line in text.split('\n') {
         let mut x = pos.x;
