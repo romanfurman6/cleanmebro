@@ -244,7 +244,7 @@
   // ---------- Startup ----------
   (() => {
     const p = pane('startup'); if (!p) return;
-    const btn = $('.sban .act', p), rows = $$('.str', p), seg = $('.tb .seg', p);
+    const btn = $('.sban .act', p), rows = $$('.str', p), seg = $('.tb .seg', p), sub = $('#st-sub', p), badge = $('.nv[data-p=startup] .bd');
     const off = r => $('.tg', r).classList.contains('off');
     let filt = 'All';
     const filter = () => {
@@ -254,10 +254,12 @@
     const upd = () => {
       const sug = rows.filter(r => r.classList.contains('sug') && !off(r)).length;
       btn.textContent = sug ? `Turn off ${sug}` : 'Done'; btn.classList.toggle('dim', !sug);
-      $('.sban b', p).textContent = sug ? `${sug} item${sug > 1 ? 's' : ''} you likely don’t need` : 'Nothing left to turn off';
+      $('.sban b', p).textContent = sug ? `${sug} item${sug > 1 ? 's' : ''} you likely don’t need` : 'Nothing left to turn off'; $('.sban .dm', p).hidden = !sug;
       rows.forEach(r => r.classList.toggle('offd', off(r)));
       const lab = [`All ${rows.length}`, `Suggested ${rows.filter(r => r.classList.contains('sug')).length}`, `Flagged ${rows.filter(r => r.dataset.f).length}`, `Off ${rows.filter(off).length}`];
       [...seg.children].forEach((c, i) => { c.textContent = lab[i]; });
+      const run = rows.filter(r => !off(r) && /running/.test($('.stt', r).textContent)).length;
+      sub.textContent = `${rows.length} things start with your Mac · ${run} running now`; if (badge) badge.textContent = sug || '';
     };
     seg.addEventListener('click', e => {
       const o = e.target.closest('i'); if (!o) return;
@@ -265,6 +267,19 @@
       filt = nb.textContent.split(' ')[0]; filter();
     });
     p.addEventListener('flip', upd);
+    // More: Show in Finder, Copy label, Trust, Move file to Trash…
+    const close = () => { $$('.smn', p).forEach(m => m.remove()); $$('.smo.on', p).forEach(x => x.classList.remove('on')); };
+    p.addEventListener('click', e => {
+      const mo = e.target.closest('.smo');
+      if (mo) { const open = mo.classList.contains('on'); close(); if (open) return; const r = mo.closest('.str'); mo.classList.add('on');
+        r.append(el('div', 'smn', `<span data-k="f">Show in Finder</span><span data-k="c">Copy label</span>${r.dataset.f ? '<span data-k="t">Trust</span>' : ''}<hr><span data-k="x" class="bad">Move file to Trash…</span>`)); e.stopPropagation(); return; }
+      const it = e.target.closest('.smn span');
+      if (it) { const r = it.closest('.str'), k = it.dataset.k; close();
+        if (k === 't') { delete r.dataset.f; $$('.cn em', r).forEach(x => { if (!x.classList.contains('sug')) x.remove(); }); upd(); filter(); }
+        if (k === 'x') { r.classList.add('out'); setTimeout(() => { r.remove(); rows.splice(rows.indexOf(r), 1); upd(); filter(); }, 250); }
+        return; }
+      if (!e.target.closest('.smn')) close();
+    });
     btn.addEventListener('click', () => { rows.filter(r => r.classList.contains('sug')).forEach(r => $('.tg', r).classList.add('off')); upd(); });
     upd();
   })();

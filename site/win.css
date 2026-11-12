@@ -359,7 +359,7 @@
 .sban { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 6px; } .sban .cn { flex: 1; } .sban .cn b { font-weight: 500; } .sban .cn .dm { font-size: 11.5px; white-space: normal; }
 .ti2 { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: rgba(200,240,90,.12); box-shadow: inset 0 0 0 1px rgba(200,240,90,.28); color: var(--lime); flex: none; }
 .sgh { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--t2); padding: 8px 4px 2px; }
-.str { display: grid; grid-template-columns: 26px minmax(0, 1fr) 112px 78px 30px; align-items: center; gap: 12px; padding: 7px 12px; }
+.str { display: grid; grid-template-columns: 26px minmax(0, 1fr) 112px 78px 26px 30px; align-items: center; gap: 12px; padding: 7px 12px; }
 .str .ai { width: 26px; height: 26px; border-radius: 7px; font-size: 12px; }
 .str .cn b { font-weight: 400; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
 .str em { font-style: normal; font-size: 10px; color: var(--t2); } .str em.sug { color: var(--ap); } .str em.bad { color: var(--bad); } .str em.new { color: #D9F78A; }
@@ -402,19 +402,19 @@
   .switcher .main { height: 520px; }
   .switcher .pb { padding: 12px; }
   .switcher .tb .dm, .switcher .cop, .switcher .sbar2 span:last-child, .switcher .tls, .switcher .ctb .btn2 { display: none; }
-  .switcher .tb .seg, .switcher .tb .btn2 { display: none; }
+  .switcher .tb .btn2 { display: none; }
   .switcher .cr { grid-template-columns: 16px minmax(0, 1fr) 56px; } .switcher .cr .vk, .switcher .cr .chip { display: none; }
   .switcher .fb .seg { display: none; }
   .switcher .alh, .switcher .arw { grid-template-columns: 16px 22px minmax(0, 1fr) 62px; } .switcher .lu { display: none; } .switcher .alh span:nth-child(3) { display: none; }
   .switcher .hg { grid-template-columns: 1fr; grid-auto-rows: auto; } .switcher .hcpu, .switcher .hnet { grid-column: auto; } .switcher .hg .cb { min-height: 72px; flex: none; height: 72px; } .switcher .hg .hr { flex: none; height: 112px; }
   .switcher .cu2 { grid-template-columns: 1fr; } .switcher .akr code { display: none; }
-  .switcher .str { grid-template-columns: 26px minmax(0, 1fr) 30px; } .switcher .str .wh, .switcher .str .stt, .switcher .str em, .switcher .sban .dm { display: none; }
+  .switcher .str { grid-template-columns: 26px minmax(0, 1fr) 26px 30px; } .switcher .str .wh, .switcher .str .stt, .switcher .str em, .switcher .sban .dm { display: none; }
   .switcher .ag { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-rows: max-content; overflow: auto; } .switcher .apd { grid-column: auto; min-height: 180px; } .switcher .pv .ur { grid-template-columns: 52px minmax(0, 1fr) 36px; } .switcher .pv .ur .num.dm { display: none; }
   .switcher .vrc .chip, .switcher .vr .chip, .switcher .vr .btn2 { display: none; } .switcher .vr { grid-template-columns: 72px minmax(0, 1fr); }
   .switcher .cg, .switcher .fg { grid-template-columns: 1fr; grid-template-rows: none; overflow: auto; } .switcher .us2, .switcher .fbig { grid-column: auto; }
   .switcher .ur { grid-template-columns: 80px minmax(0, 1fr) 76px; } .switcher .ur .num { text-align: right; } .switcher .ur .num.dm { display: none; }
   .switcher .fbig { flex-wrap: wrap; } .switcher .fbig .fsp { flex-basis: 100%; margin: 8px 0 0; }
-  .switcher .ahero { flex-wrap: wrap; gap: 14px; } .switcher .ahero .sp, .switcher .ahero > .dm, .switcher .ahero .tg { display: none; }
+  .switcher .ahero { flex-wrap: wrap; gap: 14px; } .switcher .ahero .sp, .switcher .ahero > .dm { display: none; }
   .switcher .split2 { grid-template-columns: 1fr; } .switcher .split2 > div:last-child { display: none; }
   .switcher .tl2 .kh .dm { display: none; }
   .switcher .cpr .src, .switcher .cfl .fc:nth-child(n+4) { display: none; } .switcher .srch2 { width: 110px; }
@@ -576,7 +576,7 @@
 .kc2 { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,.08); } .kc2.none { color: var(--t3); background: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
 .cpf { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 99; animation: cpf .35s ease; } @keyframes cpf { 20% { opacity: .5; } }
 @media (max-width: 960px) { .switcher .thg { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 600px) { .switcher .thg { grid-template-columns: repeat(2, minmax(0, 1fr)); } .switcher .ckp { display: none; } .switcher .cfr { overflow-x: auto; } .switcher .chv .tb .seg { display: none; } }
+@media (max-width: 600px) { .switcher .thg { grid-template-columns: repeat(2, minmax(0, 1fr)); } .switcher .ckp { display: none; } .switcher .cfr { overflow-x: auto; } }
 
 /* Video page, like the app: the same grid as Screenshot with play tiles; Record screen with a red dot */
 .vrec { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; font-size: 12.5px; } .rdt { width: 12px; height: 12px; border-radius: 6px; background: #FF5A4E; } .vrec.on .rdt { background: var(--on-lime); animation: blink 1s steps(2) infinite; }
@@ -633,3 +633,24 @@
 .dmi .row2 { display: flex; gap: 8px; } .dmi .act, .dmi .btn2 { height: 30px; padding: 0 14px; display: inline-flex; align-items: center; } .dmi .pg { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; } .dmi .pg i { display: block; height: 100%; width: 0; background: var(--lime); transition: width 1.2s ease; }
 /* Cleanup: scanning */
 .cscan { position: absolute; inset: 44px 0 0; display: grid; place-items: center; background: rgba(14,18,12,.6); backdrop-filter: blur(2px); z-index: 3; font-size: 13px; color: var(--t2); } .cscan .pg { width: 220px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; margin-top: 10px; } .cscan .pg i { display: block; height: 100%; width: 0; background: var(--lime); transition: width 1.3s ease; }
+
+/* Startup: a More menu on each row, like the app */
+.str { position: relative; } .smo { width: 26px; height: 22px; font-size: 13px; letter-spacing: 1px; opacity: .55; } .str:hover .smo, .smo.on { opacity: 1; }
+.smn { position: absolute; right: 56px; top: calc(100% - 6px); z-index: 5; min-width: 190px; padding: 5px; border-radius: 10px; background: #2a2d2b; box-shadow: 0 10px 30px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.08); display: flex; flex-direction: column; }
+.smn span { height: 28px; display: flex; align-items: center; padding: 0 10px; border-radius: 6px; font-size: 12.5px; cursor: pointer; white-space: nowrap; } .smn span:hover { background: rgba(255,255,255,.08); } .smn span.bad { color: var(--bad); } .smn hr { border: 0; height: 1px; background: rgba(255,255,255,.08); margin: 4px 6px; }
+.str.out { opacity: 0; transition: opacity .25s; }
+
+/* Phones: headers wrap so tabs and filters stay; grids go one column and cards keep their height */
+@media (max-width: 600px) {
+  .switcher .tb { height: auto; min-height: 44px; flex-wrap: wrap; row-gap: 8px; padding: 8px 12px; }
+  .switcher .tb .seg { display: inline-flex; order: 9; margin: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .switcher .tb .seg > * { flex: none; }
+  .switcher .tb .act { margin-left: auto; }
+  .switcher .hg { grid-auto-rows: auto; } .switcher .hg > .card { min-height: 200px; } .switcher .hg > .hdev { min-height: 0; }
+  .switcher .fpg { grid-template-columns: 1fr 1fr; grid-template-rows: auto; overflow: auto; } .switcher .fpg > .fhm, .switcher .fpg > .fmd, .switcher .fpg > .fhs { grid-column: 1 / -1; }
+  .switcher .fpg > .fnc { min-height: 200px; } .switcher .fpg > .fhm { min-height: 240px; } .switcher .fpg > .fhs { min-height: 180px; }
+  .switcher .ufl { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 10px 12px 0; }
+  .switcher .ufl > * { flex: none; }
+}
+@media (max-width: 600px) { .switcher .pane[data-p=video] .tb .seg { margin-left: 0; } .switcher .blk b { white-space: nowrap; font-size: 11px; } }
+@media (max-width: 600px) { .switcher .vst { grid-template-columns: minmax(0, 1fr); padding: 12px; } .switcher .vst > div { min-width: 0; } .switcher .hsw > div { gap: 8px; } }
