@@ -123,9 +123,9 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
     }
     match action {
         SheetAction::Open(tool) => cx.open_page(tool, ""),
-        SheetAction::SpeedTest => {
+        SheetAction::SpeedTest(mode) => {
             // a test already under way just shows again
-            monitor::start_speed_test(mon.clone(), ui.ctx().clone());
+            monitor::start_speed_test(mon.clone(), ui.ctx().clone(), mode);
             super::speed::open(ui.ctx());
         }
         SheetAction::MeasureFolders => monitor::measure_folders(mon.clone(), ui.ctx().clone()),
@@ -147,8 +147,8 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
             P::Forget(key) => monitor::forget_device(mon, &key),
         }
     }
-    if super::speed::modal(ui, &s.speed) {
-        monitor::start_speed_test(mon.clone(), ui.ctx().clone());
+    if let Some(mode) = super::speed::modal(ui, &s.speed) {
+        monitor::start_speed_test(mon.clone(), ui.ctx().clone(), mode);
     }
 }
 
@@ -358,11 +358,17 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
         tile::spark(p, gr, &s.net_history, TEAL(), None);
     }
     let mut out = None;
-    let label = "Test speed";
-    let bw = button_width(p, label, BTN_SECONDARY);
-    let br = Rect::from_min_size(Pos2::new(r.left(), r.bottom() - 26.0), Vec2::new(bw, 26.0));
-    if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
-        out = Some(SheetAction::SpeedTest);
+    // the two tests side by side; each opens the dial in its mode
+    let mut x = r.left();
+    for mode in [super::monitor::SpeedMode::Quick, super::monitor::SpeedMode::Full] {
+        let label = mode.label();
+        let bw = button_width(p, label, BTN_SECONDARY);
+        let br = Rect::from_min_size(Pos2::new(x, r.bottom() - 26.0), Vec2::new(bw, 26.0));
+        let tip = if mode == super::monitor::SpeedMode::Quick { "About 10 seconds" } else { "About 20 seconds, more streams" };
+        if pill_button(ui, br, label, BTN_SECONDARY, !s.speed.running).on_hover_text(tip).clicked() {
+            out = Some(SheetAction::SpeedTest(mode));
+        }
+        x = br.right() + sp::S;
     }
     out
 }

@@ -2,7 +2,7 @@
 //! several connections at once, each phase boxed in time. The first moments
 //! of a transfer (TCP slow start) don't count toward the result.
 
-use super::monitor::{Shared, SpeedPhase, SpeedTest};
+use super::monitor::{Shared, SpeedMode, SpeedPhase, SpeedTest};
 use crate::kit::mechanics as m;
 use crate::kit::sync::LockExt;
 use serde_json::Value;
@@ -110,7 +110,7 @@ fn phase_frac(elapsed: Duration, total: Duration) -> f32 {
 /// Run `streams` workers until `length` passes or the test is stopped,
 /// sampling the bytes they move. `report` gets (live Mbps, 0..1).
 /// Returns the measured Mbps, or None when nothing came through.
-fn transfer<W>(streams: usize, length: Duration, stopped: &(dyn Fn() -> bool + Sync), report: &dyn Fn(f64, f32), worker: W) -> Option<f64>
+fn transfer<W>(streams: usize, length: Duration, grace: Duration, stopped: &(dyn Fn() -> bool + Sync), report: &dyn Fn(f64, f32), worker: W) -> Option<f64>
 where
     W: Fn(&AtomicU64, &(dyn Fn() -> bool + Sync)) + Sync,
 {
@@ -118,7 +118,7 @@ where
     let over = AtomicBool::new(false);
     let alive = AtomicUsize::new(streams);
     let done = || over.load(Ordering::Relaxed) || stopped();
-    let mut meter = Meter::new(m::SPEED_TEST_GRACE);
+    let mut meter = Meter::new(grace);
     let mut last = 0.0;
     let t0 = Instant::now();
     std::thread::scope(|sc| {
@@ -212,13 +212,31 @@ impl Read for Zeros<'_> {
 
 // ---------------------------------------------------------------- the test
 
-pub fn start(shared: Shared, ctx: egui::Context) {
+/// What a mode measures with: pings, seconds per phase, the grace before
+/// the meter counts, and download / upload streams.
+struct Plan {
+    pings: usize,
+    phase: Duration,
+    grace: Duration,
+    down: usize,
+    up: usize,
+}
+
+fn plan(mode: SpeedMode) -> Plan {
+    match mode {
+        SpeedMode::Quick => Plan { pings: 5, phase: Duration::from_secs(4), grace: Duration::from_millis(1000), down: 4, up: 3 },
+        SpeedMode::Full => Plan { pings: m::SPEED_TEST_PINGS, phase: m::SPEED_TEST_PHASE, grace: m::SPEED_TEST_GRACE, down: m::SPEED_TEST_STREAMS_DOWN, up: m::SPEED_TEST_STREAMS_UP },
+    }
+}
+
+pub fn start(shared: Shared, ctx: egui::Context, mode: SpeedMode) {
+    let pl = plan(mode);
     {
         let mut s = shared.lock_ok();
         if s.speed.running {
             return;
         }
-        s.speed = SpeedTest { running: true, phase: SpeedPhase::Ping, ..Default::default() };
+        s.speed = SpeedTest { mode, running: true, phase: SpeedPhase::Ping, ..Default::default() };
     }
     let cancel = shared.lock_ok().speed.cancel.clone();
     std::thread::spawn(move || {
@@ -262,7 +280,7 @@ pub fn start(shared: Shared, ctx: egui::Context) {
                 return;
             }
             let mut rtts = Vec::new();
-            for i in 0..m::SPEED_TEST_PINGS {
+            for i in 0..pl.pings {
                 if stopped() {
                     finish(None);
                     return;
@@ -273,7 +291,7 @@ pub fn start(shared: Shared, ctx: egui::Context) {
                     let server = r.headers().get("server-timing").and_then(|h| h.to_str().ok()).and_then(server_ms).unwrap_or(0.0);
                     rtts.push((total - server).max(0.1));
                 }
-                let frac = (i + 1) as f32 / m::SPEED_TEST_PINGS as f32;
+                let frac = (i + 1) as f32 / pl.pings as f32;
                 let (lat, jit) = (median(&rtts), jitter(&rtts));
                 set(&|s| {
                     s.latency_ms = lat;
@@ -302,7 +320,7 @@ pub fn start(shared: Shared, ctx: egui::Context) {
                 s.progress = base + share * frac;
             })
         };
-        let down = transfer(m::SPEED_TEST_STREAMS_DOWN, m::SPEED_TEST_PHASE, &stopped, &report(0.1, 0.5), |b, d| download_stream(&agent, b, d));
+        let down = transfer(pl.down, pl.phase, pl.grace, &stopped, &report(0.1, 0.5), |b, d| download_stream(&agent, b, d));
         if stopped() {
             set(&|s| s.down_mbps = down);
             finish(None);
@@ -320,7 +338,7 @@ pub fn start(shared: Shared, ctx: egui::Context) {
         });
 
         // upload
-        let up = transfer(m::SPEED_TEST_STREAMS_UP, m::SPEED_TEST_PHASE, &stopped, &report(0.6, 0.4), |b, d| upload_stream(&agent, b, d));
+        let up = transfer(pl.up, pl.phase, pl.grace, &stopped, &report(0.6, 0.4), |b, d| upload_stream(&agent, b, d));
         set(&|s| {
             if !stopped() {
                 s.up_mbps = up;
@@ -400,7 +418,7 @@ mod tests {
     fn transfer_counts_bytes_and_stops_on_time() {
         // workers that move 1 MB every 10 ms until told to stop
         let t0 = Instant::now();
-        let r = transfer(3, Duration::from_millis(400), &|| false, &|_, _| {}, |b, done| {
+        let r = transfer(3, Duration::from_millis(400), Duration::ZERO, &|| false, &|_, _| {}, |b, done| {
             while !done() {
                 b.fetch_add(1_000_000, Ordering::Relaxed);
                 std::thread::sleep(Duration::from_millis(10));
@@ -412,7 +430,7 @@ mod tests {
 
     #[test]
     fn transfer_with_nothing_through_is_none() {
-        let r = transfer(2, Duration::from_millis(200), &|| false, &|_, _| {}, |_, _| {});
+        let r = transfer(2, Duration::from_millis(200), Duration::ZERO, &|| false, &|_, _| {}, |_, _| {});
         assert_eq!(r, None);
     }
 }

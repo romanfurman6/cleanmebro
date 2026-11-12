@@ -340,9 +340,9 @@ pub fn detail(mon: &monitor::Shared, d: &str, ui: &mut Ui, rect: Rect, cx: &mut 
     match sheets::sheet(ui, rect, kind, &s) {
         Action::Close => cx.close_detail(),
         Action::Open(tool) => cx.open_page(tool, ""),
-        Action::SpeedTest => {
+        Action::SpeedTest(mode) => {
             // the same modal as on the Mac Health page
-            monitor::start_speed_test(mon.clone(), ui.ctx().clone());
+            monitor::start_speed_test(mon.clone(), ui.ctx().clone(), mode);
             super::speed::open(ui.ctx());
         }
         Action::MeasureFolders => monitor::measure_folders(mon.clone(), ui.ctx().clone()),
@@ -351,8 +351,10 @@ pub fn detail(mon: &monitor::Shared, d: &str, ui: &mut Ui, rect: Rect, cx: &mut 
         Action::OpenBluetooth => devices::open_bluetooth_settings(),
         Action::None => {}
     }
-    if kind == Sheet::Network && super::speed::modal(ui, &s.speed) {
-        monitor::start_speed_test(mon.clone(), ui.ctx().clone());
+    if kind == Sheet::Network {
+        if let Some(mode) = super::speed::modal(ui, &s.speed) {
+            monitor::start_speed_test(mon.clone(), ui.ctx().clone(), mode);
+        }
     }
 }
 
