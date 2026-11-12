@@ -2,7 +2,9 @@
 //! Bluetooth devices, shown as panel widgets with a detail sheet each.
 
 use crate::kit::sync::LockExt;
+mod ble;
 mod devices;
+mod devices_store;
 mod devices_ui;
 pub mod monitor;
 mod page;
@@ -118,7 +120,7 @@ impl Tool for System {
     /// The emptiest Bluetooth device while it is low ("Mouse 14%").
     fn tray_title(&self) -> Option<String> {
         let s = self.mon.lock_ok();
-        devices::tray_title(&s.devices, s.bt_prefs)
+        devices::tray_title(&s.devices, &s.bt_prefs)
     }
 
     fn demo_view(&mut self, view: &str) -> Option<View> {

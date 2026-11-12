@@ -873,6 +873,9 @@ pub enum Icon {
     Mouse,
     Keyboard,
     Trackpad,
+    Gamepad,
+    Phone,
+    Tablet,
     // permissions
     ScreenRec,
     Access,
@@ -952,6 +955,9 @@ pub fn symbol_name(icon: Icon) -> Option<&'static str> {
         Icon::Mouse => "magicmouse",
         Icon::Keyboard => "keyboard",
         Icon::Trackpad => "rectangle.and.hand.point.up.left",
+        Icon::Gamepad => "gamecontroller",
+        Icon::Phone => "iphone",
+        Icon::Tablet => "ipad",
         Icon::ScreenRec => "rectangle.dashed.badge.record",
         Icon::Access => "accessibility",
         Icon::Script => "applescript",
@@ -1240,6 +1246,21 @@ fn icon_drawn(p: &Painter, icon: Icon, rect: Rect, color: Color32) {
             boxr(4.0, 5.0, 20.0, 19.0, 2.5);
             open(&[(4.0, 15.0), (20.0, 15.0)]);
             open(&[(12.0, 15.0), (12.0, 19.0)]);
+        }
+        Icon::Gamepad => {
+            boxr(3.0, 7.0, 21.0, 17.0, 5.0);
+            open(&[(6.5, 12.0), (10.5, 12.0)]);
+            open(&[(8.5, 10.0), (8.5, 14.0)]);
+            dot(15.5, 11.0, 1.1);
+            dot(17.5, 13.5, 1.1);
+        }
+        Icon::Phone => {
+            boxr(7.0, 3.0, 17.0, 21.0, 2.5);
+            open(&[(10.5, 18.0), (13.5, 18.0)]);
+        }
+        Icon::Tablet => {
+            boxr(4.0, 3.0, 20.0, 21.0, 2.5);
+            dot(12.0, 18.5, 0.9);
         }
         Icon::ScreenRec => {
             boxr(3.0, 5.0, 21.0, 17.0, 2.0);

@@ -96,8 +96,8 @@ fn metric(s: &Snapshot, id: &str) -> Option<Metric> {
             (Icon::Wifi, name, split_num(&human_rate(s.net_down)), format!("↑ {}", human_rate(s.net_up)), None)
         }
         "devices" => {
-            let n = s.devices.len();
-            let low = devices::lowest_first(&s.devices).into_iter().next();
+            let n = s.devices.iter().filter(|d| d.live()).count();
+            let low = devices::lowest_first(&s.devices).into_iter().find(|d| d.live());
             let caption = if n == 0 { "None connected".to_string() } else { devices_ui::note(&s.devices) };
             match low.as_ref().and_then(|d| d.battery().map(|b| (d, b))) {
                 Some((d, b)) => (d.kind.icon(), "Devices".into(), (b.to_string(), "%".into()), caption, Some(((b as f32 / 100.0).clamp(0.02, 1.0), devices::color(b)))),

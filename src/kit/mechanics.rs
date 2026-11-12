@@ -17,6 +17,8 @@ pub const BT_LOW_BATTERY_MAX_PCT: u8 = 19;
 pub const BT_CRITICAL_BATTERY_MAX_PCT: u8 = 9;
 /// Ours: a device charged to this forgets its earlier low-battery alerts.
 pub const BT_ALERT_RESET_PCT: u8 = 30;
+/// Ours: earbuds this close (left vs right) show as one number.
+pub const BT_MERGE_PODS_PCT: u8 = 5;
 /// AssistantDomain sub_20544 arguments: recommendation priorities.
 pub const PRIORITY_DRIVE_HEALTH: u32 = 100;
 pub const PRIORITY_BATTERY_HEALTH: u32 = 80;

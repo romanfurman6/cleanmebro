@@ -50,6 +50,7 @@ pub struct Battery {
 
 pub use super::devices::Device;
 use super::devices;
+use super::devices_store::{History, Seen};
 
 #[derive(Clone, Debug, Default)]
 pub struct Wifi {
@@ -135,7 +136,10 @@ pub struct Snapshot {
     pub net_recv_total: u64,
     pub online: bool,
     pub wifi: Wifi,
+    /// Bluetooth devices: connected ones, then ones seen before.
     pub devices: Vec<Device>,
+    /// The ones the person hid (still listed on the Devices page).
+    pub hidden_devices: Vec<Device>,
     /// Device alert and menu bar settings (changed from the Devices sheet).
     pub bt_prefs: devices::Prefs,
     pub speed: SpeedTest,
@@ -205,14 +209,95 @@ impl Snapshot {
 
 pub type Shared = Arc<Mutex<Snapshot>>;
 
-/// Change the device alert / menu bar settings and save them.
+/// Change the device alert / menu bar settings and save them. Hiding or
+/// showing a device takes effect at once.
 pub fn change_bt_prefs(mon: &Shared, f: impl FnOnce(&mut devices::Prefs)) {
     let prefs = {
         let mut s = mon.lock_ok();
         f(&mut s.bt_prefs);
-        s.bt_prefs
+        let mut all = std::mem::take(&mut s.devices);
+        all.append(&mut s.hidden_devices);
+        let (shown, hidden) = s.bt_prefs.split(devices::lowest_first(&all));
+        s.devices = shown;
+        s.hidden_devices = hidden;
+        s.bt_prefs.clone()
     };
     prefs.save();
+}
+
+/// What the devices list remembers: last known charges and a week of history.
+struct BtStore {
+    seen: Seen,
+    history: History,
+}
+
+static BT_STORE: std::sync::OnceLock<Mutex<BtStore>> = std::sync::OnceLock::new();
+
+fn bt_store() -> &'static Mutex<BtStore> {
+    BT_STORE.get_or_init(|| {
+        let now = devices::now();
+        let mut history: History = crate::kit::fs::load_json(&History::path());
+        history.prune(now);
+        Mutex::new(BtStore { seen: crate::kit::fs::load_json(&Seen::path()), history })
+    })
+}
+
+/// Forget a device that isn't connected: its last charge, its history and
+/// its settings.
+pub fn forget_device(mon: &Shared, key: &str) {
+    {
+        let mut st = bt_store().lock_ok();
+        st.seen.forget(key);
+        st.history.forget(key);
+        crate::kit::fs::save_json_later(&Seen::path(), &st.seen, false);
+        crate::kit::fs::save_json_later(&History::path(), &st.history, false);
+    }
+    change_bt_prefs(mon, |p| {
+        p.devices.remove(key);
+    });
+    let mut s = mon.lock_ok();
+    s.devices.retain(|d| d.live() || d.key() != key);
+    s.hidden_devices.retain(|d| d.live() || d.key() != key);
+}
+
+/// The full device list: what's connected (the report, the input
+/// registry, Bluetooth LE and controllers), then what was seen before;
+/// each with its trend and estimate. Updates the stores.
+fn read_devices(profile: &devices::Profile) -> Vec<Device> {
+    let mut list = profile.connected.clone();
+    let mut io = run_cmd("ioreg", &["-r", "-l", "-k", "BatteryPercent"]);
+    io.push_str(&run_cmd("ioreg", &["-r", "-l", "-k", "BatteryPercentSingle"]));
+    devices::merge(&mut list, &devices::parse_ioreg(&io));
+    devices::merge_extra(&mut list, &profile.paired_pods, &super::ble::adverts(), &super::ble::extra());
+    let now = devices::now();
+    let mut st = bt_store().lock_ok();
+    let mut history_changed = false;
+    for d in &list {
+        if let Some(b) = d.battery() {
+            history_changed |= st.history.record(&d.key(), now, b);
+        }
+    }
+    if st.seen.update(&list, now) || SEEN_SAVE_EVERY.with_borrow_mut(|e| e.due(SEEN_SAVE)) {
+        crate::kit::fs::save_json_later(&Seen::path(), &st.seen, false);
+    }
+    if history_changed && HISTORY_SAVE_EVERY.with_borrow_mut(|e| e.due(HISTORY_SAVE)) {
+        crate::kit::fs::save_json_later(&History::path(), &st.history, false);
+    }
+    let away = st.seen.away(&list);
+    list.extend(away);
+    for d in &mut list {
+        let key = d.key();
+        d.trend = st.history.trend(&key, now);
+        d.eta = if d.charging || !d.live() { None } else { st.history.eta(&key) };
+    }
+    list
+}
+
+const SEEN_SAVE: Duration = Duration::from_secs(10 * 60);
+const HISTORY_SAVE: Duration = Duration::from_secs(15 * 60);
+thread_local! {
+    static SEEN_SAVE_EVERY: std::cell::RefCell<Every> = std::cell::RefCell::new(Every::default());
+    static HISTORY_SAVE_EVERY: std::cell::RefCell<Every> = std::cell::RefCell::new(Every::default());
 }
 
 pub fn start(ctx: egui::Context, demo: bool) -> Shared {
@@ -252,8 +337,11 @@ const BATTERY_EVERY: Cadence = Cadence::secs(10, Some(60));
 const BATTERY_HEALTH_EVERY: Duration = Duration::from_secs(30 * 60);
 /// Input devices (`ioreg`): batteries for the alerts and the menu-bar title.
 const HID_EVERY: Cadence = Cadence::secs(10, Some(60));
-/// The full Bluetooth report (`system_profiler`, slow).
+/// The full Bluetooth report (`system_profiler`, slow). A device coming or
+/// going refreshes it at once, so this is only for levels.
 const BT_PROFILE_EVERY: Cadence = Cadence::secs(60, Some(10 * 60));
+/// After a connect, look again this much later (levels arrive late).
+const BT_RECHECK_AFTER: Duration = Duration::from_secs(12);
 /// The network's name (`ipconfig`, fast).
 const WIFI_EVERY: Cadence = Cadence::secs(60, None);
 /// Channel, signal and so on (`system_profiler`, ~10 s as it may scan).
@@ -323,8 +411,12 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
     let mut last_ticks = cpu_ticks();
     let mut last_net = Instant::now();
     // the slow Bluetooth report, refreshed from the input registry in between
-    let mut bt_profile: Vec<Device> = Vec::new();
+    let mut bt_profile = devices::Profile::default();
     let mut bt_alerts = devices::Alerts::default();
+    // the connected set, to refresh as soon as a device comes or goes; and
+    // a second look a little later (the report lags behind a connect)
+    let mut bt_connected: Option<Vec<String>> = None;
+    let mut bt_recheck: Option<Instant> = None;
     let (mut battery_at, mut health_at, mut hid_at, mut profile_at) = (Every::default(), Every::default(), Every::default(), Every::default());
     let (mut wifi_at, mut wifi_details_at, mut sizes_at) = (Every::default(), Every::default(), Every::default());
     let mut wifi_info = Wifi::default();
@@ -379,15 +471,29 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
             wifi_info = wifi_details();
         }
         let wifi = WIFI_EVERY.due(&mut wifi_at).then(|| wifi_name(&wifi_info));
+        // Bluetooth LE: starts once the panel has been opened (it may ask
+        // for the Bluetooth permission), then scans now and then
+        if activity::visible() {
+            super::ble::start();
+        }
+        super::ble::tick();
+        if let Some(now_connected) = super::ble::connected() {
+            if bt_connected.as_ref().is_some_and(|c| *c != now_connected) {
+                profile_at.reset();
+                hid_at.reset();
+                bt_recheck = Some(Instant::now() + BT_RECHECK_AFTER);
+            }
+            bt_connected = Some(now_connected);
+        }
+        if bt_recheck.is_some_and(|t| Instant::now() >= t) {
+            bt_recheck = None;
+            profile_at.reset();
+        }
         let slow_profile = BT_PROFILE_EVERY.due(&mut profile_at);
         if slow_profile {
             bt_profile = devices::parse_profiler(&run_cmd("system_profiler", &["SPBluetoothDataType", "-json"]));
         }
-        let devices = (HID_EVERY.due(&mut hid_at) || slow_profile).then(|| {
-            let mut list = bt_profile.clone();
-            devices::merge(&mut list, &devices::parse_ioreg(&run_cmd("ioreg", &["-r", "-l", "-k", "BatteryPercent"])));
-            list
-        });
+        let devices = (HID_EVERY.due(&mut hid_at) || slow_profile).then(|| read_devices(&bt_profile));
 
         {
             let mut s = shared.lock_ok();
@@ -434,15 +540,16 @@ fn run(shared: Shared, ctx: egui::Context, _demo: bool) {
                 s.battery = b;
             }
             if let Some(d) = devices {
-                if s.bt_prefs.alerts {
-                    for (title, body) in bt_alerts.check(&d) {
-                        crate::kit::notify::send(&title, &body);
-                    }
-                } else {
-                    // stay quiet, but remember so turning alerts on doesn't replay old ones
-                    bt_alerts.check(&d);
+                let notes = bt_alerts.check(&d, &s.bt_prefs);
+                // with alerts off, stay quiet but remember, so turning them
+                // on doesn't replay old ones
+                // each kind goes out only while its own switch is on
+                for n in notes.into_iter().filter(|n| n.charged || s.bt_prefs.alerts) {
+                    crate::kit::notify::send(&n.title, &n.body);
                 }
-                s.devices = d;
+                let (shown, hidden) = s.bt_prefs.split(d);
+                s.devices = shown;
+                s.hidden_devices = hidden;
             }
             if let Some(w) = wifi {
                 s.wifi = w;
@@ -792,6 +899,7 @@ pub fn demo_snapshot() -> Snapshot {
         online: true,
         wifi: Wifi { name: "Home Wi-Fi".into(), security: "WPA3 PERSONAL".into(), phy: "802.11ax".into(), channel: "149 (5GHz, 80MHz)".into(), signal: "-52 dBm / -92 dBm".into(), wired: false },
         devices: devices::demo(),
+        hidden_devices: vec![],
         bt_prefs: devices::Prefs::default(),
         speed: SpeedTest::default(),
         apps: [("Safari", 2_400_000.0, 61_000.0), ("Slack", 180_000.0, 24_000.0), ("Music", 96_000.0, 2_000.0)]
