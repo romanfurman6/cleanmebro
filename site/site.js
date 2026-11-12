@@ -62,6 +62,28 @@
   }
 
   if (still) return;
+
+  // Hero: the app it replaces rolls over, letter by letter
+  const swap = $('swap');
+  if (swap) {
+    const names = ['CleanMyMac', 'Loom', 'CleanShot X', 'Paste', 'iStat Menus', 'Wispr Flow', 'DaisyDisk'];
+    const word = t => { const w = document.createElement('span'); w.className = 'w'; [...t].forEach(ch => { const c = document.createElement('span'); c.className = 'c'; c.textContent = ch; w.append(c); }); return w; };
+    let k = 0, cur = swap.querySelector('.w');
+    cur.replaceWith(cur = word(names[0]));
+    setInterval(() => {
+      if (document.hidden) return;
+      k = (k + 1) % names.length;
+      const out = cur, next = word(names[k]);
+      [...out.children].forEach((c, i) => c.animate(
+        [{ transform: 'none', opacity: 1, filter: 'blur(0)' }, { transform: 'translateY(-55%) rotateX(80deg)', opacity: 0, filter: 'blur(6px)' }],
+        { duration: 380, delay: i * 22, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'forwards' }));
+      setTimeout(() => out.remove(), 380 + out.children.length * 22);
+      swap.append(next); cur = next;
+      [...next.children].forEach((c, i) => c.animate(
+        [{ transform: 'translateY(60%) rotateX(-85deg)', opacity: 0, filter: 'blur(6px)' }, { transform: 'none', opacity: 1, filter: 'blur(0)' }],
+        { duration: 620, delay: 140 + i * 28, easing: 'cubic-bezier(.2,1.4,.4,1)', fill: 'backwards' }));
+    }, 2400);
+  }
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // CPU in the menu bar and the panel, a new sample every 0.8s

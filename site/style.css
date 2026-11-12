@@ -110,8 +110,12 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 
 /* Message: subline and facts under the headline */
 .hero .sub { margin-top: 20px; max-width: 500px; font-size: 19px; line-height: 29px; font-weight: 500; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.55), 0 2px 18px rgba(0,0,0,.65); }
-.facts { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 28px; padding-top: 18px; font-size: 14px; line-height: 20px; color: rgba(255,255,255,.72); }
-.facts > span { display: inline-flex; align-items: center; gap: 7px; } .facts > span::before { content: ""; width: 5px; height: 5px; border-radius: 3px; background: var(--lime); }
+.swap { display: block; position: relative; height: 46px; margin-top: 4px; font-size: 38px; line-height: 46px; font-weight: 600; letter-spacing: -0.02em; color: var(--lime); white-space: nowrap; perspective: 600px; }
+.swap .w { position: absolute; left: 0; top: 0; }
+.swap .c { display: inline-block; white-space: pre; transform-origin: 50% 100%; will-change: transform, opacity, filter; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 28px; padding-top: 18px; font-size: 14px; line-height: 20px; font-weight: 500; color: #fff; }
+.facts > span, .facts .ver { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 16px; background: rgba(8,12,8,.62); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.facts .ver { color: var(--lime); text-decoration: none; } .facts > span::before { content: ""; width: 5px; height: 5px; border-radius: 3px; background: var(--lime); }
 .facts .ver { font-size: 14px; }
 
 /* One icon for every job */
@@ -204,11 +208,13 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 
 /* Yours to keep, Install */
 .trust { padding-top: 24px; padding-bottom: 112px; }
-.tl { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 36px; }
-.tl li { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding: 24px; border-radius: 16px; background: rgba(255,255,255,.04); box-shadow: inset 0 0 0 1px var(--hair); }
+.tl { list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 36px; }
+.tl li { display: flex; align-items: center; gap: 24px; padding: 24px 28px; border-radius: 16px; background: rgba(255,255,255,.04); box-shadow: inset 0 0 0 1px var(--hair); }
 .kc { display: grid; place-items: center; min-width: 96px; height: 84px; padding: 0 18px; border-radius: 18px; font: 500 38px/1 var(--sans); letter-spacing: -.02em; color: var(--lime); background: linear-gradient(180deg, rgba(200,240,90,.16), rgba(200,240,90,.06)); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 0 0 1px rgba(200,240,90,.28), 0 6px 0 rgba(0,0,0,.45); }
 
-.tl b { font-weight: 500; font-size: 17px; line-height: 24px; }
+.tl b { font-weight: 500; font-size: 19px; line-height: 26px; }
+.tl .tx { display: flex; flex-direction: column; gap: 4px; min-width: 0; } .tl .tx span { font-size: 15px; line-height: 22px; color: rgba(255,255,255,.6); }
+.kc { flex: none; width: 120px; padding: 0; }
 .inst { padding-top: 104px; padding-bottom: 112px; }
 .steps { list-style: none; counter-reset: s; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin-top: 36px; }
 .steps li { counter-increment: s; display: flex; flex-direction: column; gap: 8px; padding-top: 18px; border-top: 1px solid var(--hair); }
@@ -217,13 +223,13 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .steps code { font: 400 13.5px "SF Mono", ui-monospace, Menlo, monospace; color: #fff; }
 .inst .cta { margin-top: 40px; align-items: center; }
 
-@media (max-width: 1100px) { .jobs { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .jobs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) {
   .jobs { grid-template-columns: 1fr; gap: 20px; } .mbx .mn span { display: none; } .mbx .icons { left: 70px; right: 10px; gap: 0; } .mbx { height: 450px; } .mpn { right: 10px; width: calc(100% - 20px); padding: 10px; } .wgrid { gap: 6px; } .wg { padding: 8px; min-height: 74px; } .wt b { font-size: 12px; } .wbtn { display: none; } .mi2 { width: 22px; } .mbx .mi2.sy { display: none; }
-  .tl { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .tl li { padding: 18px; } .kc { min-width: 72px; height: 64px; font-size: 28px; } .tl b { font-size: 15px; }
+  .tl { grid-template-columns: minmax(0, 1fr); gap: 12px; } .tl li { padding: 18px; gap: 18px; } .tl .tx span { font-size: 14px; line-height: 20px; } .kc { min-width: 0; width: 88px; height: 64px; font-size: 26px; } .tl b { font-size: 15px; }
   .repl h2, .trust h2, .inst h2 { font-size: 34px; line-height: 40px; }
   .repl, .inst { padding-top: 64px; } .inst { padding-bottom: 72px; }
-  .hero .sub { font-size: 17px; line-height: 26px; }
+  .hero .sub { font-size: 17px; line-height: 26px; } .swap { font-size: 30px; height: 38px; line-height: 38px; }
 }
 .foot .tm { display: block; margin-top: 6px; font-size: 12px; line-height: 18px; color: rgba(255,255,255,.4); }
 .jt em { font-style: normal; font-size: 12.5px; line-height: 18px; color: rgba(255,155,122,.85); }
