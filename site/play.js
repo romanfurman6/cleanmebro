@@ -442,8 +442,9 @@
     ap.forEach((ic, k) => ic.style.setProperty('--k', k));
     const wOf = i => wg.find(w => +w.dataset.i === i);
     const label = async t => { n.classList.add('flip'); await sleep(300); n.textContent = t; n.classList.remove('flip'); };
-    const reset = () => { bars.className = 'bars'; ap.forEach(ic => ic.classList.remove('out')); wg.forEach(w => w.classList.remove('on')); n.textContent = '11 apps'; };
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { bars.classList.add('b-one', 'b-open'); ap.forEach(ic => ic.classList.add('out')); wg.forEach(w => w.classList.add('on')); n.textContent = '1 app'; return; }
+    const vb = $$('#verbs span'), lit = i => { const v = vb.find(v => +v.dataset.i === i); if (v) v.classList.add('on'); };
+    const reset = () => { bars.className = 'bars'; vb.forEach(v => v.classList.remove('on')); ap.forEach(ic => ic.classList.remove('out')); wg.forEach(w => w.classList.remove('on')); n.textContent = '11 apps'; };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { bars.classList.add('b-one', 'b-open'); ap.forEach(ic => ic.classList.add('out')); wg.forEach(w => w.classList.add('on')); vb.forEach(v => v.classList.add('on')); n.textContent = '1 app'; return; }
     const ORDER = [5, 0, 9, 3, 7, 2, 10, 6, 1, 8, 4];
     let gen = 0, on = false;
     const fly = (ic, w, i) => {
@@ -457,7 +458,7 @@
         { transform: `translate(${dx * 0.35 + side}px, ${lift}px) scale(1.7) rotate(${tilt}deg)`, offset: 0.32, easing: 'cubic-bezier(.5,0,.3,1)' },
         { transform: `translate(${dx}px, ${dy}px) scale(1.05) rotate(0deg)` }
       ], { duration: 820 + (i * 53) % 220, fill: 'forwards' });
-      return new Promise(r => { an.onfinish = () => { f.remove(); w.classList.add('on'); r(); }; });
+      return new Promise(r => { an.onfinish = () => { f.remove(); w.classList.add('on'); lit(+w.dataset.i); r(); }; });
     };
     const play = async id => {
       reset(); await sleep(700); if (id !== gen) return;

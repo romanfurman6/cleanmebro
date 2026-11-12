@@ -233,3 +233,7 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 }
 .foot .tm { display: block; margin-top: 6px; font-size: 12px; line-height: 18px; color: rgba(255,255,255,.4); }
 .jt em { font-style: normal; font-size: 12.5px; line-height: 18px; color: rgba(255,155,122,.85); }
+
+.verbs { display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: 760px; }
+.verbs span { color: rgba(255,255,255,.28); transition: color .35s ease; }
+.verbs span.on { color: #fff; }
