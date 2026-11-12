@@ -784,7 +784,12 @@ pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     // the secret goes straight to the Keychain and is never shown back
     // only here (the user opened Sharing) is the Keychain asked whether a
     // key exists; settings remember the answer for everywhere else
+    let first = c.has_secret.is_none();
     let has_secret = *c.has_secret.get_or_insert_with(|| secret::exists(VIDEO_ACCOUNT));
+    if first && has_secret {
+        // ask macOS for access now, while they're looking at Sharing
+        secret::approve_now(VIDEO_ACCOUNT);
+    }
     if has_secret != c.settings.share.secret_saved {
         c.settings.share.secret_saved = has_secret;
         c.save_settings();
@@ -799,6 +804,8 @@ pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
                 c.has_secret = Some(true);
                 c.settings.share.secret_saved = true;
                 c.save_settings();
+                // read it straight back: any approval happens now, not on the first upload
+                secret::approve_now(VIDEO_ACCOUNT);
                 c.hud("Secret key saved in the Keychain")
             }
             Err(e) => c.hud(format!("Couldn't save to the Keychain: {e}")),

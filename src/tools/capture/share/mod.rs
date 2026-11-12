@@ -99,6 +99,17 @@ pub mod secret {
         *seen.get_or_insert_with(HashMap::new).entry(account.to_string()).or_insert_with(|| keychain::exists(account))
     }
 
+    /// Read the key now, from the Keychain itself, on a thread: if macOS
+    /// wants to ask, it asks while the person is on the Sharing page (not in
+    /// the middle of an upload), and the answer is kept for this run.
+    pub fn approve_now(account: &str) {
+        let account = account.to_string();
+        std::thread::spawn(move || {
+            let v = keychain::get(&account);
+            CACHE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(account, v);
+        });
+    }
+
     pub fn get(account: &str) -> Option<String> {
         let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
         c.get_or_insert_with(HashMap::new).entry(account.to_string()).or_insert_with(|| keychain::get(account)).clone()
