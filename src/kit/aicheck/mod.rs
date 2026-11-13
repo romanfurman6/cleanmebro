@@ -359,9 +359,9 @@ fn parse(text: &str, ask: &Ask) -> Option<(String, Vec<Rec>)> {
             key,
             action: id.into(),
             label: label.into(),
-            title: clip(&r.title, 40),
+            title: clip(&r.title, 80),
             value: clip(&r.value, 14),
-            why: clip(&r.why, 110),
+            why: clip(&r.why, 220),
             icon: item.icon.clone(),
             name: item.name.clone(),
         });
@@ -371,7 +371,7 @@ fn parse(text: &str, ask: &Ask) -> Option<(String, Vec<Rec>)> {
     }
     // answers first, in the order the agent gave
     out.sort_by_key(|o| !ask.answer.contains(&o.key));
-    Some((clip(&ans.headline, 70), out))
+    Some((clip(&ans.headline, 200), out))
 }
 
 // ---------------------------------------------------------------- settings

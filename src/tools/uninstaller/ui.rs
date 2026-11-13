@@ -184,6 +184,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     };
     let sub = match (u.tab, phase) {
         (Tab::Leftovers, _) => "Data left behind by apps that are no longer installed".to_string(),
+        (_, Phase::Idle) => String::new(),
         (_, Phase::Listing) => "Looking for apps…".to_string(),
         (_, Phase::Sizing { done, total: t }) => format!("{n_apps} apps · measuring {done} of {t}…"),
         _ => format!("{n_apps} apps · {} · drop any app on this window to remove it", human_bytes(total)),
@@ -345,7 +346,9 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let rows = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - 2.0));
     if ids.is_empty() {
         let (msg, hint) = match u.st.lock_ok().phase {
-            Phase::Listing | Phase::Idle => ("Looking for apps…", ""),
+            // Idle = not scanned (no Full Disk Access yet: the lock says so)
+            Phase::Idle => ("", ""),
+            Phase::Listing => ("Looking for apps…", ""),
             _ if u.search.is_empty() && u.filter == Filter::All => ("No apps found", "Apps in /Applications and ~/Applications show here."),
             _ => ("Nothing matches", "Try another filter or search."),
         };

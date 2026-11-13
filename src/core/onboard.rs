@@ -694,14 +694,18 @@ fn models_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let sub = text_wrap(&p, Pos2::new(body.left(), g.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, "They run on this Mac. The download keeps going if you continue.", ty::body(), TEXT_DIM(), body.width().min(560.0), 3);
     let list = models(app);
     let w = body.width().min(620.0);
-    let row_h = 76.0;
-    let top = sub.bottom() + sp::XL;
+    let mut y = sub.bottom() + sp::XL;
     let mut start: Option<(usize, &'static str)> = None;
     for (k, (i, m)) in list.iter().enumerate() {
         let a = ease((t - 0.05 * k as f32) / 0.4);
-        let r = Rect::from_min_size(Pos2::new(body.left(), top + k as f32 * (row_h + 8.0) + (1.0 - a) * 8.0), Vec2::new(w, row_h));
+        // one line until there is something for the second (bar or status)
+        let one_line = m.state == ModelState::Missing;
+        let row_h = if one_line { 58.0 } else { 76.0 };
+        let r = Rect::from_min_size(Pos2::new(body.left(), y + (1.0 - a) * 8.0), Vec2::new(w, row_h));
+        y += row_h + sp::S;
         glass_card(&p, r, R_CARD, 0.0, false);
-        let ib = Rect::from_min_size(Pos2::new(r.left() + 14.0, r.top() + 14.0), Vec2::splat(30.0));
+        let ib_top = if one_line { r.center().y - 15.0 } else { r.top() + 14.0 };
+        let ib = Rect::from_min_size(Pos2::new(r.left() + 14.0, ib_top), Vec2::splat(30.0));
         p.rect_filled(ib, 8.0, white(16));
         icon(&p, app.tools[*i].badge().icon, ib.shrink(7.0), if m.state == ModelState::Ready { GREEN() } else { TEXT_SOFT() });
         let tx = ib.right() + 12.0;
