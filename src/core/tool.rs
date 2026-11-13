@@ -349,7 +349,7 @@ mod tests {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetupModel {
     pub id: &'static str,
-    /// What it is for ("Speech model").
+    /// What the tool uses it for ("Speech to text").
     pub what: &'static str,
     /// Which one ("Parakeet v3").
     pub name: &'static str,
@@ -366,4 +366,6 @@ pub enum ModelState {
     Unpacking,
     Ready,
     Failed(String),
+    /// Not needed yet: the tool downloads it the first time it's used.
+    OnFirstUse,
 }
