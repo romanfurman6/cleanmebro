@@ -164,13 +164,35 @@ pub fn window_ui(app: &mut App, outer: &mut Ui, full: Rect, draw_lights: bool, c
 fn stopped_page(app: &App, ui: &mut Ui, content: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
     let t = &app.tools[app.page];
-    let c = content.center();
-    icon(&p, t.badge().icon, Rect::from_center_size(c - Vec2::new(0.0, 56.0), Vec2::splat(32.0)), TEXT_FAINT());
-    p.text(c - Vec2::new(0.0, 18.0), Align2::CENTER_CENTER, t.name(), ty::lead(), TEXT());
-    p.text(c + Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, "Stopped", ty::label(), AMBER());
-    let label = "Restart";
+    let title = format!("{} stopped", t.name());
+    let what = format!("{} ran into an error, so Cmd+Meow turned it off to keep your other tools running. Restart Cmd+Meow to bring it back.", t.name());
+    let text_w = (content.width() - 2.0 * sp::PAGE_EDGE).min(380.0);
+    let mut job = egui::text::LayoutJob::simple(what, ty::body(), TEXT_DIM(), text_w);
+    job.halign = egui::Align::Center;
+    let desc = p.layout_job(job);
+
+    // badge, title, description, button: one centred column
+    let badge = 64.0;
+    let btn_h = sp::HEADER_CONTROL_H;
+    let title_h = p.layout_no_wrap(title.clone(), ty::lead(), TEXT()).size().y;
+    let total = badge + sp::L + title_h + sp::S + desc.size().y + sp::XL + btn_h;
+    let x = content.center().x;
+    let mut y = content.center().y - total / 2.0;
+
+    let bc = Pos2::new(x, y + badge / 2.0);
+    p.circle_filled(bc, badge / 2.0, with_alpha(AMBER(), 0.14));
+    icon(&p, t.badge().icon, Rect::from_center_size(bc, Vec2::splat(28.0)), AMBER());
+    y += badge + sp::L;
+
+    p.text(Pos2::new(x, y), Align2::CENTER_TOP, &title, ty::lead(), TEXT());
+    y += title_h + sp::S;
+
+    p.galley(Pos2::new(x, y), desc.clone(), TEXT_DIM());
+    y += desc.size().y + sp::XL;
+
+    let label = "Restart Cmd+Meow";
     let bw = button_width(&p, label, BTN_PRIMARY);
-    let r = Rect::from_center_size(c + Vec2::new(0.0, 44.0), Vec2::new(bw, 30.0));
+    let r = Rect::from_min_size(Pos2::new(x - bw / 2.0, y), Vec2::new(bw, btn_h));
     if pill_button(ui, r, label, BTN_PRIMARY, true).clicked() {
         crate::kit::perms::relaunch();
         cx.quit();
