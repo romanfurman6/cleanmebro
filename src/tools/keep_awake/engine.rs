@@ -1,27 +1,30 @@
-//! The Keep Awake state machine: the switch, Claude Code activity, the wait
-//! after Claude goes quiet, the assertions that follow from them and today's
+//! The Keep Awake state machine: the switch, the main AI agent's activity,
+//! the wait after it goes quiet, the assertions that follow from them and today's
 //! log. Times are unix seconds so tests can drive it.
 
 use super::power::{Power, Want};
-use super::sessions::Session;
+use super::sessions::{Session, Source};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// A session that wrote to its log this recently is working.
 pub const WORKING_SECS: i64 = 120;
-/// Choices for the wait after Claude goes quiet, in minutes.
+/// Choices for the wait after the agent goes quiet, in minutes.
 pub const GRACE_CHOICES: [u32; 3] = [1, 5, 15];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// Stay awake while Claude Code works.
-    pub claude: bool,
+    /// Stay awake while the main agent works. (Saved as "claude", from
+    /// when Claude Code was the only one.)
+    #[serde(rename = "claude")]
+    pub agent: bool,
     /// Keep the screen on when turned on by hand.
     pub manual_screen: bool,
-    /// Keep the screen on while Claude works.
-    pub claude_screen: bool,
-    /// Minutes to stay awake after Claude goes quiet.
+    /// Keep the screen on while the agent works.
+    #[serde(rename = "claude_screen")]
+    pub agent_screen: bool,
+    /// Minutes to stay awake after the agent goes quiet.
     pub grace_min: u32,
     /// System-wide shortcut that flips the switch.
     pub shortcut: Option<crate::kit::hotkeys::Shortcut>,
@@ -29,7 +32,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { claude: true, manual_screen: true, claude_screen: false, grace_min: 5, shortcut: None }
+        Settings { agent: true, manual_screen: true, agent_screen: false, grace_min: 5, shortcut: None }
     }
 }
 
@@ -47,9 +50,9 @@ pub enum State {
     Off,
     /// The switch is on.
     Manual,
-    /// Claude Code is working.
-    Claude,
-    /// Claude went quiet; sleep is allowed again in `left` seconds.
+    /// The main agent is working.
+    Agent,
+    /// The agent went quiet; sleep is allowed again in `left` seconds.
     WindDown { left: i64 },
 }
 
@@ -64,23 +67,26 @@ impl State {
 pub struct Span {
     pub start: i64,
     pub end: i64,
-    /// Kept awake for Claude (else by hand).
-    pub claude: bool,
+    /// Kept awake for an agent (else by hand). Saved as "claude".
+    #[serde(rename = "claude")]
+    pub agent: bool,
 }
 
 pub struct Engine {
     pub settings: Settings,
     /// When the switch was turned on.
     pub manual_since: Option<i64>,
-    /// Recent sessions, newest first.
+    /// The agent being watched: the main one, when it's on this Mac.
+    pub agent: Option<Source>,
+    /// Its recent sessions, newest first.
     pub sessions: Vec<Session>,
     /// When the Mac last went from sleeping-allowed to awake.
     pub awake_since: Option<i64>,
     /// Closed spans of today (and the open one is `open`).
     pub log: Vec<Span>,
     open: Option<(i64, bool)>,
-    /// When Claude was last seen working, while its streak lasts.
-    claude_last: Option<i64>,
+    /// When the agent was last seen working, while its streak lasts.
+    agent_last: Option<i64>,
     /// The tool is turned on in Settings.
     enabled: bool,
     power: Power,
@@ -94,7 +100,29 @@ impl Engine {
             None => (Settings::default(), Vec::new(), None),
         };
         // the switch stays on across a quit, an update or a restart
-        Engine { settings, manual_since, sessions: Vec::new(), awake_since: None, log, open: None, claude_last: None, enabled: true, power: Power::default(), dir }
+        // without a data folder (tests, demos) it watches Claude
+        let agent = if dir.is_some() { Source::main() } else { Some(Source::Claude) };
+        Engine { settings, manual_since, agent, sessions: Vec::new(), awake_since: None, log, open: None, agent_last: None, enabled: true, power: Power::default(), dir }
+    }
+
+    /// The trigger is on and there's an agent to watch.
+    pub fn watching(&self) -> bool {
+        self.settings.agent && self.agent.is_some()
+    }
+
+    /// The watched agent's name ("Claude", "Codex"…), "" when none.
+    pub fn agent_name(&self) -> &'static str {
+        self.agent.map(Source::name).unwrap_or("")
+    }
+
+    /// Watch `agent` from now on (the main agent changed); its sessions
+    /// come with the next scan.
+    pub fn set_agent(&mut self, agent: Option<Source>, now: i64) {
+        if agent != self.agent {
+            self.agent = agent;
+            self.sessions.clear();
+            self.step(now);
+        }
     }
 
     pub fn working(&self, now: i64) -> Vec<&Session> {
@@ -108,13 +136,13 @@ impl Engine {
         if self.manual_since.is_some() {
             return State::Manual;
         }
-        if !self.settings.claude {
+        if !self.watching() {
             return State::Off;
         }
         if !self.working(now).is_empty() {
-            return State::Claude;
+            return State::Agent;
         }
-        match self.claude_last {
+        match self.agent_last {
             Some(t) => {
                 let left = t + self.settings.grace_min as i64 * 60 - now;
                 if left > 0 { State::WindDown { left } } else { State::Off }
@@ -130,20 +158,20 @@ impl Engine {
 
     /// Bring everything in line with the state at `now`.
     pub fn step(&mut self, now: i64) {
-        if self.enabled && self.settings.claude {
+        if self.enabled && self.watching() {
             if let Some(last) = self.working(now).iter().map(|s| s.active_at(now)).max() {
-                // Claude counts as working until WORKING_SECS after its last write
-                self.claude_last = Some(self.claude_last.unwrap_or(0).max(last + WORKING_SECS));
+                // the agent counts as working until WORKING_SECS after its last write
+                self.agent_last = Some(self.agent_last.unwrap_or(0).max(last + WORKING_SECS));
             }
         }
         let st = self.state(now);
         if st == State::Off {
-            self.claude_last = None;
+            self.agent_last = None;
         }
         let display = match st {
             State::Off => false,
             State::Manual => self.settings.manual_screen,
-            State::Claude | State::WindDown { .. } => self.settings.claude_screen,
+            State::Agent | State::WindDown { .. } => self.settings.agent_screen,
         };
         let reason = self.reason(st, now);
         self.power.apply(Want { system: st.awake(), display }, &reason);
@@ -164,16 +192,17 @@ impl Engine {
         match st {
             State::Off => String::new(),
             State::Manual => "by hand".into(),
-            State::Claude => {
+            State::Agent => {
                 let mut names: Vec<&str> = Vec::new();
                 for s in self.working(now) {
                     if !names.contains(&s.project.as_str()) {
                         names.push(&s.project);
                     }
                 }
-                if names.is_empty() { "Claude".into() } else { format!("Claude: {}", names.join(", ")) }
+                let who = self.agent_name();
+                if names.is_empty() { who.into() } else { format!("{who}: {}", names.join(", ")) }
             }
-            State::WindDown { .. } => "Claude just finished".into(),
+            State::WindDown { .. } => format!("{} just finished", self.agent_name()),
         }
     }
 
@@ -216,8 +245,8 @@ impl Engine {
     pub fn today(&self, now: i64) -> Vec<Span> {
         let day = today_start(now);
         let mut v: Vec<Span> = self.log.iter().filter(|s| s.end > day).copied().collect();
-        if let Some((start, claude)) = self.open {
-            v.push(Span { start, end: now, claude });
+        if let Some((start, agent)) = self.open {
+            v.push(Span { start, end: now, agent });
         }
         for s in &mut v {
             s.start = s.start.max(day);
@@ -225,12 +254,12 @@ impl Engine {
         v
     }
 
-    /// The last 7 days, oldest first: (day start, seconds for Claude, by hand).
+    /// The last 7 days, oldest first: (day start, seconds for agents, by hand).
     pub fn week(&self, now: i64) -> Vec<(i64, i64, i64)> {
         let today = today_start(now);
         let mut spans = self.log.clone();
-        if let Some((start, claude)) = self.open {
-            spans.push(Span { start, end: now, claude });
+        if let Some((start, agent)) = self.open {
+            spans.push(Span { start, end: now, agent });
         }
         (0..7)
             .map(|k| {
@@ -239,7 +268,7 @@ impl Engine {
                 let (mut c, mut h) = (0, 0);
                 for s in &spans {
                     let len = (s.end.min(d1) - s.start.max(d0)).max(0);
-                    if s.claude { c += len } else { h += len }
+                    if s.agent { c += len } else { h += len }
                 }
                 (d0, c, h)
             })
@@ -247,14 +276,14 @@ impl Engine {
     }
 
     fn close_span(&mut self, now: i64) {
-        let Some((start, claude)) = self.open.take() else { return };
+        let Some((start, agent)) = self.open.take() else { return };
         if now - start < 30 {
             return;
         }
         // a week is kept, for the page's last 7 days
         let day = today_start(now) - 6 * 86_400;
         self.log.retain(|s| s.end > day);
-        self.log.push(Span { start, end: now, claude });
+        self.log.push(Span { start, end: now, agent });
         if let Some(d) = &self.dir {
             save_json(d, "today.json", &self.log);
         }
@@ -333,7 +362,7 @@ mod tests {
         let mut e = Engine::new(None);
         e.sessions = vec![session(1000)];
         e.step(1010);
-        assert_eq!(e.state(1010), State::Claude);
+        assert_eq!(e.state(1010), State::Agent);
         assert_eq!(e.held(), Want { system: true, display: false });
         // quiet: working until 1000 + 120, then 5 min of grace
         e.step(1200);
@@ -345,17 +374,17 @@ mod tests {
         // a new write starts a fresh streak
         e.sessions = vec![session(2000)];
         e.step(2001);
-        assert_eq!(e.state(2001), State::Claude);
+        assert_eq!(e.state(2001), State::Agent);
     }
 
     #[test]
     fn claude_off_or_tool_off_means_no_trigger() {
         let mut e = Engine::new(None);
         e.sessions = vec![session(1000)];
-        e.change(1001, |s| s.claude = false);
+        e.change(1001, |s| s.agent = false);
         assert_eq!(e.state(1001), State::Off);
-        e.change(1002, |s| s.claude = true);
-        assert_eq!(e.state(1002), State::Claude);
+        e.change(1002, |s| s.agent = true);
+        assert_eq!(e.state(1002), State::Agent);
         e.set_manual(true, 1003);
         e.set_enabled(false, 1004);
         assert_eq!(e.state(1004), State::Off);
@@ -367,7 +396,7 @@ mod tests {
     fn claude_screen_setting_turns_display_on() {
         let mut e = Engine::new(None);
         e.sessions = vec![session(1000)];
-        e.change(1001, |s| s.claude_screen = true);
+        e.change(1001, |s| s.agent_screen = true);
         assert_eq!(e.held(), Want { system: true, display: true });
     }
 
@@ -382,8 +411,8 @@ mod tests {
         e.step(t + 1000);
         let v = e.today(t + 2000);
         assert_eq!(v.len(), 2);
-        assert_eq!((v[0].start, v[0].end, v[0].claude), (t, t + 600, false));
-        assert_eq!((v[1].start, v[1].claude), (t + 1000, true));
+        assert_eq!((v[0].start, v[0].end, v[0].agent), (t, t + 600, false));
+        assert_eq!((v[1].start, v[1].agent), (t + 1000, true));
     }
 
     #[test]
@@ -425,6 +454,36 @@ mod tests {
         assert_eq!(e.power.name(), "Cmd+Meow Keep Awake (Claude: cmdmeow, api)");
         e.step(1200);
         assert_eq!(e.power.name(), "Cmd+Meow Keep Awake (Claude just finished)");
+    }
+
+    #[test]
+    fn follows_the_main_agent() {
+        let mut e = Engine::new(None);
+        e.set_agent(Some(Source::Codex), 1000);
+        e.sessions = vec![session(1000)];
+        e.step(1001);
+        assert_eq!(e.state(1001), State::Agent);
+        assert_eq!(e.power.name(), "Cmd+Meow Keep Awake (Codex: cmdmeow)");
+        // switching agents drops the old one's sessions
+        e.set_agent(Some(Source::Gemini), 1002);
+        assert!(e.sessions.is_empty());
+        // no agent on this Mac: no trigger, whatever the setting says
+        e.set_agent(None, 1003);
+        e.sessions = vec![session(1003)];
+        e.step(1004);
+        assert!(e.settings.agent && !e.watching());
+        assert_eq!(e.state(1004), State::Off);
+        assert_eq!(e.agent_name(), "");
+    }
+
+    #[test]
+    fn old_settings_files_still_read() {
+        let s: Settings = serde_json::from_str(r#"{"claude": false, "claude_screen": true}"#).unwrap();
+        assert!(!s.agent && s.agent_screen);
+        let back = serde_json::to_string(&s).unwrap();
+        assert!(back.contains("\"claude\":false"), "{back}");
+        let v: Vec<Span> = serde_json::from_str(r#"[{"start":1,"end":2,"claude":true}]"#).unwrap();
+        assert!(v[0].agent);
     }
 
     #[test]
