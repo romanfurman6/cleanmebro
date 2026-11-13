@@ -55,14 +55,14 @@ Needs macOS 12 or later, Apple silicon or Intel.
 Every tool can be turned off, and the panel is a grid of widgets you arrange
 yourself.
 
-![Disk Map](docs/images/shot-disk-map.png)
+![Disk Map](docs/images/app-disk-map.png)
 
-![AI Usage](docs/images/shot-ai-usage.png)
+![AI Usage](docs/images/app-ai-usage.png)
 
-![Clipboard history](docs/images/shot-clipboard.png)
+![Clipboard history](docs/images/app-clipboard.png)
 
 <p align="center">
-  <img src="docs/images/shot-menu-panel.png" width="380" alt="The menu bar panel">
+  <img src="docs/images/app-menu-panel.png" width="380" alt="The menu bar panel">
 </p>
 
 ### Instead of
