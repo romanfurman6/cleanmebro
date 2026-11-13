@@ -98,6 +98,11 @@ fn main() -> eframe::Result {
     if screenshot.is_none() && !std::env::args().any(|a| a == "--view") {
         view = "panel".into();
     }
+    // one copy per build: a second launch (`open -n`) shows the running
+    // one's window and quits (a relaunch waits for the old copy instead)
+    if screenshot.is_none() && !kit::perms::relaunched() && kit::url_scheme::hand_over() {
+        return Ok(());
+    }
     let opts = core::shell::Options { screenshot, view };
     // the shell sizes the window for the chosen view on its first frame
     let viewport = egui::ViewportBuilder::default()
