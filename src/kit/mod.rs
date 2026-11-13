@@ -25,6 +25,7 @@ pub mod smc;
 pub mod sync;
 pub mod sound;
 pub mod tile;
+pub mod update;
 pub mod url_scheme;
 pub mod viewport;
 pub mod whisper;
