@@ -7,7 +7,7 @@
 //! cleanup, cleanup-no-claude, results, lens, lens-live, claude, claude-missing,
 //! health, customize, settings-tools, fan, fan-detail, fan-air, fan-air-detail,
 //! fan-curve, fan-fixed, fan-install, setup, setup-tools, setup-perms,
-//! setup-ready, settings-general,
+//! setup-crash, setup-ready, settings-general,
 //! or widget-<tool>/<widget>@<size> for one widget alone (widget-system/devices@4:4).
 //! `--fan-report` prints every fan and temperature sensor this Mac reports.
 //! `--fan-install` / `--fan-uninstall` add or remove the fan helper,
@@ -27,8 +27,9 @@ mod tools;
 
 fn main() -> eframe::Result {
     kit::sync::install_panic_log();
-    // official release builds only (DSN baked in by release.yml); off everywhere else
-    let _crash_report = kit::crash_report::start();
+    // official release builds only (DSN baked in by release.yml), and only
+    // after the person agreed in setup or Settings; off everywhere else
+    let _crash_report = kit::crash_report::start_if_allowed();
     if std::env::args().any(|a| a == "--fan-report") {
         tools::fan::probe::report();
         return Ok(());

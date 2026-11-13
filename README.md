@@ -88,7 +88,7 @@ Every action has a link for scripts, Raycast or Shortcuts: `open cmdmeow://…`
 ## Privacy and safety
 
 - No account, no telemetry. Files, clipboard, recordings and dictation never leave the Mac unless you share them.
-- Official releases send crash reports to Sentry: the error, stack trace, app and macOS version. No files, hostname or IP address, and the home folder is replaced with `~`. Builds from source have no crash reporting.
+- Crash reports are opt-in: official releases ask once during setup (and in Settings › General). If you agree, a crash sends the error, stack trace, app and macOS version to Sentry. No files, hostname or IP address, and the home folder is replaced with `~`. Builds from source never send anything.
 - Cleanup never reads file contents. If you turn on the AI review, only paths, sizes and ages go to Claude.
 - Documents, Desktop, Projects, Keychains, `.ssh` and any folder with `.git` are always kept.
 - Removed items go to the Trash unless you choose "Delete right away".

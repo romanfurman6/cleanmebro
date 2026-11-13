@@ -609,7 +609,7 @@ fn tools_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     card.bottom() + 24.0
 }
 
-/// Open at login, sounds, what macOS allows the tools (live), and setup again.
+/// Open at login, sounds, crash reports, what macOS allows the tools (live), and setup again.
 fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     scroll_body(ui, body, "settings-general", |ui, body| general_list(app, ui, body));
 }
@@ -620,7 +620,10 @@ fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     let x = body.center().x - w / 2.0;
     let mut y = body.top() + 24.0;
     let row_h = 44.0;
-    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, row_h * 2.0));
+    // crash reports: official builds only (screenshots show the row too)
+    let crash = app.demo || crate::kit::crash_report::available();
+    let n_rows = if crash { 3.0 } else { 2.0 };
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, row_h * n_rows));
     glass_card(&p, card, R_CARD, 0.0, false);
     let row = |k: usize| Rect::from_min_size(Pos2::new(card.left(), card.top() + k as f32 * row_h), Vec2::new(w, row_h));
     let sw_in = |r: Rect| Rect::from_min_size(Pos2::new(r.right() - 42.0, r.center().y - 9.0), Vec2::new(30.0, 18.0));
@@ -638,6 +641,15 @@ fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
         crate::kit::sound::set_on(!on);
         // a taste of what was just turned on
         crate::kit::sound::play(crate::kit::sound::Cue::Ready);
+    }
+    if crash {
+        let r2 = row(2);
+        hairline(&p, Pos2::new(r2.left() + 16.0, r2.top()), Pos2::new(r2.right() - 16.0, r2.top()));
+        p.text(Pos2::new(r2.left() + 16.0, r2.center().y), Align2::LEFT_CENTER, "Send crash reports", font(13.0), TEXT());
+        let on = app.demo || crate::kit::crash_report::consent() == Some(true);
+        if switch(ui, sw_in(r2), ui.scope_id().with("crash-reports"), on, true).clicked() && !app.demo {
+            crate::kit::crash_report::set_consent(!on);
+        }
     }
     y = card.bottom() + 28.0;
     p.text(Pos2::new(x, y), Align2::LEFT_TOP, "Permissions", bold(15.0), TEXT());

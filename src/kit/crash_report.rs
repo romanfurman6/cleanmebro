@@ -1,22 +1,80 @@
-//! Crash and error reports to Sentry, only in official release builds.
+//! Crash and error reports to Sentry: only in official release builds, and
+//! only after the person said yes (setup step or Settings › General).
 //!
 //! The DSN is baked in at compile time from `CMDMEOW_SENTRY_DSN`, which only
 //! `.github/workflows/release.yml` sets (from a repository secret). Every other
 //! build (forks, `cargo run`, `scripts/dev-install.sh`, PR CI) has no DSN, so
-//! the SDK is never started and nothing leaves the Mac. Dev bundles stay off
-//! even with a DSN.
+//! the SDK is never started, the question is never asked and nothing leaves
+//! the Mac. Dev bundles stay off even with a DSN.
+
+use super::sync::LockExt;
+use std::sync::Mutex;
+
+/// The running client; dropping it flushes and stops reporting.
+static CLIENT: Mutex<Option<sentry::ClientInitGuard>> = Mutex::new(None);
 
 /// The DSN this binary was built with, if any.
 fn dsn() -> Option<&'static str> {
     option_env!("CMDMEOW_SENTRY_DSN").map(str::trim).filter(|d| !d.is_empty())
 }
 
-/// Starts Sentry when this is an official build. Keep the returned guard
-/// alive for the whole run: dropping it flushes and stops reporting.
-pub fn start() -> Option<sentry::ClientInitGuard> {
-    let dsn = dsn()?;
+/// This is an official build that can send crash reports (so ask about it).
+pub fn available() -> bool {
+    dsn().is_some() && !super::fs::is_dev()
+}
+
+fn consent_file() -> std::path::PathBuf {
+    super::fs::data_path("crash-reports")
+}
+
+/// What the person chose: Some(true) send, Some(false) don't, None not asked yet.
+pub fn consent() -> Option<bool> {
+    match std::fs::read_to_string(consent_file()).ok()?.trim() {
+        "on" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// Saves the choice and starts or stops reporting right away.
+pub fn set_consent(on: bool) {
+    let f = consent_file();
+    if let Some(d) = f.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(f, if on { "on" } else { "off" });
+    if on {
+        start();
+    } else {
+        // drop outside the lock: closing flushes, which can take a moment
+        let old = CLIENT.lock_ok().take();
+        drop(old);
+    }
+}
+
+/// Starts Sentry when this is an official build and the person agreed.
+/// Hold the returned value in `main`: when it drops (normal exit or a panic
+/// unwinding out of main) queued reports are sent first.
+pub fn start_if_allowed() -> Flush {
+    if consent() == Some(true) {
+        start();
+    }
+    Flush
+}
+
+/// Whether reports are being sent right now.
+pub fn running() -> bool {
+    CLIENT.lock_ok().is_some()
+}
+
+fn start() {
+    let Some(dsn) = dsn() else { return };
     if super::fs::is_dev() {
-        return None;
+        return;
+    }
+    let mut slot = CLIENT.lock_ok();
+    if slot.is_some() {
+        return;
     }
     let release = match option_env!("CMDMEOW_BUILD") {
         Some(b) if !b.is_empty() => format!("cmdmeow@{}+{b}", env!("CARGO_PKG_VERSION")),
@@ -36,7 +94,20 @@ pub fn start() -> Option<sentry::ClientInitGuard> {
             Some(event)
         });
     let guard = sentry::init(options);
-    guard.is_enabled().then_some(guard)
+    if guard.is_enabled() {
+        *slot = Some(guard);
+    }
+}
+
+/// Sends queued reports when dropped.
+pub struct Flush;
+
+impl Drop for Flush {
+    fn drop(&mut self) {
+        if let Some(c) = sentry::Hub::current().client() {
+            c.flush(Some(std::time::Duration::from_secs(2)));
+        }
+    }
 }
 
 /// Swaps the home folder for `~` in error texts, so a path in a panic
@@ -61,11 +132,12 @@ fn scrub(event: &mut sentry::protocol::Event<'static>) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn plain_builds_have_no_dsn() {
-        // CI and local builds never set CMDMEOW_SENTRY_DSN, so Sentry stays off.
+    fn plain_builds_never_report() {
+        // CI and local builds never set CMDMEOW_SENTRY_DSN: nothing to ask, nothing starts
         if option_env!("CMDMEOW_SENTRY_DSN").is_none() {
-            assert!(super::dsn().is_none());
-            assert!(super::start().is_none());
+            assert!(!super::available());
+            super::start();
+            assert!(!super::running());
         }
     }
 

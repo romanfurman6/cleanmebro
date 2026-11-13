@@ -1,6 +1,6 @@
 //! First-run setup: pick tools, allow what they need from macOS (live
-//! status), open at login, then hand over to the menu bar panel. Also the
-//! permission list in Settings › General.
+//! status), crash reports (official builds only), open at login, then hand
+//! over to the menu bar panel. Also the permission list in Settings › General.
 
 use crate::kit::sync::LockExt;
 use super::shell::App;
@@ -11,11 +11,33 @@ use std::collections::HashMap;
 
 pub const SETUP_W: f32 = 820.0;
 pub const SETUP_H: f32 = 600.0;
-const STEPS: usize = 4;
+/// Most steps setup can have (with the crash reports step).
+const MAX_STEPS: usize = 5;
 const TOP_H: f32 = 44.0;
 const BOTTOM_H: f32 = 64.0;
 /// Tools that start off on a fresh install (the rest start on).
 pub const OFF_AT_FIRST: [&str; 2] = ["claude", "fan"];
+
+/// What a setup step shows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Kind {
+    Welcome,
+    Tools,
+    Perms,
+    Crash,
+    Ready,
+}
+
+/// The steps in order. The crash reports question only exists in official
+/// builds (screenshots show it too).
+fn kinds(app: &App) -> Vec<Kind> {
+    let mut v = vec![Kind::Welcome, Kind::Tools, Kind::Perms];
+    if app.demo || crate::kit::crash_report::available() {
+        v.push(Kind::Crash);
+    }
+    v.push(Kind::Ready);
+    v
+}
 
 /// The setup window's state while it is open.
 pub struct Setup {
@@ -44,7 +66,7 @@ fn step_file() -> std::path::PathBuf {
 /// The step setup was on when the app last quit: some permissions make macOS
 /// restart the app, and setup picks up where it was.
 pub fn saved_step() -> usize {
-    std::fs::read_to_string(step_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0).min(STEPS - 1)
+    std::fs::read_to_string(step_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0).min(MAX_STEPS - 1)
 }
 
 pub fn mark_done() {
@@ -260,6 +282,10 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     let now = ctx.input(|i| i.time);
     let p = ui.painter().clone();
     let Some(step) = app.setup.as_ref().map(|s| s.step) else { return Finish::No };
+    let kinds = kinds(app);
+    let steps = kinds.len();
+    let step = step.min(steps - 1);
+    let kind = kinds[step];
     if let Some(s) = app.setup.as_mut() {
         if s.since == f64::NEG_INFINITY {
             s.since = now;
@@ -273,9 +299,9 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     }
     // step dots
     let dw = |i: usize| if i == step { 22.0 } else { 6.0 };
-    let total: f32 = (0..STEPS).map(dw).sum::<f32>() + 6.0 * (STEPS as f32 - 1.0);
+    let total: f32 = (0..steps).map(dw).sum::<f32>() + 6.0 * (steps as f32 - 1.0);
     let mut x = full.center().x - total / 2.0;
-    for i in 0..STEPS {
+    for i in 0..steps {
         let w = egui::lerp(6.0..=dw(i), ease(t * 3.0).max(if i == step { 0.0 } else { 1.0 }));
         let r = Rect::from_min_size(Pos2::new(x, full.top() + TOP_H / 2.0 - 3.0), Vec2::new(w, 6.0));
         p.rect_filled(r, 3.0, if i <= step { BLUE() } else { white(46) });
@@ -287,14 +313,12 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     let body = body.translate(Vec2::new(slide, 0.0));
     let mut next = false;
     let mut restart_now = false;
-    match step {
-        0 => next = welcome(app, ui, body, t),
-        1 => tools(app, ui, body, t),
-        2 => {
-            let r = Rect::from_min_max(body.min, body.max);
-            permissions_step(app, ui, r, t, now)
-        }
-        _ => restart_now = ready(app, ui, body, t),
+    match kind {
+        Kind::Welcome => next = welcome(app, ui, body, t),
+        Kind::Tools => tools(app, ui, body, t),
+        Kind::Perms => permissions_step(app, ui, body, t, now),
+        Kind::Crash => next = crash_step(app, ui, body, t),
+        Kind::Ready => restart_now = ready(app, ui, body, t),
     }
     // bottom bar
     let bar = Rect::from_min_max(Pos2::new(full.left() + 24.0, full.bottom() - BOTTOM_H), Pos2::new(full.right() - 24.0, full.bottom()));
@@ -305,23 +329,24 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
             go(app, step - 1);
         }
     }
-    let label = match step {
-        0 => None,
-        1 | 2 => Some("Continue"),
-        _ if needs_restart(app) => Some("Restart and open"),
-        _ => Some("Open panel"),
+    let label = match kind {
+        // these steps have their own buttons
+        Kind::Welcome | Kind::Crash => None,
+        Kind::Tools | Kind::Perms => Some("Continue"),
+        Kind::Ready if needs_restart(app) => Some("Restart and open"),
+        Kind::Ready => Some("Open panel"),
     };
     if let Some(label) = label {
         let w = button_width(&p, label, BTN_PRIMARY).max(110.0);
         let r = Rect::from_min_size(Pos2::new(bar.right() - w, bar.center().y - 16.0), Vec2::new(w, 32.0));
         if pill_button(ui, r, label, BTN_PRIMARY, true).clicked() {
-            if step == STEPS - 1 {
+            if kind == Kind::Ready {
                 finish = if needs_restart(app) { Finish::Restart } else { Finish::Panel };
             } else {
                 next = true;
             }
         }
-        if step == 2 && !all_required(app) {
+        if kind == Kind::Perms && !all_required(app) {
             let r2 = Rect::from_min_size(Pos2::new(r.left() - 80.0, r.top()), Vec2::new(70.0, 32.0));
             if ghost_button(ui, r2, "Later").clicked() {
                 next = true;
@@ -348,8 +373,9 @@ pub enum Finish {
 }
 
 fn go(app: &mut App, step: usize) {
+    let last = kinds(app).len() - 1;
     if let Some(s) = app.setup.as_mut() {
-        s.step = step.min(STEPS - 1);
+        s.step = step.min(last);
         s.since = f64::NEG_INFINITY;
         if !app.demo {
             let f = step_file();
@@ -433,6 +459,63 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     p.text(Pos2::new(c.x, c.y + 156.0), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(13.0), TEXT_FAINT());
     let r = Rect::from_center_size(Pos2::new(c.x, c.y + 214.0), Vec2::new(128.0, 40.0));
     pill_button(ui, r, "Set up", BTN_PRIMARY, true).clicked()
+}
+
+/// Crash reports, asked once (official builds only). Returns true when the
+/// person picked an answer: setup moves on.
+fn crash_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
+    let p = ui.painter().clone();
+    let c = Pos2::new(body.center().x, body.top() + 96.0);
+    let z = pop(t / 0.5).max(0.0);
+    if z > 0.0 {
+        let mark = Rect::from_center_size(c, Vec2::splat(80.0 * z));
+        p.rect_filled(mark, 18.0 * z, CARD());
+        p.rect_stroke(mark, 18.0 * z, Stroke::new(1.0, white(24)), StrokeKind::Inside);
+        icon(&p, Icon::Shield, mark.shrink(20.0 * z), BLUE());
+    }
+    p.text(Pos2::new(c.x, c.y + 62.0), Align2::CENTER_TOP, "Send crash reports?", bold(22.0), TEXT());
+    p.text(Pos2::new(c.x, c.y + 96.0), Align2::CENTER_TOP, "They help fix bugs faster. Your personal data stays on your Mac.", font(13.0), TEXT_FAINT());
+    // what a report has, and what it never has
+    let facts: [(bool, &str); 3] = [(true, "What went wrong and where in the app"), (true, "App and macOS version"), (false, "Files, names or IP address")];
+    let w = 400.0;
+    let mut y = c.y + 134.0;
+    for (k, (sent, label)) in facts.iter().enumerate() {
+        let a = ease((t - 0.15 - 0.08 * k as f32) / 0.4);
+        let row = Rect::from_min_size(Pos2::new(c.x - w / 2.0, y - (1.0 - a) * 8.0), Vec2::new(w, 40.0));
+        p.rect_filled(row, 10.0, CARD().gamma_multiply(a));
+        let m = Pos2::new(row.left() + 22.0, row.center().y);
+        if *sent {
+            check(&p, m, 12.0, GREEN().gamma_multiply(a));
+        } else {
+            icon(&p, Icon::Close, Rect::from_center_size(m, Vec2::splat(12.0)), TEXT_MUTED().gamma_multiply(a));
+        }
+        let col = if *sent { TEXT() } else { TEXT_MUTED() };
+        p.text(Pos2::new(row.left() + 44.0, row.center().y), Align2::LEFT_CENTER, *label, font(13.0), col.gamma_multiply(a));
+        y += 48.0;
+    }
+    // the answer
+    let yes = "Send reports";
+    let bw = button_width(&p, yes, BTN_PRIMARY).max(140.0);
+    let no_w = 96.0;
+    let gap = 12.0;
+    let left = c.x - (bw + gap + no_w) / 2.0;
+    let by = y + 14.0;
+    let mut picked = None;
+    if ghost_button(ui, Rect::from_min_size(Pos2::new(left, by), Vec2::new(no_w, 36.0)), "Don't send").clicked() {
+        picked = Some(false);
+    }
+    if pill_button(ui, Rect::from_min_size(Pos2::new(left + no_w + gap, by), Vec2::new(bw, 36.0)), yes, BTN_PRIMARY, true).clicked() {
+        picked = Some(true);
+    }
+    match picked {
+        Some(on) => {
+            if !app.demo {
+                crate::kit::crash_report::set_consent(on);
+            }
+            true
+        }
+        None => false,
+    }
 }
 
 /// Section order for the tools grid.

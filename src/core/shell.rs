@@ -300,9 +300,9 @@ impl App {
                 return;
             }
             // first-run setup, one step each
-            "setup" | "setup-tools" | "setup-perms" | "setup-ready" => {
+            "setup" | "setup-tools" | "setup-perms" | "setup-crash" | "setup-ready" => {
                 self.mode = Mode::Setup;
-                let step = ["setup", "setup-tools", "setup-perms", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
+                let step = ["setup", "setup-tools", "setup-perms", "setup-crash", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
                 self.setup = Some(super::onboard::Setup::new(step));
                 use crate::kit::perms::{Perm, Status};
                 self.perm_watch.demo = Some([(Perm::Screen, Status::Allowed), (Perm::Accessibility, Status::Allowed), (Perm::FullDisk, Status::NotAsked), (Perm::SystemEvents, Status::Denied), (Perm::Microphone, Status::Allowed)].into_iter().collect());
