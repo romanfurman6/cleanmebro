@@ -155,7 +155,14 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     } else {
         format!("{} start with your Mac · {running} running now", plural(total, "thing"))
     };
-    let btns = page_header(&p, r, "Startup", &sub, TEXT_DIM());
+    // AI Check: a chip after the title
+    let ai_n = jobs.iter().filter(|j| j.on).count() + apps.iter().filter(|a| a.on).count();
+    let ai_data = loaded && ai_n > 0;
+    let cw = aicheck::ui::chip_width(&s.ai, ui, ai_data);
+    // the status ends where search starts (tabs, then a 190 pt field)
+    let n_tabs = if flagged > 0 { 4.0 } else { 3.0 };
+    let sub_right = r.right() - sp::PAGE_EDGE - 100.0 * n_tabs - 12.0 - 190.0 - 12.0;
+    let (btns, chip_at) = page_header_room(&p, r, "Startup", &sub, TEXT_DIM(), cw, sub_right);
 
     // filter + search on the right of the header
     let mut tabs = vec![(Filter::All, format!("All {total}")), (Filter::Suggested, format!("Suggested {}", suggested.len()))];
@@ -174,19 +181,12 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     search_field(ui, sr, &mut q, "Search", false);
     s.search = q;
 
-    let mut body = Rect::from_min_max(Pos2::new(r.left() + 24.0, r.top() + PAGE_HEADER_H + 1.0), Pos2::new(r.right() - 24.0, r.bottom()));
-    // AI Check: a strip on top
+    let body = Rect::from_min_max(Pos2::new(r.left() + 24.0, r.top() + PAGE_HEADER_H + 1.0), Pos2::new(r.right() - 24.0, r.bottom()));
     if loaded {
-        let n = jobs.iter().filter(|j| j.on).count() + apps.iter().filter(|a| a.on).count();
-        if n > 0 {
+        if ai_n > 0 {
             s.ai.auto(&ctx, &format!("{}:{}", jobs.len(), apps.len()), || startup_ask(&jobs, &apps));
         }
-        let top = Rect::from_min_max(Pos2::new(body.left(), body.top() + sp::L), body.max);
-        let (aih, aiev) = aicheck::ui::strip(&mut s.ai, ui, top, &format!("{} start with your Mac", plural(n, "thing")), n > 0);
-        if aih > 0.0 {
-            body.min.y += aih + sp::L;
-        }
-        match aiev {
+        match aicheck::ui::chip(&mut s.ai, ui, chip_at, ai_data) {
             Some(Event::Start) => {
                 let ask = startup_ask(&jobs, &apps);
                 s.ai.start(&ctx, ask);

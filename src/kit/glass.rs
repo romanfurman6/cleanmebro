@@ -741,14 +741,26 @@ pub const PAGE_FOOTER_H: f32 = 60.0;
 /// A window page's header: 20 pt title, one line of status under it and a
 /// hairline. Returns the rect for buttons on the right (vertically centred).
 pub fn page_header(p: &Painter, r: Rect, title: &str, sub: &str, sub_col: Color32) -> Rect {
+    page_header_room(p, r, title, sub, sub_col, 0.0, r.right() - 260.0).0
+}
+
+/// [`page_header`] keeping `room` points free right after the title (for a
+/// chip such as AI Check's); the status line moves right. Also returns the
+/// left-centre point of that room. The status line ends before `sub_right`
+/// (where the page's own header controls start).
+pub fn page_header_room(p: &Painter, r: Rect, title: &str, sub: &str, sub_col: Color32, room: f32, sub_right: f32) -> (Rect, Pos2) {
     let cy = r.top() + PAGE_HEADER_H / 2.0;
     let t = p.text(Pos2::new(r.left() + sp::PAGE_EDGE, cy), Align2::LEFT_CENTER, title, ty::lead(), TEXT());
+    let at = Pos2::new(t.right() + 10.0, cy);
+    let sx = if room > 0.0 { at.x + room + 10.0 } else { at.x };
     // status sits on the same line as the title, like a macOS toolbar
     let sub_col = if sub_col == TEXT_DIM() { ty::caption_color() } else { sub_col };
-    text_fit(p, Pos2::new(t.right() + 10.0, cy + 1.0), Align2::LEFT_CENTER, sub, ty::label(), sub_col, (r.right() - 260.0 - t.right()).max(40.0));
+    if sub_right - sx > 40.0 {
+        text_fit(p, Pos2::new(sx, cy + 1.0), Align2::LEFT_CENTER, sub, ty::label(), sub_col, sub_right - sx);
+    }
     p.line_segment([Pos2::new(r.left(), r.top() + PAGE_HEADER_H), Pos2::new(r.right(), r.top() + PAGE_HEADER_H)], Stroke::new(1.0, Color32::from_black_alpha(115)));
     let h = sp::HEADER_CONTROL_H / 2.0;
-    Rect::from_min_max(Pos2::new(r.right() - sp::PAGE_EDGE, cy - h), Pos2::new(r.right() - sp::PAGE_EDGE, cy + h))
+    (Rect::from_min_max(Pos2::new(r.right() - sp::PAGE_EDGE, cy - h), Pos2::new(r.right() - sp::PAGE_EDGE, cy + h)), at)
 }
 
 /// A window page's footer strip (darker, with a top hairline). Returns its rect.

@@ -50,7 +50,11 @@ pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendati
         Some(rec) => (rec.title.clone(), AMBER()),
         None => { let _ = sub; (String::new(), TEXT_DIM()) }
     };
-    let btns = page_header(&p, r, "Mac Health", &sub, sub_col);
+    // AI Check: a chip after the title, on the overview
+    let cw = if show_settings { 0.0 } else { aicheck::ui::chip_width(ai, ui, s.ready) };
+    let rec_w = recs.first().map(|rec| button_width(&p, &rec.action, BTN_PRIMARY) + sp::M).unwrap_or(0.0);
+    let sub_right = r.right() - sp::PAGE_EDGE - 180.0 - sp::M - rec_w - sp::M;
+    let (btns, chip_at) = page_header_room(&p, r, "Mac Health", &sub, sub_col, cw, sub_right);
     let mut right = btns.right();
     let tr = Rect::from_min_max(Pos2::new(right - 180.0, btns.top()), Pos2::new(right, btns.bottom()));
     if let Some(i) = segmented(ui, tr, ui.scope_id().with("health-tab"), &["Overview", "Settings"], show_settings as usize) {
@@ -65,20 +69,11 @@ pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendati
         }
     }
 
-    let mut body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
+    let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     let inner = body.shrink2(Vec2::new(sp::PAGE_EDGE, 0.0));
 
-    // AI Check: a strip on top of the overview
     if !show_settings {
-        let top = body.top() + sp::L;
-        let at = Rect::from_min_max(Pos2::new(inner.left(), top), Pos2::new(inner.right(), inner.bottom()));
-        let n = s.procs.iter().filter(|p| p.cpu >= 20.0).count();
-        let offer = if n > 0 { format!("{n} busy app{}", if n == 1 { "" } else { "s" }) } else { String::new() };
-        let (aih, aiev) = aicheck::ui::strip(ai, ui, at, &offer, s.ready);
-        if aih > 0.0 {
-            body.min.y = top + aih - sp::L;
-        }
-        match aiev {
+        match aicheck::ui::chip(ai, ui, chip_at, s.ready) {
             Some(Event::Start) => ai.start(ui.ctx(), health_ask(&s)),
             Some(Event::Act(rec)) => {
                 match rec.action.as_str() {
@@ -218,9 +213,21 @@ fn ring_stat(p: &egui::Painter, area: Rect, frac: f32, color: Color32, value: &s
     let c = area.center();
     let w = (rr * 0.14).clamp(8.0, 12.0);
     tile::ring(p, c, rr - w / 2.0, w, frac.max(0.01), color);
-    let inner = (rr - w) * 1.6;
-    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, value, ty::number(), TEXT(), inner);
-    p.text(c + Vec2::new(0.0, 15.0), Align2::CENTER_CENTER, unit, ty::caption(), ty::caption_color());
+    // the full chord through the centre, less a little air
+    let inner = 2.0 * (rr - w) - 8.0;
+    // "1.44 TB" + "free": the number alone, its unit goes to the caption ("TB free")
+    let (num, caption) = match value.split_once(' ') {
+        Some((n, u)) => (n, format!("{u} {unit}")),
+        None => (value, unit.to_string()),
+    };
+    // shrink the number to fit the ring rather than cut it
+    let mut font = ty::number();
+    let tw = p.layout_no_wrap(num.to_string(), font.clone(), TEXT()).size().x;
+    if tw > inner {
+        font.size = (font.size * inner / tw).max(11.0);
+    }
+    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, num, font, TEXT(), inner);
+    p.text(c + Vec2::new(0.0, 15.0), Align2::CENTER_CENTER, caption, ty::caption(), ty::caption_color());
 }
 
 fn level_status(l: Level) -> Color32 {

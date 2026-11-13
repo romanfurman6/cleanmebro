@@ -149,8 +149,6 @@ pub enum Action {
     /// request for the open sheet closes it.
     ShowDetail { tool: String, detail: String, toggle: bool },
     CloseDetail,
-    /// Open the window on Settings (`tools`: on the Tools tab).
-    OpenSettings { tools: bool },
     /// Hide the menu-bar panel (e.g. before a screenshot of the screen).
     HidePanel,
     Toast(String),

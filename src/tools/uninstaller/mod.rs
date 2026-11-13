@@ -731,8 +731,10 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
         .spawn(move || {
             crate::kit::activity::low_priority();
             // the scan reads apps all over the home folder (macOS asks about
-            // Downloads): not before first-run setup is finished
-            while !crate::core::onboard::is_done() {
+            // Downloads and other apps' data): not before first-run setup is
+            // finished and Full Disk Access is granted (the page is locked till then)
+            let fda = || crate::kit::perms::Perm::FullDisk.status() == crate::kit::perms::Status::Allowed;
+            while !crate::core::onboard::is_done() || !fda() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
             }
             start_scan(st.clone(), app_roots.clone(), roots.clone(), ctx.clone());

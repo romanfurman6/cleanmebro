@@ -186,7 +186,12 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         (_, Phase::Sizing { done, total: t }) => format!("{n_apps} apps · measuring {done} of {t}…"),
         _ => format!("{n_apps} apps · {} · drop any app on this window to remove it", human_bytes(total)),
     };
-    let btns = page_header(&p, r, "Uninstaller", &sub, TEXT_DIM());
+    // AI Check: a chip after the title, on Leftovers
+    let ai_data = u.tab == Tab::Leftovers && orphan_bytes > 0;
+    let cw = if u.tab == Tab::Leftovers { aicheck::ui::chip_width(&u.ai, ui, ai_data) } else { 0.0 };
+    // the status ends before "Startup items" and the tabs
+    let sub_right = r.right() - sp::PAGE_EDGE - 260.0 - 16.0 - 100.0;
+    let (btns, chip_at) = page_header_room(&p, r, "Uninstaller", &sub, TEXT_DIM(), cw, sub_right);
     let labels_owned = [
         "Apps".to_string(),
         if orphan_bytes > 0 { format!("Leftovers · {}", human_bytes(orphan_bytes)) } else { "Leftovers".into() },
@@ -208,7 +213,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     match u.tab {
         Tab::Apps => apps_tab(u, ui, body),
-        Tab::Leftovers => leftovers_tab(u, ui, body),
+        Tab::Leftovers => leftovers_tab(u, ui, body, chip_at),
     }
 
     // a drop on the window
@@ -784,26 +789,21 @@ fn short_path(s: &str) -> String {
 
 // ---------------------------------------------------------------- Leftovers
 
-fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
+fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, chip_at: Pos2) {
     let p = ui.painter().clone();
     let (orphans, phase) = {
         let g = u.st.lock_ok();
         (g.orphans.clone(), g.phase)
     };
-    // AI Check: a strip on top
     let x1 = body.right() - 24.0;
     let mut y = body.top() + 16.0;
     {
-        let strip_at = Rect::from_min_max(Pos2::new(body.left() + 24.0, y), Pos2::new(x1, body.bottom() - 20.0));
-        let offer = format!("Leftovers of {}", plural_n(orphans.len(), "removed app"));
         if !orphans.is_empty() {
             let scan = format!("{}:{}", orphans.len(), orphans.iter().map(|o| o.bytes()).sum::<u64>());
             let now = u.now();
             u.ai.auto(ui.ctx(), &scan, || leftovers_ask(now, &orphans));
         }
-        let (aih, aiev) = aicheck::ui::strip(&mut u.ai, ui, strip_at, &offer, !orphans.is_empty());
-        y += aih;
-        match aiev {
+        match aicheck::ui::chip(&mut u.ai, ui, chip_at, !orphans.is_empty()) {
             Some(Event::Start) => {
                 let ask = leftovers_ask(u.now(), &orphans);
                 u.ai.start(ui.ctx(), ask);
@@ -880,7 +880,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     }
 
     // list
-    let list = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, sc.top() - 14.0));
+    let list = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, sc.top() - sp::L));
     glass_card(&p, list, R_CARD, 0.0, false);
     let c_size = list.right() - 14.0;
     let c_when = c_size - 70.0 - 12.0;
@@ -892,7 +892,9 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     section_header(&p, Pos2::new(c_when, hy), Align2::RIGHT_CENTER, "Last touched");
     section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_CENTER, "Size");
     hairline(&p, Pos2::new(list.left(), list.top() + 30.0), Pos2::new(list.right(), list.top() + 30.0));
-    let rows_r = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - 2.0));
+    let rows_r = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - sp::S));
+    // whole rows only: a row cut in half by the card edge looks broken
+    let rows_r = Rect::from_min_size(rows_r.min, Vec2::new(rows_r.width(), ((rows_r.height() / 40.0).floor() * 40.0).max(40.0).min(rows_r.height())));
     if orphans.is_empty() {
         let msg = if busy { "Still looking…" } else { "Nothing left behind" };
         p.text(rows_r.center(), Align2::CENTER_CENTER, msg, font(13.0), TEXT_DIM());
@@ -1355,7 +1357,6 @@ pub mod demo {
                 let t = u.st.lock_ok().apps.iter().find(|a| a.name == "Docker").unwrap().target(true);
                 u.review = Some(Review { targets: vec![t], open: [0].into() });
             }
-            "uninstaller-leftovers" => u.tab = Tab::Leftovers,
             _ => return None,
         }
         Some(View::Page)

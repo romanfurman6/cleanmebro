@@ -1362,6 +1362,11 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
         super::save_prefs(app);
         app.lens_morph = Some((None, node.path.clone(), ctx.input(|i| i.time)));
     }
+    // AI Check: a chip left of the view switch, once the map is final and whole
+    let ai_data = !busy && !partial && !big_folders(root).is_empty();
+    let cw = if !busy && !partial { aicheck::ui::chip_width(&app.ai, ui, ai_data) } else { 0.0 };
+    let chip_at = Pos2::new(seg_r.left() - 16.0 - cw, hr.center().y);
+    let crumbs_end = if cw > 0.0 { chip_at.x - 12.0 } else { seg_r.left() - 16.0 };
     let mut x = loc.right() + 2.0;
     if crumbs.len() > 1 {
         p.text(Pos2::new(x + 4.0, hr.center().y), Align2::CENTER_CENTER, "›", font(13.0), TEXT_MUTED());
@@ -1370,7 +1375,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
     let n_crumbs = crumbs.len();
     // the first crumb is the switcher itself. When the path doesn't fit, the
     // folders in between give way ("…") so the one you're in always shows
-    let limit = seg_r.left() - 16.0;
+    let limit = crumbs_end;
     let crumb_w = |k: usize| p.layout_no_wrap(crumbs[k].0.clone(), if k + 1 == n_crumbs { bold(13.0) } else { font(13.0) }, TEXT()).size().x + 16.0 + 12.0;
     let mut first = 1;
     while first + 1 < n_crumbs && x + (first..n_crumbs).map(crumb_w).sum::<f32>() + if first > 1 { 22.0 } else { 0.0 } > limit {
@@ -1428,18 +1433,13 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
         return Act::None;
     }
 
-    let mut body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, hr.bottom() + 16.0), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - 16.0));
-    // AI Check: a strip on top, once the map is final and whole
+    let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, hr.bottom() + 16.0), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - 16.0));
     let mut ai_act: Option<(MenuAct, PathBuf, u64)> = None;
     let mut ai_go: Option<PathBuf> = None;
     if !busy && !partial {
         let scan = format!("{}:{}", root.path.display(), root.bytes);
         app.ai.auto(&ctx, &scan, || map_ask(root));
-        let n = big_folders(root).len();
-        let offer = format!("{n} big folder{}", if n == 1 { "" } else { "s" });
-        let (aih, aiev) = aicheck::ui::strip(&mut app.ai, ui, body, &offer, n > 0);
-        body.min.y += aih;
-        match aiev {
+        match aicheck::ui::chip(&mut app.ai, ui, chip_at, ai_data) {
             Some(Event::Start) => {
                 let ask = map_ask(root);
                 app.ai.start(&ctx, ask);

@@ -95,6 +95,8 @@ pub struct Check {
     /// The scan the last automatic check ran for.
     auto_for: Option<String>,
     pub demo: bool,
+    /// The recommendations popover is open.
+    pub(crate) open: bool,
 }
 
 impl Check {
@@ -107,6 +109,7 @@ impl Check {
             icons: HashMap::new(),
             auto_for: None,
             demo,
+            open: false,
         }
     }
 
@@ -219,8 +222,10 @@ impl Check {
     }
 
     /// Sample answer for screenshots.
+    /// The popover shows open.
     pub fn set_demo(&mut self, headline: &str, recs: Vec<Rec>) {
         self.demo = true;
+        self.open = true;
         let mut g = self.inner.lock_ok();
         g.phase = Phase::Done;
         g.headline = headline.into();

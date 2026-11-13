@@ -33,15 +33,6 @@ impl Availability {
     pub fn ready(self) -> bool {
         self == Availability::Ready
     }
-    /// One line saying what's missing.
-    pub fn title(self) -> &'static str {
-        match self {
-            Availability::Ready => "Claude is ready",
-            Availability::Off => "Claude is turned off",
-            Availability::NotInstalled => "Claude Code isn't installed",
-            Availability::SignedOut => "Claude Code isn't signed in",
-        }
-    }
     /// How to enable it.
     pub fn how(self) -> &'static str {
         match self {
@@ -75,6 +66,12 @@ pub fn availability() -> Availability {
     }
 }
 
+/// The CLI is there and not known to be signed out, whatever the AI Usage
+/// switch says (AI Check runs the CLI without that tool).
+pub fn cli_ready() -> bool {
+    claude_bin().is_some() && SIGNED_IN.load(Ordering::Relaxed) != 2
+}
+
 pub fn tool_on() -> bool {
     TOOL_ON.load(Ordering::Relaxed)
 }
@@ -104,11 +101,6 @@ pub fn request_recheck() {
 /// The recheck request, for the loop that waits on it.
 pub fn recheck() -> &'static Kick {
     &RECHECK
-}
-
-/// Open the Claude Code download page.
-pub fn open_download_page() {
-    let _ = Command::new("open").arg("https://claude.com/claude-code").spawn();
 }
 
 /// Open Terminal (to install or sign in).

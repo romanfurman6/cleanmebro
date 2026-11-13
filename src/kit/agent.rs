@@ -47,12 +47,12 @@ impl Agent {
         }
     }
 
-    /// Whether it can judge paths now. Claude also needs its tool on and a
-    /// sign-in; the others only need their CLI (a signed-out one fails, and
-    /// the built-in rules are used).
+    /// Whether it can judge paths now: its CLI is installed (Claude: and not
+    /// known to be signed out). The AI Usage tool being off doesn't matter.
+    /// A signed-out CLI fails and the built-in rules are used.
     pub fn ready(self) -> bool {
         match self {
-            Agent::Claude => claude_code::availability().ready(),
+            Agent::Claude => claude_code::cli_ready(),
             _ => self.bin().is_some(),
         }
     }

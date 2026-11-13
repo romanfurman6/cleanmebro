@@ -346,7 +346,10 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         sub = format!("{sub} · {e}");
     }
     let _ = ai_used;
-    let btns = page_header(&p, r, "Cleanup", &sub, if ai_error.is_some() { AMBER() } else { TEXT_DIM() });
+    // AI Check: a chip after the title
+    let ai_n = app.clean.lock_ok().items.iter().filter(|i| i.verdict != Verdict::Keep).count();
+    let cw = aicheck::ui::chip_width(&app.ai, ui, ai_n > 0);
+    let (btns, chip_at) = page_header_room(&p, r, "Cleanup", &sub, if ai_error.is_some() { AMBER() } else { TEXT_DIM() }, cw, r.right() - 260.0);
     let w = button_width(&p, "Scan again", BTN_SECONDARY);
     let sr = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
     if pill_button(ui, sr, "Scan again", BTN_SECONDARY, true).clicked() {
@@ -380,18 +383,13 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         return;
     }
 
-    let mut body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - PAGE_FOOTER_H - sp::L));
+    let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - PAGE_FOOTER_H - sp::L));
 
-    // AI Check: a strip on top
     {
         let scan = format!("{total}");
         let shared = app.clean.clone();
         app.ai.auto(&ctx, &scan, || check_ask(&shared));
-        let n = app.clean.lock_ok().items.iter().filter(|i| i.verdict != Verdict::Keep).count();
-        let offer = format!("{n} item{} found", if n == 1 { "" } else { "s" });
-        let (aih, aiev) = aicheck::ui::strip(&mut app.ai, ui, body, &offer, n > 0);
-        body.min.y += aih;
-        match aiev {
+        match aicheck::ui::chip(&mut app.ai, ui, chip_at, ai_n > 0) {
             Some(Event::Start) => {
                 let ask = check_ask(&app.clean);
                 app.ai.start(&ctx, ask);
