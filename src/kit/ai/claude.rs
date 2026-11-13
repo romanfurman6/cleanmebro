@@ -4,7 +4,7 @@
 
 use crate::kit::sync::LockExt;
 use super::{balanced, find, recent_jsonl, Billing, Contrib, Limit, LocalTokens, LogCache, ParseCtx, Provider, Shared, UsageEntry, UsageInfo};
-use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd, projects_dir, scan_projects, Project};
+use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd, scan_projects, Project};
 use chrono::{DateTime, Datelike, Local, TimeZone};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -62,7 +62,9 @@ impl Provider for ClaudeCode {
         // project folders hold the session logs one level down
         // <project>/<session>.jsonl, and subagents' own logs in
         // <project>/<session>/subagents/, which count toward the limits too
-        self.cache.update(recent_jsonl(&projects_dir(), 3), usage_entry)
+        // a reply copied into two folders counts once (`LogCache::entries`)
+        let files = cc::log_dirs().iter().flat_map(|d| recent_jsonl(d, 3)).collect();
+        self.cache.update(files, usage_entry)
     }
     fn projects(&mut self) -> Vec<Project> {
         scan_projects()

@@ -167,6 +167,22 @@ pub fn projects_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".claude/projects")
 }
 
+/// Every folder Claude Code keeps session logs in: `~/.claude/projects`,
+/// and `~/.config/claude/projects`, where newer versions can write them.
+pub fn log_dirs() -> Vec<PathBuf> {
+    let home = dirs::home_dir().unwrap_or_default();
+    log_dirs_in(&home)
+}
+
+fn log_dirs_in(home: &std::path::Path) -> Vec<PathBuf> {
+    let mut v = vec![home.join(".claude/projects")];
+    let xdg = home.join(".config/claude/projects");
+    if xdg.is_dir() {
+        v.push(xdg);
+    }
+    v
+}
+
 pub fn scan_projects() -> Vec<Project> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(projects_dir()) else { return out };
@@ -263,6 +279,17 @@ pub fn first_cwd(p: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_dirs_add_xdg_folder_only_when_present() {
+        let home = std::env::temp_dir().join(format!("cmdmeow-logdirs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        assert_eq!(log_dirs_in(&home), vec![home.join(".claude/projects")]);
+        std::fs::create_dir_all(home.join(".config/claude/projects")).unwrap();
+        assert_eq!(log_dirs_in(&home), vec![home.join(".claude/projects"), home.join(".config/claude/projects")]);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn availability_follows_switch_and_sign_in() {

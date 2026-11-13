@@ -78,7 +78,12 @@ impl Provider for Codex {
         }
     }
     fn local_tokens(&mut self) -> LocalTokens {
-        self.cache.update(recent_jsonl(&home().join("sessions"), 3), usage_entry)
+        // archived chats move to `archived_sessions/`; a rollout found in
+        // both places counts once (`LogCache::entries`)
+        let home = home();
+        let mut files = recent_jsonl(&home.join("sessions"), 3);
+        files.extend(recent_jsonl(&home.join("archived_sessions"), 1));
+        self.cache.update(files, usage_entry)
     }
     fn data_dir(&self) -> Option<PathBuf> {
         Some(home())
