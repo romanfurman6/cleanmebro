@@ -179,6 +179,9 @@ pub mod sp {
     pub const LINE_GAP: f32 = 6.0;
     /// A list row with two lines of text (name over detail).
     pub const ROW2_H: f32 = 52.0;
+    /// Between rows of a list whose rows light up on hover or selection,
+    /// so two lit rows never touch.
+    pub const ROW_GAP: f32 = XS;
     /// Between columns of a row (name, schedule, state, buttons).
     pub const COL_GAP: f32 = 16.0;
 }
