@@ -379,6 +379,17 @@ thread_local! {
     static HISTORY_SAVE_EVERY: std::cell::RefCell<Every> = std::cell::RefCell::new(Every::default());
 }
 
+/// Mac Health is off: the monitor sleeps (no readings, no scans) until it is
+/// turned back on.
+static PAUSED: AtomicBool = AtomicBool::new(false);
+static RESUME: activity::Kick = activity::Kick::new();
+
+pub fn set_paused(paused: bool) {
+    if PAUSED.swap(paused, Ordering::Relaxed) != paused && !paused {
+        RESUME.kick();
+    }
+}
+
 pub fn start(ctx: egui::Context, demo: bool) -> Shared {
     let policy = if demo { charge::Policy::default() } else { charge::load() };
     let charge = charge::View { policy, ..Default::default() };
@@ -524,6 +535,15 @@ fn run(shared: Shared, ctx: egui::Context, demo: bool) {
         s.smart_status = smart;
     }
     loop {
+        if PAUSED.load(Ordering::Relaxed) {
+            super::ble::stop();
+            while PAUSED.load(Ordering::Relaxed) {
+                activity::nap(Duration::from_secs(3600), Some(&RESUME));
+            }
+            // fresh readings, not an hour-long gap
+            last_ticks = cpu_ticks();
+            last_net = Instant::now();
+        }
         // fast readings every refresh: all plain system calls, no processes
         sys.refresh_memory();
         nets.refresh(true);
@@ -612,7 +632,10 @@ fn run(shared: Shared, ctx: egui::Context, demo: bool) {
             bt_recheck = None;
             profile_at.reset();
         }
-        let slow_profile = BT_PROFILE_EVERY.due(&mut profile_at);
+        // hidden, the slow report is only for the alerts: skip it while
+        // nothing is connected over Bluetooth
+        let none_connected = bt_connected.as_ref().is_some_and(|c| c.is_empty());
+        let slow_profile = (activity::visible() || !none_connected) && BT_PROFILE_EVERY.due(&mut profile_at);
         if slow_profile {
             bt_profile = devices::parse_profiler(&run_cmd("system_profiler", &["SPBluetoothDataType", "-json"]));
         }
