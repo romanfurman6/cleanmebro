@@ -190,8 +190,8 @@ mod mac {
     }
 
     pub fn install() {
-        let handler: Retained<UrlHandler> = unsafe { msg_send![super(UrlHandler::alloc().set_ivars(())), init] };
-        HANDLER.store(Retained::into_raw(handler), Ordering::Release);
+        let made: Retained<UrlHandler> = unsafe { msg_send![super(UrlHandler::alloc().set_ivars(())), init] };
+        HANDLER.store(Retained::into_raw(made), Ordering::Release);
         let Some(h) = handler() else { return };
         unsafe {
             let mgr: Retained<AnyObject> = msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
