@@ -160,29 +160,27 @@ fn run(ctx: egui::Context, mut providers: Vec<Box<dyn ai::Provider>>, all: All) 
             REFRESHING.store(false, Ordering::Relaxed);
             activity::repaint(&ctx);
         }
-        // the data folder walks every file: once per launch, and again on
-        // Refresh, after every provider shows its numbers
-        if !activity::recording() {
+        // the data folder walks every file (once per launch, and again on
+        // Refresh) and the status pages wait on the network: both run on a
+        // thread of their own, so a Refresh never queues behind them
+        if !activity::recording() && !SIDE_BUSY.load(Ordering::Relaxed) {
+            let mut dirs: Vec<(usize, std::path::PathBuf)> = Vec::new();
             for i in 0..n {
                 if set.is_on(ai::PROVIDERS[i].id) && providers[i].enabled() && size_at[i].age().is_none() {
                     size_at[i].mark();
-                    let d = providers[i].data_dir().map(|d| crate::kit::fs::dir_size(&d)).unwrap_or(0);
-                    all[i].lock_ok().data_bytes = d;
-                    activity::repaint(&ctx);
+                    dirs.extend(providers[i].data_dir().map(|d| (i, d)));
                 }
+            }
+            let pages: Vec<(usize, &'static str)> = if set.show_outages && status_at.due(Duration::from_secs(STATUS_SECS)) {
+                ai::PROVIDERS.iter().enumerate().filter(|(_, m)| set.is_on(m.id) && !m.status_url.is_empty()).map(|(i, m)| (i, m.status_url)).collect()
+            } else {
+                Vec::new()
+            };
+            if !dirs.is_empty() || !pages.is_empty() {
+                side_jobs(ctx.clone(), all.clone(), dirs, pages);
             }
         }
-        // outages: a status page per provider that has one
-        if set.show_outages && status_at.due(Duration::from_secs(STATUS_SECS)) {
-            status_at.mark();
-            for (i, meta) in ai::PROVIDERS.iter().enumerate() {
-                if set.is_on(meta.id) && !meta.status_url.is_empty() {
-                    let incident = status::fetch(meta.status_url);
-                    all[i].lock_ok().incident = incident;
-                }
-            }
-            activity::repaint(&ctx);
-        } else if !set.show_outages {
+        if !set.show_outages {
             for s in all.iter() {
                 s.lock_ok().incident = None;
             }
@@ -195,6 +193,34 @@ fn run(ctx: egui::Context, mut providers: Vec<Box<dyn ai::Provider>>, all: All) 
             status_at.reset();
             asked = true;
         }
+    }
+}
+
+/// The side thread (data folder sizes, status pages) is running.
+static SIDE_BUSY: AtomicBool = AtomicBool::new(false);
+
+/// Walk the data folders and ask the status pages on a thread of their own.
+fn side_jobs(ctx: egui::Context, all: All, dirs: Vec<(usize, std::path::PathBuf)>, pages: Vec<(usize, &'static str)>) {
+    SIDE_BUSY.store(true, Ordering::Relaxed);
+    let spawned = std::thread::Builder::new()
+        .name("ai-usage-side".into())
+        .spawn(move || {
+            activity::low_priority();
+            for (i, url) in pages {
+                let incident = status::fetch(url);
+                all[i].lock_ok().incident = incident;
+                activity::repaint(&ctx);
+            }
+            for (i, d) in dirs {
+                let bytes = crate::kit::fs::dir_size(&d);
+                all[i].lock_ok().data_bytes = bytes;
+                activity::repaint(&ctx);
+            }
+            SIDE_BUSY.store(false, Ordering::Relaxed);
+        })
+        .is_ok();
+    if !spawned {
+        SIDE_BUSY.store(false, Ordering::Relaxed);
     }
 }
 
