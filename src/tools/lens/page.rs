@@ -1346,7 +1346,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
             Some(Event::Act(rec)) => {
                 let path = PathBuf::from(&rec.key);
                 let bytes = scan::find(root, &path).map(|n| n.bytes).unwrap_or(0);
-                match rec.action.as_str() {
+                match ai_action(&rec.action, &path) {
                     "open" => ai_go = Some(path),
                     "reveal" => ai_act = Some((MenuAct::Reveal, path, bytes)),
                     _ => ai_act = Some((MenuAct::Trash, path, bytes)),
@@ -1873,6 +1873,19 @@ mod tests {
     }
 
     #[test]
+    fn ai_check_never_trashes_essential_folders() {
+        assert_eq!(ai_action("trash", Path::new("/Applications")), "open");
+        assert_eq!(ai_action("trash", Path::new("/System/Library")), "open");
+        assert_eq!(ai_action("trash", Path::new("/Applications/Foo.app")), "trash");
+        assert_eq!(ai_action("reveal", Path::new("/Applications")), "reveal");
+        // the agent is told which folders are open/reveal only
+        let root = n("/", 400_000_000_000, 10, 0, vec![n("/Applications", 50_000_000_000, 5, 0, vec![n("/Applications/Foo.app", 1, 1, 0, vec![])])]);
+        let ask = map_ask(&root);
+        let apps = ask.items.iter().find(|i| i.key == "/Applications").unwrap();
+        assert!(apps.line.contains("never trash"));
+    }
+
+    #[test]
     fn biggest_files_come_from_every_level() {
         let t = n(
             "/r",
@@ -1934,6 +1947,22 @@ fn big_folders(root: &Node) -> Vec<&Node> {
     out
 }
 
+/// Whether the map would offer "Move to Trash…" for `p`: never for
+/// essential folders or a protected folder holding a git repo.
+fn can_trash(p: &Path) -> bool {
+    !(scan::is_essential(p) || crate::kit::fs::is_protected(p).is_some() && p.join(".git").exists())
+}
+
+/// The AI Check action to run: a Remove on a folder the map would never
+/// trash opens it on the map instead.
+fn ai_action<'a>(action: &'a str, p: &Path) -> &'a str {
+    match action {
+        "open" | "reveal" => action,
+        _ if can_trash(p) => "trash",
+        _ => "open",
+    }
+}
+
 /// What AI Check gets: the big folders on the map with their biggest parts.
 fn map_ask(root: &Node) -> aicheck::Ask {
     let items = big_folders(root)
@@ -1944,7 +1973,7 @@ fn map_ask(root: &Node) -> aicheck::Ask {
             let top: Vec<String> = kids.iter().take(4).map(|k| format!("{} {}", k.name, human_bytes(k.bytes))).collect();
             aicheck::Item {
                 key: n.path.display().to_string(),
-                line: format!("{} · {} · {} items · biggest inside: {}", n.path.display(), human_bytes(n.bytes), n.items, top.join(", ")),
+                line: format!("{} · {} · {} items · biggest inside: {}{}", n.path.display(), human_bytes(n.bytes), n.items, top.join(", "), if can_trash(&n.path) { "" } else { " · system folder: open or reveal only, never trash" }),
                 icon: None,
                 name: n.name.clone(),
             }
