@@ -541,4 +541,34 @@ mod tests {
         assert_eq!(turns_per_sec(0.0), 0.0);
         assert_eq!(turns_per_sec(-5.0), 0.0);
     }
+
+    #[test]
+    fn a_popup_over_the_blades_hands_them_to_egui() {
+        let ctx = egui::Context::default();
+        let blades = Rect::from_min_size(Pos2::new(20.0, 20.0), Vec2::splat(40.0));
+        let pass = |tip_at: Option<Pos2>| -> LayerId {
+            let mut layer = None;
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(300.0))), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| {
+                layer = Some(ui.layer_id());
+                if let Some(at) = tip_at {
+                    egui::Area::new(egui::Id::NULL.with("tip")).order(egui::Order::Tooltip).fixed_pos(at).show(ui.ctx(), |ui| {
+                        ui.set_min_size(Vec2::splat(30.0));
+                    });
+                }
+            });
+            out.textures_delta.clear();
+            layer.unwrap()
+        };
+        // an area is placed after its first pass: run each case twice
+        pass(None);
+        let layer = pass(None);
+        assert!(!covered(&ctx, layer, blades));
+        pass(Some(Pos2::new(200.0, 200.0)));
+        pass(Some(Pos2::new(200.0, 200.0)));
+        assert!(!covered(&ctx, layer, blades), "a popup elsewhere leaves them native");
+        pass(Some(Pos2::new(30.0, 30.0)));
+        pass(Some(Pos2::new(30.0, 30.0)));
+        assert!(covered(&ctx, layer, blades), "a popup over them hands them to egui");
+    }
 }

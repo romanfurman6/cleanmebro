@@ -17,16 +17,6 @@ pub fn is_invisible_or_minimized(window: &Window) -> bool {
     window.is_visible() == Some(false) || window.is_minimized() == Some(true)
 }
 
-/// On Mac, a minimized window uses up all CPU:
-/// <https://github.com/emilk/egui/issues/325>
-///
-/// On Windows, an invisible window also uses up all CPU:
-/// <https://github.com/emilk/egui/issues/7776>
-///
-/// Cmd+Meow patch: the app draws overlays (recording countdown, frame,
-/// control bar) as immediate viewports while its root window is hidden.
-/// They present with vsync themselves, so this sleep only cost them frames.
-/// The app turns it off while such overlays are up.
 /// Cmd+Meow patch: each viewport's winit window, so the app can reach its
 /// native view (Core Animation layers over the egui surface).
 pub static WINDOWS: std::sync::Mutex<Vec<(egui::ViewportId, std::sync::Weak<winit::window::Window>)>> = std::sync::Mutex::new(Vec::new());
@@ -37,6 +27,16 @@ pub fn remember_window(id: egui::ViewportId, window: &std::sync::Arc<winit::wind
     w.push((id, std::sync::Arc::downgrade(window)));
 }
 
+/// On Mac, a minimized window uses up all CPU:
+/// <https://github.com/emilk/egui/issues/325>
+///
+/// On Windows, an invisible window also uses up all CPU:
+/// <https://github.com/emilk/egui/issues/7776>
+///
+/// Cmd+Meow patch: the app draws overlays (recording countdown, frame,
+/// control bar) as immediate viewports while its root window is hidden.
+/// They present with vsync themselves, so this sleep only cost them frames.
+/// The app turns it off while such overlays are up.
 pub static SKIP_HIDDEN_SLEEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn sleep_if_invisible_or_minimized(window: Option<&Window>) {
