@@ -36,6 +36,8 @@ pub struct Cleanup {
     /// Screenshots: show Cleanup as if Claude were in this state.
     pub(crate) demo_claude: Option<crate::kit::claude_code::Availability>,
     pub(crate) ai: crate::kit::aicheck::Check,
+    /// Screenshots: the page before any scan.
+    pub(crate) demo_fresh: bool,
 }
 
 impl Cleanup {
@@ -51,6 +53,7 @@ impl Cleanup {
             clean_log: false,
             demo_claude: None,
             ai: crate::kit::aicheck::Check::new(ID, env.demo),
+            demo_fresh: false,
         }
     }
 }
@@ -204,6 +207,10 @@ impl Tool for Cleanup {
     fn demo_view(&mut self, view: &str) -> Option<View> {
         match view {
             "cleanup" => Some(View::Page),
+            "cleanup-fresh" => {
+                self.demo_fresh = true;
+                Some(View::Page)
+            }
             "cleanup-no-claude" => {
                 self.demo_claude = Some(crate::kit::claude_code::Availability::NotInstalled);
                 Some(View::Page)

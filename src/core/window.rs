@@ -85,8 +85,9 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
     }
     // settings: widgets and tools
     let r = Rect::from_min_size(Pos2::new(x, full.bottom() - 12.0 - 30.0 - 6.0 - SIDEBAR_ROW_H), Vec2::new(w, SIDEBAR_ROW_H));
-    if sidebar_item(ui, r, ui.scope_id().with("nav-settings"), Icon::Gear, tint::NEUTRAL(), "Settings", "", app.settings_open, false).clicked() {
+    if sidebar_item(ui, r, ui.scope_id().with("nav-settings"), Icon::Gear, tint::NEUTRAL(), "Settings", "", app.settings_open, false).clicked() && !app.settings_open {
         app.settings_open = true;
+        app.settings_tab = super::editor::TAB_GENERAL;
     }
     // back to the menu bar panel
     let r = Rect::from_min_size(Pos2::new(x, full.bottom() - 12.0 - 30.0), Vec2::new(w, 30.0));

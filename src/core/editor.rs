@@ -59,14 +59,24 @@ enum Target {
     Nothing,
 }
 
+/// Settings tabs by id, and the order they're shown in.
+const TAB_NAMES: [&str; 5] = ["Widgets", "Tools", "General", "AI Usage", "AI Check"];
+const TAB_ORDER: [usize; 5] = [2, 1, 3, 4, 0];
+/// The tab Settings opens on from the sidebar.
+pub const TAB_GENERAL: usize = 2;
+
 pub fn settings_page(app: &mut App, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
     let top = Rect::from_min_size(r.min, Vec2::new(r.width(), TOP_H));
     hairline(&p, top.left_bottom(), top.right_bottom());
     p.text(Pos2::new(top.left() + 24.0, top.center().y), Align2::LEFT_CENTER, "Settings", bold(15.0), TEXT());
-    let tabs = Rect::from_center_size(top.center(), Vec2::new(450.0, 28.0));
-    if let Some(t) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &["Widgets", "Tools", "General", "AI Usage", "AI Check"], app.settings_tab) {
-        app.settings_tab = t;
+    // shown General first; `settings_tab` keeps its ids (0 Widgets, 1 Tools,
+    // 2 General, 3 AI Usage, 4 AI Check) so links and Edit widgets… land on the right tab
+    let labels: Vec<&str> = TAB_ORDER.iter().map(|&t| TAB_NAMES[t]).collect();
+    let tabs = Rect::from_center_size(top.center(), Vec2::new(90.0 * labels.len() as f32, 28.0));
+    let shown = TAB_ORDER.iter().position(|&t| t == app.settings_tab).unwrap_or(0);
+    if let Some(k) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &labels, shown) {
+        app.settings_tab = TAB_ORDER[k];
         app.drag = None;
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), top.bottom() + 1.0), r.max);
