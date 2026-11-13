@@ -27,7 +27,7 @@ await page.evaluate((icon) => {
     /* Soft blur under the text: darkest at the left edge, fades out before the panel, no hard edges */
     .desk::after { inset: 0 auto 0 0; width: 860px; z-index: 1; background: linear-gradient(90deg, rgba(4,9,4,.72) 0%, rgba(4,9,4,.55) 50%, rgba(4,9,4,0) 100%); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); -webkit-mask-image: linear-gradient(90deg, #000 50%, transparent 100%); mask-image: linear-gradient(90deg, #000 50%, transparent 100%); }
     .stage { height: 630px; max-width: none; }
-    .hero { left: 64px; max-width: 540px; text-shadow: 0 2px 24px rgba(0,0,0,.45); }
+    .hero { left: 64px; top: 50%; max-width: 540px; text-shadow: 0 2px 24px rgba(0,0,0,.45); }
     .hero h1 { font-size: 62px; line-height: 66px; }
     .hero .sub { margin-top: 22px; font-size: 26px; line-height: 34px; }
     .og-id { display: flex; align-items: center; gap: 14px; margin-bottom: 30px; font: 500 30px/1 var(--sans); letter-spacing: -.01em; text-shadow: 0 2px 18px rgba(0,0,0,.5); }

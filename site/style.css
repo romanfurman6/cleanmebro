@@ -11,6 +11,8 @@ a { color: inherit; }
 
 .desk { position: relative; background: #0A150A image-set(url(desk-1376.jpg) 1x, url(desk.jpg) 2x) center 60% / cover no-repeat; overflow: hidden; }
 .desk::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 70%, var(--bg)); pointer-events: none; }
+/* Soft shade under the headline so the subhead stays readable over the lighter mountains */
+.desk::before { content: ""; position: absolute; z-index: 1; inset: 0; background: radial-gradient(ellipse 980px 640px at calc(max(0px, (100% - 1360px) / 2) + 330px) 46%, rgba(4,9,4,.55), rgba(4,9,4,.25) 55%, transparent 80%); pointer-events: none; }
 .mbar { position: relative; z-index: 5; display: flex; justify-content: space-between; align-items: center; height: 30px; padding: 0 16px;
   background: rgba(3,8,3,.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); font: 500 13px/1 -apple-system, var(--sans); }
 .mbar span { display: inline-flex; align-items: center; gap: 8px; }
@@ -22,7 +24,7 @@ a { color: inherit; }
 .mbar .cat.on { background: rgba(255,255,255,.22); }
 
 .stage { position: relative; z-index: 2; max-width: 1360px; margin: 0 auto; height: clamp(720px, calc(100svh - 30px), 900px); }
-.hero { position: absolute; z-index: 4; left: 48px; top: 50%; transform: translateY(-50%); max-width: 560px; }
+.hero { position: absolute; z-index: 4; left: 48px; top: 42%; transform: translateY(-50%); max-width: 560px; }
 h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2px 30px rgba(0,0,0,.35); }
 .cta { display: flex; gap: 12px; margin-top: 32px; flex-wrap: wrap; }
 .btn { display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 22px; border-radius: 12px; font-weight: 500; text-decoration: none; transition: background-color .15s, transform .15s; }
