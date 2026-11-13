@@ -71,6 +71,8 @@ pub struct Lens {
     /// and when the map was last brought up to date.
     pub(crate) lens_dirty: Option<f64>,
     pub(crate) lens_auto_at: f64,
+    /// Folders mapped lately (the switcher offers them again).
+    pub(crate) lens_recent: Vec<PathBuf>,
 }
 
 /// Disk Map choices kept between runs.
@@ -81,6 +83,9 @@ struct Prefs {
     rings: bool,
     #[serde(default)]
     view: Option<u8>,
+    /// Folders mapped lately, newest first.
+    #[serde(default)]
+    recent: Vec<PathBuf>,
 }
 
 fn prefs_path() -> PathBuf {
@@ -88,12 +93,13 @@ fn prefs_path() -> PathBuf {
 }
 
 pub(crate) fn save_prefs(app: &Lens) {
-    crate::kit::fs::save_json_later(&prefs_path(), &Prefs { rings: app.lens_view == 1, view: Some(app.lens_view) }, false);
+    crate::kit::fs::save_json_later(&prefs_path(), &Prefs { rings: app.lens_view == 1, view: Some(app.lens_view), recent: app.lens_recent.clone() }, false);
 }
 
 impl Lens {
     pub fn new(env: &ToolEnv) -> Self {
         let root = PathBuf::from("/");
+        let prefs = crate::kit::fs::load_json::<Prefs>(&prefs_path());
         Lens {
             lens: Default::default(),
             lens_root: root.clone(),
@@ -109,10 +115,8 @@ impl Lens {
             lens_order_at: 0.0,
             lens_rows: Default::default(),
             lens_hues: vec![],
-            lens_view: {
-                let p = crate::kit::fs::load_json::<Prefs>(&prefs_path());
-                p.view.unwrap_or(p.rings as u8).min(2)
-            },
+            lens_view: prefs.view.unwrap_or(prefs.rings as u8).min(2),
+            lens_recent: prefs.recent,
             lens_back: vec![],
             lens_fwd: vec![],
             lens_hover: None,
@@ -191,6 +195,13 @@ impl Tool for Lens {
             if view == "sizes" {
                 return None;
             }
+            Some(View::Page)
+        } else if view == "lens-intro" {
+            Some(View::Page)
+        } else if view == "lens-partial" {
+            page::demo_tree(self);
+            self.lens.partial.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.lens_selected.clear();
             Some(View::Page)
         } else if view == "lens-none" {
             page::demo_tree(self);

@@ -68,14 +68,22 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     let di = bar_card.shrink2(Vec2::new(sp::L, 0.0));
     let cy = di.center().y;
     // right to left: Scan, a divider, the free space (AI Check runs after the scan, in its strip)
-    let scan_w = button_width(&p, "Scan", BTN_PRIMARY).max(96.0);
-    let scan_r = Rect::from_min_size(Pos2::new(di.right() + 4.0 - scan_w, cy - 17.0), Vec2::new(scan_w, 34.0));
-    if pill_button(ui, scan_r, "Scan", BTN_PRIMARY, true).clicked() {
-        cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
-    }
-    let mut right = scan_r.left() - sp::L;
-    p.line_segment([Pos2::new(right, cy - 14.0), Pos2::new(right, cy + 14.0)], Stroke::new(1.0, CARD_EDGE()));
-    right -= sp::L;
+    // never scanned: the big Scan in the middle is the only one
+    let last = if app.demo && !app.demo_fresh { Some(super::engine::LastScan { when: chrono::Utc::now().timestamp() - 2 * 86400, groups: vec![14_200_000_000, 9_800_000_000, 21_600_000_000, 6_100_000_000, 2_200_000_000, 1_300_000_000, 3_400_000_000] }) } else { super::engine::last_scan() };
+    let hist = if app.demo_fresh { Vec::new() } else { super::engine::history() };
+    let fresh = last.is_none() && hist.is_empty();
+    let right = if fresh {
+        di.right()
+    } else {
+        let scan_w = button_width(&p, "Scan", BTN_PRIMARY).max(96.0);
+        let scan_r = Rect::from_min_size(Pos2::new(di.right() + 4.0 - scan_w, cy - 17.0), Vec2::new(scan_w, 34.0));
+        if pill_button(ui, scan_r, "Scan", BTN_PRIMARY, true).clicked() {
+            cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
+        }
+        let div = scan_r.left() - sp::L;
+        p.line_segment([Pos2::new(div, cy - 14.0), Pos2::new(div, cy + 14.0)], Stroke::new(1.0, CARD_EDGE()));
+        div - sp::L
+    };
     icon(&p, Icon::Disk, Rect::from_center_size(Pos2::new(di.left() + 9.0, cy), Vec2::splat(18.0)), TEXT_SOFT());
     let name = p.text(Pos2::new(di.left() + 18.0 + sp::M, cy), Align2::LEFT_CENTER, "Macintosh HD", ty::title(), TEXT());
     let free_s = if total > 0 { format!("{} free of {}", human_bytes(free), human_bytes(total)) } else { String::new() };
@@ -88,12 +96,19 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     // a note when Claude is missing, at the bottom
     let chart_bottom = body.bottom();
 
+    // never scanned: what a scan looks through, and one big Scan
+    if fresh {
+        let area = Rect::from_min_max(Pos2::new(body.left(), bar_card.bottom() + sp::M), Pos2::new(body.right(), chart_bottom));
+        if fresh_start(ui, area) {
+            cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
+        }
+        return;
+    }
+
     // the chart card
     let card = Rect::from_min_max(Pos2::new(body.left(), bar_card.bottom() + sp::M), Pos2::new(body.right(), chart_bottom));
     glass_card(&p, card, R_CARD, 0.0, false);
     let ci = card.shrink(sp::XL);
-    let last = if app.demo { Some(super::engine::LastScan { when: chrono::Utc::now().timestamp() - 2 * 86400, groups: vec![14_200_000_000, 9_800_000_000, 21_600_000_000, 6_100_000_000, 2_200_000_000, 1_300_000_000, 3_400_000_000] }) } else { super::engine::last_scan() };
-    let hist = super::engine::history();
     let sizes: Vec<u64> = Group::ALL.iter().enumerate().map(|(i, _)| last.as_ref().and_then(|l| l.groups.get(i).copied()).unwrap_or(0)).collect();
     let found: u64 = sizes.iter().sum();
     let mut top = ci.top();
@@ -139,22 +154,62 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
         let nw = p.layout_no_wrap(g.title().to_string(), ty::body(), TEXT()).size().x.min(cw - 24.0);
         let lx = x + (cw - nw - 22.0) / 2.0;
         let ir = Rect::from_center_size(Pos2::new(lx + 8.0, ny), Vec2::splat(16.0));
-        let drawn = matches!(g, Group::Developer) && symbol(&p, "hammer", ir, col);
-        if !drawn {
-            let ic = match g {
-                Group::AiTools => Icon::Gauge,
-                Group::AppCaches => Icon::Folder,
-                Group::Developer => Icon::Gear,
-                Group::Projects => Icon::Folder,
-                Group::Installers => Icon::Down,
-                Group::Logs => Icon::Doc,
-                Group::Trash => Icon::Trash,
-            };
-            icon(&p, ic, ir, col);
-        }
+        group_icon(&p, g, ir, col);
         text_fit(&p, Pos2::new(lx + 22.0, ny), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT_SOFT(), cw - 24.0);
     }
     p.line_segment([Pos2::new(ci.left(), base), Pos2::new(ci.right(), base)], Stroke::new(1.0, CARD_EDGE()));
+}
+
+/// A group's glyph (Developer: the SF hammer when there is one).
+fn group_icon(p: &egui::Painter, g: Group, r: Rect, col: Color32) {
+    if matches!(g, Group::Developer) && symbol(p, "hammer", r, col) {
+        return;
+    }
+    let ic = match g {
+        Group::AiTools => Icon::Gauge,
+        Group::AppCaches => Icon::Folder,
+        Group::Developer => Icon::Gear,
+        Group::Projects => Icon::Folder,
+        Group::Installers => Icon::Down,
+        Group::Logs => Icon::Doc,
+        Group::Trash => Icon::Trash,
+    };
+    icon(p, ic, r, col);
+}
+
+/// Before the first scan: every group a scan looks through as a round icon
+/// with its name, in one row (two when narrow), and a big Scan under them,
+/// all centred in `area`. True when Scan was clicked.
+fn fresh_start(ui: &mut Ui, area: Rect) -> bool {
+    let p = ui.painter().clone();
+    let n = Group::ALL.len();
+    let cell = 112.0;
+    let per_row = if area.width() >= cell * n as f32 { n } else { n.div_ceil(2) };
+    let rows = n.div_ceil(per_row);
+    let cell_h = 92.0;
+    let btn = Vec2::new(200.0, 44.0);
+    let block_h = rows as f32 * cell_h + sp::XXL + btn.y;
+    let top = area.center().y - block_h / 2.0;
+    for (k, g) in Group::ALL.into_iter().enumerate() {
+        let row = k / per_row;
+        let in_row = if row + 1 == rows { n - row * per_row } else { per_row };
+        let col_i = k % per_row;
+        let x0 = area.center().x - in_row as f32 * cell / 2.0;
+        let c = Pos2::new(x0 + (col_i as f32 + 0.5) * cell, top + row as f32 * cell_h + 26.0);
+        let col = junk_ramp(k);
+        p.circle_filled(c, 26.0, with_alpha(col, 0.14));
+        group_icon(&p, g, Rect::from_center_size(c, Vec2::splat(22.0)), col);
+        text_fit(&p, Pos2::new(c.x, c.y + 40.0), Align2::CENTER_CENTER, g.title(), ty::body(), TEXT_SOFT(), cell - 8.0);
+    }
+    let br = Rect::from_center_size(Pos2::new(area.center().x, top + rows as f32 * cell_h + sp::XXL + btn.y / 2.0), btn);
+    let resp = ui.interact(br, ui.scope_id().with("fresh-scan"), Sense::click());
+    let hov = ui.ctx().animate_bool(resp.id, resp.hovered());
+    liquid_capsule(&p, br, Some(BLUE()), if resp.is_pointer_button_down_on() { 1.6 } else { hov }, 1.0);
+    p.text(br.center(), Align2::CENTER_CENTER, "Scan", bold(16.0), on_color(BLUE()));
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
 }
 
 // ---------------------------------------------------------------- scanning / judging / cleaning

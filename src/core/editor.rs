@@ -59,14 +59,24 @@ enum Target {
     Nothing,
 }
 
+/// Settings tabs by id, and the order they're shown in.
+const TAB_NAMES: [&str; 5] = ["Widgets", "Tools", "General", "AI Usage", "AI Check"];
+const TAB_ORDER: [usize; 5] = [2, 1, 3, 4, 0];
+/// The tab Settings opens on from the sidebar.
+pub const TAB_GENERAL: usize = 2;
+
 pub fn settings_page(app: &mut App, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
     let top = Rect::from_min_size(r.min, Vec2::new(r.width(), TOP_H));
     hairline(&p, top.left_bottom(), top.right_bottom());
     p.text(Pos2::new(top.left() + 24.0, top.center().y), Align2::LEFT_CENTER, "Settings", bold(15.0), TEXT());
-    let tabs = Rect::from_center_size(top.center(), Vec2::new(450.0, 28.0));
-    if let Some(t) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &["Widgets", "Tools", "General", "AI Usage", "AI Check"], app.settings_tab) {
-        app.settings_tab = t;
+    // shown General first; `settings_tab` keeps its ids (0 Widgets, 1 Tools,
+    // 2 General, 3 AI Usage, 4 AI Check) so links and Edit widgets… land on the right tab
+    let labels: Vec<&str> = TAB_ORDER.iter().map(|&t| TAB_NAMES[t]).collect();
+    let tabs = Rect::from_center_size(top.center(), Vec2::new(90.0 * labels.len() as f32, 28.0));
+    let shown = TAB_ORDER.iter().position(|&t| t == app.settings_tab).unwrap_or(0);
+    if let Some(k) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &labels, shown) {
+        app.settings_tab = TAB_ORDER[k];
         app.drag = None;
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), top.bottom() + 1.0), r.max);
@@ -780,4 +790,19 @@ fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     p.text(Pos2::new(x + w, y + 15.0), Align2::RIGHT_CENTER, version_label(), font(11.0), TEXT_FAINT());
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
     y + 30.0 + 24.0
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::*;
+
+    #[test]
+    fn every_settings_tab_shows_once_general_first_widgets_last() {
+        let mut ids = TAB_ORDER.to_vec();
+        ids.sort();
+        assert_eq!(ids, (0..TAB_NAMES.len()).collect::<Vec<_>>());
+        assert_eq!(TAB_NAMES[TAB_ORDER[0]], "General");
+        assert_eq!(TAB_ORDER[0], TAB_GENERAL);
+        assert_eq!(TAB_NAMES[*TAB_ORDER.last().unwrap()], "Widgets");
+    }
 }
