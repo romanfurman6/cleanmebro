@@ -11,6 +11,16 @@ pub fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 
+/// Would touching `p` make macOS ask the user about a folder (Desktop,
+/// Documents, Downloads, iCloud Drive, other volumes)? Only while Full Disk
+/// Access isn't granted. Background checks (a startup job's program, its
+/// signature) skip such paths, so no folder question comes before setup.
+pub fn behind_folder_prompt(p: &Path) -> bool {
+    let h = home();
+    let private = ["Desktop", "Documents", "Downloads", "Library/Mobile Documents"].iter().any(|x| p.starts_with(h.join(x))) || p.starts_with("/Volumes");
+    private && crate::kit::perms::Perm::FullDisk.status() != crate::kit::perms::Status::Allowed
+}
+
 /// How deep `dir_size` walks; deeper content is not counted.
 const DIR_SIZE_MAX_DEPTH: usize = 64;
 

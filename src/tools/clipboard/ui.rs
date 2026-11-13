@@ -15,6 +15,8 @@ use std::time::Instant;
 /// Most recent clips listed in the Large widget.
 const PANEL_ROWS: usize = 8;
 const ROW_H: f32 = sp::SETTINGS_ROW_H;
+/// Room between history rows, so hover and selection don't touch.
+const ROW_GAP: f32 = sp::LINE_GAP;
 
 // ---------------------------------------------------------------- shared bits
 
@@ -467,7 +469,7 @@ fn grouped_rows(c: &Clipboard, ids: &[u64]) -> std::sync::Arc<Vec<Row>> {
 /// Rows grouped as Pinned, then by day.
 fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
     let rows = grouped_rows(c, ids);
-    let h: f32 = rows.iter().map(|r| if matches!(r, Row::Head(_)) { 28.0 } else { ROW_H }).sum::<f32>() + 8.0;
+    let h: f32 = rows.iter().map(|r| if matches!(r, Row::Head(_)) { 28.0 } else { ROW_H + ROW_GAP }).sum::<f32>() + 8.0;
     let mut child = ui.new_child(UiBuilder::new().max_rect(list.shrink2(Vec2::new(0.0, 4.0))));
     ScrollArea::vertical().id_salt("clip-list").auto_shrink([false, false]).show(&mut child, |ui| {
         let (area, _) = ui.allocate_exact_size(Vec2::new(list.width(), h), Sense::hover());
@@ -483,7 +485,7 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
                     let r = Rect::from_min_size(Pos2::new(area.left() + 4.0, y), Vec2::new(area.width() - 8.0, ROW_H));
                     // up to a thousand rows: only those in view are drawn
                     if !ui.is_rect_visible(r) {
-                        y += ROW_H;
+                        y += ROW_H + ROW_GAP;
                         continue;
                     }
                     let Some(e) = c.store.get(*id).map(Entry::light) else { continue };
@@ -519,7 +521,7 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
                     if resp.double_clicked() && c.copy(e.id, false) {
                         c.hud("Copied");
                     }
-                    y += ROW_H;
+                    y += ROW_H + ROW_GAP;
                 }
             }
         }
