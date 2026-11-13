@@ -15,8 +15,6 @@ pub const SETUP_H: f32 = 600.0;
 const MAX_STEPS: usize = 7;
 const TOP_H: f32 = 44.0;
 const BOTTOM_H: f32 = 64.0;
-/// Tools that start off on a fresh install (the rest start on).
-pub const OFF_AT_FIRST: [&str; 2] = ["claude", "fan"];
 
 /// What a setup step shows.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -53,11 +51,13 @@ pub struct Setup {
     since: f64,
     /// The step before this one: the cat on the step dots hops from there.
     from: usize,
+    /// The Tools step shows every tool with a switch, not the goals.
+    pub all_tools: bool,
 }
 
 impl Setup {
     pub fn new(step: usize) -> Self {
-        Setup { step, since: f64::NEG_INFINITY, from: step }
+        Setup { step, since: f64::NEG_INFINITY, from: step, all_tools: false }
     }
 }
 
@@ -421,7 +421,13 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     if let Some(label) = label {
         let w = button_width(&p, label, BTN_PRIMARY).max(110.0);
         let r = Rect::from_min_size(Pos2::new(bar.right() - w, bar.center().y - 16.0), Vec2::new(w, 32.0));
-        if pill_button(ui, r, label, BTN_PRIMARY, true).clicked() {
+        // nothing to set up with no tool on
+        let can = kind != Kind::Tools || (0..app.tools.len()).any(|i| app.tool_on(i));
+        if kind == Kind::Tools {
+            let left = bar.left() + 70.0 + sp::L;
+            cost_line(app, ui, Rect::from_min_max(Pos2::new(left, bar.top()), Pos2::new(r.left() - sp::L, bar.bottom())));
+        }
+        if pill_button(ui, r, label, BTN_PRIMARY, can).clicked() && can {
             if kind == Kind::Ready {
                 finish = if needs_restart(app) { Finish::Restart } else { Finish::Panel };
             } else {
@@ -662,74 +668,407 @@ fn sections(app: &App) -> Vec<&'static str> {
     out
 }
 
+/// A ready-made set of tools on the Tools step: picking it turns them all on.
+pub struct Goal {
+    pub name: &'static str,
+    pub tools: &'static [&'static str],
+}
+
+/// What people come for. Every tool but Fan Control is in one goal; Fan
+/// Control (it needs an admin helper) is only in the full list.
+pub const GOALS: [Goal; 6] = {
+    use crate::tools::*;
+    [
+        Goal { name: "Clean my Mac", tools: &[cleanup::ID, lens::ID, uninstaller::ID] },
+        Goal { name: "Screenshots & recording", tools: &[capture::ID, capture::VIDEO_ID, capture::SHARING_ID] },
+        Goal { name: "Clipboard", tools: &[clipboard::ID] },
+        Goal { name: "Voice typing", tools: &[dictation::ID] },
+        Goal { name: "Watch my Mac", tools: &[system::ID, startup::ID, displays::ID] },
+        Goal { name: "For developers", tools: &[claude::ID, keep_awake::ID] },
+    ]
+};
+
+/// Tools on in a fresh install: "Clean my Mac" and Clipboard. One
+/// permission (Full Disk Access), no downloads, no shortcuts taken.
+pub const ON_AT_FIRST: [&str; 4] = [crate::tools::cleanup::ID, crate::tools::lens::ID, crate::tools::uninstaller::ID, crate::tools::clipboard::ID];
+
+/// The ids to save as switched off on a fresh install.
+pub fn off_at_first<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
+    ids.filter(|id| !ON_AT_FIRST.contains(id)).map(str::to_string).collect()
+}
+
+/// Indexes of a goal's tools that this build has.
+fn goal_tools(app: &App, g: &Goal) -> Vec<usize> {
+    g.tools.iter().filter_map(|id| app.tool_index(id)).collect()
+}
+
+/// What the switched-on tools will take: permissions (required first, then
+/// optional), bytes to download, and global shortcuts.
+#[derive(Debug, Default, PartialEq)]
+pub struct Cost {
+    pub must: Vec<Perm>,
+    pub may: Vec<Perm>,
+    pub download: u64,
+    pub keys: Vec<String>,
+}
+
+fn cost(app: &App) -> Cost {
+    use crate::core::tool::ModelState;
+    let rows = rows(app);
+    let must = rows.iter().filter(|r| !r.optional).map(|r| r.perm).collect();
+    let may = rows.iter().filter(|r| r.optional).map(|r| r.perm).collect();
+    let download = models(app).iter().filter(|(_, m)| !matches!(m.state, ModelState::Ready)).map(|(_, m)| m.bytes).sum();
+    let mut keys: Vec<String> = Vec::new();
+    for i in (0..app.tools.len()).filter(|&i| app.tool_on(i)) {
+        for (_, k) in app.tools[i].setup_shortcuts() {
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+        }
+    }
+    Cost { must, may, download, keys }
+}
+
+/// 0→1 over `dur` seconds from when `id` was first drawn (again): things
+/// that just appeared drop or pop in. Screenshots show them settled.
+fn appear(ctx: &egui::Context, id: egui::Id, now: f64, dur: f32, demo: bool) -> f32 {
+    if demo {
+        return 1.0;
+    }
+    let (first, last) = ctx.data_mut(|d| d.get_temp::<(f64, f64)>(id)).unwrap_or((now, now));
+    // not drawn for a moment: it was gone, so it appears afresh
+    let first = if now - last > 0.2 { now } else { first };
+    ctx.data_mut(|d| d.insert_temp(id, (first, now)));
+    let k = ((now - first) as f32) / dur;
+    if k < 1.0 {
+        ctx.request_repaint();
+    }
+    ease(k)
+}
+
+const PANEL_W: f32 = 252.0;
+
 fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let p = ui.painter().clone();
     let on = (0..app.tools.len()).filter(|&i| app.tool_on(i)).count();
+    let left = Rect::from_min_max(body.min, Pos2::new(body.right() - PANEL_W - 28.0, body.bottom()));
     let head = body.top() + 6.0;
-    let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Tools", bold(22.0), TEXT());
+    let g = p.text(Pos2::new(left.left(), head), Align2::LEFT_TOP, "What do you need?", bold(22.0), TEXT());
     // the count rolls to its new number like an odometer
     let shown = ui.ctx().animate_value_with_time(ui.scope_id().with("setup-tools-on"), on as f32, 0.28);
     rolling_count(&p, Pos2::new(g.right() + 10.0, g.bottom() - 4.0), shown, app.tools.len());
-    let secs = sections(app);
-    let cols = secs.len().max(1) as f32;
-    let gap = 12.0;
-    let cw = (body.width() - gap * (cols - 1.0)) / cols;
+    let all = app.setup.as_ref().is_some_and(|s| s.all_tools);
+    let seg = Rect::from_min_size(Pos2::new(left.right() - 150.0, g.center().y - sp::CONTROL_H / 2.0), Vec2::new(150.0, sp::CONTROL_H));
+    if let Some(k) = segmented(ui, seg, ui.scope_id().with("setup-tools-mode"), &["Goals", "All tools"], all as usize) {
+        if let Some(s) = app.setup.as_mut() {
+            s.all_tools = k == 1;
+        }
+    }
     let top = g.bottom() + 20.0;
+    let area = Rect::from_min_max(Pos2::new(left.left(), top), left.max);
+    if all {
+        all_tools(app, ui, area, t);
+    } else {
+        goal_cards(app, ui, area, t);
+    }
+    mini_panel(app, ui, Rect::from_min_max(Pos2::new(body.right() - PANEL_W, body.top() + 6.0), body.max), t);
+}
+
+fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) {
+    let p = ui.painter().clone();
+    let gap = sp::M;
+    let cw = (area.width() - gap) / 2.0;
+    // three rows fill the step
+    let ch = ((area.height() - sp::L - gap * 2.0) / 3.0).clamp(96.0, 116.0);
+    let mut flip = None;
+    for (k, goal) in GOALS.iter().enumerate() {
+        let idx = goal_tools(app, goal);
+        if idx.is_empty() {
+            continue;
+        }
+        let picked = idx.iter().all(|&i| app.tool_on(i));
+        let a = ease((t - 0.05 * k as f32) / 0.4);
+        let (col, row) = ((k % 2) as f32, (k / 2) as f32);
+        let r = Rect::from_min_size(Pos2::new(area.left() + col * (cw + gap), area.top() + row * (ch + gap) + (1.0 - a) * 8.0), Vec2::new(cw, ch));
+        let id = ui.scope_id().with(("setup-goal", goal.name));
+        let resp = ui.interact(r, id, Sense::click());
+        let s = ui.ctx().animate_bool_with_time(id.with("on"), picked, 0.18);
+        let hov = ui.ctx().animate_bool(id.with("h"), resp.hovered());
+        let r = r.translate(Vec2::new(0.0, -hov));
+        let fill = lerp_color(lerp_color(CARD(), white(30), hov * 0.15), with_alpha(BLUE(), 0.10), s);
+        p.rect_filled(r, 12.0, fill.gamma_multiply(a));
+        p.rect_stroke(r, 12.0, Stroke::new(1.0, lerp_color(CARD_EDGE(), with_alpha(BLUE(), 0.55), s).gamma_multiply(a)), StrokeKind::Inside);
+        // the goal's tools, as their chips
+        let inner = r.shrink(14.0);
+        let jolt = ui.ctx().animate_bool_with_time(id.with("jolt"), picked, 0.32);
+        let bump = 4.0 * jolt * (1.0 - jolt) * if picked { 0.12 } else { -0.08 };
+        for (j, &i) in idx.iter().enumerate() {
+            let c = Pos2::new(inner.left() + 15.0 + j as f32 * 36.0, inner.top() + 15.0);
+            let b = app.tools[i].badge();
+            tool_chip(&p, Rect::from_center_size(c, Vec2::splat(30.0 * (1.0 + bump))), b.icon, b.color);
+        }
+        // check, top right
+        let cc = Pos2::new(inner.right() - 9.0, inner.top() + 15.0);
+        p.circle_stroke(cc, 8.5, Stroke::new(1.5, lerp_color(white(40), BLUE(), s)));
+        if s > 0.01 {
+            let z = pop(s);
+            p.circle_filled(cc, 9.0 * z, BLUE());
+            check(&p, cc, 7.0 * z, ON_ACTION);
+        }
+        // name, and what it will ask macOS for
+        let ny = inner.bottom() - 8.0;
+        let mut px = inner.right();
+        let mut need: Vec<Perm> = Vec::new();
+        for &i in &idx {
+            for n in app.tools[i].needs() {
+                if !n.optional && !need.contains(&n.perm) {
+                    need.push(n.perm);
+                }
+            }
+        }
+        for perm in need.iter().rev() {
+            let ir = Rect::from_min_size(Pos2::new(px - 13.0, ny - 6.5), Vec2::splat(13.0));
+            icon(&p, perm.icon(), ir, TEXT_FAINT());
+            ui.interact(ir, id.with(("perm", perm.name())), Sense::hover()).on_hover_text(perm.name());
+            px -= 17.0;
+        }
+        text_fit(&p, Pos2::new(inner.left(), ny), Align2::LEFT_CENTER, goal.name, bold(14.0), TEXT(), px - inner.left() - 6.0);
+        if resp.clicked() {
+            flip = Some((idx, !picked));
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+    if let Some((idx, o)) = flip {
+        for i in idx {
+            app.set_tool_on(i, o);
+        }
+    }
+}
+
+/// Every tool with a switch, by section in two columns.
+fn all_tools(app: &mut App, ui: &mut Ui, area: Rect, t: f32) {
+    let p = ui.painter().clone();
+    let secs = sections(app);
+    let gap = 18.0;
+    let cw = (area.width() - gap) / 2.0;
+    let mut ys = [area.top(); 2];
     let mut flip = None;
     let mut k = 0;
-    for (ci, sec) in secs.iter().enumerate() {
-        let x = body.left() + ci as f32 * (cw + gap);
-        p.text(Pos2::new(x + 2.0, top), Align2::LEFT_TOP, sec, font(11.0), TEXT_FAINT());
-        let mut y = top + 20.0;
+    for (si, sec) in secs.iter().enumerate() {
+        let c = si % 2;
+        let x = area.left() + c as f32 * (cw + gap);
+        group_header(&p, Pos2::new(x + 8.0, ys[c]), sec);
+        ys[c] += 20.0;
         for i in 0..app.tools.len() {
             if app.tools[i].section() != *sec {
                 continue;
             }
-            let a = ease((t - 0.04 * k as f32) / 0.4);
+            let a = ease((t - 0.03 * k as f32) / 0.3);
             k += 1;
-            let r = Rect::from_min_size(Pos2::new(x, y + (1.0 - a) * 8.0), Vec2::new(cw, 68.0));
+            let r = Rect::from_min_size(Pos2::new(x, ys[c]), Vec2::new(cw, 36.0));
+            ys[c] += 36.0;
             let id = ui.scope_id().with(("setup-tool", app.tools[i].id()));
             let resp = ui.interact(r, id, Sense::click());
             let o = app.tool_on(i);
-            let s = ui.ctx().animate_bool_with_time(id.with("on"), o, 0.18);
-            let hov = ui.ctx().animate_bool(id.with("h"), resp.hovered());
-            p.rect_filled(r, 10.0, lerp_color(CARD(), white(30), hov * 0.15).gamma_multiply(a));
-            p.rect_stroke(r, 10.0, Stroke::new(1.0, white(12).gamma_multiply(a)), StrokeKind::Inside);
-            // the tile jumps up when switched on and dips when switched off
-            let jolt = ui.ctx().animate_bool_with_time(id.with("jolt"), o, 0.32);
-            let bump = 4.0 * jolt * (1.0 - jolt) * if o { 0.16 } else { -0.1 };
-            let ib = Rect::from_center_size(Pos2::new(r.left() + 29.0, r.center().y), Vec2::splat(34.0 * (1.0 + bump)));
-            p.rect_filled(ib, 9.0 * (1.0 + bump), lerp_color(white(16), BLUE(), s));
-            let b = app.tools[i].badge();
-            icon(&p, b.icon, ib.shrink(8.0 * (1.0 + bump)), lerp_color(TEXT_MUTED(), ON_ACTION, s));
-            let tx = r.left() + 56.0;
-            // name + permission icons as one block, centered, LINE_GAP apart
-            let block = if app.tools[i].needs().is_empty() { 16.0 } else { 16.0 + sp::LINE_GAP + 12.0 };
-            let ny = r.center().y - block / 2.0;
-            text_fit(&p, Pos2::new(tx, ny), Align2::LEFT_TOP, app.tools[i].name(), bold(13.0), lerp_color(TEXT_MUTED(), TEXT(), s), r.right() - tx - 24.0);
-            // what it will ask for
-            let mut gx = tx;
-            for n in app.tools[i].needs() {
-                icon(&p, n.perm.icon(), Rect::from_min_size(Pos2::new(gx, ny + 16.0 + sp::LINE_GAP), Vec2::splat(12.0)), TEXT_MUTED());
-                gx += 16.0;
-            }
-            if s > 0.01 {
-                let c = Pos2::new(r.right() - 14.0, r.top() + 14.0);
-                let z = pop(s);
-                p.circle_filled(c, 8.0 * z, BLUE());
-                check(&p, c, 7.0 * z, ON_ACTION);
-            }
-            if resp.clicked() {
-                flip = Some((i, !o));
-            }
             if resp.hovered() {
+                p.rect_filled(r, 9.0, CARD());
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
-            y += 76.0;
+            let b = app.tools[i].badge();
+            let chip = Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(24.0));
+            tool_chip(&p, chip, b.icon, if o { b.color } else { tint::NEUTRAL() });
+            let sw = Rect::from_min_size(Pos2::new(r.right() - 38.0, r.center().y - 9.0), Vec2::new(30.0, 18.0));
+            let tx = chip.right() + 10.0;
+            let name = text_fit(&p, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, app.tools[i].name(), font(13.0), lerp_color(TEXT_DIM(), TEXT(), a * o as u8 as f32).gamma_multiply(a.max(0.3)), sw.left() - tx - 60.0);
+            let mut gx = name.right() + 8.0;
+            for n in app.tools[i].needs() {
+                let ir = Rect::from_min_size(Pos2::new(gx, r.center().y - 6.0), Vec2::splat(12.0));
+                icon(&p, n.perm.icon(), ir, if n.optional { TEXT_MUTED() } else { TEXT_FAINT() });
+                ui.interact(ir, id.with(("perm", n.perm.name())), Sense::hover()).on_hover_text(n.perm.name());
+                gx += 16.0;
+            }
+            if switch(ui, sw, id.with("sw"), o, true).clicked() || resp.clicked() {
+                flip = Some((i, !o));
+            }
         }
+        ys[c] += sp::S;
     }
     if let Some((i, o)) = flip {
         app.set_tool_on(i, o);
+    }
+}
+
+/// The menu bar panel as it will look: a tile per switched-on tool, which
+/// drops in when the tool is turned on.
+fn mini_panel(app: &App, ui: &mut Ui, area: Rect, t: f32) {
+    let p = ui.painter().clone();
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let a = ease((t - 0.15) / 0.4);
+    // the menu bar, our icon lit
+    let mb = Rect::from_min_size(area.min, Vec2::new(area.width(), 24.0));
+    p.rect_filled(mb, 7.0, pick(Color32::from_black_alpha(100), Color32::from_white_alpha(170)).gamma_multiply(a));
+    let cat = Rect::from_min_size(Pos2::new(mb.right() - 30.0, mb.top() + 3.0), Vec2::new(22.0, 18.0));
+    p.rect_filled(cat, 5.0, with_alpha(BLUE(), 0.16 * a));
+    brand_glyph(&p, cat.center(), 14.0, BLUE().gamma_multiply(a));
+    let mut sx = cat.left() - 12.0;
+    for name in ["battery.75percent", "wifi"] {
+        let r = Rect::from_min_size(Pos2::new(sx - 14.0, mb.center().y - 7.0), Vec2::splat(14.0));
+        symbol(&p, name, r, TEXT_DIM().gamma_multiply(a));
+        sx -= 24.0;
+    }
+    // the panel under it
+    let on: Vec<usize> = (0..app.tools.len()).filter(|&i| app.tool_on(i)).collect();
+    let pad = sp::S;
+    let gap = 6.0;
+    let th = 44.0;
+    let tw = (area.width() - pad * 2.0 - gap) / 2.0;
+    let rows = on.len().div_ceil(2);
+    let want = if rows == 0 { 120.0 } else { pad * 2.0 + rows as f32 * (th + gap) - gap };
+    let h = ctx.animate_value_with_time(ui.scope_id().with("setup-panel-h"), want, 0.25);
+    let panel = Rect::from_min_size(Pos2::new(area.left(), mb.bottom() + 8.0), Vec2::new(area.width(), h));
+    let panel = panel.translate(Vec2::new(0.0, (1.0 - a) * -10.0));
+    p.add(egui::epaint::Shadow { offset: [0, 14], blur: 36, spread: 0, color: Color32::from_black_alpha((70.0 * a) as u8) }.as_shape(panel, CornerRadius::same(12)));
+    p.rect_filled(panel, 12.0, BG().gamma_multiply(a));
+    p.rect_stroke(panel, 12.0, Stroke::new(1.0, CARD_EDGE().gamma_multiply(a)), StrokeKind::Inside);
+    if on.is_empty() {
+        brand_glyph(&p, panel.center(), 40.0, white(24).gamma_multiply(a));
+        return;
+    }
+    let clip = p.with_clip_rect(panel);
+    for (k, &i) in on.iter().enumerate() {
+        let id = ui.scope_id().with(("setup-panel-tile", app.tools[i].id()));
+        let (col, row) = ((k % 2) as f32, (k / 2) as f32);
+        let x = ctx.animate_value_with_time(id.with("x"), panel.left() + pad + col * (tw + gap), 0.25);
+        let y = ctx.animate_value_with_time(id.with("y"), row * (th + gap), 0.25);
+        let d = appear(&ctx, id.with("in"), now, 0.36, app.demo).min(a);
+        let r = Rect::from_min_size(Pos2::new(x, panel.top() + pad + y - (1.0 - d) * 12.0), Vec2::new(tw, th));
+        let r = Rect::from_center_size(r.center(), r.size() * (0.92 + 0.08 * d));
+        clip.rect_filled(r, 10.0, CARD().gamma_multiply(d));
+        clip.rect_stroke(r, 10.0, Stroke::new(1.0, CARD_EDGE().gamma_multiply(d)), StrokeKind::Inside);
+        let b = app.tools[i].badge();
+        let chip = Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(26.0));
+        tool_chip(&clip, chip, b.icon, b.color.gamma_multiply(d));
+        let tx = chip.right() + 8.0;
+        let meta = app.tools[i].sidebar_meta();
+        let room = r.right() - tx - 6.0;
+        if meta.is_empty() {
+            text_fit(&clip, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, app.tools[i].name(), font(12.0), TEXT().gamma_multiply(d), room);
+        } else {
+            two_lines(&clip, tx, r.center().y, app.tools[i].name(), font(10.5), TEXT_FAINT().gamma_multiply(d), &meta, bold(13.0), TEXT().gamma_multiply(d), room);
+        }
+    }
+}
+
+/// The Tools step's bottom bar, between Back and Continue: the permissions
+/// the switched-on tools will ask for (required with their names, optional
+/// as dashed icons), the download, and the shortcuts they take.
+fn cost_line(app: &App, ui: &mut Ui, area: Rect) {
+    let p = ui.painter().clone();
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let c = cost(app);
+    enum Item {
+        Perm(Perm, bool),
+        Down(u64),
+        Keys(String),
+    }
+    let mut items: Vec<Item> = c.must.iter().map(|&q| Item::Perm(q, false)).collect();
+    items.extend(c.may.iter().map(|&q| Item::Perm(q, true)));
+    if c.download > 0 {
+        items.push(Item::Down(c.download));
+    }
+    items.extend(c.keys.iter().cloned().map(Item::Keys));
+    let h = 26.0;
+    let gap = 6.0;
+    let label = |it: &Item, named: bool| -> Option<String> {
+        match it {
+            Item::Perm(q, false) if named => Some(q.name().to_string()),
+            Item::Down(b) => Some(human_bytes(*b)),
+            _ => None,
+        }
+    };
+    let width = |it: &Item, named: bool| -> f32 {
+        match it {
+            Item::Keys(k) => p.layout_no_wrap(k.clone(), font(13.0), TEXT()).size().x + 14.0,
+            _ => {
+                let tw = label(it, named).map(|s| p.layout_no_wrap(s, font(12.0), TEXT()).size().x + 6.0).unwrap_or(0.0);
+                14.0 + tw + 16.0
+            }
+        }
+    };
+    // one row: with the permissions' names when they fit, else icons only
+    // (their names show on hover, and on the Permissions step)
+    let lay = |named: bool| -> Vec<Vec<(usize, f32)>> {
+        let mut rows: Vec<Vec<(usize, f32)>> = vec![Vec::new()];
+        let mut x = 0.0;
+        for (k, it) in items.iter().enumerate() {
+            let w = width(it, named);
+            if x > 0.0 && x + w > area.width() {
+                rows.push(Vec::new());
+                x = 0.0;
+            }
+            rows.last_mut().unwrap().push((k, w));
+            x += w + gap;
+        }
+        rows
+    };
+    let mut named = true;
+    let mut rows = lay(true);
+    if rows.len() > 1 {
+        named = false;
+        rows = lay(false);
+    }
+    let total = rows.len() as f32 * h + (rows.len() as f32 - 1.0) * gap;
+    let mut y = area.center().y - total / 2.0;
+    for row in rows {
+        let mut x = area.left();
+        for (k, w) in row {
+            let it = &items[k];
+            let key = match it {
+                Item::Perm(q, _) => q.name().to_string(),
+                Item::Down(_) => "download".to_string(),
+                Item::Keys(s) => s.clone(),
+            };
+            let id = ui.scope_id().with(("setup-cost", key.as_str()));
+            let d = appear(&ctx, id, now, 0.28, app.demo);
+            let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h));
+            let r = Rect::from_center_size(r.center(), r.size() * (0.8 + 0.2 * pop(d)));
+            match it {
+                Item::Keys(s) => {
+                    // one cap per shortcut, its keys in a row
+                    let c = Rect::from_center_size(r.center(), Vec2::new(r.width(), 22.0 * r.height() / h));
+                    p.rect_filled(c, 5.0, white(26).gamma_multiply(d));
+                    p.rect_filled(Rect::from_min_max(Pos2::new(c.left() + 1.0, c.bottom() - 1.5), Pos2::new(c.right() - 1.0, c.bottom())), CornerRadius::same(2), Color32::from_black_alpha((90.0 * d) as u8));
+                    p.text(c.center() - Vec2::new(0.0, 0.75), Align2::CENTER_CENTER, s, font(13.0), TEXT().gamma_multiply(d));
+                }
+                _ => {
+                    let optional = matches!(it, Item::Perm(_, true));
+                    if optional {
+                        dashed_rect(&p, r, 8.0, TEXT_MUTED().gamma_multiply(d));
+                    } else {
+                        p.rect_filled(r, 8.0, CARD().gamma_multiply(d));
+                        p.rect_stroke(r, 8.0, Stroke::new(1.0, CARD_EDGE().gamma_multiply(d)), StrokeKind::Inside);
+                    }
+                    let ic = match it {
+                        Item::Perm(q, _) => q.icon(),
+                        _ => Icon::Down,
+                    };
+                    let ir = Rect::from_min_size(Pos2::new(r.left() + 8.0, r.center().y - 7.0), Vec2::splat(14.0));
+                    icon(&p, ic, ir, if optional { TEXT_FAINT() } else { TEXT_DIM() }.gamma_multiply(d));
+                    if let Some(s) = label(it, named) {
+                        p.text(Pos2::new(ir.right() + 6.0, r.center().y), Align2::LEFT_CENTER, s, font(12.0), TEXT().gamma_multiply(d));
+                    }
+                    if let Item::Perm(q, _) = it {
+                        ui.interact(r, id.with("tip"), Sense::hover()).on_hover_text(q.name());
+                    }
+                }
+            }
+            x += w + gap;
+        }
+        y += h + gap;
     }
 }
 
@@ -1121,20 +1460,26 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
     y - area.top()
 }
 
+/// A shortcut's caps: modifiers are one char each; the key is the rest.
+fn caps(keys: &str) -> Vec<String> {
+    let mods: String = keys.chars().take_while(|c| "⌃⌥⇧⌘".contains(*c)).collect();
+    let key: String = keys.chars().skip(mods.chars().count()).collect();
+    let mut v: Vec<String> = mods.chars().map(|c| c.to_string()).collect();
+    v.push(key);
+    v
+}
+
+fn cap_w(p: &egui::Painter, c: &str) -> f32 {
+    p.layout_no_wrap(c.to_string(), font(13.0), TEXT()).size().x.max(10.0) + 12.0
+}
+
 fn keycaps(p: &egui::Painter, right: Pos2, keys: &str) {
     let mut x = right.x;
-    let caps: Vec<String> = {
-        // modifiers are one char each; the key is the rest
-        let mods: String = keys.chars().take_while(|c| "⌃⌥⇧⌘".contains(*c)).collect();
-        let key: String = keys.chars().skip(mods.chars().count()).collect();
-        let mut v: Vec<String> = mods.chars().map(|c| c.to_string()).collect();
-        v.push(key);
-        v
-    };
+    let caps = caps(keys);
     for c in caps.iter().rev() {
         let f: FontId = font(13.0);
         let g = p.layout_no_wrap(c.clone(), f, TEXT());
-        let w = g.size().x.max(10.0) + 12.0;
+        let w = cap_w(p, c);
         let r = Rect::from_min_size(Pos2::new(x - w, right.y - 11.0), Vec2::new(w, 22.0));
         p.rect_filled(r, 5.0, white(26));
         p.rect_filled(Rect::from_min_max(Pos2::new(r.left() + 1.0, r.bottom() - 1.5), Pos2::new(r.right() - 1.0, r.bottom())), CornerRadius::same(2), Color32::from_black_alpha(90));
@@ -1391,6 +1736,49 @@ mod tests {
             assert!((r - last).abs() < 15.0, "a jump of {} at {:.2}s", r - last, i as f32 * 0.01);
             last = r;
         }
+    }
+
+    #[test]
+    fn goals_cover_every_tool_but_fan_once() {
+        let env = crate::core::tool::ToolEnv { ctx: egui::Context::default(), demo: true };
+        let ids: Vec<&str> = crate::tools::all(&env).iter().map(|t| t.id()).collect();
+        let mut seen: Vec<&str> = Vec::new();
+        for g in &GOALS {
+            for id in g.tools {
+                assert!(ids.contains(id), "{} lists unknown tool {id}", g.name);
+                assert!(!seen.contains(id), "{id} is in two goals");
+                seen.push(id);
+            }
+        }
+        let left: Vec<&&str> = ids.iter().filter(|id| !seen.contains(id)).collect();
+        assert_eq!(left, vec![&crate::tools::fan::ID]);
+    }
+
+    #[test]
+    fn fresh_install_turns_on_three_to_four_tools() {
+        let env = crate::core::tool::ToolEnv { ctx: egui::Context::default(), demo: true };
+        let all = crate::tools::all(&env);
+        let off = off_at_first(all.iter().map(|t| t.id()));
+        let on: Vec<&str> = all.iter().map(|t| t.id()).filter(|id| !off.iter().any(|o| o == id)).collect();
+        assert_eq!(on, ON_AT_FIRST.to_vec());
+        // they ask macOS for one thing only, and take no shortcut
+        let mut need: Vec<Perm> = Vec::new();
+        for t in all.iter().filter(|t| on.contains(&t.id())) {
+            for n in t.needs() {
+                if !need.contains(&n.perm) {
+                    need.push(n.perm);
+                }
+            }
+            assert!(t.setup_shortcuts().is_empty(), "{} takes a shortcut", t.id());
+            assert!(t.setup_models().is_empty(), "{} downloads", t.id());
+        }
+        assert_eq!(need, vec![Perm::FullDisk]);
+    }
+
+    #[test]
+    fn keycaps_split_modifiers_from_the_key() {
+        assert_eq!(caps("⌘⇧2"), vec!["⌘", "⇧", "2"]);
+        assert_eq!(caps("⌥Space"), vec!["⌥", "Space"]);
     }
 
     #[test]

@@ -126,7 +126,7 @@ impl App {
         let first_run = !demo && !super::onboard::done_marker().exists();
         let tools_off: Vec<String> = match stored_off {
             Some(v) => v,
-            None if first_run => super::onboard::OFF_AT_FIRST.iter().map(|s| s.to_string()).collect(),
+            None if first_run => super::onboard::off_at_first(tools.iter().map(|t| t.id())),
             None => Vec::new(),
         };
         // what macOS said about Screen Recording at launch (it only applies
@@ -313,16 +313,25 @@ impl App {
                 return;
             }
             // first-run setup, one step each
-            "setup" | "setup-tools" | "setup-ai" | "setup-models" | "setup-perms" | "setup-crash" | "setup-ready" => {
+            "setup" | "setup-tools" | "setup-tools-all" | "setup-ai" | "setup-models" | "setup-perms" | "setup-crash" | "setup-ready" => {
                 self.mode = Mode::Setup;
                 let step = ["setup", "setup-tools", "setup-ai", "setup-models", "setup-perms", "setup-crash", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
                 self.setup = Some(super::onboard::Setup::new(step));
                 use crate::kit::perms::{Perm, Status};
                 self.perm_watch.demo = Some([(Perm::Screen, Status::Allowed), (Perm::Accessibility, Status::Allowed), (Perm::FullDisk, Status::NotAsked), (Perm::SystemEvents, Status::Denied), (Perm::Microphone, Status::Allowed)].into_iter().collect());
-                for id in super::onboard::OFF_AT_FIRST {
-                    if let Some(i) = self.tool_index(id) {
-                        self.set_tool_on(i, false);
-                    }
+                // the full list, with a few more tools on (the cost line fills up)
+                let all = view == "setup-tools-all";
+                let more = [crate::tools::capture::ID, crate::tools::capture::VIDEO_ID, crate::tools::dictation::ID, crate::tools::system::ID];
+                for i in 0..self.tools.len() {
+                    let id = self.tools[i].id();
+                    // the models step only exists with Dictation on
+                    let on = super::onboard::ON_AT_FIRST.contains(&id) || (all && more.contains(&id)) || (view == "setup-models" && id == crate::tools::dictation::ID);
+                    self.set_tool_on(i, on);
+                }
+                if all {
+                    let mut s = super::onboard::Setup::new(1);
+                    s.all_tools = true;
+                    self.setup = Some(s);
                 }
                 return;
             }
