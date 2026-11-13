@@ -312,28 +312,30 @@ fn step_dots(p: &egui::Painter, full: Rect, steps: usize, from: usize, step: usi
     const GAP: f32 = 22.0;
     let total = steps as f32 * D + (steps as f32 - 1.0) * GAP;
     let x = |i: usize| full.center().x - total / 2.0 + D / 2.0 + i as f32 * (D + GAP);
-    let y = full.top() + TOP_H / 2.0 + 6.0;
+    let y = full.top() + TOP_H / 2.0 + 9.0;
     let k = (t / HOP).clamp(0.0, 1.0);
     let moving = from != step;
     for i in 0..steps {
         let lit = i < step || (i == step && (!moving || k >= 1.0)) || (i <= from && i <= step);
         p.circle_filled(Pos2::new(x(i), y), D / 2.0, if lit { BLUE() } else { white(46) });
     }
-    // the Welcome step has the big cat
-    if step == 0 {
+    // the Welcome step has the big cat: back there, the small one hops
+    // onto its dot and fades away
+    let fade = if step == 0 { 1.0 - ((t - HOP) / 0.2).clamp(0.0, 1.0) } else { 1.0 };
+    if fade <= 0.0 || (step == 0 && !moving) {
         return;
     }
     let m = k * k * (3.0 - 2.0 * k);
     let cx = egui::lerp(x(from)..=x(step), m);
-    let jump = if moving { (k * std::f32::consts::PI).sin() * 12.0 } else { 0.0 };
+    let jump = if moving { (k * std::f32::consts::PI).sin() * 8.0 } else { 0.0 };
     // a squash as it lands
     let l = ((t - HOP) / 0.2).clamp(0.0, 1.0);
     let sq = if moving && l > 0.0 && l < 1.0 { (l * std::f32::consts::PI).sin() * 0.18 } else { 0.0 };
-    let size = 18.0;
+    let size = 16.0;
     let (w, h) = (size * (1.0 + sq), size * (1.0 - sq));
     let bottom = y - D / 2.0 - 3.0 - jump;
     let r = Rect::from_min_max(Pos2::new(cx - w / 2.0, bottom - h), Pos2::new(cx + w / 2.0, bottom));
-    crate::kit::brand::draw_mascot(p, r, cat_color(), (0.0, twitch(t, HOP + 0.15)));
+    crate::kit::brand::draw_mascot(p, r, cat_color().gamma_multiply(fade), (0.0, twitch(t, HOP + 0.15)));
 }
 
 /// A soft vertical band of `col`, brightest at `x` and `w` wide, inside `clip`.
@@ -362,12 +364,18 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     let steps = kinds.len();
     let step = step.min(steps - 1);
     let kind = kinds[step];
+    // a step's animations start when it can be seen: not while the window
+    // is still hidden or covered (they would play to nobody)
+    let unseen = ctx.input(|i| i.viewport().occluded == Some(true) || i.viewport().minimized == Some(true));
     if let Some(s) = app.setup.as_mut() {
-        if s.since == f64::NEG_INFINITY {
+        if s.since == f64::NEG_INFINITY && !unseen {
             s.since = now;
         }
     }
-    let t = (now - app.setup.as_ref().map(|s| s.since).unwrap_or(now)) as f32;
+    let since = app.setup.as_ref().map(|s| s.since).unwrap_or(now);
+    let t = if since == f64::NEG_INFINITY { 0.0 } else { (now - since) as f32 };
+    // screenshots show each step settled, not mid-animation
+    let t = if app.demo { t + 5.0 } else { t };
     // setup lives in the app window: a centered column when that is wider
     let win = full;
     let full = Rect::from_center_size(win.center(), Vec2::new(win.width().min(SETUP_W + 80.0), win.height()));
@@ -1365,3 +1373,31 @@ pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
     r.clicked()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn welcome_cat_rises_smoothly_and_comes_to_rest() {
+        let (rise, _, _) = peek(0.0);
+        assert!(rise <= -96.0, "hidden below the floor at first: {rise}");
+        let (rise, _, _) = peek(0.6);
+        assert!((-80.0..-60.0).contains(&rise), "only the ears show while it looks round: {rise}");
+        assert_eq!(peek(2.0), (0.0, 1.0, 1.0), "at rest, unsquashed");
+        let mut last = peek(0.0).0;
+        for i in 1..300 {
+            let r = peek(i as f32 * 0.01).0;
+            assert!((r - last).abs() < 15.0, "a jump of {} at {:.2}s", r - last, i as f32 * 0.01);
+            last = r;
+        }
+    }
+
+    #[test]
+    fn ear_flick_is_short_and_small() {
+        assert_eq!(twitch(0.9, 1.0), 0.0);
+        assert_eq!(twitch(1.4, 1.0), 0.0);
+        let most = (0..36).map(|i| twitch(1.0 + i as f32 * 0.01, 1.0)).fold(0.0f32, f32::max);
+        assert!(most > 0.1 && most <= 0.3, "{most}");
+    }
+}
