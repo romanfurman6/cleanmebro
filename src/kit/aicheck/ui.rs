@@ -131,7 +131,6 @@ fn popover(c: &mut Check, ui: &mut Ui, chip: Rect) -> Option<Event> {
     let area = egui::Area::new(ui.scope_id().with(("ai-pop", c.tool))).order(egui::Order::Foreground).fixed_pos(rect.min).show(&ctx, |ui| {
         let (rr, _) = ui.allocate_exact_size(rect.size(), Sense::click());
         let p = ui.painter().clone();
-        p.rect_filled(rr.translate(Vec2::new(0.0, 8.0)).expand(6.0), 16.0, Color32::from_black_alpha(70));
         p.rect_filled(rr, 12.0, POPOVER());
         p.rect_stroke(rr, 12.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
         // header: sparkle, AI Check, the headline (or the error), Check again
