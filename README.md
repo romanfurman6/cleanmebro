@@ -15,7 +15,7 @@ Fourteen Mac tools in one menu bar app. Open source, no account, runs locally.</
 
 <p align="center">
   <a href="https://github.com/romanfurman6/cmdmeow/releases/latest"><img src="https://img.shields.io/github/v/release/romanfurman6/cmdmeow?label=version&color=C8F05A&labelColor=1d211d" alt="Latest version"></a>
-  <img src="https://img.shields.io/badge/macOS-12%2B-C8F05A?labelColor=1d211d" alt="macOS 12+">
+  <img src="https://img.shields.io/badge/macOS-13%2B-C8F05A?labelColor=1d211d" alt="macOS 13+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-C8F05A?labelColor=1d211d" alt="MIT license"></a>
   <a href="https://github.com/romanfurman6/cmdmeow/actions/workflows/macos.yml"><img src="https://img.shields.io/github/actions/workflow/status/romanfurman6/cmdmeow/macos.yml?branch=main&label=build&labelColor=1d211d" alt="Build"></a>
 </p>
@@ -31,7 +31,7 @@ Fourteen Mac tools in one menu bar app. Open source, no account, runs locally.</
    Or run `xattr -dr com.apple.quarantine /Applications/CmdMeow.app`.
 3. First-run setup asks only for the permissions of the tools you turn on.
 
-Needs macOS 12 or later, Apple silicon or Intel.
+Needs macOS 13 or later on Apple silicon. The download also runs on Intel Macs, but it is not tested there yet, and Displays (external monitor brightness) and the power readings in Mac Health work on Apple silicon only.
 
 ## What's inside
 
