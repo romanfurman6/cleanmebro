@@ -1,6 +1,6 @@
 //! AI coding assistants on this Mac, behind one `Provider` trait: plan and
-//! limit windows, local token counts from session logs, and the projects
-//! the assistant worked in. Each provider fills the same `UsageInfo`, and
+//! limit windows and local token counts (per model and project) from session
+//! logs. Each provider fills the same `UsageInfo`, and
 //! whatever it can't tell stays empty, so one UI shows any of them.
 
 pub mod account;
@@ -16,7 +16,7 @@ pub mod alerts;
 pub mod status;
 pub mod statusline;
 
-use crate::kit::claude_code::{Availability, Project};
+use crate::kit::claude_code::Availability;
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Utc};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -59,7 +59,12 @@ pub struct Contrib {
 pub struct UsageInfo {
     /// The provider's display name, e.g. "Claude".
     pub provider: &'static str,
+    /// A check the person waits on is running: the first one after launch,
+    /// or a Refresh. Quiet checks in the background leave it off.
     pub loading: bool,
+    /// The first check (account and local logs) is done. Until then the
+    /// page says it's checking; after it, a refresh never swaps the layout.
+    pub scanned: bool,
     pub installed: bool,
     pub logged_in: bool,
     /// The provider said plainly that nobody is signed in.
@@ -73,7 +78,6 @@ pub struct UsageInfo {
     pub error: Option<String>,
     pub fetched: Option<DateTime<Local>>,
     pub local: LocalTokens,
-    pub projects: Vec<Project>,
     pub data_bytes: u64,
     pub billing: Billing,
     /// Extra plan detail that can tell the price, e.g. a rate-limit tier
@@ -95,7 +99,7 @@ impl UsageInfo {
     }
     /// The assistant is missing or signed out (known only after the first check).
     pub fn unavailable(&self) -> Option<Availability> {
-        if self.loading && self.fetched.is_none() {
+        if !self.scanned {
             None
         } else if !self.installed {
             Some(Availability::NotInstalled)
@@ -149,10 +153,6 @@ pub trait Provider: Send {
     fn fetch_account(&mut self, s: &Shared);
     /// Token counts from local session logs.
     fn local_tokens(&mut self) -> LocalTokens;
-    /// Projects the assistant worked in.
-    fn projects(&mut self) -> Vec<Project> {
-        Vec::new()
-    }
     /// The folder where the assistant keeps its data, for the size shown.
     fn data_dir(&self) -> Option<PathBuf> {
         None
@@ -259,15 +259,14 @@ pub fn meta(name: &str) -> &'static Meta {
     PROVIDERS.iter().find(|m| m.name == name).unwrap_or(&PROVIDERS[0])
 }
 
-/// Make `i` the main provider, save it (unless `save` is false, for
-/// demos), and wake the loop to switch.
+/// Make `i` the main provider and save it (unless `save` is false, for
+/// demos). Nothing is checked again: the loop keeps every provider's data.
 pub fn select(i: usize, save: bool) {
     let i = i.min(ALL);
     if SELECTED.swap(i, Ordering::Relaxed) == i || !save {
         return;
     }
     settings::update(true, |s| s.provider = PROVIDERS.get(i).map(|m| m.id).unwrap_or("all").into());
-    crate::kit::claude_code::request_recheck();
 }
 
 /// A fresh provider for index `i`.
@@ -706,6 +705,16 @@ pub fn balanced(s: &[u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_until_the_first_check() {
+        let mut i = UsageInfo { loading: true, ..UsageInfo::new(codex::NAME) };
+        assert_eq!(i.unavailable(), None);
+        i.scanned = true;
+        assert_eq!(i.unavailable(), Some(Availability::NotInstalled));
+        i.installed = true;
+        assert_eq!(i.unavailable(), None);
+    }
 
     #[test]
     fn plan_titles() {
