@@ -12,7 +12,7 @@ use std::collections::HashMap;
 pub const SETUP_W: f32 = 820.0;
 pub const SETUP_H: f32 = 600.0;
 /// Most steps setup can have (with the crash reports step).
-const MAX_STEPS: usize = 6;
+const MAX_STEPS: usize = 7;
 const TOP_H: f32 = 44.0;
 const BOTTOM_H: f32 = 64.0;
 /// Tools that start off on a fresh install (the rest start on).
@@ -24,6 +24,7 @@ enum Kind {
     Welcome,
     Tools,
     Agents,
+    Models,
     Perms,
     Crash,
     Ready,
@@ -32,7 +33,12 @@ enum Kind {
 /// The steps in order. The crash reports question only exists in official
 /// builds (screenshots show it too).
 fn kinds(app: &App) -> Vec<Kind> {
-    let mut v = vec![Kind::Welcome, Kind::Tools, Kind::Agents, Kind::Perms];
+    let mut v = vec![Kind::Welcome, Kind::Tools, Kind::Agents];
+    // only when an enabled tool needs a download (Dictation's speech model)
+    if !models(app).is_empty() {
+        v.push(Kind::Models);
+    }
+    v.push(Kind::Perms);
     if app.demo || crate::kit::crash_report::available() {
         v.push(Kind::Crash);
     }
@@ -45,13 +51,11 @@ pub struct Setup {
     pub step: usize,
     /// When the current step appeared (its animations count from here).
     since: f64,
-    /// Bring the window to the front on its next frame.
-    pub focus: bool,
 }
 
 impl Setup {
     pub fn new(step: usize) -> Self {
-        Setup { step, since: f64::NEG_INFINITY, focus: true }
+        Setup { step, since: f64::NEG_INFINITY }
     }
 }
 
@@ -68,6 +72,11 @@ fn step_file() -> std::path::PathBuf {
 /// restart the app, and setup picks up where it was.
 pub fn saved_step() -> usize {
     std::fs::read_to_string(step_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0).min(MAX_STEPS - 1)
+}
+
+/// Setup was finished (closing the window no longer counts).
+pub fn is_done() -> bool {
+    done_marker().exists()
 }
 
 pub fn mark_done() {
@@ -276,8 +285,8 @@ fn pop(x: f32) -> f32 {
     1.0 + (c + 1.0) * (x - 1.0).powi(3) + c * (x - 1.0).powi(2)
 }
 
-/// The whole setup screen in `full` (its own window, or the root in screenshots).
-/// Returns true when the person finished or closed it.
+/// The whole setup screen in `full` (the app window, or the root in screenshots).
+/// Says whether the person finished it.
 pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     let ctx = ui.ctx().clone();
     let now = ctx.input(|i| i.time);
@@ -293,8 +302,11 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
         }
     }
     let t = (now - app.setup.as_ref().map(|s| s.since).unwrap_or(now)) as f32;
+    // setup lives in the app window: a centered column when that is wider
+    let win = full;
+    let full = Rect::from_center_size(win.center(), Vec2::new(win.width().min(SETUP_W + 80.0), win.height()));
     // drag the window by its top strip
-    let drag = Rect::from_min_size(full.min + Vec2::new(80.0, 0.0), Vec2::new(full.width() - 80.0, TOP_H));
+    let drag = Rect::from_min_size(win.min + Vec2::new(80.0, 0.0), Vec2::new(win.width() - 80.0, TOP_H));
     if ui.interact(drag, ui.scope_id().with("setup-drag"), Sense::click_and_drag()).drag_started() {
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
@@ -318,6 +330,7 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
         Kind::Welcome => next = welcome(app, ui, body, t),
         Kind::Tools => tools(app, ui, body, t),
         Kind::Agents => agents(app, ui, body, t),
+        Kind::Models => models_step(app, ui, body, t),
         Kind::Perms => permissions_step(app, ui, body, t, now),
         Kind::Crash => next = crash_step(app, ui, body, t),
         Kind::Ready => restart_now = ready(app, ui, body, t),
@@ -334,7 +347,7 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     let label = match kind {
         // these steps have their own buttons
         Kind::Welcome | Kind::Crash => None,
-        Kind::Tools | Kind::Agents | Kind::Perms => Some("Continue"),
+        Kind::Tools | Kind::Agents | Kind::Models | Kind::Perms => Some("Continue"),
         Kind::Ready if needs_restart(app) => Some("Restart and open"),
         Kind::Ready => Some("Open panel"),
     };
@@ -608,7 +621,7 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let set = settings::get();
     let head = body.top() + 6.0;
     let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "AI agents", bold(22.0), TEXT());
-    let sub = p.text(Pos2::new(body.left(), g.bottom() + sp::S), Align2::LEFT_TOP, "Main checks Cleanup scans. Tracked ones show in AI Usage.", ty::body(), TEXT_DIM());
+    let sub = p.text(Pos2::new(body.left(), g.bottom() + sp::S), Align2::LEFT_TOP, "Main does AI Check in Cleanup, Uninstaller, Startup, Disk Map and Mac Health. Tracked agents show in AI Usage.", ty::body(), TEXT_DIM());
     let w = body.width().min(560.0);
     let x = body.left();
     let col_track = x + w - sp::L - 8.0;
@@ -633,7 +646,7 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
         let main = set.main == m.id;
         let on = set.is_on(m.id);
         let rr = Rect::from_center_size(Pos2::new(col_main, r.center().y), Vec2::splat(16.0));
-        if radio(ui, rr, ui.scope_id().with(("setup-main", m.id)), main, true).clicked() && !main {
+        if radio(ui, rr, ui.scope_id().with(("setup-main", m.id)), main, found || main).clicked() && !main && found {
             let id = m.id.to_string();
             change = Some(Box::new(move |s| {
                 s.off.retain(|x| *x != id);
@@ -657,6 +670,75 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     }
     if let Some(f) = change {
         settings::update(!app.demo, f);
+    }
+}
+
+/// (tool index, model) for every enabled tool's downloads.
+fn models(app: &App) -> Vec<(usize, crate::core::tool::SetupModel)> {
+    (0..app.tools.len()).filter(|&i| app.tool_on(i)).flat_map(|i| app.tools[i].setup_models().into_iter().map(move |m| (i, m))).collect()
+}
+
+fn models_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
+    use crate::core::tool::ModelState;
+    let p = ui.painter().clone();
+    let head = body.top() + 6.0;
+    let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Download models", bold(22.0), TEXT());
+    let sub = p.text(Pos2::new(body.left(), g.bottom() + sp::S), Align2::LEFT_TOP, "They run on this Mac. The download keeps going if you continue.", ty::body(), TEXT_DIM());
+    let list = models(app);
+    let w = body.width().min(620.0);
+    let row_h = 76.0;
+    let top = sub.bottom() + sp::XL;
+    let mut start: Option<(usize, &'static str)> = None;
+    for (k, (i, m)) in list.iter().enumerate() {
+        let a = ease((t - 0.05 * k as f32) / 0.4);
+        let r = Rect::from_min_size(Pos2::new(body.left(), top + k as f32 * (row_h + 8.0) + (1.0 - a) * 8.0), Vec2::new(w, row_h));
+        glass_card(&p, r, R_CARD, 0.0, false);
+        let ib = Rect::from_min_size(Pos2::new(r.left() + 14.0, r.top() + 14.0), Vec2::splat(30.0));
+        p.rect_filled(ib, 8.0, white(16));
+        icon(&p, app.tools[*i].badge().icon, ib.shrink(7.0), if m.state == ModelState::Ready { GREEN() } else { TEXT_SOFT() });
+        let tx = ib.right() + 12.0;
+        let title = p.text(Pos2::new(tx, ib.center().y), Align2::LEFT_CENTER, m.what, bold(13.0), TEXT());
+        p.text(Pos2::new(title.right() + 8.0, ib.center().y), Align2::LEFT_CENTER, format!("{} · {}", m.name, human_bytes(m.bytes)), font(12.0), TEXT_FAINT());
+        let right = r.right() - 14.0;
+        // second line: the progress bar, or what happened
+        let bar = Rect::from_min_max(Pos2::new(tx, r.bottom() - 22.0), Pos2::new(right, r.bottom() - 16.0));
+        let mut button: Option<&str> = None;
+        match &m.state {
+            ModelState::Ready => {
+                check(&p, Pos2::new(right - 12.0, ib.center().y), 12.0, GREEN());
+                p.text(Pos2::new(tx, bar.center().y), Align2::LEFT_CENTER, "Downloaded", font(12.0), GREEN());
+            }
+            ModelState::Downloading { done, total } => {
+                let total = if *total > 0 { *total } else { m.bytes };
+                let f = if total > 0 { (*done as f32 / total as f32).clamp(0.0, 1.0) } else { 0.0 };
+                p.rect_filled(bar, 3.0, white(20));
+                p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * f, bar.height())), 3.0, BLUE());
+                p.text(Pos2::new(right, ib.center().y), Align2::RIGHT_CENTER, format!("{} of {} · {:.0}%", human_bytes(*done), human_bytes(total), f * 100.0), font(12.0), TEXT_DIM());
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+            }
+            ModelState::Unpacking => {
+                p.rect_filled(bar, 3.0, BLUE());
+                p.text(Pos2::new(right, ib.center().y), Align2::RIGHT_CENTER, "Unpacking", font(12.0), TEXT_DIM());
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+            }
+            ModelState::Failed(e) => {
+                text_fit(&p, Pos2::new(tx, bar.center().y), Align2::LEFT_CENTER, e, font(12.0), RED(), w - 140.0);
+                button = Some("Try again");
+            }
+            ModelState::Missing => button = Some("Download"),
+        }
+        if let Some(label) = button {
+            let bw = button_width(&p, label, BTN_SECONDARY);
+            let b = Rect::from_min_size(Pos2::new(right - bw, ib.center().y - 13.0), Vec2::new(bw, 26.0));
+            if pill_button(ui, b, label, BTN_SECONDARY, true).clicked() {
+                start = Some((*i, m.id));
+            }
+        }
+    }
+    if let Some((i, id)) = start {
+        if !app.demo {
+            app.tools[i].download_model(id);
+        }
     }
 }
 
@@ -687,7 +769,20 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
     p.text(c, Align2::CENTER_CENTER, format!("{done}/{}", req.len()), mono(11.0), TEXT());
     p.text(Pos2::new(c.x + 36.0, c.y), Align2::LEFT_CENTER, "Permissions", bold(22.0), TEXT());
     let area = Rect::from_min_max(Pos2::new(body.left(), body.top() + 56.0), body.max);
-    perm_list(app, ui, area, &list, t, now);
+    // rows at their smallest; past that the list scrolls (it never runs
+    // under the Back / Continue bar)
+    let head = if list.iter().any(|r| r.optional) { 26.0 } else { 0.0 };
+    let need = list.len() as f32 * (38.0 + 6.0) + head;
+    if need <= area.height() {
+        perm_list(app, ui, area, &list, t, now);
+    } else {
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area));
+        child.set_clip_rect(area);
+        egui::ScrollArea::vertical().id_salt("setup-perms").auto_shrink([false, false]).show(&mut child, |ui| {
+            let (r, _) = ui.allocate_exact_size(Vec2::new(area.width() - 10.0, need), Sense::hover());
+            perm_list(app, ui, r, &list, t, now);
+        });
+    }
 }
 
 /// The permission rows (setup and Settings › General). Returns the height used.
@@ -794,11 +889,17 @@ fn keycaps(p: &egui::Painter, right: Pos2, keys: &str) {
     };
     for c in caps.iter().rev() {
         let f: FontId = font(13.0);
-        let w = p.layout_no_wrap(c.clone(), f.clone(), TEXT()).size().x.max(10.0) + 12.0;
+        let g = p.layout_no_wrap(c.clone(), f, TEXT());
+        let w = g.size().x.max(10.0) + 12.0;
         let r = Rect::from_min_size(Pos2::new(x - w, right.y - 11.0), Vec2::new(w, 22.0));
         p.rect_filled(r, 5.0, white(26));
         p.rect_filled(Rect::from_min_max(Pos2::new(r.left() + 1.0, r.bottom() - 1.5), Pos2::new(r.right() - 1.0, r.bottom())), CornerRadius::same(2), Color32::from_black_alpha(90));
-        p.text(r.center(), Align2::CENTER_CENTER, c, f, TEXT());
+        // center the glyph's ink, not the font's line box (symbols sat low);
+        // the cap's bottom edge takes 1.5 pt, so aim a hair above the middle
+        let ink = g.mesh_bounds;
+        let target = r.center() - Vec2::new(0.0, 0.75);
+        let pos = Pos2::new(r.center().x - g.size().x / 2.0, target.y - ink.center().y);
+        p.galley(pos, g, TEXT());
         x = r.left() - 3.0;
     }
 }

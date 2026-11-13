@@ -236,6 +236,13 @@ pub trait Tool {
     fn own_progress(&self, _id: &str) -> Option<(bool, String)> {
         None
     }
+    /// Models the tool downloads before it works (setup's own step, apart
+    /// from the permissions).
+    fn setup_models(&self) -> Vec<SetupModel> {
+        Vec::new()
+    }
+    /// Start (or retry) downloading one of [`Tool::setup_models`].
+    fn download_model(&mut self, _id: &str) {}
     /// Global shortcuts worth showing at the end of setup: (label, keys).
     fn setup_shortcuts(&self) -> Vec<(&'static str, String)> {
         Vec::new()
@@ -332,4 +339,27 @@ mod tests {
         assert_eq!(a[2], Action::ShowDetail { tool: "system".into(), detail: "cpu".into(), toggle: true });
         assert!(cx.take_actions().is_empty());
     }
+}
+
+/// A model a tool needs, as setup shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetupModel {
+    pub id: &'static str,
+    /// What it is for ("Speech model").
+    pub what: &'static str,
+    /// Which one ("Parakeet v3").
+    pub name: &'static str,
+    /// About how big the download is.
+    pub bytes: u64,
+    pub state: ModelState,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ModelState {
+    Missing,
+    /// Bytes so far and the total (0 until the server says).
+    Downloading { done: u64, total: u64 },
+    Unpacking,
+    Ready,
+    Failed(String),
 }

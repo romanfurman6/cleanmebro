@@ -743,12 +743,29 @@ impl Tool for Dictation {
         if self.listening() { "Listening".into() } else { self.shortcut_label() }
     }
     fn needs(&self) -> Vec<Need> {
-        vec![Need::must(Perm::Microphone), Need::must(Perm::Accessibility), Need::must(Perm::Own { id: MODEL_NEED, name: "Speech model", icon: Icon::Down })]
+        // the speech model is a download, not a permission: setup has a step for it
+        vec![Need::must(Perm::Microphone), Need::must(Perm::Accessibility)]
     }
-    fn own_status(&self, id: &str) -> Status {
-        if id == MODEL_NEED && self.settings.engine.ready() { Status::Allowed } else { Status::NotAsked }
+    fn setup_models(&self) -> Vec<crate::core::tool::SetupModel> {
+        use crate::core::tool::{ModelState, SetupModel};
+        let engine = self.settings.engine;
+        // sample data (screenshots) shows a download under way
+        if self.dir.is_none() {
+            let total = engine.bytes();
+            return vec![SetupModel { id: MODEL_NEED, what: "Speech model", name: engine.name(), bytes: total, state: ModelState::Downloading { done: total * 42 / 100, total } }];
+        }
+        let state = match &self.download {
+            Some(d) if d.unpacking.load(Ordering::Relaxed) => ModelState::Unpacking,
+            Some(d) => ModelState::Downloading { done: d.progress.done.load(Ordering::Relaxed), total: d.progress.total.load(Ordering::Relaxed) },
+            None if engine.ready() => ModelState::Ready,
+            None => match &self.download_error {
+                Some(e) => ModelState::Failed(e.clone()),
+                None => ModelState::Missing,
+            },
+        };
+        vec![SetupModel { id: MODEL_NEED, what: "Speech model", name: engine.name(), bytes: engine.bytes(), state }]
     }
-    fn ask_own(&mut self, id: &str) {
+    fn download_model(&mut self, id: &str) {
         if id == MODEL_NEED {
             self.start_download(self.settings.engine);
         }
@@ -860,7 +877,12 @@ mod tests {
         let n = d.needs();
         assert!(n.iter().any(|x| x.perm == Perm::Microphone));
         assert!(n.iter().any(|x| x.perm == Perm::Accessibility));
-        assert!(n.iter().any(|x| matches!(x.perm, Perm::Own { id: MODEL_NEED, .. })));
+        // the model is its own setup step, not a permission row
+        assert!(!n.iter().any(|x| matches!(x.perm, Perm::Own { .. })));
+        let m = d.setup_models();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].id, MODEL_NEED);
+        assert!(m[0].bytes > 0);
     }
 
     // the stand-in microphone exists off macOS only

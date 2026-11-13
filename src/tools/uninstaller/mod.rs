@@ -726,11 +726,16 @@ pub fn pretty_name(id: &str) -> String {
 /// Watch the app folders: when an app disappears that we didn't remove,
 /// offer its leftovers; when anything changes, scan again.
 fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) {
-    start_scan(st.clone(), app_roots.clone(), roots.clone(), ctx.clone());
     std::thread::Builder::new()
         .name("uninstaller-watch".into())
         .spawn(move || {
             crate::kit::activity::low_priority();
+            // the scan reads apps all over the home folder (macOS asks about
+            // Downloads): not before first-run setup is finished
+            while !crate::core::onboard::is_done() {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            start_scan(st.clone(), app_roots.clone(), roots.clone(), ctx.clone());
             static CHANGED: crate::kit::activity::Kick = crate::kit::activity::Kick::new();
             // app folders change rarely: wait for macOS to say so, with a slow
             // look now and then in case an event was missed
