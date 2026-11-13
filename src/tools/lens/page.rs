@@ -1440,7 +1440,8 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
     let mut ai_act: Option<(MenuAct, PathBuf, u64)> = None;
     let mut ai_go: Option<PathBuf> = None;
     if !busy && !partial {
-        let scan = format!("{}:{}", root.path.display(), root.bytes);
+        // once per map: removing a folder changes the bytes, not the map
+        let scan = format!("{}:{}", root.path.display(), app.lens.maps.load(Ordering::SeqCst));
         app.ai.auto(&ctx, &scan, || map_ask(root));
         match aicheck::ui::chip(&mut app.ai, ui, chip_at, ai_data) {
             Some(Event::Start) => {
