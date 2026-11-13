@@ -546,6 +546,8 @@ fn answer_items(app: &mut App, idx: &[usize], v: Verdict) {
         let mut g = app.clean.lock_ok();
         for &i in idx {
             let it = &mut g.items[i];
+            // decided here: AI Check's answer for it goes
+            app.ai.answered(&it.path.display().to_string());
             if v == Verdict::Keep {
                 kept.push(it.path.clone());
             }
@@ -593,6 +595,10 @@ fn ask_card(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let it = app.clean.lock_ok().items[i].clone();
     let p = ui.painter().clone();
     glass_card(&p, rr, R_CARD, 0.0, false);
+    // the AI Check answer under the pointer points at its card
+    if app.ai.hovered.as_deref() == Some(it.path.display().to_string().as_str()) {
+        p.rect_stroke(rr, R_CARD, Stroke::new(2.0, with_alpha(tint::HEALTH(), 0.7)), StrokeKind::Inside);
+    }
     row_extras(ui, rr, &it, false);
     let kw = button_width(&p, "Keep", BTN_SECONDARY);
     let aw = button_width(&p, "Allow", BTN_PRIMARY);
@@ -621,6 +627,9 @@ fn safe_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let p = ui.painter().clone();
     let rr = rr.shrink2(Vec2::new(4.0, 0.0));
     row_extras(ui, rr, &it, true);
+    if app.ai.hovered.as_deref() == Some(it.path.display().to_string().as_str()) {
+        p.rect_stroke(rr, R_SMALL, Stroke::new(2.0, with_alpha(tint::HEALTH(), 0.7)), StrokeKind::Inside);
+    }
     let can = !it.hard_keep;
     let cb = Rect::from_center_size(Pos2::new(rr.left() + sp::M + 8.0, rr.center().y), Vec2::splat(16.0));
     if checkbox(ui, cb, ui.scope_id().with(("sel", &it.path)), it.selected, can).clicked() && can {
@@ -872,7 +881,9 @@ pub fn demo_done() -> cleanup::State {
 fn check_ask(clean: &cleanup::Shared) -> aicheck::Ask {
     let g = clean.lock_ok();
     let mut idx: Vec<usize> = (0..g.items.len()).filter(|&i| g.items[i].verdict != Verdict::Keep).collect();
-    idx.sort_by_key(|&i| std::cmp::Reverse(g.items[i].bytes));
+    // what waits on the user first (all of it is sent), then by size
+    idx.sort_by_key(|&i| (g.items[i].verdict != Verdict::Ask, std::cmp::Reverse(g.items[i].bytes)));
+    let answer: Vec<String> = idx.iter().filter(|&&i| g.items[i].verdict == Verdict::Ask && g.items[i].by != Who::You).take(aicheck::MAX_ANSWERS).map(|&i| g.items[i].path.display().to_string()).collect();
     let items = idx
         .into_iter()
         .take(40)
@@ -893,12 +904,13 @@ fn check_ask(clean: &cleanup::Shared) -> aicheck::Ask {
         })
         .collect();
     aicheck::Ask {
-        task: "This is Cleanup's results: caches, logs and leftovers found on this Mac. Point out the few biggest wins that are clearly safe to remove, and anything ticked for cleaning that the user would likely miss (documents, settings, data that cannot be downloaded again).".into(),
+        task: "This is Cleanup's results: caches, logs and leftovers found on this Mac. Some items need the user's OK: say for each whether to clean it (select) or keep it. Then point out anything ticked for cleaning that the user would likely miss (documents, settings, data that cannot be downloaded again), or a big clearly safe win.".into(),
         actions: vec![
-            ("select", "tick it for cleaning (the user still presses Clean and confirms)", "Select"),
+            ("select", "clean it: tick it for cleaning (the user still presses Clean and confirms)", "Allow"),
             ("keep", "untick it and remember it as kept", "Keep"),
         ],
         items,
         facts: Vec::new(),
+        answer,
     }
 }

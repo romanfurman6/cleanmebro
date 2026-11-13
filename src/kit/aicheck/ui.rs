@@ -13,6 +13,7 @@ const CHIP_H: f32 = 26.0;
 const POP_W: f32 = 560.0;
 const POP_HEAD_H: f32 = 44.0;
 const POP_ROW_H: f32 = 58.0;
+const POP_SEC_H: f32 = 28.0;
 
 /// What the person pressed.
 #[derive(Clone, Debug, PartialEq)]
@@ -39,11 +40,19 @@ fn chip_label(c: &Check) -> String {
         Phase::Idle => format!("Check with {}", agent_of(c).name()),
         Phase::Running => "Checking…".into(),
         Phase::Failed(_) => "Check failed".into(),
-        Phase::Done => match c.recs().len() {
-            0 => "All good".into(),
-            1 => "1 tip".into(),
-            n => format!("{n} tips"),
-        },
+        Phase::Done => {
+            let recs = c.recs();
+            let a = recs.iter().filter(|r| c.is_answer(r)).count();
+            let t = recs.len() - a;
+            let tips = |n: usize| if n == 1 { "1 tip".to_string() } else { format!("{n} tips") };
+            match (a, t) {
+                (0, 0) => "All good".into(),
+                (0, t) => tips(t),
+                (1, 0) => "1 answer".into(),
+                (a, 0) => format!("{a} answers"),
+                (a, t) => format!("{a} answer{} · {}", if a == 1 { "" } else { "s" }, tips(t)),
+            }
+        }
     }
 }
 
@@ -124,7 +133,10 @@ fn popover(c: &mut Check, ui: &mut Ui, chip: Rect) -> Option<Event> {
     let phase = c.phase();
     let recs = if phase == Phase::Done { c.recs() } else { vec![] };
     let w = POP_W.min(screen.width() - 2.0 * sp::L);
-    let h = POP_HEAD_H + recs.len().max(if recs.is_empty() { 0 } else { 1 }) as f32 * POP_ROW_H;
+    let answers: Vec<Rec> = recs.iter().filter(|r| c.is_answer(r)).cloned().collect();
+    let others: Vec<Rec> = recs.iter().filter(|r| !c.is_answer(r)).cloned().collect();
+    let sections = if answers.is_empty() { 0.0 } else if others.is_empty() { 1.0 } else { 2.0 };
+    let h = POP_HEAD_H + recs.len() as f32 * POP_ROW_H + sections * POP_SEC_H;
     let x = chip.left().min(screen.right() - sp::L - w).max(screen.left() + sp::L);
     let rect = Rect::from_min_size(Pos2::new(x, chip.bottom() + 6.0), Vec2::new(w, h));
     let mut ev = None;
@@ -153,12 +165,25 @@ fn popover(c: &mut Check, ui: &mut Ui, chip: Rect) -> Option<Event> {
         text_fit(&p, Pos2::new(t.right() + sp::M, cy), Align2::LEFT_CENTER, &line, ty::body(), col, ar.left() - sp::M - t.right() - sp::M);
         c.hovered = None;
         let mut y = rr.top() + POP_HEAD_H;
-        for r in &recs {
-            let row = Rect::from_min_size(Pos2::new(rr.left(), y), Vec2::new(rr.width(), POP_ROW_H));
-            if let Some(e) = rec_row(c, ui, row, r) {
-                ev = Some(e);
+        // what waited on the user first, under its own label; then the rest
+        let groups: [(&str, &Vec<Rec>); 2] = [("Needs your OK", &answers), ("Also", &others)];
+        for (label, list) in groups {
+            if list.is_empty() {
+                continue;
             }
-            y += POP_ROW_H;
+            if sections > 0.0 {
+                hairline(&p, Pos2::new(rr.left(), y), Pos2::new(rr.right(), y));
+                let t = if label == "Also" { label.to_string() } else { format!("{label} · {}", list.len()) };
+                p.text(Pos2::new(rr.left() + 14.0, y + POP_SEC_H / 2.0), Align2::LEFT_CENTER, t, ty::label(), TEXT_FAINT());
+                y += POP_SEC_H;
+            }
+            for r in list.iter() {
+                let row = Rect::from_min_size(Pos2::new(rr.left(), y), Vec2::new(rr.width(), POP_ROW_H));
+                if let Some(e) = rec_row(c, ui, row, r) {
+                    ev = Some(e);
+                }
+                y += POP_ROW_H;
+            }
         }
     });
     // close on a click elsewhere (the chip toggles itself) or Escape
@@ -221,15 +246,26 @@ fn rec_row(c: &mut Check, ui: &mut Ui, rr: Rect, r: &Rec) -> Option<Event> {
     }
     let ic = Rect::from_center_size(Pos2::new(rr.left() + 14.0 + 12.0, cy), Vec2::splat(24.0));
     rec_icon(c, ui.ctx(), &p, ic, r);
-    // right to left: Skip, the button
-    let sw = p.layout_no_wrap("Skip".into(), ty::body(), TEXT()).size().x;
-    let sr = Rect::from_min_size(Pos2::new(rr.right() - 14.0 - sw, cy - 10.0), Vec2::new(sw, 20.0));
-    if ghost(ui, sr, "Skip") {
-        c.skip(r);
-    }
+    let mut ev = None;
+    // right to left: Skip (an answer: the other choice), then the agent's pick
+    let alt = if c.is_answer(r) { c.actions.iter().find(|(id, _)| *id != r.action).copied() } else { None };
+    let sr = if let Some((id, label)) = alt {
+        let aw = button_width(&p, label, BTN_SECONDARY);
+        let ar = Rect::from_min_size(Pos2::new(rr.right() - 14.0 - aw, cy - sp::CONTROL_H / 2.0), Vec2::new(aw, sp::CONTROL_H));
+        if pill_button(ui, ar, label, BTN_SECONDARY, true).clicked() {
+            ev = Some(Event::Act(Rec { action: id.to_string(), label: label.to_string(), ..r.clone() }));
+        }
+        ar
+    } else {
+        let sw = p.layout_no_wrap("Skip".into(), ty::body(), TEXT()).size().x;
+        let sr = Rect::from_min_size(Pos2::new(rr.right() - 14.0 - sw, cy - 10.0), Vec2::new(sw, 20.0));
+        if ghost(ui, sr, "Skip") {
+            c.skip(r);
+        }
+        sr
+    };
     let bw = button_width(&p, &r.label, BTN_PRIMARY);
     let br = Rect::from_min_size(Pos2::new(sr.left() - sp::M - bw, cy - sp::CONTROL_H / 2.0), Vec2::new(bw, sp::CONTROL_H));
-    let mut ev = None;
     if pill_button(ui, br, &r.label, BTN_PRIMARY, true).clicked() {
         ev = Some(Event::Act(r.clone()));
     }

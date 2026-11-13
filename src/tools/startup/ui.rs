@@ -759,6 +759,7 @@ fn startup_ask(jobs: &[Job], apps: &[LoginApp]) -> aicheck::Ask {
         ],
         items,
         facts: Vec::new(),
+        answer: Vec::new(),
     }
 }
 

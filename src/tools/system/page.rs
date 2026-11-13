@@ -458,6 +458,7 @@ fn health_ask(s: &monitor::Snapshot) -> aicheck::Ask {
         ],
         items,
         facts,
+        answer: Vec::new(),
     }
 }
 
