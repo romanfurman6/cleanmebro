@@ -594,8 +594,8 @@ fn run(shared: Shared, ctx: egui::Context, demo: bool) {
             wifi_at.reset();
         }
         let wifi = WIFI_EVERY.due(&mut wifi_at).then(|| wifi_name(&wifi_info));
-        // Bluetooth LE: starts once the panel has been opened (it may ask
-        // for the Bluetooth permission), then scans now and then
+        // Bluetooth LE: starts once the panel has been opened and the
+        // permission is given, then scans now and then
         if activity::visible() {
             super::ble::start();
         }

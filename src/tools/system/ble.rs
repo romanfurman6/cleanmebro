@@ -323,10 +323,12 @@ mod mac {
     }
 
     pub fn start() {
-        if STARTED.swap(true, Ordering::Relaxed) {
+        // a central manager asks for the permission when it isn't decided:
+        // only start once it's given (setup's Permissions step asks)
+        if STARTED.load(Ordering::Relaxed) || !has_usage_text() || authorization() != ALLOWED {
             return;
         }
-        if !has_usage_text() || authorization() == 2 || authorization() == 1 {
+        if STARTED.swap(true, Ordering::Relaxed) {
             return;
         }
         let queue = DispatchQueue::new("cmdmeow.bluetooth", None);

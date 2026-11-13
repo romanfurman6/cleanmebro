@@ -81,6 +81,10 @@ pub struct App {
     pub perm_watch: super::onboard::PermWatch,
     /// Keep the panel hidden at launch (setup opens instead).
     start_hidden: bool,
+    /// Right after setup hands over to the panel: macOS moves focus around
+    /// while the setup window closes and the Dock icon goes; the panel must
+    /// not take that for a click elsewhere.
+    hold_panel: Option<Instant>,
     /// `cmdmeow://open/<tool>[/<route>]` links, as (tool, route).
     links: Option<crate::kit::url_scheme::Inbox<(String, String)>>,
     /// The update banner was shown last frame (see `kit::update`).
@@ -163,6 +167,7 @@ impl App {
             setup: first_run.then(|| super::onboard::Setup::new(super::onboard::saved_step())),
             perm_watch: Default::default(),
             start_hidden: first_run,
+            hold_panel: None,
             links: (!demo).then(|| crate::kit::url_scheme::Inbox::new("open", Some(ctx.clone()), open_link)),
             update_banner: false,
         };
@@ -173,7 +178,12 @@ impl App {
             }
         }
         app.apply_view(&opts.view);
-        crate::kit::native::set_dock_icon(app.mode == Mode::Window || demo);
+        // setup is the app window's first state: nothing else opens before it
+        if app.setup.is_some() && app.mode != Mode::Setup && app.screenshot.is_none() {
+            app.app_open = true;
+            app.app_focus = true;
+        }
+        crate::kit::native::set_dock_icon(app.mode == Mode::Window || app.app_open || demo);
         app
     }
 
@@ -303,9 +313,9 @@ impl App {
                 return;
             }
             // first-run setup, one step each
-            "setup" | "setup-tools" | "setup-ai" | "setup-perms" | "setup-crash" | "setup-ready" => {
+            "setup" | "setup-tools" | "setup-ai" | "setup-models" | "setup-perms" | "setup-crash" | "setup-ready" => {
                 self.mode = Mode::Setup;
-                let step = ["setup", "setup-tools", "setup-ai", "setup-perms", "setup-crash", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
+                let step = ["setup", "setup-tools", "setup-ai", "setup-models", "setup-perms", "setup-crash", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
                 self.setup = Some(super::onboard::Setup::new(step));
                 use crate::kit::perms::{Perm, Status};
                 self.perm_watch.demo = Some([(Perm::Screen, Status::Allowed), (Perm::Accessibility, Status::Allowed), (Perm::FullDisk, Status::NotAsked), (Perm::SystemEvents, Status::Denied), (Perm::Microphone, Status::Allowed)].into_iter().collect());
@@ -503,7 +513,10 @@ impl App {
                 let bottom = (rect.position.y + rect.size.height as f64) as f32 / ppp;
                 self.anchor = Some(Pos2::new(cx, bottom));
                 let just_hid = self.last_hide.elapsed().as_millis() < 350;
-                if self.visible && self.mode == Mode::Panel {
+                if self.setup.is_some() && self.mode == Mode::Panel {
+                    // until setup is finished the menu bar only leads back to it
+                    self.open_setup_window(ctx);
+                } else if self.visible && self.mode == Mode::Panel {
                     self.hide(ctx);
                 } else if !just_hid || self.mode == Mode::Window {
                     self.open_panel(ctx);
@@ -613,7 +626,15 @@ impl eframe::App for App {
         if focused == Some(true) {
             self.had_focus = true;
         }
-        if self.mode == Mode::Panel && self.visible && self.had_focus && focused == Some(false) && self.screenshot.is_none() {
+        if let Some(at) = self.hold_panel {
+            if at.elapsed().as_millis() > 1500 {
+                self.hold_panel = None;
+            } else if focused == Some(false) && self.visible {
+                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Focus);
+                crate::kit::native::activate();
+            }
+        }
+        if self.hold_panel.is_none() && self.mode == Mode::Panel && self.visible && self.had_focus && focused == Some(false) && self.screenshot.is_none() {
             self.hide(ctx);
         }
     }
@@ -750,9 +771,6 @@ impl eframe::App for App {
         } else if self.visible && self.mode == Mode::Panel && self.screenshot.is_none() {
             self.prewarm_app(&ctx);
         }
-        if self.setup.is_some() && self.mode != Mode::Setup {
-            self.setup_viewport(&ctx);
-        }
         if self.screenshot.is_none() {
             super::onboard::fda_helper(self, &ctx);
         }
@@ -810,6 +828,8 @@ impl App {
             builder = builder.with_active(true);
         }
         let id = egui::ViewportId::from_hash_of("cmdmeow-app");
+        use super::onboard::Finish;
+        let mut finish = Finish::No;
         crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
             let vctx = ui.ctx().clone();
             if let Some(at) = self.app_asked.take() {
@@ -823,6 +843,7 @@ impl App {
                 crate::kit::native::activate();
             }
             if vctx.input(|i| i.viewport().close_requested()) {
+                // closing during setup only hides it: the menu bar brings it back
                 self.app_open = false;
                 crate::kit::native::set_dock_icon(false);
                 return;
@@ -831,68 +852,54 @@ impl App {
             let full = ui.max_rect();
             let t = vctx.input(|i| i.time);
             glass::backdrop(ui.painter(), full, 16.0, false, t);
+            if self.setup.is_some() {
+                finish = super::onboard::setup_ui(self, ui, full);
+                return;
+            }
             let mut cx = self.cx();
             super::window::window_ui(self, ui, full, false, &mut cx);
             self.run_actions(&vctx, &mut cx);
             vctx.request_repaint_after(std::time::Duration::from_millis(500));
         });
-    }
-
-    /// Open first-run setup again (Settings › General).
-    pub fn open_setup(&mut self) {
-        self.setup = Some(super::onboard::Setup::new(0));
-        self.app_open = false;
-    }
-
-    /// First-run setup in its own window.
-    fn setup_viewport(&mut self, ctx: &egui::Context) {
-        use super::onboard::{Finish, SETUP_H, SETUP_W};
-        let builder = egui::ViewportBuilder::default()
-            .with_title("Cmd+Meow Setup")
-            .with_inner_size([SETUP_W, SETUP_H])
-            .with_resizable(false)
-            .with_transparent(true)
-            .with_fullsize_content_view(true)
-            .with_titlebar_shown(false)
-            .with_title_shown(false)
-            .with_has_shadow(true)
-            .with_active(true);
-        let id = egui::ViewportId::from_hash_of("cmdmeow-setup");
-        let mut finish = Finish::No;
-        let mut closed = false;
-        crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
-            let vctx = ui.ctx().clone();
-            if vctx.input(|i| i.viewport().close_requested()) {
-                closed = true;
-                return;
-            }
-            if let Some(s) = self.setup.as_mut().filter(|s| s.focus) {
-                s.focus = false;
-                crate::kit::native::set_dock_icon(true);
-                vctx.send_viewport_cmd(ViewportCommand::Focus);
-                crate::kit::native::activate();
-            }
-            crate::kit::native::apply_glass(16.0);
-            let full = ui.max_rect();
-            glass::backdrop(ui.painter(), full, 16.0, false, vctx.input(|i| i.time));
-            finish = super::onboard::setup_ui(self, ui, full);
-        });
-        if closed || finish != Finish::No {
-            if finish != Finish::No {
-                crate::kit::login::default_on();
-            }
+        if finish != Finish::No {
+            crate::kit::login::default_on();
             super::onboard::mark_done();
             self.setup = None;
-            crate::kit::native::set_dock_icon(self.app_open);
+            self.app_open = false;
+            crate::kit::native::set_dock_icon(false);
             match finish {
                 Finish::Restart => {
                     crate::kit::perms::relaunch();
                     self.quit(ctx);
                 }
-                Finish::Panel => self.open_panel(ctx),
+                Finish::Panel => {
+                    self.hold_panel = Some(Instant::now());
+                    self.open_panel(ctx);
+                }
                 Finish::No => {}
             }
         }
+    }
+
+    /// Show unfinished setup in the app window, on the step it was left at.
+    pub fn open_setup_window(&mut self, ctx: &egui::Context) {
+        if self.setup.is_none() {
+            self.setup = Some(super::onboard::Setup::new(super::onboard::saved_step()));
+        }
+        self.app_open = true;
+        self.app_focus = true;
+        self.app_asked = Some(Instant::now());
+        crate::kit::native::set_dock_icon(true);
+        if self.visible {
+            self.hide(ctx);
+        }
+    }
+
+    /// Open first-run setup again (Settings › General).
+    pub fn open_setup(&mut self) {
+        self.setup = Some(super::onboard::Setup::new(0));
+        self.app_open = true;
+        self.app_focus = true;
     }
 
     fn screenshot_step(&mut self, ctx: &egui::Context) {
