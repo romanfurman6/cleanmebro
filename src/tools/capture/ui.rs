@@ -203,9 +203,20 @@ pub fn thumb(p: &egui::Painter, r: Rect, tex: Option<egui::TextureId>, size: (u3
 
 // ---------------------------------------------------------------- page
 
+/// Nothing captured yet (recordings live on the Video page).
+fn no_shots(c: &Capture) -> bool {
+    only_recordings(&c.store.shots)
+}
+
+fn only_recordings(shots: &[Shot]) -> bool {
+    shots.iter().all(|s| s.kind == Kind::Recording)
+}
+
 pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
+    let first = c.tab == Tab::History && no_shots(c);
     let sub = match c.tab {
+        Tab::History if first => format!("Saving to {}", c.shown_folder()),
         Tab::History => {
             let n = c.store.shots.iter().filter(|s| s.kind != Kind::Recording).count();
             format!("{n} screenshot{} · {} · saving to {}", if n == 1 { "" } else { "s" }, human_bytes(c.store.bytes_on_disk()), c.shown_folder())
@@ -220,7 +231,8 @@ pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     };
     let btns = page_header(&p, r, "Screenshot", &sub, TEXT_DIM());
     let mut right = btns.right();
-    if c.tab != Tab::Settings {
+    // before the first capture the big button in the middle is the only one
+    if c.tab != Tab::Settings && !first {
         let label = "Capture area";
         let w = button_width(&p, label, BTN_PRIMARY) + 18.0;
         let br = Rect::from_min_max(Pos2::new(right - w, btns.top() - 1.0), Pos2::new(right, btns.bottom() + 1.0));
@@ -518,6 +530,10 @@ fn tile_ui(ui: &mut Ui, p: &egui::Painter, r: Rect, it: &Item, tex: Option<egui:
 }
 
 fn history(c: &mut Capture, ui: &mut Ui, body: Rect) {
+    if no_shots(c) {
+        first_capture(c, ui, body);
+        return;
+    }
     let p = ui.painter().clone();
     let x0 = body.left() + 24.0;
     let x1 = body.right() - 24.0;
@@ -545,20 +561,106 @@ fn history(c: &mut Capture, ui: &mut Ui, body: Rect) {
     let list = Rect::from_min_max(Pos2::new(body.left(), fy + 38.0), body.max);
     let items: Vec<Item> = c.store.shots.iter().filter(|s| passes(c.filter, s)).map(Item::from_shot).collect();
     if items.is_empty() {
-        let none = !c.store.shots.iter().any(|s| s.kind != Kind::Recording);
-        let msg = if none { "No screenshots yet" } else { "Nothing here with this filter" };
-        p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT());
-        if none {
-            let hint = match c.settings.shortcut(Command::Area) {
-                Some(s) => format!("Press {} to capture an area", s.display()),
-                None => "Captures land here.".into(),
-            };
-            p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM());
-        }
+        p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, "Nothing here with this filter", bold(15.0), TEXT_SOFT());
         return;
     }
     for (a, it) in grid(c, ui, list, &items, "capture-history") {
         run_act(c, a, &it);
+    }
+}
+
+/// Before the first screenshot: a dragged selection, one big Capture area
+/// and the other two ways under it, each with its shortcut. Like Cleanup
+/// before its first scan.
+fn first_capture(c: &mut Capture, ui: &mut Ui, body: Rect) {
+    use crate::kit::empty::{hero_button, side_button, side_width, tile, Lead, HERO_H, TILE};
+    let p = ui.painter().clone();
+    let id = ui.scope_id().with("capture-first");
+    let tint = tint::CAPTURE();
+    let block = TILE.y + sp::XXL + HERO_H + sp::L + 34.0;
+    let top = body.center().y - block / 2.0 - sp::L;
+    let cx0 = body.center().x;
+
+    // the picture: a selection being dragged, with its handles and size
+    let tr = Rect::from_center_size(Pos2::new(cx0, top + TILE.y / 2.0), TILE);
+    tile(&p, tr, tint);
+    let sel = Rect::from_center_size(tr.center(), Vec2::new(100.0, 64.0));
+    p.rect_filled(sel, 4.0, with_alpha(tint, 0.10));
+    dashed_rect(&p, sel, 4.0, tint);
+    for k in [sel.left_top(), sel.right_top(), sel.left_bottom(), sel.right_bottom()] {
+        p.rect_filled(Rect::from_center_size(k, Vec2::splat(8.0)), 2.0, tint);
+    }
+    let g = p.layout_no_wrap("640 × 400".into(), bold(11.0), on_color(tint));
+    let br = Rect::from_min_max(Pos2::new(tr.right() + 8.0 - g.size().x - 14.0, tr.bottom() + 10.0 - g.size().y - 6.0), Pos2::new(tr.right() + 8.0, tr.bottom() + 10.0));
+    p.rect_filled(br, 6.0, tint);
+    p.galley(br.center() - g.size() / 2.0, g, on_color(tint));
+
+    let key = |cmd: Command| c.settings.shortcut(cmd).map(|s| s.display());
+    let (area, window, screen) = (key(Command::Area), key(Command::Window), key(Command::Screen));
+    let hc = Pos2::new(cx0, tr.bottom() + sp::XXL + HERO_H / 2.0);
+    if hero_button(ui, hc, id.with("area"), "Capture area", area.as_deref(), Lead::None, Some(BLUE()), !c.busy, 200.0).clicked() {
+        c.queue.push((Command::Area, 0));
+    }
+    let sy = hc.y + HERO_H / 2.0 + sp::L + 17.0;
+    let (ww, sw) = (side_width(&p, "Window", window.as_deref()), side_width(&p, "Screen", screen.as_deref()));
+    let x = cx0 - (ww + sp::S + sw) / 2.0;
+    let (r1, _) = side_button(ui, Pos2::new(x, sy), id.with("window"), "Window", window.as_deref(), !c.busy, |p, r| icons::draw(p, Ico::Window, r, tint));
+    let (r2, _) = side_button(ui, Pos2::new(x + ww + sp::S, sy), id.with("screen"), "Screen", screen.as_deref(), !c.busy, |p, r| icons::draw(p, Ico::Screen, r, tint));
+    if r1.clicked() {
+        c.queue.push((Command::Window, 0));
+    }
+    if r2.clicked() {
+        c.queue.push((Command::Screen, 0));
+    }
+}
+
+/// Before the first recording: a screen with REC on it, one big Record
+/// screen, and the two sound switches a first recording most needs.
+fn first_recording(c: &mut Capture, ui: &mut Ui, body: Rect) {
+    use crate::kit::empty::{hero_button, tile, toggle_chip, toggle_width, Lead, HERO_H, TILE};
+    let p = ui.painter().clone();
+    let id = ui.scope_id().with("video-first");
+    let tint = tint::CAPTURE();
+    let t = ui.ctx().input(|i| i.time);
+    let block = TILE.y + sp::XXL + HERO_H + sp::L + 34.0;
+    let top = body.center().y - block / 2.0 - sp::L;
+    let cx0 = body.center().x;
+
+    // the picture: a display with a blinking REC on it
+    let tr = Rect::from_center_size(Pos2::new(cx0, top + TILE.y / 2.0), TILE);
+    tile(&p, tr, tint);
+    let scr = Rect::from_center_size(tr.center() - Vec2::new(0.0, 7.0), Vec2::new(86.0, 52.0));
+    p.rect_stroke(scr, 6.0, Stroke::new(2.5, tint), StrokeKind::Middle);
+    let foot = scr.bottom() + 12.0;
+    p.line_segment([Pos2::new(scr.center().x, scr.bottom()), Pos2::new(scr.center().x, foot)], Stroke::new(2.5, tint));
+    p.line_segment([Pos2::new(scr.center().x - 12.0, foot), Pos2::new(scr.center().x + 12.0, foot)], Stroke::new(2.5, tint));
+    let g = p.layout_no_wrap("REC".into(), bold(10.0), RED());
+    let rec = Rect::from_center_size(scr.center(), Vec2::new(8.0 + 5.0 + g.size().x + 16.0, 20.0));
+    p.rect_filled(rec, 8.0, with_alpha(RED(), 0.18));
+    let on = (t * 0.7).fract() < 0.6;
+    p.circle_filled(Pos2::new(rec.left() + 8.0 + 4.0, rec.center().y), 4.0, if on { RED() } else { with_alpha(RED(), 0.4) });
+    p.galley(Pos2::new(rec.left() + 8.0 + 8.0 + 5.0, rec.center().y - g.size().y / 2.0), g, RED());
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
+
+    let key = c.settings.shortcut(Command::Record).map(|s| s.display());
+    let hc = Pos2::new(cx0, tr.bottom() + sp::XXL + HERO_H / 2.0);
+    if hero_button(ui, hc, id.with("record"), "Record screen", key.as_deref(), Lead::Dot(RED()), Some(BLUE()), true, 220.0).clicked() {
+        c.queue.push((Command::Record, 0));
+    }
+    // sound: what you hear and your voice
+    let sy = hc.y + HERO_H / 2.0 + sp::L + 17.0;
+    let (aw, mw) = (toggle_width(&p, "System audio"), toggle_width(&p, "Microphone"));
+    let x = cx0 - (aw + sp::S + mw) / 2.0;
+    let (sys, mic) = (c.settings.rec.system_audio, c.settings.rec.mic);
+    let (r1, _) = toggle_chip(ui, Pos2::new(x, sy), id.with("sys"), "System audio", sys, |p, r, col| icons::draw(p, Ico::Speaker, r, col));
+    let (r2, _) = toggle_chip(ui, Pos2::new(x + aw + sp::S, sy), id.with("mic"), "Microphone", mic, |p, r, col| icons::draw(p, if mic { Ico::Mic } else { Ico::MicOff }, r, col));
+    if r1.clicked() {
+        c.settings.rec.system_audio = !sys;
+        c.save_settings();
+    }
+    if r2.clicked() {
+        c.rec.toggle_mic(&mut c.settings.rec);
+        c.save_settings();
     }
 }
 
@@ -1165,6 +1267,14 @@ mod tests {
         assert!(passes(4, &s(Kind::Window, true)));
         assert!(!passes(4, &s(Kind::Window, false)));
     }
+
+    #[test]
+    fn recordings_alone_still_show_the_first_capture_screen() {
+        let s = |kind| Shot { id: 1, kind, w: 1, h: 1, saved: None, pinned: false, secs: None };
+        assert!(only_recordings(&[]));
+        assert!(only_recordings(&[s(Kind::Recording)]));
+        assert!(!only_recordings(&[s(Kind::Recording), s(Kind::Area)]));
+    }
 }
 
 // ---------------------------------------------------------------- Video
@@ -1260,13 +1370,15 @@ fn video_card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
 pub fn video_page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
     let n = c.store.shots.iter().filter(|s| s.kind == Kind::Recording).count();
+    let first = c.vtab == VTab::Recordings && n == 0 && c.rec.tray().is_none();
     let sub = match c.vtab {
+        VTab::Recordings if first => format!("Saving to {}", c.shown_folder()),
         VTab::Recordings => format!("{n} recording{} · saving to {}", if n == 1 { "" } else { "s" }, c.shown_folder()),
         VTab::Settings => String::new(),
     };
     let btns = page_header(&p, r, "Video", &sub, TEXT_DIM());
     let mut right = btns.right();
-    if c.vtab == VTab::Recordings {
+    if c.vtab == VTab::Recordings && !first {
         let live = c.rec.tray().map(|t| t.trim_start_matches(['●', '❚', ' ']).to_string());
         let label = match &live {
             Some(t) => format!("Stop · {t}"),
@@ -1295,12 +1407,7 @@ pub fn video_page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             let list = Rect::from_min_max(Pos2::new(body.left(), body.top() + 12.0), body.max);
             let items = recordings(c);
             if items.is_empty() {
-                p.text(list.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, "No recordings yet", bold(15.0), TEXT_SOFT());
-                let hint = match c.settings.shortcut(Command::Record) {
-                    Some(s) => format!("Press {} to record the screen", s.display()),
-                    None => "Recordings land here.".into(),
-                };
-                p.text(list.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, hint, font(13.0), TEXT_DIM());
+                first_recording(c, ui, body);
                 return;
             }
             for (a, it) in grid(c, ui, list, &items, "video-history") {

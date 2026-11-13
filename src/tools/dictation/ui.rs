@@ -57,7 +57,8 @@ fn note_text(n: &Note) -> Option<String> {
 
 /// The pill under the caret while dictating, and its short notes after.
 pub fn pill(d: &mut Dictation, ctx: &egui::Context) {
-    if matches!(d.phase, Phase::Idle) {
+    // a take in the page's try-it field shows itself there
+    if matches!(d.phase, Phase::Idle) || d.trying {
         return;
     }
     let text = match &d.phase {
@@ -236,9 +237,8 @@ pub fn page(d: &mut Dictation, ui: &mut Ui, r: Rect, cx: &mut Cx) {
 fn history(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
     let x0 = body.left() + 24.0;
     let w = body.width() - 48.0;
-    if d.history.items.is_empty() {
-        let p = ui.painter();
-        tile::empty_note(p, Rect::from_min_size(Pos2::new(x0, body.top() + 20.0), Vec2::new(w, 120.0)), &format!("Hold {} anywhere and speak", d.shortcut_label()));
+    if d.history.items.is_empty() || d.try_last.is_some() || d.try_note.is_some() || d.trying || d.try_fake.is_some() {
+        try_it(d, ui, body, cx);
         return;
     }
     let mut child = ui.new_child(UiBuilder::new().max_rect(body));
@@ -281,6 +281,211 @@ fn history(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
         d.history.items.remove(k);
         d.save_history();
     }
+}
+
+// ---------------------------------------------------------------- try it
+
+/// What the try-it field shows (first visit, no history yet).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Shown {
+    Idle,
+    Listening { secs: f32 },
+    /// The model is turning the take into words.
+    Working { frac: f32 },
+    /// The take is done: its words in the field.
+    Done(super::Said),
+    Problem(String),
+    /// The speech model isn't here yet; `failed`: the last download's error.
+    NeedModel { failed: Option<String> },
+    Downloading { frac: f32, done: u64, total: u64, unpacking: bool },
+}
+
+fn shown(d: &Dictation) -> Shown {
+    use std::sync::atomic::Ordering;
+    if let Some(s) = &d.try_fake {
+        return s.clone();
+    }
+    if let Some(dl) = &d.download {
+        return Shown::Downloading {
+            frac: dl.progress.fraction(),
+            done: dl.progress.done.load(Ordering::Relaxed),
+            total: dl.progress.total.load(Ordering::Relaxed),
+            unpacking: dl.unpacking.load(Ordering::Relaxed),
+        };
+    }
+    if !d.settings.engine.ready() {
+        return Shown::NeedModel { failed: d.download_error.clone() };
+    }
+    if d.trying {
+        match &d.phase {
+            Phase::Listening { since, .. } => return Shown::Listening { secs: since.elapsed().as_secs_f32() },
+            Phase::Working { since, expect, done, .. } => return Shown::Working { frac: super::work_progress(since.elapsed().as_secs_f32(), *expect, done.load(Ordering::Relaxed)) },
+            _ => {}
+        }
+    }
+    if let Some(n) = &d.try_note {
+        return Shown::Problem(n.clone());
+    }
+    if let Some(s) = &d.try_last {
+        return Shown::Done(s.clone());
+    }
+    Shown::Idle
+}
+
+/// Bars for sample screenshots, where no mic is listening.
+fn sample_levels() -> Vec<f32> {
+    (0..64).map(|k| 0.25 + 0.6 * ((k as f32 * 0.55).sin() * (k as f32 * 0.21).cos()).abs()).collect()
+}
+
+/// The first visit: a mic, a field and Hold to talk. The take lands in
+/// the field (not pasted anywhere), so they see dictation work right here.
+fn try_it(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
+    use crate::kit::empty::{hero_button, Lead, HERO_H};
+    d.try_seen = Some(std::time::Instant::now());
+    // our window has the keys: the shortcut pressed now is meant for this field
+    // (a menu-bar app is often not the "frontmost app" even then)
+    d.try_focused = ui.input(|i| i.focused);
+    let state = shown(d);
+    let p = ui.painter().clone();
+    let t = ui.ctx().input(|i| i.time);
+    let id = ui.scope_id().with("dict-try");
+    let field_w = (body.width() - 2.0 * sp::PAGE_EDGE).min(480.0);
+    let (dot, field_h) = (64.0, 112.0);
+    let block = dot + sp::XL + field_h + sp::XXL + HERO_H;
+    let top = body.center().y - block / 2.0 - sp::L;
+    let cx0 = body.center().x;
+
+    // the mic, red while it listens, a tick once the words are in
+    let c = Pos2::new(cx0, top + dot / 2.0);
+    let (glyph, col) = match &state {
+        Shown::Listening { .. } => (Icon::Mic, LIVE),
+        Shown::Done(_) => (Icon::Check, BLUE()),
+        _ => (Icon::Mic, TINT()),
+    };
+    if let Shown::Listening { .. } = state {
+        // a soft ring breathing out of it
+        let k = (t * 0.9).fract() as f32;
+        p.circle_filled(c, dot / 2.0 + 18.0 * k, with_alpha(LIVE, 0.22 * (1.0 - k)));
+    }
+    p.circle_filled(c, dot / 2.0, with_alpha(col, 0.15));
+    icon(&p, glyph, Rect::from_center_size(c, Vec2::splat(28.0)), col);
+
+    // the field
+    let fr = Rect::from_min_size(Pos2::new(cx0 - field_w / 2.0, top + dot + sp::XL), Vec2::new(field_w, field_h));
+    let quiet = matches!(state, Shown::NeedModel { .. } | Shown::Downloading { .. });
+    let edge = match &state {
+        Shown::Listening { .. } => Some(LIVE),
+        Shown::Idle => Some(TINT()),
+        _ => None,
+    };
+    if let Some(e) = edge {
+        p.rect_stroke(fr.expand(4.0), R_CARD + 4.0, Stroke::new(4.0, with_alpha(e, 0.08)), StrokeKind::Outside);
+    }
+    // dimmer until the model is here
+    let [cr, cg, cb, ca] = CARD().to_srgba_unmultiplied();
+    p.rect_filled(fr, R_CARD, if quiet { Color32::from_rgba_unmultiplied(cr, cg, cb, ca / 2) } else { CARD() });
+    p.rect_stroke(fr, R_CARD, Stroke::new(1.0, edge.map(|e| with_alpha(e, 0.5)).unwrap_or(CARD_EDGE())), StrokeKind::Inside);
+    let inner = fr.shrink(sp::L);
+    let placeholder = "Say something";
+    match &state {
+        Shown::Idle => {
+            // a blinking caret, as in any empty field
+            if (t * 1.8).fract() < 0.5 {
+                p.rect_filled(Rect::from_min_size(Pos2::new(inner.left(), inner.top() + 1.0), Vec2::new(2.0, 18.0)), 1.0, TINT());
+            }
+            p.text(Pos2::new(inner.left() + 6.0, inner.top() + 10.0), Align2::LEFT_CENTER, placeholder, font(15.0), TEXT_MUTED());
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        Shown::NeedModel { .. } | Shown::Downloading { .. } => {
+            p.text(Pos2::new(inner.left(), inner.top() + 10.0), Align2::LEFT_CENTER, placeholder, font(15.0), with_alpha(TEXT(), 0.24));
+        }
+        Shown::Listening { .. } => {
+            let lv = if d.demo { sample_levels() } else { d.levels.clone() };
+            let br = Rect::from_center_size(inner.center(), Vec2::new(inner.width(), 48.0));
+            bars(&p, br, &lv, LIVE);
+        }
+        Shown::Working { frac } => {
+            // like the pill: the take's bars light up left to right
+            let lv = if d.demo { sample_levels() } else { d.levels.clone() };
+            let br = Rect::from_center_size(inner.center(), Vec2::new(inner.width(), 48.0));
+            bars(&p, br, &lv, with_alpha(TEXT(), 0.25));
+            bars(&p.with_clip_rect(Rect::from_min_max(Pos2::new(br.left() - 2.0, fr.top()), Pos2::new(br.left() + br.width() * frac, fr.bottom()))), br, &lv, TEXT_SOFT());
+        }
+        Shown::Done(s) => {
+            let n = s.text.split_whitespace().count();
+            p.text(inner.min, Align2::LEFT_TOP, format!("{} · {:.0} s · {}", ago(s.at), s.secs.max(1.0), words(n)), font(11.0), TEXT_FAINT());
+            text_wrap(&p, Pos2::new(inner.left(), inner.top() + 14.0 + sp::LINE_GAP), Align2::LEFT_TOP, &s.text, font(15.0), TEXT(), inner.width(), 3);
+        }
+        Shown::Problem(m) => {
+            text_wrap(&p, inner.center(), Align2::CENTER_CENTER, m, font(14.0), AMBER(), inner.width(), 2);
+        }
+    }
+
+    // the button
+    let bc = Pos2::new(cx0, fr.bottom() + sp::XXL + HERO_H / 2.0);
+    let key = d.shortcut_label();
+    let keys = (!key.is_empty()).then_some(key.as_str());
+    match &state {
+        Shown::NeedModel { failed } => {
+            let label = if failed.is_some() { "Try the download again".to_string() } else { format!("Get speech model · {}", human_bytes(d.settings.engine.bytes())) };
+            if hero_button(ui, bc, id.with("get"), &label, None, Lead::Icon(Icon::Down), Some(BLUE()), true, 220.0).clicked() {
+                d.download_error = None;
+                d.start_download(d.settings.engine);
+            }
+        }
+        Shown::Downloading { frac, done, total, unpacking } => {
+            let r = Rect::from_center_size(bc, Vec2::new(260.0, HERO_H));
+            p.rect_filled(r, R_BUTTON, with_alpha(BLUE(), 0.14));
+            let f = if *unpacking { 1.0 } else { frac.clamp(0.0, 1.0) };
+            p.with_clip_rect(Rect::from_min_max(r.min, Pos2::new(r.left() + r.width() * f, r.bottom()))).rect_filled(r, R_BUTTON, with_alpha(BLUE(), 0.30));
+            p.rect_stroke(r, R_BUTTON, Stroke::new(1.0, with_alpha(BLUE(), 0.30)), StrokeKind::Inside);
+            let what = if *unpacking { "Unpacking…".to_string() } else { format!("{} of {}", human_bytes(*done), human_bytes(*total)) };
+            p.text(r.center(), Align2::CENTER_CENTER, what, bold(15.0), ACCENT());
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        Shown::Listening { secs } => {
+            let resp = hero_button(ui, bc, id.with("talk"), &format!("Stop · {}", clock(*secs)), None, Lead::Stop, Some(LIVE), true, 160.0);
+            hold(d, ui, &resp);
+        }
+        Shown::Working { .. } => {
+            hero_button(ui, bc, id.with("talk"), "Hold to talk", keys, Lead::Icon(Icon::Mic), Some(BLUE()), false, 0.0);
+        }
+        Shown::Done(s) => {
+            // Copy and Try again side by side
+            let gap = sp::M;
+            let cw = crate::kit::empty::hero_width(&p, "Copy", None, Lead::None);
+            let tw = crate::kit::empty::hero_width(&p, "Try again", keys, Lead::None);
+            let x = cx0 - (cw + gap + tw) / 2.0;
+            if hero_button(ui, Pos2::new(x + cw / 2.0, bc.y), id.with("copy"), "Copy", None, Lead::None, None, true, 0.0).clicked() {
+                ui.ctx().copy_text(s.text.clone());
+                cx.toast("Copied");
+            }
+            let resp = hero_button(ui, Pos2::new(x + cw + gap + tw / 2.0, bc.y), id.with("talk"), "Try again", keys, Lead::None, Some(BLUE()), true, 0.0);
+            hold(d, ui, &resp);
+        }
+        Shown::Idle | Shown::Problem(_) => {
+            let resp = hero_button(ui, bc, id.with("talk"), "Hold to talk", keys, Lead::Icon(Icon::Mic), Some(BLUE()), true, 0.0);
+            hold(d, ui, &resp);
+        }
+    }
+}
+
+/// Hold to talk: down starts a take (into the field), up ends it unless
+/// it was a short press, which keeps listening until the next press.
+fn hold(d: &mut Dictation, ui: &Ui, resp: &egui::Response) {
+    if d.demo {
+        return;
+    }
+    // egui stops calling a long press "down on" the button once it can't
+    // be a click any more (under a second), so after the press starts on
+    // the button, the hold lasts while the mouse button stays down
+    let down = if d.try_down { ui.input(|i| i.pointer.primary_down()) } else { resp.is_pointer_button_down_on() };
+    if down && !d.try_down {
+        d.press_talk(true);
+    } else if !down && d.try_down {
+        d.release_talk();
+    }
+    d.try_down = down;
 }
 
 fn card_rows(p: &egui::Painter, x: f32, y: f32, w: f32, rows: usize) -> Rect {
