@@ -43,7 +43,7 @@ impl Cleanup {
         Cleanup {
             clean: Default::default(),
             demo: env.demo,
-            use_ai: true,
+            use_ai: false,
             agent: if env.demo { agent::Agent::Claude } else { agent::main() },
             delete_now: false,
             clean_group: None,

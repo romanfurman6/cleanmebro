@@ -3,9 +3,9 @@
 
 use crate::kit::sync::LockExt;
 use super::engine::{self as cleanup, Group, Item, Phase, Verdict, Who};
-use super::agent::{self, Agent};
+use super::agent::Agent;
 use super::Cleanup as App;
-use crate::core::tool::{Action, Cx};
+use crate::core::tool::Cx;
 use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::claude_code::{self as cc, Availability};
 use crate::kit::glass::{self, *};
@@ -43,61 +43,6 @@ fn ai_agent(app: &App) -> Option<Agent> {
     (app.use_ai && ok).then_some(app.agent)
 }
 
-/// A calm note in place of the Claude switch: what's missing, how to turn it
-/// on, and that the built-in rules are used meanwhile. Returns its height.
-fn claude_note_height(p: &egui::Painter, width: f32, a: Availability) -> f32 {
-    let text_h = p.layout(a.how().to_string(), font(12.0), TEXT_DIM(), width - 54.0).size().y;
-    32.0 + text_h + 12.0 + 26.0 + 14.0
-}
-
-fn claude_note(ui: &mut Ui, pos: Pos2, width: f32, a: Availability, cx: &mut Cx) -> f32 {
-    let p = ui.painter().clone();
-    let x = pos.x + 40.0;
-    let w = width - 54.0;
-    let body = a.how().to_string();
-    let r = Rect::from_min_size(pos, Vec2::new(width, claude_note_height(&p, width, a)));
-    glass_card(&p, r, R_CARD, 0.0, false);
-    icon(&p, Icon::Gauge, Rect::from_min_size(r.min + Vec2::new(14.0, 14.0), Vec2::splat(16.0)), TEXT_FAINT());
-    text_fit(&p, Pos2::new(x, r.top() + 13.0), Align2::LEFT_TOP, a.title(), bold(13.0), TEXT(), w);
-    paragraph(&p, Pos2::new(x, r.top() + 32.0), &body, font(12.0), TEXT_DIM(), w);
-    // buttons, bottom left
-    let by = r.bottom() - 12.0 - 26.0;
-    let mut bx = x;
-    let mut btn = |ui: &mut Ui, label: &str, kind: u8| {
-        let bw = button_width(&p, label, kind);
-        let br = Rect::from_min_size(Pos2::new(bx, by), Vec2::new(bw, 26.0));
-        bx += bw + 8.0;
-        pill_button(ui, br, label, kind, true).clicked()
-    };
-    match a {
-        Availability::Off => {
-            if btn(ui, "Open Settings", BTN_SECONDARY) {
-                cx.push(Action::OpenSettings { tools: true });
-            }
-        }
-        Availability::NotInstalled => {
-            if btn(ui, "Get Claude Code", BTN_SECONDARY) {
-                cc::open_download_page();
-            }
-            if btn(ui, "Check again", BTN_SECONDARY) {
-                cc::request_recheck();
-                cx.toast("Looking for Claude Code…");
-            }
-        }
-        Availability::SignedOut => {
-            if btn(ui, "Open Terminal", BTN_SECONDARY) {
-                cc::open_terminal();
-            }
-            if btn(ui, "Check again", BTN_SECONDARY) {
-                cc::request_recheck();
-                cx.toast("Checking your Claude sign-in…");
-            }
-        }
-        Availability::Ready => {}
-    }
-    r.height()
-}
-
 fn home_str() -> String {
     dirs::home_dir().unwrap_or_default().display().to_string()
 }
@@ -108,11 +53,8 @@ fn short_path(p: &std::path::Path) -> String {
 
 // ---------------------------------------------------------------- start
 
-fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
+fn intro(app: &mut App, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     let ctx = ui.ctx().clone();
-    let avail = claude_now(app);
-    // the note only matters when Claude is the one picked
-    let has_claude = avail.ready() || app.agent != Agent::Claude;
     let p = ui.painter().clone();
     page_header(&p, r, "Cleanup", "", TEXT_DIM());
     let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - sp::L));
@@ -125,23 +67,13 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     glass_card(&p, bar_card, R_CARD, 0.0, false);
     let di = bar_card.shrink2(Vec2::new(sp::L, 0.0));
     let cy = di.center().y;
-    // right to left: Scan, which agent checks, the AI switch, a divider, the free space
+    // right to left: Scan, a divider, the free space (AI Check runs after the scan, in its strip)
     let scan_w = button_width(&p, "Scan", BTN_PRIMARY).max(96.0);
     let scan_r = Rect::from_min_size(Pos2::new(di.right() + 4.0 - scan_w, cy - 17.0), Vec2::new(scan_w, 34.0));
     if pill_button(ui, scan_r, "Scan", BTN_PRIMARY, true).clicked() {
         cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
     }
     let mut right = scan_r.left() - sp::L;
-    // which agent is picked once, in setup and Settings › AI Usage
-    if !app.demo {
-        app.agent = agent::main();
-    }
-    let lr = p.text(Pos2::new(right, cy), Align2::RIGHT_CENTER, format!("Check with {}", app.agent.name()), ty::body(), TEXT());
-    let sw = Rect::from_min_size(Pos2::new(lr.left() - sp::S - 30.0, cy - 9.0), Vec2::new(30.0, 18.0));
-    if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
-        app.use_ai = !app.use_ai;
-    }
-    right = sw.left() - sp::L;
     p.line_segment([Pos2::new(right, cy - 14.0), Pos2::new(right, cy + 14.0)], Stroke::new(1.0, CARD_EDGE()));
     right -= sp::L;
     icon(&p, Icon::Disk, Rect::from_center_size(Pos2::new(di.left() + 9.0, cy), Vec2::splat(18.0)), TEXT_SOFT());
@@ -154,12 +86,7 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     }
 
     // a note when Claude is missing, at the bottom
-    let mut chart_bottom = body.bottom();
-    if !has_claude && app.use_ai {
-        let h = claude_note_height(&p, body.width(), avail);
-        claude_note(ui, Pos2::new(body.left(), body.bottom() - h), body.width(), avail, tcx);
-        chart_bottom -= h + sp::M;
-    }
+    let chart_bottom = body.bottom();
 
     // the chart card
     let card = Rect::from_min_max(Pos2::new(body.left(), bar_card.bottom() + sp::M), Pos2::new(body.right(), chart_bottom));

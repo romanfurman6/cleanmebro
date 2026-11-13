@@ -22,15 +22,17 @@ pub enum Event {
 
 /// Whether the strip shows: the tool found something to look at and the
 /// main agent can be used (screenshots: always).
-pub fn shown(c: &Check, has_data: bool) -> bool {
-    c.demo || (has_data && crate::kit::agent::main().ready())
+/// Not on a locked page (a missing permission disables it), and only once the
+/// tool has something to check and the main agent can run.
+pub fn shown(c: &Check, ui: &Ui, has_data: bool) -> bool {
+    ui.is_enabled() && (c.demo || (has_data && crate::kit::agent::main().ready()))
 }
 
 /// Draw the strip at the top of `body` when it shows. Returns the height it
 /// took (0 when hidden), the gap under it included, and what was pressed.
 /// `offer` says what there is to check ("12 removed apps").
 pub fn strip(c: &mut Check, ui: &mut Ui, body: Rect, offer: &str, has_data: bool) -> (f32, Option<Event>) {
-    if !shown(c, has_data) {
+    if !shown(c, ui, has_data) {
         c.hovered = None;
         return (0.0, None);
     }
