@@ -520,7 +520,8 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let tips = if right.is_positive() { app.ai.tips() } else { Vec::new() };
     let tip_w = right.width();
     let tip_hs: Vec<f32> = tips.iter().map(|t| tip_height(&p, t, tip_w)).collect();
-    let tips_h: f32 = if tips.is_empty() { 0.0 } else { sp::M + tip_hs.iter().sum::<f32>() + sp::S * (tips.len() - 1) as f32 };
+    // at most a third of the column, so the lists always keep room
+    let tips_h: f32 = if tips.is_empty() { 0.0 } else { (sp::M + tip_hs.iter().sum::<f32>() + sp::S * (tips.len() - 1) as f32).min(right.height() / 3.0) };
     let right = if right.is_positive() { Rect::from_min_max(right.min, Pos2::new(right.right(), right.bottom() - tips_h)) } else { right };
 
     // right: what will go (Safe) and what stays (Kept)
@@ -562,6 +563,9 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         let mut ty_ = right.top() + safe_h + gap + kept_h + sp::M;
         let mut act = None;
         for (t, h) in tips.iter().zip(&tip_hs) {
+            if ty_ + h > right.bottom() + tips_h {
+                break;
+            }
             if let Some(e) = tip_row(ui, Rect::from_min_size(Pos2::new(right.left(), ty_), Vec2::new(tip_w, *h)), t) {
                 act = Some(e);
             }
@@ -693,14 +697,19 @@ fn tip_row(ui: &mut Ui, r: Rect, t: &aicheck::Rec) -> Option<aicheck::Rec> {
 /// said (a question goes back to "Needs your OK").
 fn undo_item(app: &mut App, i: usize) {
     let mut g = app.clean.lock_ok();
-    let it = &mut g.items[i];
-    if it.verdict == Verdict::Keep {
-        cleanup::forget_kept_one(&it.path);
+    if undo(&mut g.items[i]) {
+        cleanup::forget_kept_one(&g.items[i].path);
     }
+}
+
+/// Put an item back to what the rules said; true when it had been kept.
+fn undo(it: &mut Item) -> bool {
+    let was_kept = it.verdict == Verdict::Keep;
     it.verdict = it.rule_verdict;
     it.by = Who::Rule;
     it.selected = it.rule_verdict == Verdict::Safe && !it.permanent && !it.hard_keep;
     it.reason = it.rule_reason.clone();
+    was_kept
 }
 
 /// Whether the person decided this item here (it can go back).
@@ -1132,7 +1141,30 @@ fn check_ask(clean: &cleanup::Shared) -> aicheck::Ask {
 
 #[cfg(test)]
 mod tests {
-    use super::scrolls;
+    use super::*;
+
+    #[test]
+    fn undo_puts_a_question_back() {
+        let mut st = demo_results();
+        let it = st.items.iter_mut().find(|i| i.verdict == Verdict::Ask).unwrap();
+        let rule_reason = it.rule_reason.clone();
+        // the person said keep
+        it.verdict = Verdict::Keep;
+        it.by = Who::You;
+        it.reason = "You said keep".into();
+        assert!(undoable(it));
+        assert!(undo(it));
+        assert_eq!((it.verdict, it.by, it.selected), (Verdict::Ask, Who::Rule, false));
+        assert_eq!(it.reason, rule_reason);
+        assert!(!undoable(it));
+        // a safe item the person kept goes back ticked
+        let it = st.items.iter_mut().find(|i| i.rule_verdict == Verdict::Safe && !i.permanent).unwrap();
+        it.verdict = Verdict::Keep;
+        it.by = Who::You;
+        it.selected = false;
+        assert!(undo(it));
+        assert!(it.selected && it.verdict == Verdict::Safe);
+    }
 
     #[test]
     fn rows_leave_room_for_the_scroll_bar_only_when_they_scroll() {
