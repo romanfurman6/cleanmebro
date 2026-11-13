@@ -536,7 +536,8 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let a = ease(t / 0.4);
     let card = Rect::from_min_size(Pos2::new(x, top + 20.0 + (1.0 - a) * 8.0), Vec2::new(w, n as f32 * sp::ROW_H));
     glass_card(&p, card, R_CARD, 0.0, false);
-    let mut change: Option<Box<dyn FnOnce(&mut settings::Settings)>> = None;
+    type Change = Box<dyn FnOnce(&mut settings::Settings)>;
+    let mut change: Option<Change> = None;
     for (k, m) in ai::PROVIDERS.iter().enumerate() {
         let r = Rect::from_min_size(Pos2::new(card.left(), card.top() + k as f32 * sp::ROW_H), Vec2::new(w, sp::ROW_H));
         if k > 0 {
@@ -558,7 +559,9 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
         }
         // the main agent is always tracked
         let cb = Rect::from_center_size(Pos2::new(col_track, r.center().y), Vec2::splat(16.0));
-        if checkbox(ui, cb, ui.scope_id().with(("setup-track", m.id)), on, !main).clicked() && !main {
+        let track = checkbox(ui, cb, ui.scope_id().with(("setup-track", m.id)), on || main, true);
+        let track = if main { track.on_hover_text("The main agent is always tracked") } else { track };
+        if track.clicked() && !main {
             let id = m.id.to_string();
             change = Some(Box::new(move |s| {
                 s.off.retain(|x| *x != id);

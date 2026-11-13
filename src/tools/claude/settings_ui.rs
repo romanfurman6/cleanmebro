@@ -72,7 +72,9 @@ pub fn list(ui: &mut Ui, body: Rect, demo: bool) -> f32 {
         }
         p.text(Pos2::new(rr.left() - sp::M, r.center().y), Align2::RIGHT_CENTER, state, ty::label(), TEXT_DIM());
         let on = set.is_on(m.id);
-        if switch(ui, switch_at(r), ui.scope_id().with(("ai-on", m.id)), on, !main).clicked() && !main {
+        let sw = switch(ui, switch_at(r), ui.scope_id().with(("ai-on", m.id)), on || main, true);
+        let sw = if main { sw.on_hover_text("The main agent is always tracked") } else { sw };
+        if sw.clicked() && !main {
             let id = m.id.to_string();
             change = Some(Box::new(move |s| {
                 s.off.retain(|x| *x != id);
