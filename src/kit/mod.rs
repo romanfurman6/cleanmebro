@@ -24,6 +24,7 @@ pub mod parakeet;
 pub mod notify;
 pub mod perms;
 pub mod plist;
+pub mod remove;
 pub mod smc;
 pub mod sync;
 pub mod sound;

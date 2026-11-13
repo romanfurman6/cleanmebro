@@ -787,9 +787,43 @@ fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     if pill_button(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(bw, 30.0)), label, BTN_SECONDARY, true).clicked() {
         app.open_setup();
     }
+    remove_button(app, ui, Pos2::new(x + bw + 10.0, y));
     p.text(Pos2::new(x + w, y + 15.0), Align2::RIGHT_CENTER, version_label(), font(11.0), TEXT_FAINT());
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
     y + 30.0 + 24.0
+}
+
+/// "Remove Cmd+Meow": a second click within a few seconds removes the app
+/// and everything it keeps (see [`crate::kit::remove`]), then quits.
+fn remove_button(app: &mut App, ui: &mut Ui, at: Pos2) {
+    use crate::kit::remove::{self, Run};
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let armed_id = ui.scope_id().with("remove-armed");
+    let armed = ctx.data(|d| d.get_temp::<f64>(armed_id)).is_some_and(|t| now - t < 4.0);
+    let run = if app.demo { Run::Idle } else { remove::run_state() };
+    let label = match (&run, armed) {
+        (Run::Working, _) => "Removing…",
+        (_, true) => "Click again to remove",
+        _ => "Remove Cmd+Meow",
+    };
+    let p = ui.painter().clone();
+    let bw = button_width(&p, label, BTN_DANGER);
+    let r = Rect::from_min_size(at, Vec2::new(bw, 30.0));
+    if pill_button(ui, r, label, BTN_DANGER, run != Run::Working).clicked() && !app.demo {
+        if armed {
+            ctx.data_mut(|d| d.remove::<f64>(armed_id));
+            remove::start(ctx.clone());
+        } else {
+            ctx.data_mut(|d| d.insert_temp(armed_id, now));
+        }
+    }
+    if armed {
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+    if let Run::Failed(e) = &run {
+        text_fit(&p, Pos2::new(r.right() + 10.0, r.center().y), Align2::LEFT_CENTER, e, font(12.0), AMBER(), 260.0);
+    }
 }
 
 #[cfg(test)]
