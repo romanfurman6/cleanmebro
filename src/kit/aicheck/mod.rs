@@ -542,10 +542,10 @@ mod tests {
     fn parse_caps_count_and_length() {
         let mut a = ask();
         a.items = (0..9).map(|k| Item { key: k.to_string(), line: String::new(), icon: None, name: String::new() }).collect();
-        let recs: Vec<String> = (0..9).map(|k| format!(r#"{{"key":"{k}","action":"remove","title":"{}","value":"","why":""}}"#, "t".repeat(80))).collect();
+        let recs: Vec<String> = (0..9).map(|k| format!(r#"{{"key":"{k}","action":"remove","title":"{}","value":"","why":""}}"#, "t".repeat(200))).collect();
         let (_, out) = parse(&format!(r#"{{"recs":[{}]}}"#, recs.join(",")), &a).unwrap();
         assert_eq!(out.len(), MAX_RECS);
-        assert!(out[0].title.chars().count() <= 40);
+        assert!(out[0].title.chars().count() <= 80);
     }
 
     #[test]
