@@ -546,6 +546,7 @@ pub const ANIM_FRAME: std::time::Duration = std::time::Duration::from_millis(15)
 
 /// Ask for the next frame of something that moves by itself (spinners, fan
 /// blades, steam). Only call it while the thing is on screen.
+#[track_caller]
 pub fn animate(ctx: &egui::Context) {
     ctx.request_repaint_after(ANIM_FRAME);
 }
