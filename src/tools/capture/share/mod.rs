@@ -300,19 +300,22 @@ pub fn allow_page_later(b: s3::Bucket) {
 /// Once per bucket and run: let the share page read the bucket (CORS), so
 /// Edit works there. A failure only costs editing, so it is just logged.
 fn allow_page(b: &s3::Bucket) {
+    // Buckets checked (or being checked) this run; one check at a time each.
     static DONE: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
     let id = b.bucket_host();
-    if DONE.lock().map(|d| d.contains(&id)).unwrap_or(true) {
-        return;
+    match DONE.lock() {
+        Ok(mut d) if !d.contains(&id) => d.push(id.clone()),
+        _ => return,
     }
     match s3::ensure_cors(b, &ORIGINS) {
-        Ok(changed) => {
-            eprintln!("[share] CORS for {} on {id}: {}", ORIGINS.join(", "), if changed { "added" } else { "already there" });
+        Ok(changed) => eprintln!("[share] CORS for {} on {id}: {}", ORIGINS.join(", "), if changed { "added" } else { "already there" }),
+        Err(e) => {
+            eprintln!("[share] {e}");
+            // Try again next time.
             if let Ok(mut d) = DONE.lock() {
-                d.push(id);
+                d.retain(|x| x != &id);
             }
         }
-        Err(e) => eprintln!("[share] {e}"),
     }
 }
 
