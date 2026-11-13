@@ -109,9 +109,16 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let act = results(app, ui, r, root, None);
     drop(guard);
     auto_update(app, ui.ctx(), &root_path, now);
-    if act == Act::Update {
+    if act == Act::Stop {
+        shared.stop.store(true, Ordering::SeqCst);
+    } else if act == Act::Update {
         app.lens_selected.clear();
-        scan::update(shared.clone(), ui.ctx().clone(), false);
+        if shared.running.load(Ordering::SeqCst) {
+            // an automatic update is already on it: show it, with Stop
+            shared.quiet.store(false, Ordering::SeqCst);
+        } else {
+            scan::update(shared.clone(), ui.ctx().clone(), false);
+        }
     } else if app.lens_review {
         review(app, ui, r, cx);
     }
@@ -315,6 +322,7 @@ fn open_disk(app: &mut App) {
     *app.lens.result.lock_ok() = None;
     *app.lens.event.lock_ok() = None;
     app.lens.loaded.store(false, Ordering::SeqCst);
+    app.lens.partial.store(false, Ordering::SeqCst);
 }
 
 /// "just now", "5 min ago", "3 h ago", "2 days ago".
@@ -1248,12 +1256,22 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
         }
     }
     let updating = app.lens.updating.load(Ordering::SeqCst) && !app.lens.quiet.load(Ordering::SeqCst);
-    let btn = if peek.is_some() { "Stop" } else { "Update" };
+    let partial = app.lens.partial.load(Ordering::SeqCst);
+    // Stop while anything runs; a stopped map is mapped again from scratch
+    let busy = peek.is_some() || updating;
+    let btn = if busy {
+        "Stop"
+    } else if partial {
+        "Map again"
+    } else {
+        "Update"
+    };
     let nb = button_width(&p, btn, BTN_SECONDARY);
     let new_r = Rect::from_min_size(Pos2::new(hr.right() - 20.0 - nb, hr.center().y - 15.0), Vec2::new(nb, 30.0));
     let when = match (*app.lens.when.lock_ok(), updating, peek) {
         (_, _, Some((done, all))) => format!("{done} / {all}"),
         (_, true, _) => "Updating…".to_string(),
+        (_, _, _) if partial => "Stopped · partial map".to_string(),
         (Some(w), _, _) if app.lens_freed > 0 => format!("{} freed · Mapped {}", human_bytes(app.lens_freed), ago(w)),
         (Some(w), _, _) => format!("Mapped {}", ago(w)),
         (None, _, _) => String::new(),
@@ -1294,8 +1312,8 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
             x += 10.0;
         }
     }
-    if pill_button(ui, new_r, btn, BTN_SECONDARY, !updating).clicked() {
-        act = if peek.is_some() { Act::Stop } else { Act::Update };
+    if pill_button(ui, new_r, btn, BTN_SECONDARY, true).clicked() {
+        act = if busy { Act::Stop } else { Act::Update };
     }
     let picked = pick_root.is_some();
     match pick_root {

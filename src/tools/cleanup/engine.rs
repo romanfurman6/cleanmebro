@@ -10,6 +10,7 @@ use crate::kit::fs::dir_size;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
@@ -161,7 +162,10 @@ pub struct State {
     pub cleaned: Vec<(Group, u64)>,
     pub failed: Vec<(String, String)>,
     pub log: Vec<String>,
-    pub stop: bool,
+    /// Set to stop this run (Stop, Skip, a new scan); each run has its own.
+    pub cancel: Arc<AtomicBool>,
+    /// The agent checking this scan's paths, if any.
+    pub agent: Option<super::agent::Agent>,
     /// Found, but hidden: the person chose to keep them before.
     pub hidden_kept: usize,
     /// While scanning: per group (in [`Group::ALL`] order) what has been
@@ -219,11 +223,12 @@ pub(super) struct Ctx {
     brew: bool,
     shared: Shared,
     egui: egui::Context,
+    cancel: Arc<AtomicBool>,
 }
 
 impl Ctx {
     pub(super) fn stopped(&self) -> bool {
-        self.shared.lock_ok().stop
+        self.cancel.load(Ordering::SeqCst)
     }
     fn status(&self, s: &str, progress: f32) {
         let mut g = self.shared.lock_ok();
@@ -336,7 +341,7 @@ fn app_open(ids: &HashSet<String>, names: &HashSet<String>, path: &Path, title: 
 /// Drop repeated and nested paths (the outer one stays), then measure what's
 /// left on all cores and drop items too small to matter. Sizing is nearly all
 /// of a scan's time, so nothing is measured twice.
-fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f32) {
+fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f32, cancel: &AtomicBool) {
     let mut seen = HashSet::new();
     items.retain(|it| seen.insert(it.path.clone()));
     let all: HashSet<PathBuf> = items.iter().map(|i| i.path.clone()).collect();
@@ -362,7 +367,7 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
                 crate::kit::activity::low_priority();
                 loop {
                     let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if k >= n || shared.lock_ok().stop {
+                    if k >= n || cancel.load(Ordering::SeqCst) {
                         break;
                     }
                     // a tool's item came with its size
@@ -370,6 +375,10 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
                     sizes[k].store(size, std::sync::atomic::Ordering::Relaxed);
                     let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     let mut g = shared.lock_ok();
+                    // a stopped run no longer owns the shared state
+                    if cancel.load(Ordering::SeqCst) {
+                        break;
+                    }
                     let l = &mut g.live[gi(items[k].group)];
                     l.done += 1;
                     if size >= m::MIN_ITEM_BYTES && items[k].verdict != Verdict::Keep {
@@ -462,14 +471,19 @@ const CHROMIUM_CACHES: [&str; 9] = [
     "Shared Dictionary",
 ];
 
-pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
-    {
+/// Scan, then (with `agent`) have that agent check the paths. A run still
+/// going is stopped first.
+pub fn start_scan(shared: Shared, ctx: egui::Context, agent: Option<super::agent::Agent>) {
+    let use_ai = agent.is_some();
+    let cancel = {
         let mut g = shared.lock_ok();
-        *g = State { phase: Phase::Scanning, with_ai: use_ai, ..Default::default() };
-    }
+        g.cancel.store(true, Ordering::SeqCst);
+        *g = State { phase: Phase::Scanning, with_ai: use_ai, agent, ..Default::default() };
+        g.cancel.clone()
+    };
     std::thread::spawn(move || {
         let (running_ids, running_names) = running_apps();
-        let mut c = Ctx { items: Vec::new(), kept: kept().into_iter().collect(), hidden_kept: 0, running_ids, running_names, brew: false, shared: shared.clone(), egui: ctx.clone() };
+        let mut c = Ctx { items: Vec::new(), kept: kept().into_iter().collect(), hidden_kept: 0, running_ids, running_names, brew: false, shared: shared.clone(), egui: ctx.clone(), cancel: cancel.clone() };
         let steps: [ScanStep; 12] = [
             ("Claude", scan_claude),
             ("AI tools", scan_ai_tools),
@@ -494,36 +508,70 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, use_ai: bool) {
             f(&mut c);
         }
         if !c.stopped() {
-            measure(&mut c.items, &shared, &ctx, FIND);
+            measure(&mut c.items, &shared, &ctx, FIND, &cancel);
         }
         c.items.sort_by(|a, b| a.group.cmp(&b.group).then(b.bytes.cmp(&a.bytes)));
         for it in c.items.iter_mut() {
             it.selected = it.verdict == Verdict::Safe && !it.permanent;
         }
-        let stopped = c.stopped();
         {
+            // stopped: Stop already took the page back to the start
             let mut g = shared.lock_ok();
+            if cancel.load(Ordering::SeqCst) {
+                return;
+            }
             g.items = std::mem::take(&mut c.items);
             g.hidden_kept = c.hidden_kept;
-            g.phase = if use_ai && !stopped { Phase::Judging } else { Phase::Results };
+            g.phase = if use_ai { Phase::Judging } else { Phase::Results };
+            if !use_ai {
+                record_scan(&g);
+            }
         }
         ctx.request_repaint();
-        if !use_ai && !stopped {
-            record_scan(&shared.lock_ok());
-            crate::kit::sound::play(crate::kit::sound::Cue::Ready);
-        }
-        if use_ai && !stopped {
-            judge(&shared, &ctx);
+        if let Some(agent) = agent {
+            judge(&shared, &ctx, agent, &cancel);
             let mut g = shared.lock_ok();
-            for it in g.items.iter_mut() {
-                it.selected = it.verdict == Verdict::Safe && !it.permanent;
+            // skipped: the results are already showing
+            if cancel.load(Ordering::SeqCst) {
+                return;
             }
-            g.phase = Phase::Results;
-            record_scan(&g);
-            ctx.request_repaint();
-            crate::kit::sound::play(crate::kit::sound::Cue::Ready);
+            finish_results(&mut g);
         }
+        ctx.request_repaint();
+        crate::kit::sound::play(crate::kit::sound::Cue::Ready);
     });
+}
+
+/// Show the results as they stand: select what's safe, remember the scan.
+fn finish_results(g: &mut State) {
+    for it in g.items.iter_mut() {
+        it.selected = it.verdict == Verdict::Safe && !it.permanent;
+    }
+    g.phase = Phase::Results;
+    record_scan(g);
+}
+
+/// Stop a scan: back to the start screen at once (the scan thread notices
+/// and quits without touching the page again).
+pub fn stop_scan(shared: &Shared) {
+    let mut g = shared.lock_ok();
+    g.cancel.store(true, Ordering::SeqCst);
+    *g = State::default();
+}
+
+/// Stop the AI check: the results show now, judged by the built-in rules
+/// (and whatever the agent already answered).
+pub fn skip_ai(shared: &Shared) {
+    let mut g = shared.lock_ok();
+    if g.phase != Phase::Judging {
+        return;
+    }
+    g.cancel.store(true, Ordering::SeqCst);
+    let name = g.agent.map(|a| a.name()).unwrap_or("AI");
+    if !g.ai_used {
+        g.ai_error = Some(format!("{name} check skipped; the built-in rules were used."));
+    }
+    finish_results(&mut g);
 }
 
 // ---- Claude (catalog read from the original's AIToolScanning, plus project rules)
@@ -851,12 +899,13 @@ fn scan_trash(c: &mut Ctx) {
 
 // ---------------------------------------------------------------- AI judge
 
-fn judge(shared: &Shared, ctx: &egui::Context) {
-    let Some(bin) = claude_code::claude_bin().filter(|_| claude_code::availability().ready()) else {
+fn judge(shared: &Shared, ctx: &egui::Context, agent: super::agent::Agent, cancel: &Arc<AtomicBool>) {
+    let name = agent.name();
+    if !agent.ready() {
         let mut g = shared.lock_ok();
-        g.ai_error = Some(format!("{}, so only the built-in rules were used.", claude_code::availability().short()));
+        g.ai_error = Some(format!("{}, so only the built-in rules were used.", agent.why_not()));
         return;
-    };
+    }
     let h = home().display().to_string();
     let candidates: Vec<usize> = {
         let g = shared.lock_ok();
@@ -874,7 +923,7 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
     let batches: Vec<Vec<usize>> = candidates.chunks(m::AI_BATCH).map(|c| c.to_vec()).collect();
     let n = batches.len().max(1);
     for (bi, batch) in batches.iter().enumerate() {
-        if shared.lock_ok().stop {
+        if cancel.load(Ordering::SeqCst) {
             break;
         }
         let lines: String = {
@@ -899,31 +948,29 @@ fn judge(shared: &Shared, ctx: &egui::Context) {
         };
         {
             let mut g = shared.lock_ok();
-            g.ai_status = format!("Claude is reviewing {} paths (batch {} of {})…", batch.len(), bi + 1, n);
+            if cancel.load(Ordering::SeqCst) {
+                return;
+            }
+            g.ai_status = format!("{name} is reviewing {} paths (batch {} of {})…", batch.len(), bi + 1, n);
             g.progress = bi as f32 / n as f32;
         }
         ctx.request_repaint();
-        let out = Command::new(&bin)
-            .current_dir(std::env::temp_dir())
-            .args(["-p", &lines, "--system-prompt", &system, "--output-format", "json", "--no-session-persistence", "--model", m::AI_MODEL, "--tools", "", "--strict-mcp-config"])
-            .output();
-        let text = match out {
-            Ok(o) if !o.status.success() => {
-                let err = String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("").to_string();
-                let mut g = shared.lock_ok();
-                g.ai_error = Some(if err.is_empty() { "Claude couldn't review the paths; the built-in rules were used.".into() } else { format!("Claude couldn't review the paths ({err}); the built-in rules were used.") });
-                return;
-            }
-            Ok(o) => serde_json::from_slice::<serde_json::Value>(&o.stdout).ok().and_then(|v| v["result"].as_str().map(|s| s.to_string())).unwrap_or_default(),
-            Err(e) => {
-                shared.lock_ok().ai_error = Some(format!("Couldn't run Claude: {e}"));
+        let answer = agent.ask(&system, &lines, cancel);
+        let mut g = shared.lock_ok();
+        // stopped: the page moved on; this run writes nothing more
+        if cancel.load(Ordering::SeqCst) {
+            return;
+        }
+        let text = match answer {
+            Ok(t) => t,
+            Err(err) => {
+                g.ai_error = Some(if err.is_empty() { format!("{name} couldn't review the paths; the built-in rules were used.") } else { format!("{name} couldn't review the paths ({err}); the built-in rules were used.") });
                 return;
             }
         };
         let verdicts = parse_verdicts(&text);
-        let mut g = shared.lock_ok();
         if verdicts.is_empty() {
-            g.ai_error = Some("Claude's answer couldn't be read; the built-in rules were used for some items.".into());
+            g.ai_error = Some(format!("{name}'s answer couldn't be read; the built-in rules were used for some items."));
             continue;
         }
         g.ai_used = true;
@@ -1450,7 +1497,7 @@ mod tests {
             it(Group::Logs, &p("tiny"), "Logs", Verdict::Safe, Who::Rule),
         ];
         let shared: Shared = Default::default();
-        measure(&mut items, &shared, &egui::Context::default(), 0.0);
+        measure(&mut items, &shared, &egui::Context::default(), 0.0, &AtomicBool::new(false));
         assert_eq!(items.len(), 1, "inner, the repeat and the tiny one are gone");
         assert_eq!(items[0].path, base.join("outer"));
         assert_eq!(items[0].group, Group::AppCaches, "the first rule wins");

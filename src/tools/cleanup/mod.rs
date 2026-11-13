@@ -4,6 +4,7 @@
 //! Page routes: "" (as left), "claude" (open on the Claude group).
 
 use crate::kit::sync::LockExt;
+pub mod agent;
 pub mod engine;
 mod inuse;
 mod journal;
@@ -25,6 +26,10 @@ pub struct Cleanup {
     pub(crate) clean: engine::Shared,
     pub(crate) demo: bool,
     pub(crate) use_ai: bool,
+    /// The agent that checks the paths (Claude, Codex, Gemini).
+    pub(crate) agent: agent::Agent,
+    /// Agents installed on this Mac (looked up once).
+    pub(crate) agents: Option<Vec<agent::Agent>>,
     pub(crate) delete_now: bool,
     /// Group shown in the results; `None` = "Needs your OK".
     pub(crate) clean_group: Option<Group>,
@@ -40,6 +45,8 @@ impl Cleanup {
             clean: Default::default(),
             demo: env.demo,
             use_ai: true,
+            agent: if env.demo { agent::Agent::Claude } else { agent::chosen() },
+            agents: if env.demo { Some(vec![agent::Agent::Claude, agent::Agent::Codex]) } else { None },
             delete_now: false,
             clean_group: None,
             clean_confirm: false,
@@ -61,7 +68,7 @@ impl Tool for Cleanup {
         "Cleanup"
     }
     fn about(&self) -> &'static str {
-        "Safe junk removal, checked by Claude when it's on"
+        "Safe junk removal, checked by AI when it's on"
     }
     fn badge(&self) -> Badge {
         badge()
@@ -230,7 +237,7 @@ impl Tool for Cleanup {
 /// Claude, prints what it would offer. Nothing is removed.
 pub fn scan_report(ai: bool) {
     let state: engine::Shared = Default::default();
-    engine::start_scan(state.clone(), egui::Context::default(), ai);
+    engine::start_scan(state.clone(), egui::Context::default(), ai.then(agent::chosen));
     loop {
         std::thread::sleep(std::time::Duration::from_millis(300));
         if state.lock_ok().phase == engine::Phase::Results {
