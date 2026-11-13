@@ -276,15 +276,9 @@ impl<T: WinitApp> WinitAppWrapper<T> {
             // have handled this window, so only run it if the deadline is still there:
             if self.windows_redraw_deadlines.remove(&window_id).is_some() {
                 log::trace!("RedrawRequested is overdue for {window_id:?}: running logic only");
-                // cmdmeow: on macOS a hidden (ordered-out) root never gets
-                // RedrawRequested, and our windows are immediate viewports
-                // painted in the root's pass: logic only left them showing
-                // the old frame (first-run setup stuck after a click until
-                // resized). The Wayland reason for logic-only doesn't apply.
-                let mode = if cfg!(target_os = "macos") { PassMode::Full } else { PassMode::LogicOnly };
                 let event_result =
                     self.winit_app
-                        .run_ui_and_paint(event_loop, window_id, mode);
+                        .run_ui_and_paint(event_loop, window_id, PassMode::LogicOnly);
                 self.handle_event_result(event_loop, event_result);
             }
         }

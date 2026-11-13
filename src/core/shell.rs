@@ -800,6 +800,32 @@ impl eframe::App for App {
     }
 }
 
+/// macOS: right after launch the app window kept showing its first frames
+/// (setup frozen on Welcome, clicks working underneath) until it was resized
+/// once; from then on it drew fine. So resize it by a point and back once,
+/// shortly after it first shows.
+fn kick_first_frames(ctx: &egui::Context) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static STATE: AtomicU8 = AtomicU8::new(0);
+    let Some(r) = ctx.input(|i| i.viewport().inner_rect) else { return };
+    let id = egui::Id::new("kick-first-frames");
+    let now = ctx.input(|i| i.time);
+    let first = ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(id, || now));
+    let t = now - first;
+    match STATE.load(Ordering::Relaxed) {
+        0 if t > 0.5 => {
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(r.size() + egui::vec2(1.0, 0.0)));
+            STATE.store(1, Ordering::Relaxed);
+        }
+        1 if t > 0.6 => {
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(r.size() - egui::vec2(1.0, 0.0)));
+            STATE.store(2, Ordering::Relaxed);
+        }
+        0 | 1 => ctx.request_repaint(),
+        _ => {}
+    }
+}
+
 pub static QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl App {
@@ -862,6 +888,7 @@ impl App {
                 return;
             }
             crate::kit::native::apply_glass(16.0);
+            kick_first_frames(&vctx);
             let full = ui.max_rect();
             let t = vctx.input(|i| i.time);
             glass::backdrop(ui.painter(), full, 16.0, false, t);
