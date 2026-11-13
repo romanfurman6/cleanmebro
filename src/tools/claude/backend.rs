@@ -89,7 +89,6 @@ fn run(ctx: egui::Context, mut providers: Vec<Box<dyn ai::Provider>>, all: All) 
             let wanted = shown == i || shown == ai::ALL || local_at[i].age().is_none();
             if wanted && (activity::visible() || local_at[i].age().is_none()) && local_at[i].due(Duration::from_secs(m::CLAUDE_LOCAL_REFRESH_SECS)) {
                 local_at[i].mark();
-                let projects = p.projects();
                 let mut local = p.local_tokens();
                 history::with(id, |h| {
                     h.merge_days(&mut local, chrono::Local::now().date_naive());
@@ -101,7 +100,6 @@ fn run(ctx: egui::Context, mut providers: Vec<Box<dyn ai::Provider>>, all: All) 
                     p.data_dir().map(|d| crate::kit::fs::dir_size(&d)).unwrap_or(0)
                 });
                 let mut g = s.lock_ok();
-                g.projects = projects;
                 g.local = local;
                 if let Some(d) = data {
                     g.data_bytes = d;
