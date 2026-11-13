@@ -1,7 +1,7 @@
 //! Password managers and other secret keepers that Clipboard never records
 //! from by default, but only the ones this Mac actually has.
 
-use crate::tools::uninstaller::apps;
+use crate::kit::bundles as apps;
 use std::path::PathBuf;
 
 /// One app in the catalog: bundle ids it ships under (current and older

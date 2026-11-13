@@ -939,7 +939,7 @@ impl Clipboard {
             let got = out.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().trim_end_matches('/').to_string());
             let app = got.filter(|p| !p.is_empty()).and_then(|p| {
                 let path = std::path::PathBuf::from(p);
-                let info = crate::tools::uninstaller::apps::read_info(&path)?;
+                let info = crate::kit::bundles::read_info(&path)?;
                 Some(super::secret_apps::Found { bundle: info.id, name: info.name, path })
             });
             let _ = tx.send(app);
