@@ -52,11 +52,11 @@ pub fn verdict(f: &Found) -> Option<(Verdict, String)> {
     }
     let days = f.idle_days as u64;
     Some(if f.careful {
-        (Verdict::Ask, format!("{} build output, project untouched for {days} days; sometimes kept on purpose", f.kind))
+        (Verdict::Ask, format!("{} build output, idle {days} days, may be kept on purpose", f.kind))
     } else if f.idle_days >= IDLE_DAYS {
-        (Verdict::Safe, format!("{} build output, project untouched for {days} days; rebuilt on the next build", f.kind))
+        (Verdict::Safe, format!("{} build output, idle {days} days, rebuilds itself", f.kind))
     } else {
-        (Verdict::Ask, format!("{} build output, project used {days} days ago", f.kind))
+        (Verdict::Ask, format!("{} build output, used {days} days ago", f.kind))
     })
 }
 

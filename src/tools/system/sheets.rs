@@ -561,8 +561,9 @@ fn switches(ui: &mut Ui, sp: &Spec, x0: f32, w: f32, y: f32) -> Action {
         if hint.is_empty() {
             text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y), Align2::LEFT_CENTER, label, font(13.0), TEXT(), tw);
         } else {
-            text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, label, font(13.0), TEXT(), tw);
-            text_fit(&p, Pos2::new(rr.left() + 12.0, rr.center().y + 2.0), Align2::LEFT_TOP, hint, font(12.0), TEXT_FAINT(), tw);
+            let (ly1, ly2) = two_lines_y(&p, rr.center().y, &font(13.0), &font(12.0));
+            text_fit(&p, Pos2::new(rr.left() + 12.0, ly1), Align2::LEFT_CENTER, label, font(13.0), TEXT(), tw);
+            text_fit(&p, Pos2::new(rr.left() + 12.0, ly2), Align2::LEFT_CENTER, hint, font(12.0), TEXT_FAINT(), tw);
         }
     }
     action

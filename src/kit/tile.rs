@@ -45,9 +45,10 @@ pub fn small_text(p: &egui::Painter, rect: Rect, title: &str, sub: &str, sub_col
     let w = rect.width() - 2.0 * PAD;
     // a long name ("Screenshot") steps down a size or two before it's cut
     let fid = [13.0, 12.0, 11.0].into_iter().map(bold).find(|f| p.layout_no_wrap(title.to_string(), f.clone(), TEXT()).size().x <= w).unwrap_or_else(ty::title);
-    text_fit(p, Pos2::new(rect.left() + PAD, rect.bottom() - 26.0), Align2::LEFT_BOTTOM, title, fid, TEXT(), w);
     let sub_col = if sub_col == TEXT_DIM() { ty::caption_color() } else { sub_col };
-    text_fit(p, Pos2::new(rect.left() + PAD, rect.bottom() - 10.0), Align2::LEFT_BOTTOM, sub, ty::caption(), sub_col, w);
+    let sr = text_fit(p, Pos2::new(rect.left() + PAD, rect.bottom() - 10.0), Align2::LEFT_BOTTOM, sub, ty::caption(), sub_col, w);
+    let tb = if sub.is_empty() { rect.bottom() - 10.0 } else { sr.top() - sp::LINE_GAP };
+    text_fit(p, Pos2::new(rect.left() + PAD, tb), Align2::LEFT_BOTTOM, title, fid, TEXT(), w);
 }
 
 /// Small (1:1) gauge: a ring with the glyph inside and a caption under it.
@@ -101,15 +102,7 @@ pub fn wide(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, 
     };
     let x0 = c.x + rr + sp::M;
     let w = rect.right() - PAD - x0;
-    let lines: Vec<(&str, egui::FontId, Color32)> = [(label, ty::caption(), ty::caption_color()), (value, ty::title(), TEXT()), (caption, ty::caption(), ty::caption_color())]
-        .into_iter()
-        .filter(|l| !l.0.is_empty())
-        .collect();
-    let lh = 16.0;
-    let top = cy - lh * lines.len() as f32 / 2.0;
-    for (k, (t, f, col)) in lines.into_iter().enumerate() {
-        text_fit(p, Pos2::new(x0, top + lh * (k as f32 + 0.5)), Align2::LEFT_CENTER, t, f, col, w);
-    }
+    stack_lines(p, x0, cy, &[(label, ty::caption(), ty::caption_color()), (value, ty::title(), TEXT()), (caption, ty::caption(), ty::caption_color())], w);
     resp
 }
 
@@ -138,11 +131,9 @@ pub fn row_split_at(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: C
     let split = rect.left() + (rect.width() * ratio).round();
     let (x0, x1) = (chip.right() + sp::M, split - sp::M);
     let cy = rect.center().y;
-    text_fit(p, Pos2::new(x0, cy - 20.0), Align2::LEFT_CENTER, label, ty::caption(), ty::caption_color(), x1 - x0);
     // the value shrinks a step before it gets cut
     let f = if p.layout_no_wrap(value.to_string(), ty::number(), TEXT()).size().x <= x1 - x0 { ty::number() } else { ty::lead() };
-    text_fit(p, Pos2::new(x0, cy + 1.0), Align2::LEFT_CENTER, value, f, TEXT(), x1 - x0);
-    text_fit(p, Pos2::new(x0, cy + 21.0), Align2::LEFT_CENTER, caption, ty::caption(), ty::caption_color(), x1 - x0);
+    stack_lines(p, x0, cy, &[(label, ty::caption(), ty::caption_color()), (value, f, TEXT()), (caption, ty::caption(), ty::caption_color())], x1 - x0);
     p.line_segment([Pos2::new(split, rect.top() + 16.0), Pos2::new(split, rect.bottom() - 16.0)], Stroke::new(1.0, white(15)));
     (resp, Rect::from_min_max(Pos2::new(split + sp::M, rect.top() + PAD), Pos2::new(rect.right() - PAD, rect.bottom() - PAD)))
 }

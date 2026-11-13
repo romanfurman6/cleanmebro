@@ -208,10 +208,14 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
         }
         // icon + name under the baseline
         let ny = ci.bottom() - label_h / 2.0;
-        let nw = p.layout_no_wrap(g.title().to_string(), ty::body(), TEXT()).size().x.min(cw - 24.0);
-        let lx = x + (cw - nw - 22.0) / 2.0;
+        // the whole name; the icon goes first when both don't fit the column
+        let nw = p.layout_no_wrap(g.title().to_string(), ty::body(), TEXT()).size().x;
+        // (a label may run into the gap between columns)
+        let avail = cw + gap - sp::XS;
+        let with_icon = nw + 22.0 <= avail;
+        let lx = if with_icon { x + (cw - nw - 22.0) / 2.0 } else { x + (cw - nw.min(avail)) / 2.0 - 22.0 };
         let ir = Rect::from_center_size(Pos2::new(lx + 8.0, ny), Vec2::splat(16.0));
-        let drawn = matches!(g, Group::Developer) && symbol(&p, "hammer", ir, col);
+        let drawn = !with_icon || (matches!(g, Group::Developer) && symbol(&p, "hammer", ir, col));
         if !drawn {
             let ic = match g {
                 Group::AiTools => Icon::Gauge,
@@ -224,7 +228,7 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
             };
             icon(&p, ic, ir, col);
         }
-        text_fit(&p, Pos2::new(lx + 22.0, ny), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT_SOFT(), cw - 24.0);
+        text_fit(&p, Pos2::new(lx + 22.0, ny), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT_SOFT(), avail);
     }
     p.line_segment([Pos2::new(ci.left(), base), Pos2::new(ci.right(), base)], Stroke::new(1.0, CARD_EDGE()));
 }
@@ -503,7 +507,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
 
     // right: what will go (Safe) and what stays (Kept)
     if right.is_positive() {
-        let row_h = sp::ROW_H;
+        let row_h = sp::ROW2_H;
         let need = |n: usize| if n == 0 { 0.0 } else { LABEL_H + sp::S + n as f32 * row_h + 8.0 };
         let (mut safe_h, mut kept_h) = (need(safe.len()), need(kept.len()));
         let gap = if safe_h > 0.0 && kept_h > 0.0 { sp::L } else { 0.0 };
@@ -609,7 +613,7 @@ fn answer_items(app: &mut App, idx: &[usize], v: Verdict) {
 }
 
 /// A question card: name, path and the reason on three lines.
-const ASK_H: f32 = 78.0;
+const ASK_H: f32 = 84.0;
 
 /// Hover: a light highlight, and the path when the row doesn't show it;
 /// double click: show in Finder.
@@ -648,13 +652,15 @@ fn ask_card(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let ar = Rect::from_min_size(Pos2::new(kr.left() - sp::S - aw, kr.top()), Vec2::new(aw, 28.0));
     let tx = rr.left() + sp::L;
     let tw = ar.left() - sp::M - tx;
-    let t = text_fit(&p, Pos2::new(tx, rr.top() + sp::M), Align2::LEFT_TOP, &it.title, ty::title(), TEXT(), tw - 70.0);
+    // title, path and reason, LINE_GAP apart, the block centred in the card
+    let block = line_h(&p, &ty::title()) + line_h(&p, &mono(11.0)) + line_h(&p, &ty::label()) + 2.0 * sp::LINE_GAP;
+    let t = text_fit(&p, Pos2::new(tx, rr.center().y - block / 2.0), Align2::LEFT_TOP, &it.title, ty::title(), TEXT(), tw - 70.0);
     let s = p.text(Pos2::new(t.right() + sp::S, t.top()), Align2::LEFT_TOP, human_bytes(it.bytes), ty::body(), TEXT_DIM());
     if it.permanent {
         chip(&p, Pos2::new(s.right() + sp::S, t.top() - 2.0), Align2::LEFT_TOP, "Permanent", CHIP_RISK());
     }
-    let path = text_fit(&p, Pos2::new(tx, t.bottom() + sp::XS), Align2::LEFT_TOP, &middle_ellipsis(&short_path(&it.path), 80), mono(11.0), TEXT_FAINT(), tw);
-    reason_line(ui, Pos2::new(tx, path.bottom() + sp::XS), Align2::LEFT_TOP, &it, TEXT_SOFT(), tw);
+    let path = text_fit(&p, Pos2::new(tx, t.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, &middle_ellipsis(&short_path(&it.path), 80), mono(11.0), TEXT_FAINT(), tw);
+    reason_line(ui, Pos2::new(tx, path.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, &it, TEXT_SOFT(), tw);
     if pill_button(ui, ar, "Allow", BTN_PRIMARY, true).clicked() {
         answer_items(app, &[i], Verdict::Safe);
     }
@@ -681,8 +687,9 @@ fn safe_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
         right = chip(&p, Pos2::new(right, rr.center().y), Align2::RIGHT_CENTER, "Permanent", CHIP_RISK()).left() - sp::S;
     }
     let x = cb.right() + sp::M;
-    text_fit(&p, Pos2::new(x, rr.center().y - 1.0), Align2::LEFT_BOTTOM, &it.title, ty::body(), TEXT(), right - x);
-    reason_line(ui, Pos2::new(x, rr.center().y + 1.0), Align2::LEFT_TOP, &it, TEXT_DIM(), right - x);
+    let (ly1, ly2) = two_lines_y(&p, rr.center().y, &ty::body(), &ty::label());
+    text_fit(&p, Pos2::new(x, ly1), Align2::LEFT_CENTER, &it.title, ty::body(), TEXT(), right - x);
+    reason_line(ui, Pos2::new(x, ly2), Align2::LEFT_CENTER, &it, TEXT_DIM(), right - x);
 }
 
 /// One kept item: a lock, the name, the size, dimmed.
@@ -694,8 +701,9 @@ fn kept_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     icon(&p, Icon::Lock, Rect::from_center_size(Pos2::new(rr.left() + sp::M + 8.0, rr.center().y), Vec2::splat(14.0)), TEXT_FAINT());
     let sz = p.text(Pos2::new(rr.right() - sp::M, rr.center().y), Align2::RIGHT_CENTER, human_bytes(it.bytes), ty::body(), TEXT_DIM());
     let x = rr.left() + sp::M + 16.0 + sp::M;
-    text_fit(&p, Pos2::new(x, rr.center().y - 1.0), Align2::LEFT_BOTTOM, &it.title, ty::body(), TEXT_DIM(), sz.left() - sp::M - x);
-    reason_line(ui, Pos2::new(x, rr.center().y + 1.0), Align2::LEFT_TOP, &it, TEXT_FAINT(), sz.left() - sp::M - x);
+    let (ly1, ly2) = two_lines_y(&p, rr.center().y, &ty::body(), &ty::label());
+    text_fit(&p, Pos2::new(x, ly1), Align2::LEFT_CENTER, &it.title, ty::body(), TEXT_DIM(), sz.left() - sp::M - x);
+    reason_line(ui, Pos2::new(x, ly2), Align2::LEFT_CENTER, &it, TEXT_FAINT(), sz.left() - sp::M - x);
 }
 
 fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
@@ -776,7 +784,7 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     // cards fit their content (no stretched empty boxes); the log gets the full height
     let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - sp::L));
     let left_h = 2.0 * sp::L + 44.0 + sp::L + 34.0 + sp::XS + 16.0 + sp::XL + 34.0 + if ok { 0.0 } else { 16.0 + sp::S + st.failed.len().min(4) as f32 * 18.0 + 20.0 + sp::L };
-    let right_h = 2.0 * sp::L + 34.0 + sp::S + rows.len().max(1) as f32 * sp::ROW_H;
+    let right_h = 2.0 * sp::L + 34.0 + sp::S + rows.len().max(1) as f32 * sp::ROW2_H;
     let h = if app.clean_log { body.height() } else { left_h.max(right_h).min(body.height()) };
     let left = Rect::from_min_size(body.min, Vec2::new(340.0f32.min(body.width() * 0.4), h));
     let right = Rect::from_min_size(Pos2::new(left.right() + sp::L, body.top()), Vec2::new(body.right() - left.right() - sp::L, h));
@@ -791,8 +799,9 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     icon(&p, if ok { Icon::Check } else { Icon::Info }, Rect::from_center_size(c, Vec2::splat(18.0)), col);
     let tx = c.x + 22.0 + sp::M;
     let total = st.cleaned_count + st.failed.len();
-    p.text(Pos2::new(tx, c.y - 1.0), Align2::LEFT_BOTTOM, "Cleanup finished", ty::title(), TEXT());
-    p.text(Pos2::new(tx, c.y + 3.0), Align2::LEFT_TOP, format!("{} of {} items", st.cleaned_count, total), ty::caption(), ty::caption_color());
+    let (ly1, ly2) = two_lines_y(&p, c.y, &ty::title(), &ty::caption());
+    p.text(Pos2::new(tx, ly1), Align2::LEFT_CENTER, "Cleanup finished", ty::title(), TEXT());
+    p.text(Pos2::new(tx, ly2), Align2::LEFT_CENTER, format!("{} of {} items", st.cleaned_count, total), ty::caption(), ty::caption_color());
     let mut y = li.top() + 44.0 + sp::L;
     let freed = st.cleaned_bytes.saturating_sub(st.trashed_bytes);
     let g = p.layout_no_wrap(human_bytes(if freed > 0 { freed } else { st.cleaned_bytes }), ty::hero(), TEXT());
@@ -847,7 +856,7 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
     }
     p.text(ri.left_top(), Align2::LEFT_TOP, "What was cleaned", ty::title(), TEXT());
     for (k, (g, n, b)) in rows.iter().enumerate() {
-        let row = Rect::from_min_size(Pos2::new(list.left(), list.top() + k as f32 * sp::ROW_H), Vec2::new(list.width(), sp::ROW_H));
+        let row = Rect::from_min_size(Pos2::new(list.left(), list.top() + k as f32 * sp::ROW2_H), Vec2::new(list.width(), sp::ROW2_H));
         if row.bottom() > list.bottom() {
             break;
         }
@@ -857,8 +866,9 @@ fn done(app: &mut App, ui: &mut Ui, r: Rect) {
         icon(&p, Icon::Check, Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(14.0)), GREEN());
         let vr = p.text(Pos2::new(row.right(), row.center().y), Align2::RIGHT_CENTER, human_bytes(*b), ty::body(), white(166));
         let x = row.left() + 14.0 + sp::M;
-        text_fit(&p, Pos2::new(x, row.center().y - 1.0), Align2::LEFT_BOTTOM, g.title(), ty::body(), TEXT(), vr.left() - x - sp::S);
-        text_fit(&p, Pos2::new(x, row.center().y + 1.0), Align2::LEFT_TOP, &format!("{n} item{}", if *n == 1 { "" } else { "s" }), ty::caption(), ty::caption_color(), vr.left() - x - sp::S);
+        let (ly1, ly2) = two_lines_y(&p, row.center().y, &ty::body(), &ty::caption());
+        text_fit(&p, Pos2::new(x, ly1), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT(), vr.left() - x - sp::S);
+        text_fit(&p, Pos2::new(x, ly2), Align2::LEFT_CENTER, &format!("{n} item{}", if *n == 1 { "" } else { "s" }), ty::caption(), ty::caption_color(), vr.left() - x - sp::S);
     }
     if rows.is_empty() {
         text_fit(&p, Pos2::new(list.left(), list.top() + sp::M), Align2::LEFT_TOP, "Nothing selected", ty::body(), TEXT_DIM(), list.width());
@@ -897,7 +907,7 @@ pub fn demo_results() -> cleanup::State {
         mk(Group::Developer, "Derived Data · MyApp", "~/Library/Developer/Xcode/DerivedData/MyApp-abc", 3_400_000_000, "Build Data", Verdict::Safe, "Build products and index, Xcode rebuilds them", Who::Rule),
         mk(Group::AppCaches, "Adobe Media Cache", "~/Library/Application Support/Adobe/Common/Media Cache Files", 2_100_000_000, "Caches", Verdict::Safe, "Premiere/After Effects media cache", Who::Rule),
         mk(Group::Developer, "npm cache", "~/.npm/_cacache", 640_000_000, "Caches", Verdict::Safe, "npm downloads, fetched again when needed", Who::Ai),
-        mk(Group::Projects, "old-site · node_modules", "~/Code/old-site/node_modules", 870_000_000, "Build Data", Verdict::Safe, "Node build output, project untouched for 94 days; rebuilt on the next build", Who::Rule),
+        mk(Group::Projects, "old-site · node_modules", "~/Code/old-site/node_modules", 870_000_000, "Build Data", Verdict::Safe, "Node build output, idle 94 days, rebuilds itself", Who::Rule),
     ];
     cleanup::State { phase: Phase::Results, items, ai_used: true, ..Default::default() }
 }

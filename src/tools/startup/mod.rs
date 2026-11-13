@@ -743,6 +743,8 @@ pub fn demo(g: &mut State, done: bool) {
         job("com.google.GoogleUpdater.wake", "Google Updater", "/Users/you/Library/Application Support/Google/GoogleUpdater/Current/GoogleUpdater.app/Contents/MacOS/GoogleUpdater", Scope::User, When::Every(3600), true, None, false),
         job("com.valvesoftware.steamclean", "Steam Cleaner", "/Users/you/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/steamclean", Scope::User, When::AtLogin, true, None, false),
         job("com.teamviewer.teamviewer_desktop", "TeamViewer", "/Applications/TeamViewer.app/Contents/Helpers/TeamViewer_Desktop", Scope::User, When::KeepsRunning, true, None, true),
+        // a long name and id, to see they get room before they get cut
+        job("com.asus.display.DisplayWidgetCenter", "DisplayWidgetCenter", "/Applications/DisplayWidget Center.app/Contents/MacOS/DisplayWidget Center", Scope::User, When::AtLogin, true, None, false),
         job("com.1password.SafariShim", "1Password", "/Applications/1Password.app/Contents/Library/LaunchAgents/SafariShim", Scope::AllUsers, When::OnDemand, true, Some(904), false),
         job("com.microsoft.autoupdate.helper", "Microsoft AutoUpdate", "/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app/Contents/MacOS/Microsoft AutoUpdate", Scope::System, When::OnDemand, true, None, false),
         job("com.docker.vmnetd", "Docker", "/Library/PrivilegedHelperTools/com.docker.vmnetd", Scope::System, When::KeepsRunning, true, Some(233), false),
