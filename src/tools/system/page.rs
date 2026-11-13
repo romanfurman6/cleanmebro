@@ -81,7 +81,8 @@ pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendati
             Some(Event::Act(rec)) => {
                 match rec.action.as_str() {
                     "quit" => {
-                        if let Some(pid) = rec.key.strip_prefix("pid:").and_then(|x| x.parse::<u32>().ok()) {
+                        // only the same process, still running, and the user's own
+                        if let Some(pid) = quit_target(&mon.lock_ok().procs, &rec.key, &rec.name) {
                             super::procs::quit(pid);
                         }
                     }
@@ -409,6 +410,14 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
     out
 }
 
+/// The pid an AI Check "Quit" may signal: the rec's process must still be in
+/// the live list under the same name and run as the user (a pid can be
+/// reused by another process while the rec sits on screen).
+fn quit_target(live: &[super::procs::Proc], key: &str, name: &str) -> Option<u32> {
+    let pid = key.strip_prefix("pid:")?.parse::<u32>().ok()?;
+    live.iter().find(|p| p.pid == pid && p.name == name && p.mine).map(|p| p.pid)
+}
+
 /// What AI Check gets: the busiest processes and how the Mac is doing.
 fn health_ask(s: &monitor::Snapshot) -> aicheck::Ask {
     let items = s
@@ -441,5 +450,24 @@ fn health_ask(s: &monitor::Snapshot) -> aicheck::Ask {
         ],
         items,
         facts,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::system::procs::Proc;
+
+    #[test]
+    fn ai_quit_only_the_same_live_process_of_the_user() {
+        let live = vec![Proc { pid: 10, name: "Chrome".into(), cpu: 60.0, mine: true }, Proc { pid: 11, name: "WindowServer".into(), cpu: 30.0, mine: false }];
+        assert_eq!(quit_target(&live, "pid:10", "Chrome"), Some(10));
+        // pid reused by another process
+        assert_eq!(quit_target(&live, "pid:10", "Docker"), None);
+        // exited
+        assert_eq!(quit_target(&live, "pid:12", "Docker"), None);
+        // not the user's
+        assert_eq!(quit_target(&live, "pid:11", "WindowServer"), None);
+        assert_eq!(quit_target(&live, "10", "Chrome"), None);
     }
 }
