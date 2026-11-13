@@ -205,9 +205,14 @@ fn permission(c: &mut Capture, ctx: &egui::Context, screen: Vec2, cx: &mut Cx) {
         return;
     }
     // allowed in System Settings, but macOS only applies it to a new process
-    let restart = crate::kit::perms::Perm::Screen.status() == crate::kit::perms::Status::Allowed;
+    let allowed = crate::kit::perms::Perm::Screen.status() == crate::kit::perms::Status::Allowed;
+    // a restart already happened and capture still can't see the screen:
+    // another one won't help, the switch in Settings has to be flipped again
+    let restart = allowed && !crate::kit::perms::relaunched();
     let (title_text, body, action) = if restart {
         ("Restart to turn on Screen Recording".to_string(), "macOS applies it after a restart".to_string(), "Restart")
+    } else if allowed {
+        ("Screen Recording is still off".to_string(), format!("macOS didn't turn it on for {}. Switch it off and on in System Settings, then quit and reopen.", crate::kit::perms::app_name()), "Open System Settings")
     } else {
         ("Capture needs Screen Recording".to_string(), format!("Turn on {} in System Settings", crate::kit::perms::app_name()), "Open System Settings")
     };

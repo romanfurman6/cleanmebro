@@ -40,7 +40,7 @@ fn header(ui: &mut Ui, r: Rect, sub: &str, sub_col: egui::Color32, loading: bool
     let p = ui.painter().clone();
     let btns = page_header(&p, r, "AI Usage", sub, sub_col);
     let rb = Rect::from_center_size(Pos2::new(btns.right() - 13.0, btns.center().y), Vec2::splat(26.0));
-    if loading {
+    if loading || backend::refreshing() {
         spinner(&p, rb.center(), 6.0, ui.ctx().input(|i| i.time), TEXT_DIM());
         animate(ui.ctx());
     } else if round_button(ui, rb, Icon::Refresh, "Refresh").clicked() {
@@ -96,12 +96,32 @@ fn not_set_up(a: Availability, cl: &UsageInfo, demo: bool, ui: &mut Ui, r: Rect,
     }
 }
 
+/// An outage chip (the provider's status page, not the person's usage),
+/// with a hover that says so.
+fn incident(ui: &mut Ui, pos: Pos2, align: Align2, cl: &UsageInfo) -> Option<Rect> {
+    let p = ui.painter().clone();
+    let r = parts::incident_chip(&p, pos, align, cl)?;
+    let m = ai::meta(cl.provider);
+    let host = m.status_url.trim_start_matches("https://").split('/').next().unwrap_or("");
+    let what = if cl.incident.as_deref() == Some("Outage") { "an outage" } else { "degraded service" };
+    ui.interact(r, ui.scope_id().with(("ai-incident", cl.provider)), egui::Sense::hover()).on_hover_text(format!("{host} reports {what} right now. It's about {}'s servers, not your usage.", m.name));
+    Some(r)
+}
+
 pub fn page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     if ai::shows_all() {
         all_page(all, demo, ui, r, cx);
         return;
     }
     let cl = backend::current(all).lock_ok().clone();
+    // the first check isn't done: say so, rather than cards of zeros that
+    // turn into "No usage yet" a moment later
+    if !cl.scanned {
+        let left = header(ui, r, "Checking…", TEXT_DIM(), true, demo, cx);
+        incident(ui, Pos2::new(left - sp::M, r.top() + PAGE_HEADER_H / 2.0), Align2::RIGHT_CENTER, &cl);
+        checking(&cl, ui, r);
+        return;
+    }
     if let Some(a) = cl.unavailable() {
         not_set_up(a, &cl, demo, ui, r, cx);
         return;
@@ -117,12 +137,13 @@ pub fn page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         sub.push_str(&format!(" · {fresh}"));
     }
     let left = header(ui, r, &sub, if cl.stale { AMBER() } else { TEXT_DIM() }, cl.loading, demo, cx);
-    // nothing to show at all: one empty state instead of cards of zeros
-    if !cl.loading && cl.limits.is_empty() && cl.local.days.iter().all(|d| d.tokens == 0) && cl.local.models.is_empty() {
+    incident(ui, Pos2::new(left - sp::M, r.top() + PAGE_HEADER_H / 2.0), Align2::RIGHT_CENTER, &cl);
+    // nothing to show at all: one empty state instead of cards of zeros. It
+    // stays up while a refresh runs, so the page doesn't flash cards
+    if !has_usage(&cl) {
         no_usage(&cl, ui, r);
         return;
     }
-    parts::incident_chip(&p, Pos2::new(left - sp::M, r.top() + PAGE_HEADER_H / 2.0), Align2::RIGHT_CENTER, &cl);
     let _ = fresh_col;
 
     let is_claude = meta.id == "claude";
@@ -207,24 +228,48 @@ fn empty_note(p: &egui::Painter, r: Rect, msg: &str) {
     text_fit(p, Pos2::new(r.center().x, r.center().y - 8.0), Align2::CENTER_CENTER, msg, ty::body(), TEXT_FAINT(), r.width());
 }
 
-/// A provider that's set up but hasn't been used on this Mac yet.
-fn no_usage(cl: &UsageInfo, ui: &mut Ui, r: Rect) {
+/// Limits, or any tokens in the last 30 days.
+fn has_usage(cl: &UsageInfo) -> bool {
+    !cl.limits.is_empty() || cl.local.days.iter().any(|d| d.tokens > 0) || !cl.local.models.is_empty()
+}
+
+/// The centred empty state (R6): chip, title, a dim body, and under it
+/// either a spinner (`None`) or one secondary button. True when it's clicked.
+fn empty_state(ui: &mut Ui, r: Rect, title: &str, msg: &str, button: Option<&str>) -> bool {
     let p = ui.painter().clone();
-    let m = ai::meta(cl.provider);
     let c = Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + sp::XXL + (r.height() - PAGE_HEADER_H) * 0.3);
     tool_chip(&p, Rect::from_center_size(c, Vec2::splat(56.0)), Icon::Gauge, tint::CLAUDE());
-    p.text(c + Vec2::new(0.0, 52.0), Align2::CENTER_CENTER, format!("No {} usage yet", m.name), bold(15.0), TEXT());
+    p.text(c + Vec2::new(0.0, 52.0), Align2::CENTER_CENTER, title, bold(15.0), TEXT());
     let w = (r.width() - 48.0).min(400.0);
-    let msg = format!("Use {} on this Mac and its tokens, cost, models and projects show up here. Nothing in the last 30 days so far.", m.name);
-    let mut job = egui::text::LayoutJob::simple(msg, ty::body(), TEXT_DIM(), w);
+    let mut job = egui::text::LayoutJob::simple(msg.to_string(), ty::body(), TEXT_DIM(), w);
     job.halign = egui::Align::Center;
     let g = p.layout_job(job);
     let h = g.size().y;
     p.galley(c + Vec2::new(0.0, 74.0), g, TEXT_DIM());
-    let label = "Check again";
+    let below = Pos2::new(c.x, c.y + 74.0 + h + 30.0);
+    let Some(label) = button else {
+        spinner(&p, below, 8.0, ui.ctx().input(|i| i.time), TEXT_DIM());
+        animate(ui.ctx());
+        return false;
+    };
     let bw = button_width(&p, label, BTN_SECONDARY);
-    let br = Rect::from_center_size(Pos2::new(c.x, c.y + 74.0 + h + 30.0), Vec2::new(bw, 30.0));
-    if pill_button(ui, br, label, BTN_SECONDARY, true).clicked() {
+    let br = Rect::from_center_size(below, Vec2::new(bw, 30.0));
+    pill_button(ui, br, label, BTN_SECONDARY, !backend::refreshing()).clicked()
+}
+
+/// The first check after launch is still running.
+fn checking(cl: &UsageInfo, ui: &mut Ui, r: Rect) {
+    let m = ai::meta(cl.provider);
+    empty_state(ui, r, &format!("Checking {}…", m.name), &format!("Reading {}'s logs and limits on this Mac.", m.name), None);
+}
+
+/// A provider that's set up but hasn't been used on this Mac yet. While a
+/// check runs the button says so and waits; the page stays as it is.
+fn no_usage(cl: &UsageInfo, ui: &mut Ui, r: Rect) {
+    let m = ai::meta(cl.provider);
+    let msg = format!("Use {} on this Mac and its tokens, cost, models and projects show up here. Nothing in the last 30 days so far.", m.name);
+    let label = if cl.loading || backend::refreshing() { "Checking…" } else { "Check again" };
+    if empty_state(ui, r, &format!("No {} usage yet", m.name), &msg, Some(label)) {
         backend::request_refresh();
     }
 }
@@ -440,7 +485,7 @@ fn all_page(all: &All, demo: bool, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let show_usd = settings::get().show_cost;
     let today: f64 = infos.iter().map(|i| i.local.usd_today).sum();
     let sub = if show_usd { format!("{} today", parts::usd(today)) } else { String::new() };
-    let loading = infos.iter().any(|i| i.loading);
+    let loading = infos.iter().any(|i| i.loading || !i.scanned);
     header(ui, r, &sub, TEXT_DIM(), loading, demo, cx);
     let x0 = r.left() + sp::PAGE_EDGE;
     let x1 = r.right() - sp::PAGE_EDGE;
@@ -511,12 +556,19 @@ fn provider_card(ui: &mut Ui, cr: Rect, info: &UsageInfo, menu: bool, show_usd: 
         ui.interact(cr, ui.scope_id().with(("ai-menu-chip", info.provider)), egui::Sense::hover()).on_hover_text("Its usage is the number shown next to the Cmd+Meow icon in the menu bar. Change it in Settings › AI Usage.");
         x = cr.right() + sp::S;
     }
-    if let Some(c) = parts::incident_chip(&p, Pos2::new(x, tr.center().y), Align2::LEFT_CENTER, info) {
-        let _ = c;
-    }
+    incident(ui, Pos2::new(x, tr.center().y), Align2::LEFT_CENTER, info);
     let mut y = i.top() + 16.0 + sp::M;
-    if let Some(e) = info.unavailable() {
-        let s = if e == Availability::SignedOut { "Signed out" } else { "Not installed" };
+    // the same words as the provider's own tab
+    let state = if !info.scanned {
+        Some("Checking…".to_string())
+    } else if let Some(e) = info.unavailable() {
+        Some(if e == Availability::SignedOut { "Signed out" } else { "Not installed" }.to_string())
+    } else if !has_usage(info) {
+        Some(format!("No {} usage yet", ai::meta(info.provider).name))
+    } else {
+        None
+    };
+    if let Some(s) = state {
         p.text(Pos2::new(i.left(), y), Align2::LEFT_TOP, s, ty::body(), TEXT_DIM());
         return;
     }

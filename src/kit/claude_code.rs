@@ -114,7 +114,6 @@ pub struct Project {
     pub cwd: Option<PathBuf>,
     pub cwd_exists: bool,
     pub last_used: Option<SystemTime>,
-    pub bytes: u64,
 }
 
 impl Project {
@@ -167,6 +166,10 @@ pub fn projects_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".claude/projects")
 }
 
+/// Claude Code's projects and whether their folders still exist. Looks at
+/// each project's own folder (and walks the disk to resolve its name), so a
+/// project in Downloads, Documents or Desktop makes macOS ask about that
+/// folder: call it only once Full Disk Access is granted (Cleanup's scan).
 pub fn scan_projects() -> Vec<Project> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(projects_dir()) else { return out };
@@ -205,8 +208,7 @@ pub fn scan_projects() -> Vec<Project> {
             cwd = Some(PathBuf::from(enc.replace('-', "/")));
         }
         let cwd_exists = cwd.as_ref().map(|c| c.exists()).unwrap_or(false);
-        let bytes = crate::kit::fs::dir_size(&folder);
-        out.push(Project { folder, cwd, cwd_exists, last_used: last, bytes });
+        out.push(Project { folder, cwd, cwd_exists, last_used: last });
     }
     out.sort_by_key(|p| std::cmp::Reverse(p.last_used));
     out
