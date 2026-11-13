@@ -42,7 +42,7 @@ impl ClaudeCode {
             return None;
         }
         self.creds_at = Some(Instant::now());
-        let c = account::claude_creds_file().or_else(read_keychain).filter(|c| c.fresh(now))?;
+        let c = account::claude_creds_file().filter(|c| c.fresh(now)).or_else(read_keychain).filter(|c| c.fresh(now))?;
         self.creds = Some(c.clone());
         Some(c)
     }

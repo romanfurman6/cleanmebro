@@ -339,7 +339,8 @@ fn google_token(creds: &GoogleCreds) -> Result<String, ApiError> {
     if creds.refresh.is_empty() {
         return Err(ApiError::Auth);
     }
-    let (id, secret) = gemini_client().ok_or_else(|| ApiError::Other("Gemini CLI's sign-in client wasn't found".into()))?;
+    // without Gemini CLI's client there's no way to sign in: same as refused
+    let (id, secret) = gemini_client().ok_or(ApiError::Auth)?;
     let r = agent().post("https://oauth2.googleapis.com/token").header("User-Agent", UA).send_form([
         ("client_id", id.as_str()),
         ("client_secret", secret.as_str()),

@@ -4,6 +4,7 @@
 //! come from Google's account when Gemini CLI is signed in with Google on a
 //! plan that still serves it (`account::gemini_usage`); otherwise tokens only.
 
+use super::account::ApiError;
 use super::{intern, recent_files, FileCache, LocalTokens, Provider, Shared, UsageEntry, UsageInfo};
 use crate::kit::sync::LockExt;
 use chrono::{DateTime, Local};
@@ -32,10 +33,15 @@ impl Provider for Gemini {
     fn fetch_account(&mut self, s: &Shared) {
         let home = home();
         let installed = home.join("tmp").is_dir();
-        let due = self.quota_after.is_none_or(|t| std::time::Instant::now() >= t);
-        let live = if installed && due { super::account::gemini_usage(&home).map_err(|e| eprintln!("[ai] gemini quota: {e:?}")).ok() } else { None };
-        if installed && due && live.is_none() {
-            self.quota_after = Some(std::time::Instant::now() + std::time::Duration::from_secs(3600));
+        let now = std::time::Instant::now();
+        let due = installed && self.quota_after.is_none_or(|t| now >= t);
+        let live = due.then(|| super::account::gemini_usage(&home));
+        if let Some(Err(e)) = &live {
+            eprintln!("[ai] gemini quota: {e:?}");
+            // no Google sign-in that gets quotas: ask again in an hour; a
+            // passing failure (offline, a 5xx) only skips one round
+            let wait = if *e == ApiError::Auth { 3600 } else { 240 };
+            self.quota_after = Some(now + std::time::Duration::from_secs(wait));
         }
         let mut g = s.lock_ok();
         g.installed = installed;
@@ -43,15 +49,19 @@ impl Provider for Gemini {
         g.fetched = Some(Local::now());
         g.error = (!installed).then(|| "Gemini CLI hasn't been used on this Mac.".to_string());
         match live {
-            Some((plan, limits)) => {
+            Some(Ok((plan, limits))) => {
                 g.source = "API";
                 g.plan = plan;
                 g.limits = limits;
+                g.stale = false;
                 g.billing = super::Billing::Subscription;
             }
-            None => {
+            // the last quotas known stay up, marked as old
+            Some(Err(ApiError::Other(_))) | None if !g.limits.is_empty() && installed => g.stale = true,
+            _ => {
                 g.source = "Local";
                 g.limits.clear();
+                g.stale = false;
             }
         }
     }
