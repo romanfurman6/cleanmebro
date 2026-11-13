@@ -209,7 +209,7 @@ impl Loaded {
         let mut state = self.ctx.create_state().map_err(|e| e.to_string())?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_language(Some(lang.unwrap_or("auto")));
-        params.set_n_threads(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8) as i32);
+        params.set_n_threads(crate::kit::work_threads() as i32);
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_special(false);

@@ -63,7 +63,7 @@ pub fn probe(a: &[String]) -> Result<(), String> {
     let t = Instant::now();
     let keep = super::cut::trim(&pcm, MODEL_RATE);
     eprintln!("[dictation] kept {:.2}–{:.2} s, {} piece(s)", keep.start as f32 / MODEL_RATE as f32, keep.end as f32 / MODEL_RATE as f32, super::cut::split(&pcm[keep.clone()], MODEL_RATE).len());
-    let text = m.run(&pcm[keep], lang)?;
+    let text = m.run(&pcm[keep], lang, None)?;
     eprintln!("[dictation] ran in {:?}", t.elapsed());
     if text.is_empty() {
         return Err("Nothing heard".into());

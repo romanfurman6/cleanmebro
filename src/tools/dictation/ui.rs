@@ -106,9 +106,14 @@ pub fn pill(d: &mut Dictation, ctx: &egui::Context) {
                 let tr = p.text(Pos2::new(r.right() - 13.0, cy), Align2::RIGHT_CENTER, clock(phase_secs), mono(12.0), TEXT_SOFT());
                 bars(&p, Rect::from_min_max(Pos2::new(r.left() + 28.0, r.top() + 8.0), Pos2::new(tr.left() - 10.0, r.bottom() - 8.0)), &levels, white(225));
             }
-            Phase::Working { .. } => {
+            Phase::Working { since, expect, done, .. } => {
+                // like a video render: the take's bars light up left to right
+                let f = super::work_progress(since.elapsed().as_secs_f32(), *expect, done.load(std::sync::atomic::Ordering::Relaxed));
                 spinner(&p, Pos2::new(r.left() + 17.0, cy), 6.5, t, TEXT_SOFT());
-                bars(&p, Rect::from_min_max(Pos2::new(r.left() + 32.0, r.top() + 8.0), Pos2::new(r.right() - 14.0, r.bottom() - 8.0)), &levels, white(70));
+                let tr = p.text(Pos2::new(r.right() - 13.0, cy), Align2::RIGHT_CENTER, format!("{}%", (f * 100.0) as u32), mono(12.0), TEXT_SOFT());
+                let br = Rect::from_min_max(Pos2::new(r.left() + 32.0, r.top() + 8.0), Pos2::new(tr.left() - 10.0, r.bottom() - 8.0));
+                bars(&p, br, &levels, white(70));
+                bars(&p.with_clip_rect(Rect::from_min_max(Pos2::new(br.left() - 2.0, r.top()), Pos2::new(br.left() + br.width() * f, r.bottom()))), br, &levels, white(225));
             }
             Phase::Showing { note: Note::Pasted, .. } => {
                 icon(&p, Icon::Check, Rect::from_center_size(r.center(), Vec2::splat(16.0)), GREEN());
