@@ -5,7 +5,7 @@
 use super::control::{speed, Mode, Preset, Settings, Source, CURVE_HI, CURVE_LO, RESUME_C};
 use super::data::{heat, heat_text, rpm_text, Fan, Snapshot, HISTORY};
 use super::{Cmd, HelperState, Live};
-use super::ui::{blades, dial, fan_name, heat_pos, heat_scale, hottest_text, is_block, keep_spinning, plural, sparkline, spin, thermal_hint, BLADE, HOT_LINE, LINE};
+use super::ui::{blades, dial, fan_name, heat_pos, heat_scale, hottest_text, is_block, plural, sparkline, thermal_hint, BLADE, HOT_LINE, LINE};
 use crate::core::tool::Cx;
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, Stroke, Ui, Vec2};
@@ -52,7 +52,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
             dial(&p, c, 58.0, 7.0, f.frac(), tint::FAN());
             p.circle_filled(c, 44.0, BG());
             crate::kit::glass::stroke_circle(&p, c, 44.0, Stroke::new(1.0, white(15)));
-            blades(&p, c, 40.0, spin(&format!("fan-{i}"), crate::kit::glass::ambient_clock(ui.ctx()), f.rpm), BLADE(), RAISED());
+            crate::kit::spin::blades(&p, &format!("fan-{i}"), c, 40.0, f.rpm, BLADE(), RAISED());
             let g = p.layout_no_wrap(rpm_text(f.rpm), bold(28.0), TEXT());
             let u = p.layout_no_wrap("rpm".into(), font(13.0), TEXT_DIM());
             let tw = g.size().x + 4.0 + u.size().x;
@@ -64,7 +64,6 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
             p.text(Pos2::new(fr.center().x, base + gh + 8.0), Align2::CENTER_TOP, format!("{} – {} rpm", rpm_text(f.min), rpm_text(f.max)), font(11.0), TEXT_FAINT());
         }
         hx = x0 + n as f32 * (fan_w + GAP);
-        keep_spinning(ui, s);
     } else if s.loaded {
         let fr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(fan_w * 2.0 + GAP, ROW1_H));
         glass_card(&p, fr, 14.0, 0.0, false);

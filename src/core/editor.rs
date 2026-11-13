@@ -450,6 +450,8 @@ fn resize_glyph(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
 #[allow(clippy::too_many_arguments)]
 fn preview(app: &mut App, ui: &mut Ui, origin: Rect, clip: Rect, placed: &[Placed], content_h: f32, pointer: Option<Pos2>) -> (Target, Option<String>, Option<Pick>) {
     let ctx = ui.ctx().clone();
+    // the widgets jiggle and get dragged: egui draws their fan blades
+    crate::kit::spin::suspend(&ctx);
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time) as f32;
     let at = |r: Rect| r.translate(origin.min.to_vec2());

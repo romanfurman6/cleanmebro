@@ -704,6 +704,8 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.frame += 1;
+        // screenshots and demo views render egui alone: no native layers
+        crate::kit::spin::set_allowed(self.screenshot.is_none() && !self.demo);
         if self.frame <= 3 || self.frame.is_multiple_of(30) {
             sync_theme(&ctx, self.screenshot.is_none());
             let r = if self.mode == Mode::Panel { m::CARD_RADIUS as f64 + 6.0 } else { 16.0 };
@@ -840,6 +842,8 @@ impl eframe::App for App {
             ctx.request_repaint_after(std::time::Duration::from_millis(2000));
         }
         self.screenshot_step(&ctx);
+        crate::kit::spin::flush(&ctx);
+        crate::kit::spin::drop_unflushed();
         crate::kit::viewport::end_pass();
         crate::kit::repaint_log::end();
     }

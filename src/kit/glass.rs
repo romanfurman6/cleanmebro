@@ -626,6 +626,11 @@ pub fn ambient_clock(ctx: &egui::Context) -> f64 {
     ambient_state(ctx).0
 }
 
+/// Whether decorative loops run now (the app saw input lately).
+pub fn ambient_live(ctx: &egui::Context) -> bool {
+    ambient_state(ctx).1
+}
+
 /// Ask for the next frame of a decorative loop (see [`AMBIENT_FPS`]); only
 /// while it's on screen and the app saw input lately.
 #[track_caller]
