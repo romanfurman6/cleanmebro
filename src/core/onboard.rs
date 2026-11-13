@@ -1002,8 +1002,8 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
         let a0 = -std::f32::consts::FRAC_PI_2;
         p.add(egui::Shape::line(arc_points(c, 18.0, a0, a0 + std::f32::consts::TAU * shown, 48), Stroke::new(4.0, if full { GREEN() } else { BLUE() })));
     }
-    // all required ones allowed: the count turns into a check and the ring
-    // grows ears (it was full already when the step opened: no show)
+    // all required ones allowed: the count turns into a check and a ripple
+    // runs out of the ring once (it was full already when the step opened: no show)
     let full_id = ui.scope_id().with("perm-full");
     let full_at = if full {
         let at = ui.ctx().data(|d| d.get_temp::<f64>(full_id)).unwrap_or(if t < 0.1 { now - 10.0 } else { now });
@@ -1016,10 +1016,11 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
     match full_at {
         Some(at) => {
             let since = (now - at) as f32;
-            let z = pop((since - 0.25) / 0.4).max(0.0);
             check(&p, c, 14.0 * pop(since / 0.35).max(0.0), GREEN());
-            if z > 0.0 {
-                ring_ears(&p, c, z, GREEN());
+            let k = (since - 0.15) / 0.6;
+            if (0.0..1.0).contains(&k) {
+                let e = ease(k);
+                crate::kit::glass::stroke_circle(&p, c, 20.0 + 10.0 * e, Stroke::new(2.0, with_alpha(GREEN(), 0.5 * (1.0 - e))));
             }
             if since < 0.8 {
                 ui.ctx().request_repaint();
@@ -1048,24 +1049,6 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
 }
 
 /// The permission rows (setup and Settings › General). Returns the height used.
-/// Two cat ears on top of the permissions ring (radius 18 round `c`),
-/// grown to `z` (0 → none, 1 → full; a bit over 1 overshoots).
-fn ring_ears(p: &egui::Painter, c: Pos2, z: f32, col: Color32) {
-    for side in [-1.0f32, 1.0] {
-        let pt = |deg: f32, r: f32| {
-            let a = deg.to_radians();
-            c + Vec2::new(a.cos() * side, a.sin()) * r
-        };
-        // base on the ring's outer edge, tip out and up
-        let (b0, b1, tip) = (pt(-145.0, 19.0), pt(-103.0, 19.0), pt(-126.0, 31.0));
-        let mid = b0 + (b1 - b0) * 0.5;
-        let tip = mid + (tip - mid) * z;
-        // same winding on both sides
-        let pts = if side < 0.0 { vec![b0, tip, b1] } else { vec![b1, tip, b0] };
-        p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
-    }
-}
-
 pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, now: f64) -> f32 {
     let p = ui.painter().clone();
     let mut y = area.top();
