@@ -9,7 +9,7 @@
 //! Page routes: "" (Apps), "leftovers", "app:<path>" (select an app).
 
 use crate::kit::sync::LockExt;
-mod apps;
+pub(crate) mod apps;
 mod extra;
 mod leftovers;
 mod mac;

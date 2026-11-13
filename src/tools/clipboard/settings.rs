@@ -1,5 +1,6 @@
 //! Clipboard's own settings, saved as JSON in the app's data folder.
 
+use super::secret_apps::{self, Found};
 use super::store::Limits;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -33,20 +34,11 @@ pub struct Settings {
     /// Record what arrives from an iPhone or another Mac (Universal Clipboard).
     pub record_remote: bool,
     pub ignore: Vec<Ignored>,
-}
-
-/// Password managers skipped out of the box.
-pub fn default_ignored() -> Vec<Ignored> {
-    [
-        ("com.1password.1password", "1Password"),
-        ("com.agilebits.onepassword7", "1Password 7"),
-        ("com.apple.keychainaccess", "Keychain Access"),
-        ("com.apple.Passwords", "Passwords"),
-        ("com.bitwarden.desktop", "Bitwarden"),
-    ]
-    .iter()
-    .map(|(b, n)| Ignored { bundle: (*b).into(), name: (*n).into() })
-    .collect()
+    /// Password managers found on this Mac and put in `ignore` once
+    /// (lowercase bundle ids): one the user takes out stays out.
+    pub seeded: Vec<String>,
+    /// 0: written before defaults followed what's installed.
+    pub defaults_v: u32,
 }
 
 impl Default for Settings {
@@ -59,7 +51,9 @@ impl Default for Settings {
             record_concealed: false,
             record_secrets: false,
             record_remote: true,
-            ignore: default_ignored(),
+            ignore: Vec::new(),
+            seeded: Vec::new(),
+            defaults_v: 0,
         }
     }
 }
@@ -70,7 +64,33 @@ impl Settings {
     }
 
     pub fn ignores(&self, bundle: &str) -> bool {
-        !bundle.is_empty() && self.ignore.iter().any(|i| i.bundle == bundle)
+        !bundle.is_empty() && self.ignore.iter().any(|i| i.bundle.eq_ignore_ascii_case(bundle))
+    }
+
+    /// Never record from the password managers on this Mac (`installed` is
+    /// every app found). Each one is added once; ones the user removed or
+    /// added by hand are left alone. Old defaults for apps that aren't
+    /// installed are dropped. True when something changed.
+    pub fn adopt_installed(&mut self, installed: &[Found]) -> bool {
+        let mut changed = false;
+        let has = |b: &str| installed.iter().any(|f| f.bundle.eq_ignore_ascii_case(b));
+        if self.defaults_v < 1 {
+            self.ignore.retain(|i| has(&i.bundle) || !secret_apps::OLD_DEFAULTS.iter().any(|d| d.eq_ignore_ascii_case(&i.bundle)));
+            self.defaults_v = 1;
+            changed = true;
+        }
+        for f in secret_apps::password_managers(installed) {
+            let key = f.bundle.to_lowercase();
+            if self.seeded.contains(&key) {
+                continue;
+            }
+            self.seeded.push(key);
+            if !self.ignores(&f.bundle) {
+                self.ignore.push(Ignored { bundle: f.bundle, name: f.name });
+            }
+            changed = true;
+        }
+        changed
     }
 
     /// Keep values in range after loading a file someone edited by hand.
@@ -106,8 +126,74 @@ mod tests {
         assert!(!s.record_concealed, "passwords stay out unless turned on");
         assert!(!s.record_secrets, "tokens stay out unless turned on");
         assert!(s.record_remote);
-        assert!(s.ignores("com.1password.1password"));
+        assert!(s.ignore.is_empty(), "nothing listed until the Mac is scanned");
         assert!(!s.ignores(""));
+    }
+
+    fn app(bundle: &str, name: &str) -> Found {
+        Found { bundle: bundle.into(), name: name.into(), path: format!("/Applications/{name}.app").into() }
+    }
+
+    fn ig(bundle: &str, name: &str) -> Ignored {
+        Ignored { bundle: bundle.into(), name: name.into() }
+    }
+
+    #[test]
+    fn adds_only_installed_managers() {
+        let mut s = Settings::default();
+        let mac = [app("com.apple.Safari", "Safari"), app("com.1password.1password", "1Password"), app("com.apple.keychainaccess", "Keychain Access")];
+        assert!(s.adopt_installed(&mac));
+        assert_eq!(s.ignore, [ig("com.1password.1password", "1Password"), ig("com.apple.keychainaccess", "Keychain Access")]);
+        assert!(s.ignores("com.1Password.1password"));
+        assert!(!s.ignores("com.bitwarden.desktop"));
+        assert!(!s.adopt_installed(&mac), "second run changes nothing");
+    }
+
+    #[test]
+    fn removed_stays_removed_new_install_is_added() {
+        let mut s = Settings::default();
+        s.adopt_installed(&[app("com.1password.1password", "1Password")]);
+        s.ignore.clear();
+        let mac = [app("com.1password.1password", "1Password"), app("org.keepassxc.keepassxc", "KeePassXC")];
+        assert!(s.adopt_installed(&mac));
+        assert_eq!(s.ignore, [ig("org.keepassxc.keepassxc", "KeePassXC")]);
+    }
+
+    #[test]
+    fn migrates_old_defaults_keeps_user_apps() {
+        // A file from an older build: the five fixed defaults plus one app the user added.
+        let mut s = Settings {
+            ignore: vec![
+                ig("com.1password.1password", "1Password"),
+                ig("com.agilebits.onepassword7", "1Password 7"),
+                ig("com.apple.keychainaccess", "Keychain Access"),
+                ig("com.apple.Passwords", "Passwords"),
+                ig("com.bitwarden.desktop", "Bitwarden"),
+                ig("com.tinyspeck.slackmacgap", "Slack"),
+            ],
+            ..Default::default()
+        };
+        let mac = [app("com.apple.Passwords", "Passwords"), app("com.apple.keychainaccess", "Keychain Access"), app("com.tinyspeck.slackmacgap", "Slack")];
+        assert!(s.adopt_installed(&mac));
+        let left: Vec<&str> = s.ignore.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(left, ["Keychain Access", "Passwords", "Slack"]);
+        assert_eq!(s.defaults_v, 1);
+        // Taking Passwords out later sticks.
+        s.ignore.retain(|i| i.name != "Passwords");
+        assert!(!s.adopt_installed(&mac));
+        assert!(!s.ignores("com.apple.Passwords"));
+    }
+
+    #[test]
+    fn old_file_without_new_fields_loads() {
+        let dir = std::env::temp_dir().join(format!("cmb-clip-old-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("settings.json"), r#"{"keep":200,"ignore":[{"bundle":"com.bitwarden.desktop","name":"Bitwarden"}]}"#).unwrap();
+        let mut s = load(&dir);
+        assert_eq!(s.defaults_v, 0);
+        assert!(s.adopt_installed(&[]));
+        assert!(s.ignore.is_empty(), "Bitwarden isn't installed");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
