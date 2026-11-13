@@ -679,13 +679,11 @@
   // Plays once when it comes into view and stays on the open panel; the round button plays it again.
   (() => {
     const bars = document.getElementById('bars'); if (!bars) return;
-    const n = document.getElementById('bars-n'), again = document.getElementById('bars-again'), ap = $$('.mi2.ap', bars), wg = $$('.wg', bars);
-    const MANY = ap.length + ' apps';
+    const again = document.getElementById('bars-again'), ap = $$('.mi2.ap', bars), wg = $$('.wg', bars);
     ap.forEach((ic, k) => ic.style.setProperty('--k', k));
     const wOf = i => wg.find(w => +w.dataset.i === i);
-    const label = async t => { n.classList.add('flip'); await sleep(300); n.textContent = t; n.classList.remove('flip'); };
-    const end = () => { bars.className = 'bars b-one b-open b-done'; ap.forEach(ic => ic.classList.add('out')); wg.forEach(w => w.classList.add('on')); n.textContent = '1 app'; };
-    const reset = () => { bars.className = 'bars'; ap.forEach(ic => ic.classList.remove('out')); wg.forEach(w => w.classList.remove('on')); n.textContent = MANY; };
+    const end = () => { bars.className = 'bars b-one b-open b-done'; ap.forEach(ic => ic.classList.add('out')); wg.forEach(w => w.classList.add('on')); };
+    const reset = () => { bars.className = 'bars'; ap.forEach(ic => ic.classList.remove('out')); wg.forEach(w => w.classList.remove('on')); };
     const clearFlying = () => $$('.mi2.fly', document).forEach(f => f.parentNode && f.parentNode.removeChild(f));
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) { end(); return; }
     const ORDER = [7, 0, 12, 5, 11, 2, 13, 8, 1, 10, 4, 9, 3, 6];
@@ -715,7 +713,7 @@
         await sleep(60 + (k * 29) % 60);
       }
       await Promise.all(all); bars.classList.remove('b-eat'); if (id !== gen) return;
-      bars.classList.add('b-done'); await label('1 app'); again.hidden = false; state = 'done';
+      bars.classList.add('b-done'); again.hidden = false; state = 'done';
     };
     const run = () => { state = 'run'; play(++gen); };
     // Scrolled away mid-way: jump to the end, so it never waits half-done

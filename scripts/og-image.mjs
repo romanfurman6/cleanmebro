@@ -25,7 +25,7 @@ await page.evaluate((icon) => {
     html, body { width: 1200px; height: 630px; overflow: hidden; }
     .desk { height: 630px; } .desk::after { display: none; } .mbar { display: none; }
     .stage { height: 630px; max-width: none; }
-    .hero { left: 64px; max-width: 560px; }
+    .hero { left: 40px; max-width: 600px; padding: 36px 40px 40px; border-radius: 28px; background: rgba(6,12,6,.5); backdrop-filter: blur(22px) saturate(1.2); -webkit-backdrop-filter: blur(22px) saturate(1.2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 24px 60px rgba(0,0,0,.35); }
     .hero h1 { font-size: 62px; line-height: 66px; }
     .hero .sub { margin-top: 22px; font-size: 26px; line-height: 34px; }
     .og-id { display: flex; align-items: center; gap: 14px; margin-bottom: 30px; font: 500 30px/1 var(--sans); letter-spacing: -.01em; text-shadow: 0 2px 18px rgba(0,0,0,.5); }

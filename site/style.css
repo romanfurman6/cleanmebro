@@ -110,7 +110,6 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 
 /* Message: subline and facts under the headline */
 .hero .sub { margin-top: 24px; max-width: 640px; font-size: 28px; line-height: 36px; letter-spacing: -.01em; font-weight: 500; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.55), 0 2px 18px rgba(0,0,0,.65); }
-.hero .alt { margin-top: 20px; width: max-content; max-width: min(640px, 100%); text-wrap: balance; font-size: 14px; line-height: 22px; font-weight: 500; color: rgba(255,255,255,.78); text-shadow: 0 1px 2px rgba(0,0,0,.6), 0 2px 14px rgba(0,0,0,.6); }
 .facts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 20px; font-size: 14px; line-height: 20px; font-weight: 500; color: #fff; }
 .facts > span, .facts .ver { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 16px; background: rgba(8,12,8,.62); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .facts .ver { color: var(--lime); text-decoration: none; } .facts > span::before { content: ""; width: 5px; height: 5px; border-radius: 3px; background: var(--lime); }
@@ -122,11 +121,8 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .lead { margin-top: 12px; max-width: 640px; font-size: 18px; line-height: 28px; color: var(--ink2); }
 .bars { margin-top: 40px; }
 .scr { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.scr figcaption { display: flex; align-items: center; gap: 12px; min-height: 48px; }
-.scr figcaption b { font: 500 40px/48px var(--sans); letter-spacing: -.02em; }
-.bars.b-done #bars-n { color: var(--lime); }
-.replay { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 16px; background: rgba(255,255,255,.08); color: var(--ink2); cursor: pointer; transition: background-color .15s, color .15s; }
-.replay:hover { background: rgba(255,255,255,.14); color: var(--ink); }
+.replay { position: absolute; z-index: 2; left: 16px; bottom: 16px; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 0; border-radius: 15px; background: rgba(8,12,8,.62); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #fff; font: 500 13px var(--sans); cursor: pointer; transition: background-color .15s; }
+.replay:hover { background: rgba(8,12,8,.8); }
 .replay[hidden] { display: none; }
 .mbx { position: relative; height: 480px; border-radius: 16px; overflow: hidden; background: url(desk.jpg) center 45%/cover; box-shadow: inset 0 0 0 1px var(--hair); font: 500 13px/1 -apple-system, var(--sans); }
 .mbx::before { content: ""; position: absolute; inset: 0 0 auto; height: 32px; background: rgba(10,14,10,.45); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
@@ -192,8 +188,6 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .mbx .icons .mi2.ap + .mi2.ap { margin-left: 2px; }
 .wi:not(.wr) > .i { width: 15px; height: 15px; }
 .wg.s2 .wt { flex: 1; }
-#bars-n { display: inline-block; transition: transform .3s ease, opacity .3s ease; }
-#bars-n.flip { transform: translateY(-8px); opacity: 0; }
 .mi2 { flex: none; display: grid; place-items: center; width: 26px; height: 24px; border-radius: 6px; color: rgba(255,255,255,.9); }
 .mi2 .i { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .mi2.bat i { width: 20px; height: 10px; border-radius: 3px; box-shadow: inset 0 0 0 1.4px rgba(255,255,255,.85); background: linear-gradient(90deg, #fff 0 62%, transparent 0) 2px 2px/16px 6px no-repeat; }
@@ -231,7 +225,7 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 
 @media (max-width: 1100px) { .jobs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) {
-  .jobs { grid-template-columns: 1fr; gap: 20px; } .mbx .mn, .mbx .clk, .mbx .mi2.bat { display: none; } .mbx .icons { left: 8px; right: 8px; gap: 0; justify-content: center; } .mbx { height: 470px; } .scr figcaption b { font-size: 32px; line-height: 40px; } .mpn { right: 10px; width: calc(100% - 20px); padding: 10px; } .wgrid { gap: 6px; } .wg { padding: 8px; min-height: 74px; } .wt b { font-size: 12px; } .wt .dm { font-size: 10.5px; letter-spacing: -.01em; text-overflow: clip; } .wbtn { display: none; } .mbx .mi2 { width: 20px; } .mbx .icons .mi2.ap + .mi2.ap { margin-left: 1px; } .mbx .mi2 .i { width: 14px; height: 14px; } .mbx .mi2.sy { display: none; }
+  .jobs { grid-template-columns: 1fr; gap: 20px; } .mbx .mn, .mbx .clk, .mbx .mi2.bat { display: none; } .mbx .icons { left: 8px; right: 8px; gap: 0; justify-content: center; } .mbx { height: 520px; } .mpn { right: 10px; width: calc(100% - 20px); padding: 10px; } .wgrid { gap: 6px; } .wg { padding: 8px; min-height: 74px; } .wt b { font-size: 12px; } .wt .dm { font-size: 10.5px; letter-spacing: -.01em; text-overflow: clip; } .wbtn { display: none; } .mbx .mi2 { width: 20px; } .mbx .icons .mi2.ap + .mi2.ap { margin-left: 1px; } .mbx .mi2 .i { width: 14px; height: 14px; } .mbx .mi2.sy { display: none; }
   .tl { grid-template-columns: minmax(0, 1fr); gap: 12px; } .tl li { padding: 18px; gap: 18px; } .tl .tx span { font-size: 14px; line-height: 20px; } .kc { min-width: 0; width: 88px; height: 64px; font-size: 26px; } .tl b { font-size: 15px; }
   .repl h2, .trust h2, .inst h2 { font-size: 34px; line-height: 40px; }
   .repl, .inst { padding-top: 64px; } .inst { padding-bottom: 72px; }
@@ -242,7 +236,6 @@ h1 { font: 500 68px/72px var(--sans); letter-spacing: -.035em; text-shadow: 0 2p
 .ftl { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; } .ftl a { color: var(--ink2); transition: color .15s; } .ftl a:hover { color: var(--ink); }
 .jt em { font-style: normal; font-size: 12.5px; line-height: 18px; color: rgba(255,155,122,.85); }
 
-@media (min-width: 1181px) { .hero .alt { max-width: min(640px, calc(100vw - 560px)); } }
 @media (min-width: 861px) and (max-width: 1180px) { .hero { max-width: calc(100vw - 470px); } .hero h1 { font-size: clamp(44px, 6vw, 72px); line-height: 1.05; } .hero .sub { font-size: 22px; line-height: 30px; } }
 
 @media (prefers-reduced-motion: reduce) { .wg.on, .wg.on::after, .wg.on[data-i="4"] .wi svg, .wg.on .rec, .wg.on .wave2 i { animation: none; } }
