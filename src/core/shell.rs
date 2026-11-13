@@ -83,6 +83,8 @@ pub struct App {
     start_hidden: bool,
     /// `cmdmeow://open/<tool>[/<route>]` links, as (tool, route).
     links: Option<crate::kit::url_scheme::Inbox<(String, String)>>,
+    /// The update banner was shown last frame (see `kit::update`).
+    update_banner: bool,
 }
 
 impl App {
@@ -162,6 +164,7 @@ impl App {
             perm_watch: Default::default(),
             start_hidden: first_run,
             links: (!demo).then(|| crate::kit::url_scheme::Inbox::new("open", Some(ctx.clone()), open_link)),
+            update_banner: false,
         };
         app.widgets = prefs.resolve(&app.available_widgets());
         for i in 0..app.tools.len() {
@@ -300,9 +303,9 @@ impl App {
                 return;
             }
             // first-run setup, one step each
-            "setup" | "setup-tools" | "setup-ai" | "setup-perms" | "setup-ready" => {
+            "setup" | "setup-tools" | "setup-ai" | "setup-perms" | "setup-crash" | "setup-ready" => {
                 self.mode = Mode::Setup;
-                let step = ["setup", "setup-tools", "setup-ai", "setup-perms", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
+                let step = ["setup", "setup-tools", "setup-ai", "setup-perms", "setup-crash", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
                 self.setup = Some(super::onboard::Setup::new(step));
                 use crate::kit::perms::{Perm, Status};
                 self.perm_watch.demo = Some([(Perm::Screen, Status::Allowed), (Perm::Accessibility, Status::Allowed), (Perm::FullDisk, Status::NotAsked), (Perm::SystemEvents, Status::Denied), (Perm::Microphone, Status::Allowed)].into_iter().collect());
@@ -402,7 +405,7 @@ impl App {
     /// The panel's height for its current widgets, before the screen limit.
     fn panel_height(&self) -> f32 {
         let content = super::panel::content_height(self);
-        let h = super::panel::HEADER + content + super::panel::FOOTER;
+        let h = super::panel::HEADER + content + super::panel::banner_h() + super::panel::FOOTER;
         if self.sheet_open() {
             h.max(m::PANEL_HEIGHT)
         } else {
@@ -560,6 +563,17 @@ impl App {
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.follow_links(ctx);
+        crate::kit::update::tick();
+        if crate::kit::update::take_restart() {
+            self.quit(ctx);
+            return;
+        }
+        // the update banner came or went: the panel changes height
+        let banner = crate::kit::update::banner();
+        if banner != self.update_banner {
+            self.update_banner = banner;
+            self.pending_shape = true;
+        }
         // tools poll their background work; some need frames while hidden
         let mut tools_need_frames = false;
         for i in 0..self.tools.len() {

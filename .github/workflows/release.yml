@@ -3,7 +3,8 @@ name: Release
 # Push a tag like v0.2.0 (scripts/release.sh does it) to build Cmd+Meow and
 # publish a GitHub Release with CmdMeow.zip and CmdMeow.dmg.
 # The website downloads releases/latest/download/CmdMeow.zip, so the asset
-# names must stay the same from release to release.
+# names must stay the same from release to release. latest.json tells the
+# app about the new version (in-app updates).
 
 on:
   push:
@@ -20,6 +21,9 @@ jobs:
   release:
     # Roman's own M1 (self-hosted, see macos.yml). Only Roman pushes tags.
     runs-on: [self-hosted, m1-personal]
+    # Signing + notarization secrets live in the "release" environment, which
+    # waits for Roman's approval, so no other workflow can use them.
+    environment: release
     timeout-minutes: 60
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0" # see macos.yml
@@ -103,8 +107,15 @@ jobs:
           echo "HARDENED=1" >> "$GITHUB_ENV"
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
+      # Official builds only: the Sentry DSN is compiled in from a repository
+      # secret here and nowhere else (src/kit/crash_report.rs). Forks, PR CI
+      # and local builds have no DSN, so crash reporting is off in them.
       - name: Bundle CmdMeow.app (universal)
-        run: UNIVERSAL=1 scripts/bundle-mac.sh
+        env:
+          CMDMEOW_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: |
+          if [[ -z "$CMDMEOW_SENTRY_DSN" ]]; then echo "::warning::No SENTRY_DSN secret: release has no crash reporting"; fi
+          UNIVERSAL=1 scripts/bundle-mac.sh
 
       - name: Make dmg
         run: |
@@ -154,6 +165,17 @@ jobs:
           ditto -c -k --keepParent CmdMeow.app CmdMeow.zip
           shasum -a 256 CmdMeow.zip CmdMeow.dmg | tee SHA256SUMS.txt
 
+      # The app reads releases/latest/download/latest.json to offer updates
+      # (src/kit/update.rs). The zip URL names this tag, so its sha256 stays
+      # right after newer releases.
+      - name: Make update manifest
+        run: |
+          cd target/bundle
+          SHA="$(shasum -a 256 CmdMeow.zip | awk '{print $1}')"
+          SIZE="$(stat -f %z CmdMeow.zip)"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/CmdMeow.zip"
+          printf '{"version":"%s","url":"%s","sha256":"%s","size":%s}\n' "$VERSION" "$URL" "$SHA" "$SIZE" | tee latest.json
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -167,6 +189,7 @@ jobs:
             target/bundle/CmdMeow.zip
             target/bundle/CmdMeow.dmg
             target/bundle/SHA256SUMS.txt
+            target/bundle/latest.json
 
       - name: Clean up signing keychain
         if: always()

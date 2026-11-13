@@ -88,6 +88,7 @@ Every action has a link for scripts, Raycast or Shortcuts: `open cmdmeow://…`
 ## Privacy and safety
 
 - No account, no telemetry. Files, clipboard, recordings and dictation never leave the Mac unless you share them.
+- Crash reports are opt-in: official releases ask once during setup (and in Settings › General). If you agree, a crash sends the error, stack trace, app and macOS version to Sentry. No files, hostname or IP address, and the home folder is replaced with `~`. Builds from source never send anything.
 - Cleanup never reads file contents. If you turn on the AI review, only paths, sizes and ages go to Claude.
 - Documents, Desktop, Projects, Keychains, `.ssh` and any folder with `.git` are always kept.
 - Removed items go to the Trash unless you choose "Delete right away".
@@ -125,18 +126,43 @@ Info.plist gets it as `CFBundleShortVersionString`, the commit count as
 scripts/release.sh patch   # or minor, major, or an exact 0.2.0
 ```
 
-On a clean, up-to-date `main` this bumps the version, commits, tags `vX.Y.Z`
-and pushes. The tag runs `.github/workflows/release.yml`: tests, universal
-build, then a GitHub Release with generated notes and `CmdMeow.dmg`,
-`CmdMeow.zip`, `SHA256SUMS.txt`. The asset names never change, so
+On a clean, up-to-date `main` (needs `gh`, signed in) this bumps the version
+on a `release/vX.Y.Z` branch, merges it through a PR (`main` only takes PRs:
+no direct pushes, force pushes or deletion), tags the merged commit `vX.Y.Z`
+and pushes the tag. Then:
+
+1. The tag starts `.github/workflows/release.yml` on the M1 runner. The job
+   runs in the protected **`release`** environment and waits.
+2. GitHub notifies Roman: open the run › **Review deployments** › tick
+   `release` › **Approve and deploy**. Only then does the job get the signing
+   secrets.
+3. Tests, universal build, sign, notarize, then a GitHub Release with
+   generated notes and `CmdMeow.dmg`, `CmdMeow.zip`, `SHA256SUMS.txt`,
+   `latest.json`.
+
+The asset names never change, so
 `https://github.com/romanfurman6/cmdmeow/releases/latest/download/CmdMeow.zip`
 always points to the newest version (the website's Download button uses it).
 
+#### In-app updates
+
+`latest.json` holds the version, this tag's zip URL and its sha256. The app
+reads `releases/latest/download/latest.json` 15 s after launch and every 6 h;
+a newer version shows a banner in the panel, and **Update** downloads the zip,
+checks the sha256, the code signature (same Apple team), bundle id and
+version, swaps the app and relaunches (`src/kit/update.rs`). Publishing the
+Release is the whole rollout. Tags with a `-` (`v0.2.0-beta.1`) are
+prereleases and are never offered. Test locally with
+`CMDMEOW_UPDATE_URL=file:///path/latest.json` (works in the dev build too).
+
 #### Signing and notarization
 
-Release builds are signed with **Developer ID Application** and notarized when
-these repository secrets are set (Settings › Secrets and variables › Actions);
-without them the release is ad-hoc signed and users must right-click › Open.
+Release builds are signed with **Developer ID Application** and notarized with
+these secrets. They are **environment secrets of `release`** (Settings ›
+Environments › release), not repository secrets, so no other workflow can use
+them. The environment requires Roman's approval, allows only `v*` tags, and
+admins can't bypass it. Without the secrets the release is ad-hoc signed and
+users must right-click › Open.
 
 | Secret | Value |
 | --- | --- |
@@ -145,6 +171,7 @@ without them the release is ad-hoc signed and users must right-click › Open.
 | `NOTARY_KEY_P8` | contents of the App Store Connect API key `AuthKey_XXXX.p8` |
 | `NOTARY_KEY_ID` | that key's Key ID |
 | `NOTARY_ISSUER_ID` | Issuer ID from App Store Connect › Users and Access › Integrations |
+| `SENTRY_DSN` | Sentry project DSN for crash reports (Project Settings › Client Keys). Compiled into release builds only |
 
 The signed app runs with the hardened runtime and `assets/CmdMeow.entitlements`
 (microphone, camera, Apple Events).
