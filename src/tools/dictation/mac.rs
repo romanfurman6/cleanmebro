@@ -39,18 +39,19 @@ impl Spot {
 
 /// The caret and the focused field of `target`.
 pub fn spot(target: &Target) -> Spot {
-    let (caret, field) = imp::spot(target.pid);
-    let field = field.filter(|f| field_like(*f));
-    // a caret outside its own field is made up (Chromium does this): drop it
-    let caret = caret.filter(|c| field.is_none_or(|f| f.expand(24.0).intersects(*c)));
-    Spot { caret, field }
+    let (caret, frame) = imp::spot(target.pid);
+    // a caret outside its own field is made up (Chromium does this): drop
+    // it, even when the field is too tall to sit above
+    let frame = frame.filter(|f| f.is_finite() && !(f.min.x.abs() < 1.0 && f.min.y.abs() < 1.0) && f.width() >= 40.0);
+    let caret = caret.filter(|c| frame.is_none_or(|f| f.expand(24.0).intersects(*c)));
+    Spot { caret, field: frame.filter(|f| field_like(*f)) }
 }
 
 /// A frame that reads as a text field to sit above: not a whole document
 /// or web page, not a speck.
 pub fn field_like(r: Rect) -> bool {
     let at_origin = r.min.x.abs() < 1.0 && r.min.y.abs() < 1.0;
-    r.is_finite() && !at_origin && r.width() >= 40.0 && r.height() >= 12.0 && r.height() <= 240.0
+    r.is_finite() && !at_origin && r.width() >= 40.0 && r.height() >= 12.0 && r.height() <= 320.0
 }
 
 /// A rect that can't be a caret: empty at the origin, or absurdly big.
