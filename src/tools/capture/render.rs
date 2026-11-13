@@ -10,9 +10,24 @@ use serde::{Deserialize, Serialize};
 
 pub type Rgba8 = [u8; 4];
 
+/// Which ends of an arrow get a head.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Heads {
+    /// One head, at the end the drag finished on.
+    #[default]
+    End,
+    Both,
+    /// A plain line.
+    None,
+}
+
+impl Heads {
+    pub const ALL: [Heads; 3] = [Heads::End, Heads::Both, Heads::None];
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mark {
-    Arrow { a: Pos2, b: Pos2, color: Rgba8, width: f32 },
+    Arrow { a: Pos2, b: Pos2, color: Rgba8, width: f32, heads: Heads },
     Rect { r: Rect, color: Rgba8, width: f32 },
     /// An ellipse outline inside `r`.
     Ellipse { r: Rect, color: Rgba8, width: f32 },
@@ -106,20 +121,7 @@ impl Mark {
                     *b = to;
                 }
             }
-            Mark::Rect { r, .. } | Mark::Ellipse { r, .. } | Mark::Highlight { r, .. } | Mark::Blur { r, .. } | Mark::Erase { r, .. } => {
-                let (mut x0, mut y0, mut x1, mut y1) = (r.min.x, r.min.y, r.max.x, r.max.y);
-                match k {
-                    0 => (x0, y0) = (to.x, to.y),
-                    1 => y0 = to.y,
-                    2 => (x1, y0) = (to.x, to.y),
-                    3 => x1 = to.x,
-                    4 => (x1, y1) = (to.x, to.y),
-                    5 => y1 = to.y,
-                    6 => (x0, y1) = (to.x, to.y),
-                    _ => x0 = to.x,
-                }
-                *r = Rect::from_two_pos(Pos2::new(x0, y0), Pos2::new(x1, y1));
-            }
+            Mark::Rect { r, .. } | Mark::Ellipse { r, .. } | Mark::Highlight { r, .. } | Mark::Blur { r, .. } | Mark::Erase { r, .. } => *r = resize_box(*r, k, to),
             _ => {}
         }
     }
@@ -152,7 +154,24 @@ impl Mark {
     }
 }
 
-fn box_handles(r: Rect) -> [Pos2; 8] {
+/// `r` with handle `k` (from [`box_handles`]) moved to `to`.
+pub fn resize_box(r: Rect, k: usize, to: Pos2) -> Rect {
+    let (mut x0, mut y0, mut x1, mut y1) = (r.min.x, r.min.y, r.max.x, r.max.y);
+    match k {
+        0 => (x0, y0) = (to.x, to.y),
+        1 => y0 = to.y,
+        2 => (x1, y0) = (to.x, to.y),
+        3 => x1 = to.x,
+        4 => (x1, y1) = (to.x, to.y),
+        5 => y1 = to.y,
+        6 => (x0, y1) = (to.x, to.y),
+        _ => x0 = to.x,
+    }
+    Rect::from_two_pos(Pos2::new(x0, y0), Pos2::new(x1, y1))
+}
+
+/// Corners and edge midpoints, clockwise from the top left.
+pub fn box_handles(r: Rect) -> [Pos2; 8] {
     let c = r.center();
     [r.left_top(), Pos2::new(c.x, r.top()), r.right_top(), Pos2::new(r.right(), c.y), r.right_bottom(), Pos2::new(c.x, r.bottom()), r.left_bottom(), Pos2::new(r.left(), c.y)]
 }
@@ -622,23 +641,31 @@ fn draw_shapes(img: &mut RgbaImage, marks: &[Mark]) {
     let t = Transform::identity();
     for m in marks {
         match m {
-            Mark::Arrow { a, b, color, width } => {
-                let end = shaft_end(*a, *b, *width);
+            Mark::Arrow { a, b, color, width, heads } => {
+                let end = if *heads == Heads::None { *b } else { shaft_end(*a, *b, *width) };
+                let start = if *heads == Heads::Both { shaft_end(*b, *a, *width) } else { *a };
                 let mut pb = PathBuilder::new();
-                pb.move_to(a.x, a.y);
+                pb.move_to(start.x, start.y);
                 pb.line_to(end.x, end.y);
                 if let Some(path) = pb.finish() {
                     pm.stroke_path(&path, &paint(*color), &stroke(*width), t, None);
                 }
-                let [p0, p1, p2] = arrow_head(*a, *b, *width);
-                let mut pb = PathBuilder::new();
-                pb.move_to(p0.x, p0.y);
-                pb.line_to(p1.x, p1.y);
-                pb.line_to(p2.x, p2.y);
-                pb.close();
-                if let Some(path) = pb.finish() {
-                    pm.fill_path(&path, &paint(*color), FillRule::Winding, t, None);
-                    pm.stroke_path(&path, &paint(*color), &stroke(width * 0.6), t, None);
+                let tips: &[(Pos2, Pos2)] = match heads {
+                    Heads::End => &[(*a, *b)],
+                    Heads::Both => &[(*a, *b), (*b, *a)],
+                    Heads::None => &[],
+                };
+                for (from, to) in tips {
+                    let [p0, p1, p2] = arrow_head(*from, *to, *width);
+                    let mut pb = PathBuilder::new();
+                    pb.move_to(p0.x, p0.y);
+                    pb.line_to(p1.x, p1.y);
+                    pb.line_to(p2.x, p2.y);
+                    pb.close();
+                    if let Some(path) = pb.finish() {
+                        pm.fill_path(&path, &paint(*color), FillRule::Winding, t, None);
+                        pm.stroke_path(&path, &paint(*color), &stroke(width * 0.6), t, None);
+                    }
                 }
             }
             Mark::Rect { r, color, width } => {
@@ -865,13 +892,26 @@ mod tests {
     #[test]
     fn arrow_and_rect_paint_their_color() {
         let mut d = Doc::default();
-        d.marks.push(Mark::Arrow { a: Pos2::new(10.0, 40.0), b: Pos2::new(110.0, 40.0), color: [255, 0, 0, 255], width: 4.0 });
+        d.marks.push(Mark::Arrow { a: Pos2::new(10.0, 40.0), b: Pos2::new(110.0, 40.0), color: [255, 0, 0, 255], width: 4.0, heads: Heads::End });
         d.marks.push(Mark::Rect { r: Rect::from_min_max(Pos2::new(20.0, 5.0), Pos2::new(60.0, 25.0)), color: [0, 0, 255, 255], width: 4.0 });
         let out = render(&canvas(), &d);
         assert_eq!(out.get_pixel(50, 40).0, [255, 0, 0, 255], "shaft");
         assert_eq!(out.get_pixel(108, 40).0[0], 255, "head reaches the tip");
         assert_eq!(out.get_pixel(40, 5).0, [0, 0, 255, 255], "rect edge");
         assert_eq!(out.get_pixel(40, 15).0, [240, 240, 240, 255], "rect inside stays");
+    }
+
+    #[test]
+    fn arrow_heads_go_on_the_chosen_ends() {
+        // 6 px off the shaft, inside a head (heads are ~10 px wide each side)
+        let red_near = |heads: Heads, x: u32| {
+            let mut d = Doc::default();
+            d.marks.push(Mark::Arrow { a: Pos2::new(10.0, 40.0), b: Pos2::new(110.0, 40.0), color: [255, 0, 0, 255], width: 4.0, heads });
+            render(&canvas(), &d).get_pixel(x, 46).0 == [255, 0, 0, 255]
+        };
+        assert!(red_near(Heads::End, 96) && !red_near(Heads::End, 24));
+        assert!(red_near(Heads::Both, 96) && red_near(Heads::Both, 24));
+        assert!(!red_near(Heads::None, 96) && !red_near(Heads::None, 24));
     }
 
     #[test]
@@ -963,7 +1003,7 @@ mod tests {
         // dragging past the opposite edge flips instead of going negative
         m.drag_handle(3, Pos2::new(0.0, 0.0));
         assert!(matches!(m, Mark::Rect { r, .. } if r.min.x == 0.0 && r.max.x == 10.0));
-        let mut a = Mark::Arrow { a: Pos2::ZERO, b: Pos2::new(10.0, 0.0), color: [0; 4], width: 2.0 };
+        let mut a = Mark::Arrow { a: Pos2::ZERO, b: Pos2::new(10.0, 0.0), color: [0; 4], width: 2.0, heads: Heads::End };
         a.drag_handle(1, Pos2::new(5.0, 5.0));
         assert!(matches!(a, Mark::Arrow { b, .. } if b == Pos2::new(5.0, 5.0)));
         let text_blur = Mark::Blur { r: Rect::from_min_max(Pos2::ZERO, Pos2::new(9.0, 9.0)), style: BlurStyle::Blur, boxes: vec![Rect::ZERO] };
@@ -998,7 +1038,7 @@ mod tests {
 
     #[test]
     fn hit_tests() {
-        let a = Mark::Arrow { a: Pos2::new(0.0, 0.0), b: Pos2::new(100.0, 0.0), color: [0; 4], width: 4.0 };
+        let a = Mark::Arrow { a: Pos2::new(0.0, 0.0), b: Pos2::new(100.0, 0.0), color: [0; 4], width: 4.0, heads: Heads::End };
         assert!(a.hit(Pos2::new(50.0, 3.0), 2.0));
         assert!(!a.hit(Pos2::new(50.0, 20.0), 2.0));
         let r = Mark::Rect { r: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0)), color: [0; 4], width: 4.0 };

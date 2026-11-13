@@ -593,6 +593,7 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
                 ew.shared_at = Some(rev);
             }
             Request::CopyText(t) => c.copy_text(&t),
+            Request::CopyPart(img) => c.copy_image(img),
             Request::Close => closed = true,
         }
     }
