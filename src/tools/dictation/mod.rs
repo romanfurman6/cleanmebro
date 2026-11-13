@@ -203,6 +203,8 @@ pub struct Dictation {
     try_note: Option<String>,
     /// The page's Hold to talk button is down.
     try_down: bool,
+    /// Our window had the keyboard when the try-it field was last drawn.
+    try_focused: bool,
     /// Sample data (screenshots): what the try-it field shows.
     try_fake: Option<ui::Shown>,
 }
@@ -259,6 +261,7 @@ impl Dictation {
             try_last: None,
             try_note: None,
             try_down: false,
+            try_focused: false,
             try_fake: None,
         }
     }
@@ -400,7 +403,7 @@ impl Dictation {
     /// the shortcut while our try-it field is in front goes there too.
     fn start_from(&mut self, from_page: bool) {
         self.target = mac::front_app().unwrap_or_default();
-        let ours = self.target.pid == std::process::id() as i32;
+        let ours = self.target.pid == std::process::id() as i32 || self.try_focused;
         self.trying = from_page || (ours && self.try_open());
         self.try_note = None;
         let spot = mac::spot(&self.target);

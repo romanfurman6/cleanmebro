@@ -342,6 +342,9 @@ fn sample_levels() -> Vec<f32> {
 fn try_it(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
     use crate::kit::empty::{hero_button, Lead, HERO_H};
     d.try_seen = Some(std::time::Instant::now());
+    // our window has the keys: the shortcut pressed now is meant for this field
+    // (a menu-bar app is often not the "frontmost app" even then)
+    d.try_focused = ui.input(|i| i.focused);
     let state = shown(d);
     let p = ui.painter().clone();
     let t = ui.ctx().input(|i| i.time);
@@ -442,7 +445,7 @@ fn try_it(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
         }
         Shown::Listening { secs } => {
             let resp = hero_button(ui, bc, id.with("talk"), &format!("Stop · {}", clock(*secs)), None, Lead::Stop, Some(LIVE), true, 160.0);
-            hold(d, &resp);
+            hold(d, ui, &resp);
         }
         Shown::Working { .. } => {
             hero_button(ui, bc, id.with("talk"), "Hold to talk", keys, Lead::Icon(Icon::Mic), Some(BLUE()), false, 0.0);
@@ -458,22 +461,25 @@ fn try_it(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
                 cx.toast("Copied");
             }
             let resp = hero_button(ui, Pos2::new(x + cw + gap + tw / 2.0, bc.y), id.with("talk"), "Try again", keys, Lead::None, Some(BLUE()), true, 0.0);
-            hold(d, &resp);
+            hold(d, ui, &resp);
         }
         Shown::Idle | Shown::Problem(_) => {
             let resp = hero_button(ui, bc, id.with("talk"), "Hold to talk", keys, Lead::Icon(Icon::Mic), Some(BLUE()), true, 0.0);
-            hold(d, &resp);
+            hold(d, ui, &resp);
         }
     }
 }
 
 /// Hold to talk: down starts a take (into the field), up ends it unless
 /// it was a short press, which keeps listening until the next press.
-fn hold(d: &mut Dictation, resp: &egui::Response) {
+fn hold(d: &mut Dictation, ui: &Ui, resp: &egui::Response) {
     if d.demo {
         return;
     }
-    let down = resp.is_pointer_button_down_on();
+    // egui stops calling a long press "down on" the button once it can't
+    // be a click any more (under a second), so after the press starts on
+    // the button, the hold lasts while the mouse button stays down
+    let down = if d.try_down { ui.input(|i| i.pointer.primary_down()) } else { resp.is_pointer_button_down_on() };
     if down && !d.try_down {
         d.press_talk(true);
     } else if !down && d.try_down {
