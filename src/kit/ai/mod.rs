@@ -58,7 +58,12 @@ pub struct Contrib {
 pub struct UsageInfo {
     /// The provider's display name, e.g. "Claude".
     pub provider: &'static str,
+    /// A check the person waits on is running: the first one after launch,
+    /// or a Refresh. Quiet checks in the background leave it off.
     pub loading: bool,
+    /// The first check (account and local logs) is done. Until then the
+    /// page says it's checking; after it, a refresh never swaps the layout.
+    pub scanned: bool,
     pub installed: bool,
     pub logged_in: bool,
     /// The provider said plainly that nobody is signed in.
@@ -94,7 +99,7 @@ impl UsageInfo {
     }
     /// The assistant is missing or signed out (known only after the first check).
     pub fn unavailable(&self) -> Option<Availability> {
-        if self.loading && self.fetched.is_none() {
+        if !self.scanned {
             None
         } else if !self.installed {
             Some(Availability::NotInstalled)
@@ -258,15 +263,14 @@ pub fn meta(name: &str) -> &'static Meta {
     PROVIDERS.iter().find(|m| m.name == name).unwrap_or(&PROVIDERS[0])
 }
 
-/// Make `i` the main provider, save it (unless `save` is false, for
-/// demos), and wake the loop to switch.
+/// Make `i` the main provider and save it (unless `save` is false, for
+/// demos). Nothing is checked again: the loop keeps every provider's data.
 pub fn select(i: usize, save: bool) {
     let i = i.min(ALL);
     if SELECTED.swap(i, Ordering::Relaxed) == i || !save {
         return;
     }
     settings::update(true, |s| s.provider = PROVIDERS.get(i).map(|m| m.id).unwrap_or("all").into());
-    crate::kit::claude_code::request_recheck();
 }
 
 /// A fresh provider for index `i`.
@@ -705,6 +709,16 @@ pub fn balanced(s: &[u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_until_the_first_check() {
+        let mut i = UsageInfo { loading: true, ..UsageInfo::new(codex::NAME) };
+        assert_eq!(i.unavailable(), None);
+        i.scanned = true;
+        assert_eq!(i.unavailable(), Some(Availability::NotInstalled));
+        i.installed = true;
+        assert_eq!(i.unavailable(), None);
+    }
 
     #[test]
     fn plan_titles() {
