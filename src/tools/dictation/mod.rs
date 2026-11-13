@@ -191,6 +191,20 @@ pub struct Dictation {
     actions: Vec<Action>,
     ctx: egui::Context,
     demo: bool,
+    /// The take was started from the page's try-it field (no history
+    /// yet): its words land in that field instead of being pasted.
+    trying: bool,
+    /// When the try-it field was last drawn.
+    try_seen: Option<Instant>,
+    /// The last take made in the try-it field, shown there until they
+    /// leave the page.
+    try_last: Option<Said>,
+    /// A problem with a take from the try-it field, shown in the field.
+    try_note: Option<String>,
+    /// The page's Hold to talk button is down.
+    try_down: bool,
+    /// Sample data (screenshots): what the try-it field shows.
+    try_fake: Option<ui::Shown>,
 }
 
 impl Dictation {
@@ -240,6 +254,12 @@ impl Dictation {
             actions: Vec::new(),
             ctx: env.ctx.clone(),
             demo: env.demo,
+            trying: false,
+            try_seen: None,
+            try_last: None,
+            try_note: None,
+            try_down: false,
+            try_fake: None,
         }
     }
 
@@ -330,13 +350,59 @@ impl Dictation {
     // ------------------------------------------------------------ the flow
 
     fn show(&mut self, note: Note, secs: f32) {
+        if self.trying {
+            // the try-it field says it; no pill over our own window
+            self.trying = false;
+            self.phase = Phase::Idle;
+            if let Note::Problem(m) = note {
+                self.try_note = Some(m);
+            }
+            return;
+        }
         self.phase = Phase::Showing { note, until: Instant::now() + Duration::from_secs_f32(secs) };
+    }
+
+    /// The try-it field is on screen (drawn in the last half second).
+    fn try_open(&self) -> bool {
+        self.try_seen.is_some_and(|t| t.elapsed() < Duration::from_millis(500))
+    }
+
+    /// The talk key or the page's Hold to talk button went down.
+    fn press_talk(&mut self, from_page: bool) {
+        match &self.phase {
+            Phase::Idle | Phase::Showing { .. } => self.start_from(from_page),
+            Phase::Listening { tapped: true, .. } => self.end(),
+            _ => {}
+        }
+    }
+
+    /// …and came up: a short press keeps listening hands-free, a hold ends
+    /// the take.
+    fn release_talk(&mut self) {
+        if let Phase::Listening { since, tapped, ending, .. } = &mut self.phase {
+            if !*tapped && ending.is_none() {
+                if since.elapsed() < HOLD {
+                    *tapped = true;
+                } else {
+                    self.end();
+                }
+            }
+        }
     }
 
     /// The shortcut went down while idle: check what's needed, find the
     /// caret, start the mic.
     pub fn start(&mut self) {
+        self.start_from(false);
+    }
+
+    /// `from_page`: the page's own button started it. A take started with
+    /// the shortcut while our try-it field is in front goes there too.
+    fn start_from(&mut self, from_page: bool) {
         self.target = mac::front_app().unwrap_or_default();
+        let ours = self.target.pid == std::process::id() as i32;
+        self.trying = from_page || (ours && self.try_open());
+        self.try_note = None;
         let spot = mac::spot(&self.target);
         self.around = mac::around(&self.target);
         let mouse = mac::mouse();
@@ -356,6 +422,14 @@ impl Dictation {
             }
         }
         let engine = self.settings.engine;
+        if !engine.ready() && self.trying {
+            // the try-it field shows the download in its button
+            self.trying = false;
+            if self.download.is_none() {
+                self.start_download(engine);
+            }
+            return;
+        }
         if !engine.ready() {
             self.tab = Tab::Settings;
             self.actions.push(Action::OpenPage { tool: ID.into(), route: "settings".into() });
@@ -428,6 +502,8 @@ impl Dictation {
     }
 
     fn cancel(&mut self) {
+        self.trying = false;
+        self.try_down = false;
         if let Phase::Listening { mic, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
             let _ = mic.stop();
         }
@@ -448,9 +524,17 @@ impl Dictation {
             Ok(t) if t.is_empty() => self.show(Note::Problem("Didn't catch that".into()), 1.6),
             Ok(t) => {
                 let t = words::apply(&t, &self.settings.words);
+                let said = Said { at: chrono::Local::now().timestamp(), text: t.clone(), app: self.target.name.clone(), secs: self.voice_secs };
                 if self.settings.keep_history {
-                    self.history.add(Said { at: chrono::Local::now().timestamp(), text: t.clone(), app: self.target.name.clone(), secs: self.voice_secs });
+                    self.history.add(said.clone());
                     self.save_history();
+                }
+                if self.trying {
+                    // tried on the page: the words stay in its field
+                    self.trying = false;
+                    self.try_last = Some(said);
+                    self.phase = Phase::Idle;
+                    return;
                 }
                 if mac::accessibility() {
                     mac::activate(&self.target);
@@ -518,27 +602,13 @@ impl Dictation {
             self.end();
         }
         for c in presses {
-            if c != Cmd::Talk {
-                continue;
-            }
-            match &self.phase {
-                Phase::Idle | Phase::Showing { .. } => self.start(),
-                Phase::Listening { tapped: true, .. } => self.end(),
-                _ => {}
+            if c == Cmd::Talk {
+                self.press_talk(false);
             }
         }
         for c in releases {
-            if c != Cmd::Talk {
-                continue;
-            }
-            if let Phase::Listening { since, tapped, ending, .. } = &mut self.phase {
-                if !*tapped && ending.is_none() {
-                    if since.elapsed() < HOLD {
-                        *tapped = true;
-                    } else {
-                        self.end();
-                    }
-                }
+            if c == Cmd::Talk {
+                self.release_talk();
             }
         }
         if !cancels.is_empty() {
@@ -600,6 +670,12 @@ impl Dictation {
         }
         if self.recording_key && self.recording_seen.elapsed() > Duration::from_secs(1) {
             self.recording_key = false;
+        }
+        // they left the page: the try-it field starts fresh next time
+        if !self.trying && self.try_seen.is_some_and(|t| t.elapsed() > Duration::from_millis(1500)) {
+            self.try_seen = None;
+            self.try_last = None;
+            self.try_note = None;
         }
         if let Phase::Showing { until, .. } = self.phase {
             if Instant::now() >= until {
@@ -833,6 +909,21 @@ impl Tool for Dictation {
                 self.tab = Tab::Settings;
                 Some(View::Page)
             }
+            // the first visit: the try-it field, in each of its states
+            "dictation-empty" | "dictation-try-listening" | "dictation-try-working" | "dictation-try-done" | "dictation-try-model" | "dictation-try-download" => {
+                self.tab = Tab::History;
+                self.history = History::default();
+                let words = "Okay, this is my first dictation and it already works.";
+                self.try_fake = Some(match view {
+                    "dictation-try-listening" => ui::Shown::Listening { secs: 4.0 },
+                    "dictation-try-working" => ui::Shown::Working { frac: 0.6 },
+                    "dictation-try-done" => ui::Shown::Done(Said { at: chrono::Local::now().timestamp(), text: words.into(), app: String::new(), secs: 4.0 }),
+                    "dictation-try-model" => ui::Shown::NeedModel { failed: None },
+                    "dictation-try-download" => ui::Shown::Downloading { frac: 0.44, done: 212_000_000, total: crate::kit::parakeet::BYTES, unpacking: false },
+                    _ => ui::Shown::Idle,
+                });
+                Some(View::Page)
+            }
             _ => None,
         }
     }
@@ -861,6 +952,36 @@ mod tests {
 
     fn demo() -> Dictation {
         Dictation::new(&ToolEnv { ctx: egui::Context::default(), demo: true })
+    }
+
+    fn working(d: &mut Dictation) {
+        d.next_job += 1;
+        d.phase = Phase::Working { job: d.next_job, since: Instant::now(), expect: 1.0, done: Arc::new(AtomicU32::new(0)) };
+    }
+
+    #[test]
+    fn a_take_from_the_try_field_stays_in_the_field() {
+        let mut d = demo();
+        d.history = History::default();
+        d.trying = true;
+        working(&mut d);
+        d.on_heard(Heard { job: d.next_job, text: Ok("hello there".into()) });
+        assert_eq!(d.try_last.as_ref().map(|s| s.text.as_str()), Some("hello there"));
+        assert!(!d.trying);
+        assert!(matches!(d.phase, Phase::Idle));
+        // nothing waits to be pasted into another app
+        assert!(d.paste_at.is_none());
+        assert_eq!(d.history.items.len(), 1);
+    }
+
+    #[test]
+    fn a_problem_while_trying_shows_in_the_field_not_the_pill() {
+        let mut d = demo();
+        d.trying = true;
+        working(&mut d);
+        d.on_heard(Heard { job: d.next_job, text: Ok(String::new()) });
+        assert_eq!(d.try_note.as_deref(), Some("Didn't catch that"));
+        assert!(matches!(d.phase, Phase::Idle));
     }
 
     #[test]
