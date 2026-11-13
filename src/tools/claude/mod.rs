@@ -10,7 +10,7 @@ mod parts;
 pub mod settings_ui;
 mod ui;
 
-use crate::core::tool::{Action, Badge, Cx, MenuItem, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
+use crate::core::tool::{Action, Badge, Cx, Recommendation, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::glass::{tint, Icon};
 use crate::kit::ai::{self, UsageInfo};
 use egui::{Rect, Ui};
@@ -117,15 +117,6 @@ impl Tool for Claude {
     }
     fn tray_title(&self) -> Option<String> {
         self.menu_bar()
-    }
-    fn menu_items(&self) -> Vec<MenuItem> {
-        vec![MenuItem { id: "refresh", label: format!("Refresh {} limits", ai::selected_meta().name) }]
-    }
-    fn menu_action(&mut self, item: &str, cx: &mut Cx) {
-        if item == "refresh" {
-            backend::request_refresh();
-            cx.toast(format!("Asking {} for your limits…", ai::selected_meta().name));
-        }
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {
         match view {
