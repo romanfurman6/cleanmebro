@@ -52,7 +52,12 @@ impl Cleanup {
             clean_confirm: false,
             clean_log: false,
             demo_claude: None,
-            ai: crate::kit::aicheck::Check::new(ID, env.demo),
+            ai: {
+                // answers go on the cards, tips under the list
+                let mut c = crate::kit::aicheck::Check::new(ID, env.demo);
+                c.inline = true;
+                c
+            },
             demo_fresh: false,
         }
     }
@@ -233,13 +238,14 @@ impl Tool for Cleanup {
                 self.ai.set_demo(
                     "Both questions answered, one more tip",
                     vec![
-                        tip(&asks[0], "select", "Allow", "Claude Desktop VM image", "9.00 GB", "Sandbox image; Claude downloads it again when needed", "Claude"),
-                        tip(&asks[1], "select", "Allow", "Project · old-experiment", "412 MB", "Chat history of a folder that no longer exists", "Claude"),
+                        tip(&asks[0], "select", "Clean", "Claude Desktop VM image", "9.00 GB", "Sandbox image; Claude downloads it again when needed", "Claude"),
+                        tip(&asks[1], "keep", "Keep", "Project · old-experiment", "412 MB", "The folder is gone, but you opened this chat 3 days ago", "Claude"),
                         tip(&xcode, "keep", "Keep", "Keep MyApp build data", "3.40 GB", "You built MyApp today; rebuilding takes 20 minutes", "Xcode"),
                     ],
                 );
                 self.ai.answer = asks.into_iter().collect();
-                self.ai.actions = vec![("select", "Allow"), ("keep", "Keep")];
+                self.ai.actions = vec![("select", "Clean"), ("keep", "Keep")];
+                self.ai.open = false;
                 Some(View::Page)
             }
             "cleanup-scanning" => {
