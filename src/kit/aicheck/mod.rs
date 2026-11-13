@@ -114,6 +114,9 @@ pub struct Check {
     pub(crate) answer: std::collections::HashSet<String>,
     /// Labels of the ask's actions, by id (the popover's second button).
     pub(crate) actions: Vec<(&'static str, &'static str)>,
+    /// The tool shows the answers and tips on its own page (Cleanup: the
+    /// answer on each card); the chip then only says it checked.
+    pub inline: bool,
 }
 
 impl Check {
@@ -129,6 +132,7 @@ impl Check {
             open: false,
             answer: Default::default(),
             actions: Vec::new(),
+            inline: false,
         }
     }
 
@@ -226,10 +230,17 @@ impl Check {
         self.inner.lock_ok().recs.retain(|x| x != r);
     }
 
-    /// The user decided on `key` some other way (its own Allow / Keep):
-    /// its answer goes.
-    pub fn answered(&mut self, key: &str) {
-        self.inner.lock_ok().recs.retain(|x| !(x.key == key && self.answer.contains(key)));
+    /// The agent's answer for a key that waited on the user, if any.
+    pub fn answer_for(&self, key: &str) -> Option<Rec> {
+        if !self.answer.contains(key) {
+            return None;
+        }
+        self.recs().into_iter().find(|r| r.key == key)
+    }
+
+    /// Recommendations that aren't answers.
+    pub fn tips(&self) -> Vec<Rec> {
+        self.recs().into_iter().filter(|r| !self.is_answer(r)).collect()
     }
 
     /// Whether `r` answers a key that waited on the user.
@@ -566,6 +577,17 @@ mod tests {
         assert_eq!((t.calls, t.tokens), (2, 240));
         assert!((t.cost - 0.25).abs() < 1e-9);
     }
+    #[test]
+    fn answers_and_tips_split() {
+        let mut c = Check::new("cleanup", true);
+        c.set_demo("", vec![Check::demo_rec("select", "Clean", "a", "", "why a", "A"), Check::demo_rec("keep", "Keep", "b", "", "why b", "B")]);
+        c.answer = ["a".to_string()].into_iter().collect();
+        assert_eq!(c.answer_for("a").map(|r| r.why), Some("why a".into()));
+        // a tip isn't an answer, even for its own key
+        assert!(c.answer_for("b").is_none());
+        assert_eq!(c.tips().iter().map(|r| r.key.as_str()).collect::<Vec<_>>(), vec!["b"]);
+    }
+
     #[test]
     fn answers_come_first_and_dont_use_up_the_limit() {
         let mut a = ask();

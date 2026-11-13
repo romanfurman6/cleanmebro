@@ -83,19 +83,15 @@ pub fn usd(v: f64) -> String {
     if v >= 100.0 { format!("${v:.0}") } else { format!("${v:.2}") }
 }
 
-/// "Live · 14:20" (green), "As of 13:52" (amber, the last check failed),
-/// or "14:20" for a CLI or local read.
+/// "14:20" when the limits were last checked, or "As of 13:52" (amber)
+/// when the last check failed and these are the last ones known.
 pub fn fresh(i: &UsageInfo) -> (String, Color32) {
     let Some(f) = i.fetched else { return (String::new(), TEXT_FAINT()) };
     let t = f.format("%H:%M");
     if i.stale {
         (format!("As of {t}"), AMBER())
-    } else if i.source == "Live" {
-        (format!("Live · {t}"), GREEN())
-    } else if i.source.is_empty() {
-        (t.to_string(), TEXT_FAINT())
     } else {
-        (format!("{} · {t}", i.source), TEXT_FAINT())
+        (t.to_string(), TEXT_FAINT())
     }
 }
 

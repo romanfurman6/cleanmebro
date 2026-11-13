@@ -6,7 +6,7 @@ mod history;
 mod page;
 pub mod scan;
 
-use crate::core::tool::{Badge, Cx, MenuItem, Tool, ToolEnv, ToolId, View};
+use crate::core::tool::{Badge, Cx, Tool, ToolEnv, ToolId, View};
 use crate::kit::glass::*;
 use egui::{Rect, Ui};
 use std::path::PathBuf;
@@ -144,7 +144,7 @@ impl Tool for Lens {
         "Disk Map"
     }
     fn about(&self) -> &'static str {
-        "Find what takes space"
+        "Shows which folders and files take up your disk"
     }
     fn busy(&self) -> bool {
         self.lens.running.load(std::sync::atomic::Ordering::SeqCst) || self.ai.phase() == crate::kit::aicheck::Phase::Running
@@ -165,14 +165,6 @@ impl Tool for Lens {
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         page::page(self, ui, rect, cx);
-    }
-    fn menu_items(&self) -> Vec<MenuItem> {
-        vec![MenuItem { id: "open", label: "Disk Map".into() }]
-    }
-    fn menu_action(&mut self, item: &str, cx: &mut Cx) {
-        if item == "open" {
-            cx.open_page(ID, "");
-        }
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {
         if view == "lens" || view == "sizes" || view == "lens-rings" || view == "lens-files" {

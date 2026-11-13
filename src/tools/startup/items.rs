@@ -297,7 +297,7 @@ pub fn jobs(user_library: &Path, system: &Path, disabled_user: &HashSet<String>,
                 let v = plist::read(&path)?;
                 let label = v.get_str("Label")?.to_string();
                 let (program, args) = program_of(&v, None);
-                let orphan = program.as_ref().is_some_and(|p| p.is_absolute() && p.symlink_metadata().is_err());
+                let orphan = program.as_ref().is_some_and(|p| p.is_absolute() && !crate::kit::fs::behind_folder_prompt(p) && p.symlink_metadata().is_err());
                 let disabled = if scope == Scope::System { disabled_system } else { disabled_user };
                 let on = !disabled.contains(&label) && v.get_bool("Disabled") != Some(true);
                 let owner = program.as_deref().and_then(owner_app);
