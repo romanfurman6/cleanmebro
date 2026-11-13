@@ -88,6 +88,7 @@ Every action has a link for scripts, Raycast or Shortcuts: `open cmdmeow://…`
 ## Privacy and safety
 
 - No account, no telemetry. Files, clipboard, recordings and dictation never leave the Mac unless you share them.
+- Clipboard and dictation history are encrypted on disk (XChaCha20-Poly1305, key in your Keychain) and readable by your user only. Passwords from password managers, and copied tokens, keys and card numbers, are skipped by default.
 - Crash reports are opt-in: official releases ask once during setup (and in Settings › General). If you agree, a crash sends the error, stack trace, app and macOS version to Sentry. No files, hostname or IP address, and the home folder is replaced with `~`. Builds from source never send anything.
 - Cleanup never reads file contents. If you turn on the AI review, only paths, sizes and ages go to Claude.
 - Documents, Desktop, Projects, Keychains, `.ssh` and any folder with `.git` are always kept.

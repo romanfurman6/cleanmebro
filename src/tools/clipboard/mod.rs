@@ -120,7 +120,7 @@ impl Clipboard {
             (Settings::default(), None, demo_store())
         } else {
             let dir = settings::data_dir();
-            (settings::load(&dir), Some(dir.clone()), Store::open(dir.join("history")))
+            (settings::load(&dir), Some(dir.clone()), Store::open(dir.join("history"), crate::kit::vault::shared()))
         };
         let mut c = Clipboard {
             settings,
@@ -245,11 +245,11 @@ impl Clipboard {
             return Some(t.id());
         }
         if self.thumbs.pending.len() < 3 && self.thumbs.pending.insert(id) {
-            let path = self.store.image_path(id);
+            let read = self.store.image_reader(id);
             let tx = self.thumb_tx.clone();
             let ctx = self.ctx.clone();
             std::thread::spawn(move || {
-                let img = std::fs::read(&path).ok().and_then(|b| thumb_image(&b));
+                let img = read().and_then(|b| thumb_image(&b));
                 let _ = tx.send((id, img));
                 ctx.request_repaint();
             });
@@ -327,7 +327,7 @@ fn now_ms() -> i64 {
 /// Sample history for screenshots.
 fn demo_store() -> Store {
     let dir = std::env::temp_dir().join(format!("cmdmeow-clipboard-demo-{}", std::process::id()));
-    let mut st = Store::open(dir.clone());
+    let mut st = Store::open(dir.clone(), Some(Arc::new(crate::kit::vault::Vault::random())));
     st.entries.clear();
     let now = now_ms();
     let min = 60_000i64;

@@ -156,12 +156,14 @@ impl History {
     }
 }
 
+/// What was said, sealed on disk (see [`crate::kit::vault`]); `history.json`
+/// from before that is sealed on first load.
 pub fn load_history(dir: &Path) -> History {
-    crate::kit::fs::load_json(&dir.join("history.json"))
+    crate::kit::vault::load_json(crate::kit::vault::shared().as_deref(), &dir.join("history.bin"), &dir.join("history.json"))
 }
 
 pub fn save_history(dir: &Path, h: &History) {
-    crate::kit::fs::save_json_later(&dir.join("history.json"), h, false);
+    crate::kit::vault::save_json_later(crate::kit::vault::shared().as_deref(), &dir.join("history.bin"), h);
 }
 
 #[cfg(test)]

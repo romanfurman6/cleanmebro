@@ -430,13 +430,36 @@ fn to_json<T: Serialize + ?Sized>(v: &T, pretty: bool) -> Option<Vec<u8>> {
 /// Write `bytes` through a temp file beside `path` and move it in place,
 /// so a crash never leaves half a file. Creates the folder.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> bool {
+    write_atomic_as(path, bytes, false)
+}
+
+/// [`write_atomic`] for private data: the file is readable and writable by
+/// its owner only (0600) from the moment it exists.
+pub fn write_private(path: &Path, bytes: &[u8]) -> bool {
+    write_atomic_as(path, bytes, true)
+}
+
+fn write_atomic_as(path: &Path, bytes: &[u8], private: bool) -> bool {
+    use std::io::Write as _;
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, path).is_ok()
+    // a temp file left by a crash keeps its old mode: start fresh
+    let _ = std::fs::remove_file(&tmp);
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    #[cfg(not(unix))]
+    let _ = private;
+    let written = o.open(&tmp).and_then(|mut f| f.write_all(bytes)).is_ok();
+    written && std::fs::rename(&tmp, path).is_ok()
 }
 
 /// Save `v` as JSON to `path` (see [`write_atomic`]).
@@ -445,7 +468,8 @@ pub fn save_json<T: Serialize + ?Sized>(path: &Path, v: &T, pretty: bool) -> boo
 }
 
 enum Write {
-    File(PathBuf, Vec<u8>),
+    /// Path, bytes, owner-only.
+    File(PathBuf, Vec<u8>, bool),
     Flush(Sender<()>),
 }
 
@@ -462,19 +486,19 @@ fn writer() -> &'static Mutex<Sender<Write>> {
 
 fn write_loop(rx: Receiver<Write>) {
     while let Ok(first) = rx.recv() {
-        let mut files: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+        let mut files: Vec<(PathBuf, Vec<u8>, bool)> = Vec::new();
         let mut flushes = Vec::new();
         for w in std::iter::once(first).chain(rx.try_iter()) {
             match w {
-                Write::File(p, b) => {
-                    files.retain(|(q, _)| *q != p);
-                    files.push((p, b));
+                Write::File(p, b, private) => {
+                    files.retain(|(q, _, _)| *q != p);
+                    files.push((p, b, private));
                 }
                 Write::Flush(done) => flushes.push(done),
             }
         }
-        for (p, b) in files {
-            write_atomic(&p, &b);
+        for (p, b, private) in files {
+            write_atomic_as(&p, &b, private);
         }
         for done in flushes {
             let _ = done.send(());
@@ -486,8 +510,13 @@ fn write_loop(rx: Receiver<Write>) {
 /// Serializing happens here, so later changes to `v` don't leak in.
 pub fn save_json_later<T: Serialize + ?Sized>(path: &Path, v: &T, pretty: bool) {
     if let Some(b) = to_json(v, pretty) {
-        let _ = writer().lock().unwrap_or_else(|e| e.into_inner()).send(Write::File(path.to_path_buf(), b));
+        let _ = writer().lock().unwrap_or_else(|e| e.into_inner()).send(Write::File(path.to_path_buf(), b, false));
     }
+}
+
+/// Write `bytes` to `path` owner-only ([`write_private`]) on the background writer.
+pub fn save_private_later(path: &Path, bytes: Vec<u8>) {
+    let _ = writer().lock().unwrap_or_else(|e| e.into_inner()).send(Write::File(path.to_path_buf(), bytes, true));
 }
 
 /// Wait (up to 2 s) until every background save so far is on disk.
