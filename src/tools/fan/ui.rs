@@ -320,9 +320,10 @@ fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str, t: f64) {
     ring(p, c, 17.0, 3.0, f.frac(), LINE());
     blades(p, c, 12.0, spin(name, t, f.rpm), BLADE(), CARD());
     let x = c.x + 26.0;
-    p.text(Pos2::new(x, r.center().y - 9.0), Align2::LEFT_CENTER, name, font(11.0), TEXT_DIM());
-    let g = p.text(Pos2::new(x, r.center().y + 8.0), Align2::LEFT_CENTER, rpm_text(f.rpm), bold(15.0), TEXT());
-    p.text(Pos2::new(g.right() + 4.0, r.center().y + 9.0), Align2::LEFT_CENTER, "rpm", font(11.0), TEXT_FAINT());
+    let (ly1, ly2) = two_lines_y(&p, r.center().y, &font(11.0), &bold(15.0));
+    p.text(Pos2::new(x, ly1), Align2::LEFT_CENTER, name, font(11.0), TEXT_DIM());
+    let g = p.text(Pos2::new(x, ly2), Align2::LEFT_CENTER, rpm_text(f.rpm), bold(15.0), TEXT());
+    p.text(Pos2::new(g.right() + 4.0, g.bottom() - 2.0), Align2::LEFT_BOTTOM, "rpm", font(11.0), TEXT_FAINT());
 }
 
 // ---------------------------------------------------------------- sheet

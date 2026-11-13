@@ -73,8 +73,9 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
         crate::kit::glass::stroke_circle(&p, c, 32.0, Stroke::new(1.5, white(30)));
         blades(&p, c, 24.0, 0.3, white(40), CARD());
         let title = if s.has_smc { "This Mac has no fans" } else { "Fan speed isn't available" };
-        p.text(Pos2::new(fr.left() + 104.0, c.y - 10.0), Align2::LEFT_CENTER, title, bold(15.0), TEXT());
-        p.text(Pos2::new(fr.left() + 104.0, c.y + 10.0), Align2::LEFT_CENTER, "Cools passively", font(12.0), TEXT_DIM());
+        let (ly1, ly2) = two_lines_y(&p, c.y, &bold(15.0), &font(12.0));
+        p.text(Pos2::new(fr.left() + 104.0, ly1), Align2::LEFT_CENTER, title, bold(15.0), TEXT());
+        p.text(Pos2::new(fr.left() + 104.0, ly2), Align2::LEFT_CENTER, "Cools passively", font(12.0), TEXT_DIM());
         hx = fr.right() + GAP;
     }
     let hm = Rect::from_min_max(Pos2::new(hx, y), Pos2::new(x1, y + ROW1_H));

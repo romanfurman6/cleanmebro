@@ -866,9 +866,10 @@ pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
             }
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let tw = bx - 10.0 - (rr.left() + 42.0);
-            text_fit(&p, Pos2::new(rr.left() + 42.0, rr.center().y - 1.0), Align2::LEFT_BOTTOM, &name, font(13.0), if path.exists() { TEXT() } else { TEXT_DIM() }, tw);
+            let (ly1, ly2) = two_lines_y(&p, rr.center().y, &font(13.0), &mono(11.0));
+            text_fit(&p, Pos2::new(rr.left() + 42.0, ly1), Align2::LEFT_CENTER, &name, font(13.0), if path.exists() { TEXT() } else { TEXT_DIM() }, tw);
             let when = if sh.at > 0 { chrono::DateTime::from_timestamp(sh.at, 0).map(|t| t.with_timezone(&chrono::Local).format("%b %-d, %H:%M · ").to_string()).unwrap_or_default() } else { String::new() };
-            text_fit(&p, Pos2::new(rr.left() + 42.0, rr.center().y + 2.0), Align2::LEFT_TOP, &format!("{when}{}", sh.link), mono(11.0), TEXT_FAINT(), tw);
+            text_fit(&p, Pos2::new(rr.left() + 42.0, ly2), Align2::LEFT_CENTER, &format!("{when}{}", sh.link), mono(11.0), TEXT_FAINT(), tw);
         }
     });
     if let Some((k, j)) = act {
