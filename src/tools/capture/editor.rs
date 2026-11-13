@@ -219,7 +219,7 @@ impl AreaAct {
 
     fn label(self) -> (Ico, &'static str, &'static str) {
         match self {
-            AreaAct::Crop => (Ico::Crop, "Crop", "↵"),
+            AreaAct::Crop => (Ico::Crop, "Crop", "Enter"),
             AreaAct::CopyText => (Ico::ScanText, "Copy text", "O"),
             AreaAct::Blur => (Ico::Blur, "Blur", "B"),
             AreaAct::Erase => (Ico::Eraser, "Erase", "⌫"),
@@ -241,6 +241,8 @@ enum Piece {
 }
 
 const BAR_H: f32 = 36.0;
+/// The size tag under an area: its offset plus height (bold 11 + padding).
+const AREA_TAG_H: f32 = 6.0 + 20.0;
 const SWATCH_W: f32 = 26.0;
 const SEG_W: f32 = 30.0;
 
@@ -464,7 +466,9 @@ impl Editor {
                 p.circle_filled(title.left_center() + Vec2::new(20.0 + 20.0 * k as f32, 0.0), 6.0, *c);
             }
         }
-        let (w, h) = self.base.dimensions();
+        // the picture's size as it is now: the crop, once there is one
+        let v = self.view().size();
+        let (w, h) = (v.x.round() as u32, v.y.round() as u32);
         let head = p.text(title.center() - Vec2::new(30.0, 0.0), Align2::CENTER_CENTER, &self.title, bold(13.0), TEXT());
         p.text(Pos2::new(head.right() + 6.0, title.center().y), Align2::LEFT_CENTER, format!("· {w}×{h}"), font(13.0), TEXT_FAINT());
         let drag = ui.interact(Rect::from_min_max(title.min + Vec2::new(90.0, 0.0), title.max), ui.scope_id().with("drag"), Sense::click_and_drag());
@@ -1289,7 +1293,8 @@ impl Editor {
                 let anchor = Rect::from_min_max(to_screen(b.min), to_screen(b.max)).expand(6.0);
                 self.float_bar(ui, mark_pieces(&m), anchor, area, true);
             } else if let (Tool::Select, Some(c)) = (self.tool, self.area) {
-                let anchor = Rect::from_min_max(to_screen(c.min), to_screen(c.max)).expand(6.0);
+                // room for the size tag under the area's corner
+                let anchor = Rect::from_min_max(to_screen(c.min) - Vec2::splat(6.0), to_screen(c.max) + Vec2::new(6.0, AREA_TAG_H));
                 let acts: Vec<Piece> = AreaAct::ALL.iter().map(|a| Piece::Act(*a)).collect();
                 self.float_bar(ui, &acts, anchor, area, false);
             }
