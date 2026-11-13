@@ -220,7 +220,9 @@ mod mac {
         let Some(id) = NSBundle::mainBundle().bundleIdentifier() else { return false };
         let me = std::process::id() as i32;
         let running = NSRunningApplication::runningApplicationsWithBundleIdentifier(&id);
-        if !running.iter().any(|a| a.processIdentifier() != me) {
+        // two copies starting together each see the other: only the later
+        // one (higher pid) hands over, so one always stays
+        if !running.iter().any(|a| (0..me).contains(&a.processIdentifier())) {
             return false;
         }
         let name = NSString::from_str(&super::reopen_note());
@@ -238,6 +240,12 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    #[test]
+    fn reopen_note_is_per_build() {
+        let n = reopen_note();
+        assert!(n.starts_with(crate::kit::remove::bundle_id()) && n.ends_with(".reopen"));
+    }
 
     #[test]
     fn parses_host_and_action() {
