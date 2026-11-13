@@ -13,9 +13,10 @@ function note(text, ms) {
   if (ms) noteTimer = setTimeout(() => { n.hidden = true; }, ms);
 }
 
-function showEmpty(title, text) {
-  // Nothing to act on: no View/Edit, no copy of a broken link
-  ['modes', 'copy', 'dl'].forEach((id) => { $(id).hidden = true; });
+function showEmpty(title, text, keepOpen) {
+  // Nothing to act on: no View/Edit, no copy of a broken link. A file that failed
+  // to show keeps "Open file", the one way left to get it.
+  ['modes', 'copy'].concat(keepOpen ? [] : ['dl']).forEach((id) => { $(id).hidden = true; });
   $('title').textContent = '';
   document.body.classList.remove('editing');
   $('empty').hidden = false;
@@ -124,7 +125,7 @@ function openImage(item, guessing) {
   img.onload = () => { shot.hidden = false; };
   img.onerror = () => {
     if (guessing) { item.kind = 'video'; openVideo(item); return; }
-    showEmpty("Couldn't load the picture", 'The link may have expired. Try opening the file directly.');
+    showEmpty("Couldn't load the picture", 'The link may have expired. Try opening the file directly.', !item.local);
     $('url').value = item.local ? '' : item.href;
   };
   img.src = item.href;
@@ -155,7 +156,7 @@ function openImage(item, guessing) {
 function openVideo(item) {
   const p = initPlayer(item.href, () => {
     $('player').hidden = true; $('keys').hidden = true; $('modes').hidden = true; $('vt').hidden = true;
-    showEmpty("Couldn't load the video", "The link may have expired, or this browser can't play the format. Try opening the file directly.");
+    showEmpty("Couldn't load the video", "The link may have expired, or this browser can't play the format. Try opening the file directly.", !item.local);
     $('url').value = item.local ? '' : item.href;
   });
   let editor = null;
