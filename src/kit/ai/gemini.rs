@@ -1,7 +1,8 @@
-//! Google's Gemini CLI as a `Provider`: tokens only. Its chats are saved
-//! as `~/.gemini/tmp/<project>/chats/*.json` (or `.jsonl`), where each
-//! reply from the model carries its token counts and model. There are no
-//! plan limits to read.
+//! Google's Gemini CLI as a `Provider`. Its chats are saved as
+//! `~/.gemini/tmp/<project>/chats/*.json` (or `.jsonl`), where each reply
+//! from the model carries its token counts and model. Daily request quotas
+//! come from Google's account when Gemini CLI is signed in with Google on a
+//! plan that still serves it (`account::gemini_usage`); otherwise tokens only.
 
 use super::{intern, recent_files, FileCache, LocalTokens, Provider, Shared, UsageEntry, UsageInfo};
 use crate::kit::sync::LockExt;
@@ -14,6 +15,9 @@ pub const NAME: &str = "Gemini";
 #[derive(Default)]
 pub struct Gemini {
     cache: FileCache,
+    /// After a failed quota call, the next one waits an hour: most Google
+    /// sign-ins (personal accounts, API keys) get no quotas this way.
+    quota_after: Option<std::time::Instant>,
 }
 
 /// Where Gemini CLI keeps its data (`$GEMINI_DATA_DIR`, else `~/.gemini`).
@@ -28,12 +32,28 @@ impl Provider for Gemini {
     fn fetch_account(&mut self, s: &Shared) {
         let home = home();
         let installed = home.join("tmp").is_dir();
+        let due = self.quota_after.is_none_or(|t| std::time::Instant::now() >= t);
+        let live = if installed && due { super::account::gemini_usage(&home).map_err(|e| eprintln!("[ai] gemini quota: {e:?}")).ok() } else { None };
+        if installed && due && live.is_none() {
+            self.quota_after = Some(std::time::Instant::now() + std::time::Duration::from_secs(3600));
+        }
         let mut g = s.lock_ok();
         g.installed = installed;
         g.logged_in = installed;
-        g.source = "Local";
         g.fetched = Some(Local::now());
         g.error = (!installed).then(|| "Gemini CLI hasn't been used on this Mac.".to_string());
+        match live {
+            Some((plan, limits)) => {
+                g.source = "API";
+                g.plan = plan;
+                g.limits = limits;
+                g.billing = super::Billing::Subscription;
+            }
+            None => {
+                g.source = "Local";
+                g.limits.clear();
+            }
+        }
     }
     fn local_tokens(&mut self) -> LocalTokens {
         let tmp = home().join("tmp");

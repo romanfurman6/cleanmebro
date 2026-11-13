@@ -37,16 +37,31 @@ pub fn enabled(all: &All) -> Vec<UsageInfo> {
     ai::PROVIDERS.iter().zip(all.iter()).filter(|(m, _)| s.is_on(m.id)).map(|(_, i)| i.lock_ok().clone()).collect()
 }
 
+static SHOWN: std::sync::OnceLock<All> = std::sync::OnceLock::new();
+
+/// What provider `i` (an index into `ai::PROVIDERS`) last reported, for
+/// Settings.
+pub fn snapshot(i: usize) -> Option<UsageInfo> {
+    SHOWN.get()?.get(i).map(|s| s.lock_ok().clone())
+}
+
 pub fn start(ctx: egui::Context, demo: bool) -> All {
     let providers: Vec<_> = (0..ai::ALL).map(ai::make).collect();
     if demo {
-        return Arc::new(providers.iter().map(|p| Arc::new(Mutex::new(p.demo()))).collect());
+        let all: All = Arc::new(providers.iter().map(|p| Arc::new(Mutex::new(p.demo()))).collect());
+        let _ = SHOWN.set(all.clone());
+        return all;
     }
     let all: All = Arc::new(providers.iter().map(|p| Arc::new(Mutex::new(UsageInfo { loading: true, ..UsageInfo::new(p.name()) }))).collect());
     let shared = all.clone();
+    let _ = SHOWN.set(all.clone());
     std::thread::Builder::new()
         .name("ai-usage".into())
-        .spawn(move || run(ctx, providers, shared))
+        .spawn(move || {
+            // the old status-line hook is no longer needed
+            ai::statusline::cleanup();
+            run(ctx, providers, shared)
+        })
         .ok();
     all
 }
@@ -80,9 +95,6 @@ fn run(ctx: egui::Context, mut providers: Vec<Box<dyn ai::Provider>>, all: All) 
                 s.lock_ok().loading = true;
                 activity::repaint(&ctx);
                 p.fetch_account(s);
-            } else if id == "claude" {
-                // Claude Code's status line writes after every reply: cheap to re-read
-                ai::claude::apply_statusline(s);
             }
             // the rest is only shown in the panel and the window: hidden,
             // it waits until they open (the nap below ends then)

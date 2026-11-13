@@ -1,11 +1,9 @@
-//! Live Claude limits from Claude Code's own status line. Claude Code runs
-//! a status-line command after each reply and hands it a JSON summary on
-//! stdin, including `rate_limits` (5-hour and 7-day use and reset times).
-//! The hook is a tiny script in the app's data folder: it saves that JSON
-//! and then runs the status line the person had before, so their status
-//! line looks the same. Removing the hook puts the old one back.
+//! Clean-up of the old Claude Code status-line hook. Earlier versions read
+//! live Claude limits by putting a small script in Claude Code's status line
+//! (in `~/.claude/settings.json`). Limits now come from Claude's account, so
+//! on launch the hook is taken out and the person's own status line put
+//! back, as it was before the hook.
 
-use super::Limit;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -14,6 +12,7 @@ fn dir() -> PathBuf {
 }
 
 /// The hook script in `dir`.
+#[cfg(test)]
 fn script(dir: &Path) -> PathBuf {
     dir.join("statusline.sh")
 }
@@ -23,29 +22,8 @@ fn prev_script(dir: &Path) -> PathBuf {
     dir.join("statusline-prev.sh")
 }
 
-/// What Claude Code last handed the hook.
-pub fn capture() -> PathBuf {
-    dir().join("claude-status.json")
-}
-
 fn claude_settings() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".claude").join("settings.json")
-}
-
-const SCRIPT: &str = r#"#!/bin/sh
-# Cmd+Meow: saves what Claude Code reports (plan limits) for the menu bar,
-# then shows the status line you had before.
-dir="$(cd "$(dirname "$0")" && pwd)"
-input="$(cat)"
-printf '%s' "$input" > "$dir/claude-status.json.tmp" && mv -f "$dir/claude-status.json.tmp" "$dir/claude-status.json"
-if [ -f "$dir/statusline-prev.sh" ]; then
-  printf '%s' "$input" | /bin/sh "$dir/statusline-prev.sh"
-fi
-"#;
-
-/// The command Claude Code runs for the hook (quoted: the path has spaces).
-fn command(dir: &Path) -> String {
-    format!("\"{}\"", script(dir).display())
 }
 
 /// The hook is set in Claude Code's settings.
@@ -59,48 +37,6 @@ fn is_ours(status_line: &Value, dir: &Path) -> bool {
 
 fn read_json(p: &Path) -> Value {
     std::fs::read(p).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)
-}
-
-/// Set the hook in `~/.claude/settings.json`, keeping every other setting
-/// and running the previous status line (if any) after it.
-pub fn install() -> Result<(), String> {
-    install_at(&claude_settings(), &dir())
-}
-
-fn install_at(settings: &Path, dir: &Path) -> Result<(), String> {
-    let mut v = read_json(settings);
-    if settings.exists() && !v.is_object() {
-        return Err("Claude Code's settings.json isn't valid JSON, so it was left alone.".into());
-    }
-    if !v.is_object() {
-        v = json!({});
-    }
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    if !is_ours(&v["statusLine"], dir) {
-        // keep the person's own status line running after ours
-        match v["statusLine"]["command"].as_str() {
-            Some(cmd) if !cmd.trim().is_empty() => std::fs::write(prev_script(dir), format!("#!/bin/sh\n{cmd}\n")).map_err(|e| e.to_string())?,
-            _ => {
-                let _ = std::fs::remove_file(prev_script(dir));
-            }
-        }
-        if settings.exists() {
-            let _ = std::fs::copy(settings, settings.with_extension("json.cmdmeow-backup"));
-        }
-    }
-    std::fs::write(script(dir), SCRIPT).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(script(dir), std::fs::Permissions::from_mode(0o755));
-    }
-    let padding = v["statusLine"]["padding"].clone();
-    let mut line = json!({ "type": "command", "command": command(dir) });
-    if !padding.is_null() {
-        line["padding"] = padding;
-    }
-    v["statusLine"] = line;
-    write_json(settings, &v)
 }
 
 /// Take the hook out and put the previous status line back.
@@ -135,42 +71,18 @@ fn write_json(p: &Path, v: &Value) -> Result<(), String> {
     std::fs::rename(&tmp, p).map_err(|e| e.to_string())
 }
 
-/// The limits in the last capture, and when it was saved (unix time).
-pub fn latest() -> Option<(i64, Vec<Limit>)> {
-    let p = capture();
-    let at = std::fs::metadata(&p).ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
-    let limits = parse(&std::fs::read(&p).ok()?, chrono::Utc::now().timestamp());
-    (!limits.is_empty()).then_some((at, limits))
-}
-
-/// The limit windows in a status-line JSON, named like `/usage` names them.
-pub fn parse(json: &[u8], now: i64) -> Vec<Limit> {
-    let v: Value = serde_json::from_slice(json).unwrap_or(Value::Null);
-    let rl = &v["rate_limits"];
-    let windows = [
-        ("five_hour", "Current session", 5 * 3600),
-        ("seven_day", "Current week (all models)", 7 * 86_400),
-        ("seven_day_opus", "Current week (Opus)", 7 * 86_400),
-        ("seven_day_sonnet", "Current week (Sonnet)", 7 * 86_400),
-    ];
-    windows
-        .iter()
-        .filter_map(|(key, label, secs)| {
-            let w = &rl[*key];
-            let pct = w["used_percentage"].as_f64().or_else(|| w["utilization"].as_f64())? as f32;
-            if !pct.is_finite() || !(0.0..=1000.0).contains(&pct) {
-                return None;
-            }
-            let resets_at = w["resets_at"].as_i64().or_else(|| w["resets_at"].as_f64().map(|f| f as i64)).or_else(|| w["resets_at"].as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|d| d.timestamp()));
-            // a window that rolled over since the capture is unused
-            let (pct, resets_at) = match resets_at {
-                Some(r) if r <= now => (0.0, None),
-                r => (pct, r),
-            };
-            let resets = resets_at.map(super::codex::reset_text).unwrap_or_default();
-            Some(Limit { label: label.to_string(), pct, resets, resets_at, window_secs: *secs })
-        })
-        .collect()
+/// Take the hook out if it's there, and drop its files. Runs once per launch.
+pub fn cleanup() {
+    if installed() {
+        if let Err(e) = remove() {
+            eprintln!("[ai] status line: {e}");
+            return;
+        }
+    }
+    let d = dir();
+    for f in ["statusline.sh", "claude-status.json", "claude-status.json.tmp"] {
+        let _ = std::fs::remove_file(d.join(f));
+    }
 }
 
 #[cfg(test)]
@@ -178,44 +90,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn limits_from_the_status_json() {
-        let now = 1_000_000;
-        let j = format!(r#"{{"model":{{"display_name":"Opus"}},"rate_limits":{{"five_hour":{{"used_percentage":42.5,"resets_at":{}}},"seven_day":{{"used_percentage":18,"resets_at":{}}},"seven_day_opus":{{"used_percentage":3,"resets_at":{}}}}}}}"#, now + 600, now + 86_400, now - 5);
-        let l = parse(j.as_bytes(), now);
-        assert_eq!(l.len(), 3);
-        assert_eq!((l[0].label.as_str(), l[0].pct, l[0].resets_at, l[0].window_secs), ("Current session", 42.5, Some(now + 600), 5 * 3600));
-        assert_eq!(l[1].pct, 18.0);
-        // reset since: unused
-        assert_eq!((l[2].pct, l[2].resets_at), (0.0, None));
-        assert!(parse(b"{\"model\":{}}", now).is_empty());
-        assert!(parse(b"{\"rate_limits\":{\"five_hour\":\"bad\"}}", now).is_empty());
-    }
-
-    #[test]
-    fn install_keeps_settings_and_the_old_status_line() {
+    fn removing_puts_the_old_status_line_back() {
         let d = std::env::temp_dir().join(format!("cmb-statusline-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let f = d.join("settings.json");
         let hook = d.join("app data");
-        std::fs::write(&f, r#"{"model":"opus","statusLine":{"type":"command","command":"~/bin/my-line","padding":1}}"#).unwrap();
-        install_at(&f, &hook).unwrap();
-        let v = read_json(&f);
-        assert_eq!(v["model"], "opus");
-        assert!(is_ours(&v["statusLine"], &hook));
-        assert_eq!(v["statusLine"]["padding"], 1);
-        assert!(script(&hook).is_file());
-        assert!(std::fs::read_to_string(prev_script(&hook)).unwrap().contains("~/bin/my-line"));
-        // installing twice keeps the person's line, not ours, as the previous one
-        install_at(&f, &hook).unwrap();
-        assert!(std::fs::read_to_string(prev_script(&hook)).unwrap().contains("~/bin/my-line"));
+        std::fs::create_dir_all(&hook).unwrap();
+        let f = d.join("settings.json");
+        let ours = format!("\"{}\"", script(&hook).display());
+        std::fs::write(&f, json!({"model":"opus","statusLine":{"type":"command","command":ours}}).to_string()).unwrap();
+        std::fs::write(prev_script(&hook), "#!/bin/sh\n~/bin/my-line\n").unwrap();
+        assert!(is_ours(&read_json(&f)["statusLine"], &hook));
         remove_at(&f, &hook).unwrap();
         let v = read_json(&f);
         assert_eq!(v["statusLine"]["command"], "~/bin/my-line");
         assert_eq!(v["model"], "opus");
-        // broken JSON is left alone
-        std::fs::write(&f, "{oops").unwrap();
-        assert!(install_at(&f, &hook).is_err());
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "{oops");
+        assert!(!prev_script(&hook).exists());
+        // no old line: the key goes
+        std::fs::write(&f, json!({"statusLine":{"type":"command","command":ours}}).to_string()).unwrap();
+        remove_at(&f, &hook).unwrap();
+        assert!(read_json(&f).get("statusLine").is_none());
+        // someone else's status line is left alone
+        std::fs::write(&f, r#"{"statusLine":{"type":"command","command":"x"}}"#).unwrap();
+        remove_at(&f, &hook).unwrap();
+        assert_eq!(read_json(&f)["statusLine"]["command"], "x");
         std::fs::remove_dir_all(&d).unwrap();
     }
 }
