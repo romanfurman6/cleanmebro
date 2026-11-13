@@ -787,6 +787,13 @@ fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     if pill_button(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(bw, 30.0)), label, BTN_SECONDARY, true).clicked() {
         app.open_setup();
     }
+    // the panel has no menu of its own: Quit lives here
+    let quit = "Quit Cmd+Meow";
+    let qw = button_width(&p, quit, BTN_SECONDARY);
+    if pill_button(ui, Rect::from_min_size(Pos2::new(x + bw + sp::S, y), Vec2::new(qw, 30.0)), quit, BTN_SECONDARY, true).clicked() && !app.demo {
+        let ctx = ui.ctx().clone();
+        app.quit(&ctx);
+    }
     p.text(Pos2::new(x + w, y + 15.0), Align2::RIGHT_CENTER, version_label(), font(11.0), TEXT_FAINT());
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
     y + 30.0 + 24.0
