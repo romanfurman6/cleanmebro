@@ -831,7 +831,7 @@ impl Tool for Dictation {
         // sample data (screenshots) shows a download under way
         if self.dir.is_none() {
             let total = engine.bytes();
-            return vec![SetupModel { id: MODEL_NEED, what: "Speech model", name: engine.name(), bytes: total, state: ModelState::Downloading { done: total * 42 / 100, total } }];
+            return vec![SetupModel { id: MODEL_NEED, what: "Speech to text", name: engine.name(), bytes: total, state: ModelState::Downloading { done: total * 42 / 100, total } }];
         }
         let state = match &self.download {
             Some(d) if d.unpacking.load(Ordering::Relaxed) => ModelState::Unpacking,
@@ -842,7 +842,7 @@ impl Tool for Dictation {
                 None => ModelState::Missing,
             },
         };
-        vec![SetupModel { id: MODEL_NEED, what: "Speech model", name: engine.name(), bytes: engine.bytes(), state }]
+        vec![SetupModel { id: MODEL_NEED, what: "Speech to text", name: engine.name(), bytes: engine.bytes(), state }]
     }
     fn download_model(&mut self, id: &str) {
         if id == MODEL_NEED {

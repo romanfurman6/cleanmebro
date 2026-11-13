@@ -126,6 +126,10 @@ impl Tool for Video {
     fn name(&self) -> &'static str {
         "Video"
     }
+    /// Whisper, for transcripts and captions of recordings.
+    fn setup_models(&self) -> Vec<crate::core::tool::SetupModel> {
+        self.0.borrow().transcript_models()
+    }
     fn badge(&self) -> Badge {
         Badge { icon: Icon::Camera, color: tint::CAPTURE() }
     }

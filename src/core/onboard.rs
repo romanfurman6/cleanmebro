@@ -35,7 +35,8 @@ enum Kind {
 fn kinds(app: &App) -> Vec<Kind> {
     let mut v = vec![Kind::Welcome, Kind::Tools, Kind::Agents];
     // only when an enabled tool needs a download (Dictation's speech model)
-    if !models(app).is_empty() {
+    // or already has one; models fetched on first use don't count
+    if has_models_step(app) {
         v.push(Kind::Models);
     }
     v.push(Kind::Perms);
@@ -266,9 +267,10 @@ impl PermWatch {
     }
 }
 
-/// Screen Recording was allowed after launch: capture works after a restart.
+/// Screen Recording was allowed after launch: capture works after a restart
+/// (once: a restarted copy that still doesn't have it won't get it from another).
 pub fn needs_restart(app: &App) -> bool {
-    app.perm_watch.demo.is_none() && app.perm_watch.status(Perm::Screen) == Status::Allowed && !perms::screen_at_launch() && rows(app).iter().any(|r| r.perm == Perm::Screen)
+    app.perm_watch.demo.is_none() && app.perm_watch.status(Perm::Screen) == Status::Allowed && !perms::screen_at_launch() && !perms::relaunched() && rows(app).iter().any(|r| r.perm == Perm::Screen)
 }
 
 // ---------------------------------------------------------------- drawing
@@ -454,7 +456,7 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let p = ui.painter().clone();
     let c = Pos2::new(body.center().x, body.top() + 150.0);
     // the ring draws itself, then the tools land on it one by one
-    let ring = 86.0;
+    let ring = 104.0;
     crate::kit::glass::stroke_circle(&p, c, ring, Stroke::new(2.0, white(14)));
     let start = -std::f32::consts::FRAC_PI_2;
     let k = ease(t / 1.4);
@@ -474,10 +476,10 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
         icon(&p, tool.badge().icon, Rect::from_center_size(at, Vec2::splat(14.0 * s)), TEXT_SOFT());
     }
     let bob = if t > 1.8 { ((t - 1.8) * 1.6).sin() * 3.0 } else { 0.0 };
-    app_mark(&p, c + Vec2::new(0.0, bob), 96.0, ease((t - 0.3) / 1.2));
-    let name = p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT());
+    app_mark(&p, c + Vec2::new(0.0, bob), 128.0, ease((t - 0.3) / 1.2));
+    let name = p.text(Pos2::new(c.x, c.y + ring + 32.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT());
     p.text(Pos2::new(c.x, name.bottom() + sp::LINE_GAP), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(13.0), TEXT_FAINT());
-    let r = Rect::from_center_size(Pos2::new(c.x, c.y + 214.0), Vec2::new(128.0, 40.0));
+    let r = Rect::from_center_size(Pos2::new(c.x, c.y + ring + 128.0), Vec2::new(128.0, 40.0));
     pill_button(ui, r, "Set up", BTN_PRIMARY, true).clicked()
 }
 
@@ -681,9 +683,36 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     }
 }
 
-/// (tool index, model) for every enabled tool's downloads.
-fn models(app: &App) -> Vec<(usize, crate::core::tool::SetupModel)> {
-    (0..app.tools.len()).filter(|&i| app.tool_on(i)).flat_map(|i| app.tools[i].setup_models().into_iter().map(move |m| (i, m))).collect()
+/// One model on the Download models step and the tools it's for: (tool
+/// index, what that tool uses it for). Several tools can share one file.
+struct ModelRow {
+    tools: Vec<(usize, &'static str)>,
+    model: crate::core::tool::SetupModel,
+}
+
+/// Every enabled tool's models, one row per model (shared ones merged; the
+/// tool that is downloading it, or needs it now, comes first).
+fn models(app: &App) -> Vec<ModelRow> {
+    use crate::core::tool::ModelState;
+    let mut rows: Vec<ModelRow> = Vec::new();
+    for i in (0..app.tools.len()).filter(|&i| app.tool_on(i)) {
+        for m in app.tools[i].setup_models() {
+            match rows.iter_mut().find(|r| r.model.name == m.name) {
+                Some(r) if r.model.state == ModelState::OnFirstUse && m.state != ModelState::OnFirstUse => {
+                    r.tools.insert(0, (i, m.what));
+                    r.model = m;
+                }
+                Some(r) => r.tools.push((i, m.what)),
+                None => rows.push(ModelRow { tools: vec![(i, m.what)], model: m }),
+            }
+        }
+    }
+    rows
+}
+
+/// The step is there when a model needs a download now or is already here.
+fn has_models_step(app: &App) -> bool {
+    models(app).iter().any(|r| r.model.state != crate::core::tool::ModelState::OnFirstUse)
 }
 
 fn models_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
@@ -691,59 +720,67 @@ fn models_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let p = ui.painter().clone();
     let head = body.top() + 6.0;
     let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Download models", bold(22.0), TEXT());
-    let sub = text_wrap(&p, Pos2::new(body.left(), g.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, "They run on this Mac. The download keeps going if you continue.", ty::body(), TEXT_DIM(), body.width().min(560.0), 3);
+    let sub = text_wrap(&p, Pos2::new(body.left(), g.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, "They run on this Mac. Each one says which tool uses it. The download keeps going if you continue.", ty::body(), TEXT_DIM(), body.width().min(560.0), 3);
     let list = models(app);
     let w = body.width().min(620.0);
     let mut y = sub.bottom() + sp::XL;
     let mut start: Option<(usize, &'static str)> = None;
-    for (k, (i, m)) in list.iter().enumerate() {
+    for (k, row) in list.iter().enumerate() {
+        let (m, i) = (&row.model, row.tools[0].0);
         let a = ease((t - 0.05 * k as f32) / 0.4);
-        // one line until there is something for the second (bar or status)
-        let one_line = m.state == ModelState::Missing;
-        let row_h = if one_line { 58.0 } else { 76.0 };
+        // two lines (the model, then the tools it's for), a third for the bar or an error
+        let third = matches!(m.state, ModelState::Downloading { .. } | ModelState::Unpacking | ModelState::Failed(_));
+        let row_h = if third { 86.0 } else { 66.0 };
         let r = Rect::from_min_size(Pos2::new(body.left(), y + (1.0 - a) * 8.0), Vec2::new(w, row_h));
         y += row_h + sp::S;
         glass_card(&p, r, R_CARD, 0.0, false);
-        let ib_top = if one_line { r.center().y - 15.0 } else { r.top() + 14.0 };
-        let ib = Rect::from_min_size(Pos2::new(r.left() + 14.0, ib_top), Vec2::splat(30.0));
+        let ib = Rect::from_min_size(Pos2::new(r.left() + 14.0, r.top() + 18.0), Vec2::splat(30.0));
         p.rect_filled(ib, 8.0, white(16));
-        icon(&p, app.tools[*i].badge().icon, ib.shrink(7.0), if m.state == ModelState::Ready { GREEN() } else { TEXT_SOFT() });
+        icon(&p, app.tools[i].badge().icon, ib.shrink(7.0), if m.state == ModelState::Ready { GREEN() } else { TEXT_SOFT() });
         let tx = ib.right() + 12.0;
-        let title = p.text(Pos2::new(tx, ib.center().y), Align2::LEFT_CENTER, m.what, bold(13.0), TEXT());
-        p.text(Pos2::new(title.right() + 8.0, ib.center().y), Align2::LEFT_CENTER, format!("{} · {}", m.name, human_bytes(m.bytes)), font(12.0), TEXT_FAINT());
         let right = r.right() - 14.0;
-        // second line: the progress bar, or what happened
-        let bar = Rect::from_min_max(Pos2::new(tx, r.bottom() - 22.0), Pos2::new(right, r.bottom() - 16.0));
+        let line1 = r.top() + 22.0;
+        let line2 = r.top() + 44.0;
+        let title = p.text(Pos2::new(tx, line1), Align2::LEFT_CENTER, m.name, bold(13.0), TEXT());
+        p.text(Pos2::new(title.right() + 8.0, line1), Align2::LEFT_CENTER, human_bytes(m.bytes), font(12.0), TEXT_FAINT());
+        // which tools use it, and for what
+        let uses = row.tools.iter().map(|(ti, what)| format!("{}: {}", app.tools[*ti].name(), what.to_lowercase())).collect::<Vec<_>>().join(" · ");
+        let status_w = 150.0;
+        text_fit(&p, Pos2::new(tx, line2), Align2::LEFT_CENTER, &uses, font(12.0), TEXT_DIM(), right - tx - status_w);
+        let bar = Rect::from_min_max(Pos2::new(tx, r.bottom() - 16.0), Pos2::new(right, r.bottom() - 10.0));
         let mut button: Option<&str> = None;
         match &m.state {
             ModelState::Ready => {
-                check(&p, Pos2::new(right - 12.0, ib.center().y), 12.0, GREEN());
-                p.text(Pos2::new(tx, bar.center().y), Align2::LEFT_CENTER, "Downloaded", font(12.0), GREEN());
+                check(&p, Pos2::new(right - 12.0, line1), 12.0, GREEN());
+                p.text(Pos2::new(right, line2), Align2::RIGHT_CENTER, "On this Mac", font(12.0), GREEN());
+            }
+            ModelState::OnFirstUse => {
+                p.text(Pos2::new(right, line2), Align2::RIGHT_CENTER, "Downloads on first use", font(12.0), TEXT_FAINT());
             }
             ModelState::Downloading { done, total } => {
                 let total = if *total > 0 { *total } else { m.bytes };
                 let f = if total > 0 { (*done as f32 / total as f32).clamp(0.0, 1.0) } else { 0.0 };
                 p.rect_filled(bar, 3.0, white(20));
                 p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * f, bar.height())), 3.0, BLUE());
-                p.text(Pos2::new(right, ib.center().y), Align2::RIGHT_CENTER, format!("{} of {} · {:.0}%", human_bytes(*done), human_bytes(total), f * 100.0), font(12.0), TEXT_DIM());
+                p.text(Pos2::new(right, line1), Align2::RIGHT_CENTER, format!("{} of {} · {:.0}%", human_bytes(*done), human_bytes(total), f * 100.0), font(12.0), TEXT_DIM());
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
             }
             ModelState::Unpacking => {
                 p.rect_filled(bar, 3.0, BLUE());
-                p.text(Pos2::new(right, ib.center().y), Align2::RIGHT_CENTER, "Unpacking", font(12.0), TEXT_DIM());
+                p.text(Pos2::new(right, line1), Align2::RIGHT_CENTER, "Unpacking", font(12.0), TEXT_DIM());
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
             }
             ModelState::Failed(e) => {
-                text_fit(&p, Pos2::new(tx, bar.center().y), Align2::LEFT_CENTER, e, font(12.0), RED(), w - 140.0);
+                text_fit(&p, Pos2::new(tx, bar.center().y), Align2::LEFT_CENTER, e, font(12.0), RED(), right - tx);
                 button = Some("Try again");
             }
             ModelState::Missing => button = Some("Download"),
         }
         if let Some(label) = button {
             let bw = button_width(&p, label, BTN_SECONDARY);
-            let b = Rect::from_min_size(Pos2::new(right - bw, ib.center().y - 13.0), Vec2::new(bw, 26.0));
+            let b = Rect::from_min_size(Pos2::new(right - bw, line1 - 13.0), Vec2::new(bw, 26.0));
             if pill_button(ui, b, label, BTN_SECONDARY, true).clicked() {
-                start = Some((*i, m.id));
+                start = Some((i, m.id));
             }
         }
     }
@@ -807,6 +844,8 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
     let head = if list.iter().any(|r| r.optional) { 26.0 } else { 0.0 };
     let row_h = ((area.height() - head - 6.0 * n) / n).clamp(38.0, 46.0);
     let mut ask: Option<Perm> = None;
+    // the reasons line up in one column, after the longest row of tool icons
+    let max_tools = list.iter().map(|r| r.tools.len()).max().unwrap_or(0) as f32;
     for (k, r) in list.iter().enumerate() {
         if r.optional && !opt_head {
             opt_head = true;
@@ -830,13 +869,18 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         icon(&p, r.perm.icon(), ib.shrink(7.0), tint);
         p.text(Pos2::new(ib.right() + 12.0, rr.center().y), Align2::LEFT_CENTER, r.perm.name(), bold(13.0), TEXT().gamma_multiply(a));
         // the tools that want it
-        let mut gx = ib.right() + 190.0;
-        for &i in &r.tools {
+        for (n, &i) in r.tools.iter().enumerate() {
+            let gx = ib.right() + 190.0 + n as f32 * 22.0;
             icon(&p, app.tools[i].badge().icon, Rect::from_min_size(Pos2::new(gx, rr.center().y - 7.0), Vec2::splat(14.0)), TEXT_MUTED());
-            gx += 22.0;
         }
         // status on the right
         let right = rr.right() - 12.0;
+        // why it's asked, after the tools' icons (the status keeps its room)
+        let why_x = ib.right() + 190.0 + max_tools * 22.0 + 10.0;
+        let why_w = right - 210.0 - why_x;
+        if why_w > 60.0 && !r.perm.why().is_empty() {
+            text_fit(&p, Pos2::new(why_x, rr.center().y), Align2::LEFT_CENTER, r.perm.why(), font(12.0), TEXT_FAINT().gamma_multiply(a), why_w);
+        }
         if ok {
             let since = app.perm_watch.allowed_at.get(&r.perm).map(|t0| (now - t0) as f32).unwrap_or(1.0);
             let z = pop(since / 0.45);
@@ -1030,25 +1074,26 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     restart
 }
 
-// ---------------------------------------------------------------- Full Disk Access helper
+// ---------------------------------------------------------------- System Settings helper
 
 const HELP_W: f32 = 360.0;
 const HELP_H: f32 = 132.0;
+/// The permissions switched on by hand in a System Settings list.
+const HELPED: [Perm; 3] = [Perm::FullDisk, Perm::Accessibility, Perm::Screen];
 
-/// While Full Disk Access is being set up, a small card floats on top of
-/// System Settings showing what to do: find the app in the list and switch
-/// it on (or drag it in from Finder when it isn't listed).
-pub fn fda_helper(app: &mut App, ctx: &egui::Context) {
+/// While one of [`HELPED`] is being set up, a small card floats on top in
+/// the middle of the screen showing what to do: find the app in the list
+/// and switch it on.
+pub fn perm_helper(app: &mut App, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
-    let show = app.perm_watch.waiting(Perm::FullDisk, now) && (app.demo || app.perm_watch.status(Perm::FullDisk) != Status::Allowed);
-    if !show {
+    let Some(perm) = HELPED.into_iter().find(|&p| app.perm_watch.waiting(p, now) && (app.demo || app.perm_watch.status(p) != Status::Allowed)) else {
         return;
-    }
+    };
     let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
     let builder = egui::ViewportBuilder::default()
-        .with_title("Full Disk Access")
+        .with_title(perm.name())
         .with_inner_size([HELP_W, HELP_H])
-        .with_position([screen.x - HELP_W - 24.0, screen.y - HELP_H - 90.0])
+        .with_position([(screen.x - HELP_W) / 2.0, (screen.y - HELP_H) / 2.0])
         .with_decorations(false)
         .with_transparent(true)
         .with_resizable(false)
@@ -1057,15 +1102,15 @@ pub fn fda_helper(app: &mut App, ctx: &egui::Context) {
     let id = egui::ViewportId::from_hash_of("cmdmeow-fda-help");
     let mut close = false;
     crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
-        close = help_card(ui, ui.max_rect(), now);
+        close = help_card(ui, ui.max_rect(), now, perm);
     });
     if close {
-        app.perm_watch.asked.remove(&Perm::FullDisk);
+        app.perm_watch.asked.remove(&perm);
     }
 }
 
 /// The helper's card. Returns true when its close button was clicked.
-pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
+pub fn help_card(ui: &mut Ui, full: Rect, now: f64, perm: Perm) -> bool {
     let p = ui.painter().clone();
     p.rect_filled(full, 12.0, BG());
     p.rect_stroke(full, 12.0, Stroke::new(1.0, white(40)), StrokeKind::Inside);
@@ -1086,7 +1131,11 @@ pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
     p.add(egui::Shape::convex_polygon(arrow, Color32::WHITE, Stroke::new(1.0, Color32::BLACK)));
     let y = row.bottom() + 14.0;
     p.text(Pos2::new(full.left() + 16.0, y), Align2::LEFT_TOP, format!("Switch on {name} in the list"), bold(13.0), TEXT());
-    p.text(Pos2::new(full.left() + 16.0, y + 20.0), Align2::LEFT_TOP, "Not there? Drag it in from the Finder window.", font(12.0), TEXT_FAINT());
+    let more = match perm {
+        Perm::FullDisk => "Not there? Drag it in from the Finder window.",
+        _ => "If macOS asks first, pick Open System Settings.",
+    };
+    p.text(Pos2::new(full.left() + 16.0, y + 20.0), Align2::LEFT_TOP, more, font(12.0), TEXT_FAINT());
     let x = Rect::from_min_size(Pos2::new(full.right() - 26.0, full.bottom() - 26.0), Vec2::splat(18.0));
     let r = ui.interact(x, ui.scope_id().with("fda-help-close"), Sense::click());
     icon(&p, Icon::Close, x.shrink(3.0), if r.hovered() { TEXT() } else { TEXT_MUTED() });

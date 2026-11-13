@@ -181,8 +181,9 @@ pub struct State {
     pub removed_by_us: HashSet<String>,
     /// The tool is off in Settings: the background watchers idle.
     pub off: bool,
-    /// The page was shown. Until then scans only list the apps (enough to
-    /// notice one being thrown away) and leave measuring them for later.
+    /// Scan for apps was clicked. Until then the page shows its start screen
+    /// and scans only list the apps (enough to notice one being thrown away),
+    /// leaving measuring them for later.
     pub page_seen: bool,
 }
 
@@ -366,6 +367,9 @@ impl Uninstaller {
                 crate::kit::sound::play(if rep.failed.is_empty() { crate::kit::sound::Cue::Done } else { crate::kit::sound::Cue::Oops });
                 {
                     let mut g = st.lock_ok();
+                    // the lists lose what was moved right away (the rescan
+                    // below takes a while), so the page matches the summary
+                    drop_moved(&mut g, &rep);
                     g.working = None;
                     g.last = Some((rep, Instant::now()));
                     g.drop = Drop::Idle;
@@ -586,6 +590,24 @@ fn fill_items(row: &mut AppRow, index: &Index, all: &[Owner], roots: &Roots, app
     row.items = items;
     row.pkgs = pkgs;
     row.sized = true;
+}
+
+/// Take what a removal moved to the Trash out of the apps and leftovers
+/// lists (an app whose bundle went, an orphan with nothing left).
+fn drop_moved(g: &mut State, rep: &Report) {
+    let moved: HashSet<&Path> = rep.moved.iter().map(|m| m.from.as_path()).collect();
+    if moved.is_empty() {
+        return;
+    }
+    let gone = |p: &Path| p.ancestors().any(|a| moved.contains(a));
+    g.apps.retain(|a| !gone(&a.path));
+    for a in g.apps.iter_mut() {
+        a.items.retain(|i| !gone(&i.path));
+    }
+    for o in g.orphans.iter_mut() {
+        o.items.retain(|i| !gone(&i.path));
+    }
+    g.orphans.retain(|o| !o.items.is_empty());
 }
 
 fn start_scan(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) {
@@ -931,6 +953,22 @@ impl Tool for Uninstaller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moved_items_leave_the_lists_at_once() {
+        let item = |p: &str| super::leftovers::Item { path: PathBuf::from(p), kind: super::leftovers::Kind::Caches, bytes: 1, admin: false, selected: true };
+        let mut g = State::default();
+        g.orphans = vec![
+            Orphan { id: "a".into(), name: "A".into(), items: vec![item("/u/Library/Caches/a")], touched: None, selected: true },
+            Orphan { id: "b".into(), name: "B".into(), items: vec![item("/u/Library/Caches/b"), item("/u/Library/Logs/b/x.log")], touched: None, selected: true },
+        ];
+        let moved = |p: &str| remove::Moved { from: PathBuf::from(p), to: PathBuf::from("/u/.Trash/x"), admin: false, bytes: 1, owner: None };
+        let rep = Report { moved: vec![moved("/u/Library/Caches/a"), moved("/u/Library/Logs/b")], ..Default::default() };
+        drop_moved(&mut g, &rep);
+        assert_eq!(g.orphans.len(), 1);
+        assert_eq!(g.orphans[0].items.len(), 1);
+        assert_eq!(g.orphans[0].items[0].path, PathBuf::from("/u/Library/Caches/b"));
+    }
 
     #[test]
     fn pretty_names() {
