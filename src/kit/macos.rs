@@ -46,6 +46,25 @@ pub fn reveal(path: &std::path::Path) {
 }
 
 /// The app's own icon as straight RGBA pixels, `px` square. Main thread only.
+/// Finder puts file reference URLs (`file:///.file/id=…`) on the drag and
+/// copy pasteboards: turn one into the plain `file:///path` URL. Other
+/// strings come back as they are.
+#[cfg(target_os = "macos")]
+pub fn file_path_url(url: &str) -> String {
+    use objc2_foundation::{NSString, NSURL};
+    if !url.starts_with("file:///.file/") {
+        return url.to_string();
+    }
+    #[allow(unused_unsafe)]
+    let resolved = unsafe { NSURL::URLWithString(&NSString::from_str(url)).and_then(|u| u.filePathURL()).and_then(|u| u.absoluteString()) };
+    resolved.map(|s| s.to_string()).unwrap_or_else(|| url.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn file_path_url(url: &str) -> String {
+    url.to_string()
+}
+
 #[cfg(target_os = "macos")]
 pub fn app_icon(path: &std::path::Path, px: usize) -> Option<(usize, Vec<u8>)> {
     use objc2::{AllocAnyThread, MainThreadMarker};

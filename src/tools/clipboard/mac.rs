@@ -155,7 +155,7 @@ mod imp {
                 if let Some(items) = pb.pasteboardItems() {
                     for it in items.iter() {
                         if let Some(u) = it.stringForType(NSPasteboardTypeFileURL) {
-                            if let Some(p) = super::file_url_path(&u.to_string()) {
+                            if let Some(p) = super::file_url_path(&crate::kit::macos::file_path_url(&u.to_string())) {
                                 c.files.push(p);
                             }
                         }
