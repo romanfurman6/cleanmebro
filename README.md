@@ -84,6 +84,7 @@ Every action has a link for scripts, Raycast or Shortcuts: `open cmdmeow://…`
 | `capture/area`, `window`, `screen`, `delayed`, `text`, `color`, `ruler`, `record`, `history` | Screenshot and Video |
 | `dictation/toggle`, `start`, `stop`, `cancel` | Dictation |
 | `open/<tool>[/<page>]`, e.g. `open/disk-map`, `open/capture/settings`, `open/settings` | Open a page |
+| `open/window` | Open the window (also what opening the app again from Finder or Spotlight does) |
 
 ## Privacy and safety
 

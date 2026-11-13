@@ -579,6 +579,17 @@ impl App {
                 self.open_settings(ctx, route == "tools");
                 continue;
             }
+            // the app opened again while running (Finder, Spotlight, Dock):
+            // show the window, so it is reachable with the menu bar icon hidden
+            if tool == "window" {
+                if self.setup.is_some() {
+                    self.open_setup_window(ctx);
+                } else {
+                    let page = self.page;
+                    self.open_window(ctx, page);
+                }
+                continue;
+            }
             let found = (0..self.tools.len()).find(|&i| link_matches(self.tools[i].id(), self.tools[i].name(), &tool));
             match found.filter(|&i| self.tool_on(i) && self.tools[i].has_page()) {
                 Some(i) => {
