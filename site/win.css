@@ -618,8 +618,7 @@
 .dh2 { padding-bottom: 12px; } .dh2 b { font-size: 15px; font-weight: 600; } .dsl { height: 40px; }
 @media (max-width: 960px) { .switcher .dp { grid-template-columns: minmax(0, 1fr); } }
 
-/* Uninstaller, like the app: Startup items link, Apps | Leftovers, search + filter chips, sort */
-.sti { margin-left: auto; font-size: 12px; cursor: pointer; } .sti + .seg { margin-left: 8px !important; }
+/* Uninstaller, like the app: Apps | Leftovers, search + filter chips, sort */
 .ufl { padding: 12px 16px 0; } .ufl .srch2 { width: 190px; } .usort { margin-left: auto; font-size: 12px; cursor: pointer; } .usort::before { content: "Sort: "; color: var(--t3); }
 .srch2 .srch-in { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: #fff; font: inherit; font-size: 12.5px; }
 .arw.out, .lor.out { opacity: 0; transition: opacity .25s; }

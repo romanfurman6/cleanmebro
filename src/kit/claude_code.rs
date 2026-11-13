@@ -166,6 +166,22 @@ pub fn projects_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".claude/projects")
 }
 
+/// Every folder Claude Code keeps session logs in: `~/.claude/projects`,
+/// and `~/.config/claude/projects`, where newer versions can write them.
+pub fn log_dirs() -> Vec<PathBuf> {
+    let home = dirs::home_dir().unwrap_or_default();
+    log_dirs_in(&home)
+}
+
+fn log_dirs_in(home: &std::path::Path) -> Vec<PathBuf> {
+    let mut v = vec![home.join(".claude/projects")];
+    let xdg = home.join(".config/claude/projects");
+    if xdg.is_dir() {
+        v.push(xdg);
+    }
+    v
+}
+
 /// Claude Code's projects and whether their folders still exist. Looks at
 /// each project's own folder (and walks the disk to resolve its name), so a
 /// project in Downloads, Documents or Desktop makes macOS ask about that
@@ -204,10 +220,10 @@ pub fn scan_projects() -> Vec<Project> {
         // (a session's logged cwd may be a subfolder; trust it when it exists)
         if let Some(real) = resolve_encoded(&enc) {
             cwd = Some(real);
-        } else if cwd.as_ref().is_none_or(|c| !c.exists()) {
+        } else if cwd.as_ref().is_none_or(|c| !exists_quiet(c)) {
             cwd = Some(PathBuf::from(enc.replace('-', "/")));
         }
-        let cwd_exists = cwd.as_ref().map(|c| c.exists()).unwrap_or(false);
+        let cwd_exists = cwd.as_ref().map(|c| exists_quiet(c)).unwrap_or(false);
         out.push(Project { folder, cwd, cwd_exists, last_used: last });
     }
     out.sort_by_key(|p| std::cmp::Reverse(p.last_used));
@@ -219,10 +235,19 @@ pub fn encode(path: &str) -> String {
     path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
+/// Does `p` exist? A path in Downloads/Desktop/Documents (without Full
+/// Disk Access) counts as there: looking would make macOS ask the user about
+/// the folder, and a project must never be called gone because we didn't look.
+fn exists_quiet(p: &Path) -> bool {
+    crate::kit::fs::behind_folder_prompt(p) || p.exists()
+}
+
 /// Walk the disk to find the folder whose encoded path equals `enc`.
 fn resolve_encoded(enc: &str) -> Option<PathBuf> {
     fn go(dir: &Path, rest: &str, depth: usize) -> Option<PathBuf> {
-        if depth > 14 {
+        // never list a folder macOS guards with a question (the first launch
+        // asked about Downloads because of a project there)
+        if depth > 14 || crate::kit::fs::behind_folder_prompt(dir) {
             return None;
         }
         for e in std::fs::read_dir(dir).ok()?.flatten() {
@@ -265,6 +290,17 @@ pub fn first_cwd(p: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_dirs_add_xdg_folder_only_when_present() {
+        let home = std::env::temp_dir().join(format!("cmdmeow-logdirs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        assert_eq!(log_dirs_in(&home), vec![home.join(".claude/projects")]);
+        std::fs::create_dir_all(home.join(".config/claude/projects")).unwrap();
+        assert_eq!(log_dirs_in(&home), vec![home.join(".claude/projects"), home.join(".config/claude/projects")]);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn availability_follows_switch_and_sign_in() {

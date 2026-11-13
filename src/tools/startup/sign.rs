@@ -261,6 +261,9 @@ pub fn known(program: &Path, args: &[String]) -> Option<Signer> {
         return Some(Signer::Script);
     }
     let p = subject(program, args);
+    if crate::kit::fs::behind_folder_prompt(&p) {
+        return Some(Signer::Unknown);
+    }
     match stamp(&p) {
         Some(s) => cached(&s),
         None => Some(Signer::Missing),

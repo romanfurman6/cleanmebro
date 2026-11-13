@@ -241,7 +241,6 @@
       $('#lo-n', lo).textContent = `${on.length} selected · ${fmt(on.reduce((a, r) => a + parse($('.num', r).textContent), 0))}`; const seg = $$('.tb .seg > *', p)[1]; seg.textContent = tot ? 'Leftovers · ' + fmt(tot) : 'Leftovers'; };
     lo.addEventListener('click', e => { const r = e.target.closest('.lor'); if (r) { const c = $('.ck', r); c.classList.toggle('off'); c.innerHTML = c.classList.contains('off') ? '' : ICON('M5 12.5l4.5 4.5L19 7'); loUpd(); } });
     $('.fb2 .act', lo).addEventListener('click', () => { const on = $$('.lor', lo).filter(r => !$('.ck', r).classList.contains('off')); on.forEach(r => r.classList.add('out')); setTimeout(() => { on.forEach(r => r.remove()); loUpd(); }, 260); });
-    $('.sti', p).addEventListener('click', () => window.cmShow && window.cmShow('startup'));
   })();
 
   // ---------- Startup ----------

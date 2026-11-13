@@ -35,7 +35,7 @@ impl Tool for Sharing {
         "Create"
     }
     fn about(&self) -> &'static str {
-        "Your storage for links to screenshots and recordings"
+        "Uploads screenshots and recordings to your own storage and copies a link"
     }
     fn sidebar_meta(&self) -> String {
         let c = self.0.borrow();
@@ -70,7 +70,7 @@ impl Tool for Screenshot {
         "Create"
     }
     fn about(&self) -> &'static str {
-        "Screenshots, markup and text from the screen"
+        "Screenshots of an area or window, markup, and text copied from the screen"
     }
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};

@@ -64,7 +64,6 @@ pub struct App {
     visible: bool,
     had_focus: bool,
     last_hide: Instant,
-    pub gear_open: bool,
     pub app_open: bool,
     /// When the window was asked for (dev log: how long the first frame took).
     pub app_asked: Option<Instant>,
@@ -155,7 +154,6 @@ impl App {
             visible: true,
             had_focus: false,
             last_hide: Instant::now(),
-            gear_open: false,
             app_open: false,
             app_asked: None,
             app_focus: false,
@@ -490,7 +488,6 @@ impl App {
 
     pub fn hide(&mut self, ctx: &egui::Context) {
         self.visible = false;
-        self.gear_open = false;
         self.last_hide = Instant::now();
         ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Visible(false));
     }
@@ -500,7 +497,6 @@ impl App {
     pub fn open_window(&mut self, ctx: &egui::Context, page: usize) {
         self.page = page;
         self.settings_open = false;
-        self.gear_open = false;
         if self.screenshot.is_some() {
             return;
         }
