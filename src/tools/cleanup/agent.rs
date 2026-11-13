@@ -151,28 +151,40 @@ fn find_bin(exe: &str) -> Option<PathBuf> {
 
 // ---------------------------------------------------------------- the choice
 
-fn prefs_path() -> PathBuf {
-    crate::kit::fs::data_path("cleanup-agent.json")
+impl Agent {
+    fn id(self) -> &'static str {
+        self.exe()
+    }
 }
 
-/// The agent picked in Cleanup (Claude until something else is picked).
-pub fn chosen() -> Agent {
-    crate::kit::fs::load_json::<Option<Agent>>(&prefs_path()).unwrap_or_default()
+/// The agent Cleanup checks with: the main agent picked in setup (Settings ›
+/// AI Usage), when it can judge paths safely; otherwise the first one that
+/// can and is turned on; Claude when none is.
+pub fn main() -> Agent {
+    let s = crate::kit::ai::settings::get();
+    pick(&s.main, |id| s.is_on(id))
 }
 
-pub fn choose(a: Agent) {
-    crate::kit::fs::save_json(&prefs_path(), &Some(a), true);
-}
-
-/// Agents that can be picked: Claude always (its note says how to set it
-/// up), the others once their CLI is installed.
-pub fn offered() -> Vec<Agent> {
-    Agent::ALL.into_iter().filter(|a| *a == Agent::Claude || a.bin().is_some()).collect()
+fn pick(main: &str, on: impl Fn(&str) -> bool) -> Agent {
+    Agent::ALL
+        .into_iter()
+        .find(|a| a.id() == main)
+        .or_else(|| Agent::ALL.into_iter().find(|a| on(a.id())))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_agent_falls_back_to_one_that_can_judge() {
+        assert_eq!(pick("codex", |_| true), Agent::Codex);
+        assert_eq!(pick("claude", |_| true), Agent::Claude);
+        // Gemini can't judge paths with its tools off: the next one on does
+        assert_eq!(pick("gemini", |id| id == "codex"), Agent::Codex);
+        assert_eq!(pick("gemini", |_| false), Agent::Claude);
+    }
 
     #[test]
     fn names_round_trip() {

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 pub const SETUP_W: f32 = 820.0;
 pub const SETUP_H: f32 = 600.0;
-const STEPS: usize = 4;
+const STEPS: usize = 5;
 const TOP_H: f32 = 44.0;
 const BOTTOM_H: f32 = 64.0;
 /// Tools that start off on a fresh install (the rest start on).
@@ -290,7 +290,8 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     match step {
         0 => next = welcome(app, ui, body, t),
         1 => tools(app, ui, body, t),
-        2 => {
+        2 => agents(app, ui, body, t),
+        3 => {
             let r = Rect::from_min_max(body.min, body.max);
             permissions_step(app, ui, r, t, now)
         }
@@ -307,7 +308,7 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     }
     let label = match step {
         0 => None,
-        1 | 2 => Some("Continue"),
+        1..=3 => Some("Continue"),
         _ if needs_restart(app) => Some("Restart and open"),
         _ => Some("Open panel"),
     };
@@ -321,7 +322,7 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
                 next = true;
             }
         }
-        if step == 2 && !all_required(app) {
+        if step == 3 && !all_required(app) {
             let r2 = Rect::from_min_size(Pos2::new(r.left() - 80.0, r.top()), Vec2::new(70.0, 32.0));
             if ghost_button(ui, r2, "Later").clicked() {
                 next = true;
@@ -511,6 +512,64 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     }
     if let Some((i, o)) = flip {
         app.set_tool_on(i, o);
+    }
+}
+
+/// The AI agents the person uses: one main (Cleanup checks with it), and
+/// the ones AI Usage tracks. Saved in the AI Usage settings, changed later in
+/// Settings › AI Usage.
+fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
+    use crate::kit::ai::{self, settings};
+    let p = ui.painter().clone();
+    let set = settings::get();
+    let head = body.top() + 6.0;
+    let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "AI agents", bold(22.0), TEXT());
+    let sub = p.text(Pos2::new(body.left(), g.bottom() + sp::S), Align2::LEFT_TOP, "Main checks Cleanup scans. Tracked ones show in AI Usage.", ty::body(), TEXT_DIM());
+    let w = body.width().min(560.0);
+    let x = body.left();
+    let col_track = x + w - sp::L - 8.0;
+    let col_main = col_track - 56.0;
+    let top = sub.bottom() + sp::XL;
+    p.text(Pos2::new(col_main, top), Align2::CENTER_TOP, "Main", ty::caption(), TEXT_FAINT());
+    p.text(Pos2::new(col_track, top), Align2::CENTER_TOP, "Track", ty::caption(), TEXT_FAINT());
+    let n = ai::PROVIDERS.len();
+    let a = ease(t / 0.4);
+    let card = Rect::from_min_size(Pos2::new(x, top + 20.0 + (1.0 - a) * 8.0), Vec2::new(w, n as f32 * sp::ROW_H));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    let mut change: Option<Box<dyn FnOnce(&mut settings::Settings)>> = None;
+    for (k, m) in ai::PROVIDERS.iter().enumerate() {
+        let r = Rect::from_min_size(Pos2::new(card.left(), card.top() + k as f32 * sp::ROW_H), Vec2::new(w, sp::ROW_H));
+        if k > 0 {
+            hairline(&p, Pos2::new(r.left() + sp::L, r.top()), Pos2::new(r.right() - sp::L, r.top()));
+        }
+        let found = app.demo || ai::make(k).data_dir().is_some_and(|d| d.exists());
+        let name = p.text(Pos2::new(r.left() + sp::L, r.center().y), Align2::LEFT_CENTER, m.name, ty::title(), TEXT());
+        p.text(Pos2::new(name.right() + sp::S, r.center().y), Align2::LEFT_CENTER, if found { "Found" } else { "Not found" }, ty::label(), if found { GREEN() } else { TEXT_FAINT() });
+        let main = set.main == m.id;
+        let on = set.is_on(m.id);
+        let rr = Rect::from_center_size(Pos2::new(col_main, r.center().y), Vec2::splat(16.0));
+        if radio(ui, rr, ui.scope_id().with(("setup-main", m.id)), main, true).clicked() && !main {
+            let id = m.id.to_string();
+            change = Some(Box::new(move |s| {
+                s.off.retain(|x| *x != id);
+                s.provider = id.clone();
+                s.main = id;
+            }));
+        }
+        // the main agent is always tracked
+        let cb = Rect::from_center_size(Pos2::new(col_track, r.center().y), Vec2::splat(16.0));
+        if checkbox(ui, cb, ui.scope_id().with(("setup-track", m.id)), on, !main).clicked() && !main {
+            let id = m.id.to_string();
+            change = Some(Box::new(move |s| {
+                s.off.retain(|x| *x != id);
+                if on {
+                    s.off.push(id);
+                }
+            }));
+        }
+    }
+    if let Some(f) = change {
+        settings::update(!app.demo, f);
     }
 }
 

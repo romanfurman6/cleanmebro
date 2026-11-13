@@ -131,23 +131,11 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
         cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
     }
     let mut right = scan_r.left() - sp::L;
-    let agents = app.agents.get_or_insert_with(agent::offered).clone();
-    if agents.len() > 1 {
-        let labels: Vec<&str> = agents.iter().map(|a| a.name()).collect();
-        let seg_w = labels.iter().map(|l| p.layout_no_wrap(l.to_string(), ty::body(), TEXT()).size().x + 24.0).sum::<f32>();
-        let seg = Rect::from_min_size(Pos2::new(right - seg_w, cy - 14.0), Vec2::new(seg_w, 28.0));
-        let cur = agents.iter().position(|a| *a == app.agent).unwrap_or(0);
-        if let Some(k) = segmented(ui, seg, ui.scope_id().with("agent"), &labels, cur) {
-            app.agent = agents[k];
-            app.use_ai = true;
-            if !app.demo {
-                agent::choose(app.agent);
-            }
-        }
-        right = seg.left() - sp::M;
+    // which agent is picked once, in setup and Settings › AI Usage
+    if !app.demo {
+        app.agent = agent::main();
     }
-    let label = if agents.len() > 1 { "Check with".to_string() } else { format!("Check with {}", app.agent.name()) };
-    let lr = p.text(Pos2::new(right, cy), Align2::RIGHT_CENTER, label, ty::body(), TEXT());
+    let lr = p.text(Pos2::new(right, cy), Align2::RIGHT_CENTER, format!("Check with {}", app.agent.name()), ty::body(), TEXT());
     let sw = Rect::from_min_size(Pos2::new(lr.left() - sp::S - 30.0, cy - 9.0), Vec2::new(30.0, 18.0));
     if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
         app.use_ai = !app.use_ai;

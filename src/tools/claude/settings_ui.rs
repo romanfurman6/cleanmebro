@@ -59,9 +59,20 @@ pub fn list(ui: &mut Ui, body: Rect, demo: bool) -> f32 {
             _ => "Tokens only",
         };
         let state = if found { source } else { "Not found" };
-        p.text(Pos2::new(r.right() - 58.0, r.center().y), Align2::RIGHT_CENTER, state, ty::label(), TEXT_DIM());
+        // the main agent (Cleanup checks with it) is always on
+        let main = set.main == m.id;
+        let rr = Rect::from_center_size(Pos2::new(r.right() - 58.0 - 8.0, r.center().y), Vec2::splat(16.0));
+        let resp = radio(ui, rr, ui.scope_id().with(("ai-main", m.id)), main, true).on_hover_text("Main agent");
+        if resp.clicked() && !main {
+            let id = m.id.to_string();
+            change = Some(Box::new(move |s| {
+                s.off.retain(|x| *x != id);
+                s.main = id;
+            }));
+        }
+        p.text(Pos2::new(rr.left() - sp::M, r.center().y), Align2::RIGHT_CENTER, state, ty::label(), TEXT_DIM());
         let on = set.is_on(m.id);
-        if switch(ui, switch_at(r), ui.scope_id().with(("ai-on", m.id)), on, true).clicked() {
+        if switch(ui, switch_at(r), ui.scope_id().with(("ai-on", m.id)), on, !main).clicked() && !main {
             let id = m.id.to_string();
             change = Some(Box::new(move |s| {
                 s.off.retain(|x| *x != id);
