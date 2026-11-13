@@ -148,12 +148,33 @@ pub fn window_ui(app: &mut App, outer: &mut Ui, full: Rect, draw_lights: bool, c
         None => content,
     };
     let tool = &mut app.tools[app.page];
-    let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt(("page", tool.id())));
+    let tid = tool.id();
+    let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt(("page", tid)));
     if lock.is_some() {
         child.disable();
         child.multiply_opacity(0.5);
     }
-    tool.page_ui(&mut child, content, cx);
+    if super::tool::guard(tid, || tool.page_ui(&mut child, content, cx)).is_none() {
+        stopped_page(app, ui, content, cx);
+    }
+}
+
+/// The page of a tool that stopped after an error: its glyph, its name and
+/// "Stopped", and a button that restarts the app.
+fn stopped_page(app: &App, ui: &mut Ui, content: Rect, cx: &mut Cx) {
+    let p = ui.painter().clone();
+    let t = &app.tools[app.page];
+    let c = content.center();
+    icon(&p, t.badge().icon, Rect::from_center_size(c - Vec2::new(0.0, 56.0), Vec2::splat(32.0)), TEXT_FAINT());
+    p.text(c - Vec2::new(0.0, 18.0), Align2::CENTER_CENTER, t.name(), ty::lead(), TEXT());
+    p.text(c + Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, "Stopped", ty::label(), AMBER());
+    let label = "Restart";
+    let bw = button_width(&p, label, BTN_PRIMARY);
+    let r = Rect::from_center_size(c + Vec2::new(0.0, 44.0), Vec2::new(bw, 30.0));
+    if pill_button(ui, r, label, BTN_PRIMARY, true).clicked() {
+        crate::kit::perms::relaunch();
+        cx.quit();
+    }
 }
 
 /// Sidebar order of the tool sections; unknown sections go last.
