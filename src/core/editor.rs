@@ -45,7 +45,8 @@ const fn sizes_width() -> f32 {
 const fn preview_width() -> f32 {
     m::PANEL_WIDTH + 2.0 * PREVIEW_PAD
 }
-const LIST_ROW_H: f32 = 30.0;
+/// A row of the widget list, and the step to the next (rows 32 tall, 4 apart).
+const LIST_ROW_H: f32 = 32.0 + sp::XS;
 const END_SLOT_H: f32 = 40.0;
 /// Under the panel preview: the selected widget's sizes.
 const SIZE_BAR_H: f32 = 64.0;
@@ -188,7 +189,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
             section_title(&p, origin.left() + 4.0, y, name);
             y += sp::SECTION_H;
             for it in items {
-                let rr = Rect::from_min_size(Pos2::new(origin.left(), y), Vec2::new(w, LIST_ROW_H - 2.0));
+                let rr = Rect::from_min_size(Pos2::new(origin.left(), y), Vec2::new(w, LIST_ROW_H - sp::XS));
                 y += LIST_ROW_H;
                 let resp = ui.interact(rr, ui.scope_id().with(("gl", &it.title, &it.key)), Sense::click());
                 let sel = it.key.is_some() && it.key == app.gallery_pick;
@@ -334,7 +335,7 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
     let w = panel::inner_width();
     let mut y = r.top() + sp::L;
     text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, spec.title, ty::title(), TEXT(), w);
-    y += 16.0 + sp::M;
+    y += 16.0 + sp::L;
     let cur = app.widgets.iter().find(|e| e.key == key && e.on).map(|e| spec.fit(e.size));
     // rows: Small and Wide share one; the rest get their own
     let mut rows: Vec<Vec<Size>> = vec![];
@@ -343,8 +344,13 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
         rows.push(small);
     }
     rows.extend(spec.sizes.iter().copied().filter(|z| z.cols() > 2).map(|z| vec![z]));
-    let label_h = 14.0 + sp::XS;
-    let total: f32 = rows.iter().map(|row| label_h + row.iter().map(|z| panel::size_px(*z, w).y).fold(0.0, f32::max) + sp::L).sum();
+    // each size: its label, S, the widget; sizes side by side 16 apart when
+    // the column has the room (else the panel's own 8), rows 24 apart
+    let label_h = line_h(&p, &ty::caption()) + sp::S;
+    let row_w = |row: &Vec<Size>| row.iter().map(|z| panel::size_px(*z, w).x).sum::<f32>();
+    let widest = rows.iter().filter(|r| r.len() > 1).map(|r| row_w(r) + (r.len() - 1) as f32 * sp::L).fold(0.0, f32::max);
+    let gap_x = if widest <= r.width() - 2.0 * sp::L - sp::SCROLL_GUTTER { sp::L } else { panel::GAP };
+    let total: f32 = rows.iter().map(|row| label_h + row.iter().map(|z| panel::size_px(*z, w).y).fold(0.0, f32::max) + sp::XL).sum();
     let area = Rect::from_min_max(Pos2::new(r.left(), y), r.max);
     let mut child = ui.new_child(UiBuilder::new().id_salt("gallery-sizes").max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(area);
@@ -381,10 +387,10 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
                 } else if resp.on_hover_text(if here { "In the panel at this size" } else { "Click to add at this size, or drag into the panel" }).clicked() {
                     out = Some(*z);
                 }
-                cx += sz.x + panel::GAP;
+                cx += sz.x + gap_x;
                 row_h = row_h.max(sz.y);
             }
-            y += label_h + row_h + sp::L;
+            y += label_h + row_h + sp::XL;
         }
     });
     out
