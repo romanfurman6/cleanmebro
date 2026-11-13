@@ -527,7 +527,12 @@ impl App {
 
     fn update_tray_title(&mut self) {
         let Some(tray) = &self.tray else { return };
-        let title = self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).find_map(|(_, t)| t.tray_title()).unwrap_or_default();
+        // until setup is finished the menu bar says so (and a click opens setup)
+        let title = if self.setup.is_some() || !super::onboard::is_done() {
+            "Finish setup".to_string()
+        } else {
+            self.tools.iter().enumerate().filter(|(i, _)| self.tool_on(*i)).find_map(|(_, t)| t.tray_title()).unwrap_or_default()
+        };
         if title != self.tray_title {
             // tray-icon's set_title(None) leaves the old text on macOS (the
             // recording clock stayed after a stop); an empty title clears it
