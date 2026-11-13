@@ -1029,6 +1029,13 @@ pub fn remember_kept(paths: impl IntoIterator<Item = PathBuf>) {
     crate::kit::fs::save_json(&kept_file(), &all, true);
 }
 
+/// Offer `path` again (Undo on a Keep).
+pub fn forget_kept_one(path: &std::path::Path) {
+    let mut all = kept();
+    all.retain(|p| p != path);
+    crate::kit::fs::save_json(&kept_file(), &all, true);
+}
+
 /// Offer everything again.
 pub fn forget_kept() {
     crate::kit::fs::save_json(&kept_file(), &Vec::<PathBuf>::new(), true);
