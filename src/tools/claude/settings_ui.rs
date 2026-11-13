@@ -1,7 +1,7 @@
-//! Settings › AI Usage: which providers to read, where Claude's limits come
-//! from (the status-line hook), notifications, and what the menu bar shows.
+//! Settings › AI Usage: which providers to read, notifications, and what
+//! the menu bar shows.
 
-use crate::kit::ai::{self, settings, statusline};
+use crate::kit::ai::{self, settings, UsageInfo};
 use crate::kit::glass::*;
 use egui::{Align2, Pos2, Rect, Ui, Vec2};
 
@@ -36,6 +36,18 @@ fn label(p: &egui::Painter, r: Rect, s: &str) {
     p.text(Pos2::new(r.left() + 16.0, r.center().y), Align2::LEFT_CENTER, s, font(13.0), TEXT());
 }
 
+/// The plan as people call it: "Max", "Plus", "API key", or nothing.
+fn plan_name(i: &UsageInfo) -> String {
+    if i.is_api() {
+        return "API key".into();
+    }
+    let mut p = i.plan.trim().to_string();
+    if let Some(f) = p.get_mut(0..1) {
+        f.make_ascii_uppercase();
+    }
+    p
+}
+
 /// Draws the tab into `body`; returns the bottom of what it drew.
 pub fn list(ui: &mut Ui, body: Rect, demo: bool) -> f32 {
     let p = ui.painter().clone();
@@ -45,22 +57,27 @@ pub fn list(ui: &mut Ui, body: Rect, demo: bool) -> f32 {
     let mut y = body.top() + 24.0;
     let mut change: Option<Box<dyn FnOnce(&mut settings::Settings)>> = None;
 
-    // providers
+    // providers: the ones on this Mac first, the rest dim below them
+    let found: Vec<bool> = (0..ai::PROVIDERS.len()).map(|k| demo || ai::make(k).data_dir().is_some_and(|d| d.exists())).collect();
+    let mut order: Vec<usize> = (0..ai::PROVIDERS.len()).collect();
+    order.sort_by_key(|k| !found[*k]);
     let card = section(&p, x, w, &mut y, "Providers", ai::PROVIDERS.len());
-    for (k, m) in ai::PROVIDERS.iter().enumerate() {
-        let r = row(card, k);
-        let found = demo || ai::make(k).data_dir().is_some_and(|d| d.exists());
-        p.circle_filled(Pos2::new(r.left() + 20.0, r.center().y), 4.0, if found { GREEN() } else { white(51) });
-        p.text(Pos2::new(r.left() + 32.0, r.center().y), Align2::LEFT_CENTER, m.name, font(13.0), TEXT());
-        let source = match m.id {
-            "claude" if statusline::installed() => "Status line + logs",
-            "claude" => "CLI + logs",
-            _ if m.limits => "Local files",
-            _ => "Tokens only",
-        };
-        let state = if found { source } else { "Not found" };
-        // the main agent (Cleanup checks with it) is always on
+    for (n, &k) in order.iter().enumerate() {
+        let m = &ai::PROVIDERS[k];
+        let r = row(card, n);
+        let on = set.is_on(m.id);
         let main = set.main == m.id;
+        let info = super::backend::snapshot(k).unwrap_or_default();
+        // green: up to date, amber: the last check failed, dim: not on this Mac or off
+        let dot = if !found[k] || !(on || main) {
+            white(51)
+        } else if info.stale {
+            AMBER()
+        } else {
+            GREEN()
+        };
+        p.circle_filled(Pos2::new(r.left() + 20.0, r.center().y), 4.0, dot);
+        p.text(Pos2::new(r.left() + 32.0, r.center().y), Align2::LEFT_CENTER, m.name, font(13.0), if found[k] { TEXT() } else { TEXT_FAINT() });
         let rr = Rect::from_center_size(Pos2::new(r.right() - 58.0 - 8.0, r.center().y), Vec2::splat(16.0));
         let resp = radio(ui, rr, ui.scope_id().with(("ai-main", m.id)), main, true).on_hover_text("Main agent");
         if resp.clicked() && !main {
@@ -70,9 +87,19 @@ pub fn list(ui: &mut Ui, body: Rect, demo: bool) -> f32 {
                 s.main = id;
             }));
         }
-        p.text(Pos2::new(rr.left() - sp::M, r.center().y), Align2::RIGHT_CENTER, state, ty::label(), TEXT_DIM());
-        let on = set.is_on(m.id);
+        // Claude's live limits need its sign-in from the Keychain; after a
+        // Deny, this asks again
+        if m.id == "claude" && found[k] && set.claude_keychain == "denied" && !demo {
+            let bw = button_width(&p, "Connect", BTN_SECONDARY);
+            let br = Rect::from_min_size(Pos2::new(rr.left() - sp::M - bw, r.center().y - 14.0), Vec2::new(bw, 28.0));
+            if pill_button(ui, br, "Connect", BTN_SECONDARY, true).on_hover_text("Read Claude Code's sign-in from the Keychain").clicked() {
+                change = Some(Box::new(|s| s.claude_keychain.clear()));
+            }
+        } else if found[k] {
+            p.text(Pos2::new(rr.left() - sp::M, r.center().y), Align2::RIGHT_CENTER, plan_name(&info), ty::label(), TEXT_DIM());
+        }
         let sw = switch(ui, switch_at(r), ui.scope_id().with(("ai-on", m.id)), on || main, true);
+        // the main agent (Cleanup checks with it) is always on
         let sw = if main { sw.on_hover_text("The main agent is always tracked") } else { sw };
         if sw.clicked() && !main {
             let id = m.id.to_string();
@@ -82,30 +109,6 @@ pub fn list(ui: &mut Ui, body: Rect, demo: bool) -> f32 {
                     s.off.push(id);
                 }
             }));
-        }
-    }
-
-    // Claude's limits
-    let card = section(&p, x, w, &mut y, "Claude limits", 2);
-    let r0 = row(card, 0);
-    label(&p, r0, "Source");
-    let seg = Rect::from_min_size(Pos2::new(r0.right() - 16.0 - 200.0, r0.center().y - 13.0), Vec2::new(200.0, 26.0));
-    let cur = usize::from(set.claude_source != "statusline");
-    if let Some(i) = segmented(ui, seg, ui.scope_id().with("ai-claude-src"), &["Status line", "CLI"], cur) {
-        change = Some(Box::new(move |s| s.claude_source = if i == 0 { "statusline".into() } else { "cli".into() }));
-    }
-    let r1 = row(card, 1);
-    let installed = statusline::installed();
-    label(&p, r1, "Status line hook");
-    let (txt, col) = if installed { ("Installed", GREEN()) } else { ("Off", TEXT_DIM()) };
-    let btn = if installed { "Remove" } else { "Install" };
-    let bw = button_width(&p, btn, BTN_SECONDARY);
-    let br = Rect::from_min_size(Pos2::new(r1.right() - 16.0 - bw, r1.center().y - 14.0), Vec2::new(bw, 28.0));
-    p.text(Pos2::new(br.left() - sp::M, r1.center().y), Align2::RIGHT_CENTER, txt, ty::label(), col);
-    if pill_button(ui, br, btn, BTN_SECONDARY, !demo).clicked() {
-        let res = if installed { statusline::remove() } else { statusline::install() };
-        if let Err(e) = res {
-            eprintln!("[ai] status line: {e}");
         }
     }
 

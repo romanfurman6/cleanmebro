@@ -36,9 +36,9 @@ pub struct Settings {
     /// What the menu bar shows: "closest" (the provider nearest a limit)
     /// or a provider id.
     pub menu_bar: String,
-    /// Where Claude's limits come from: "statusline" (Claude Code's own
-    /// status line, when the hook is installed) or "cli" (`claude /usage`).
-    pub claude_source: String,
+    /// Reading Claude Code's sign-in from the Keychain: "" not asked yet,
+    /// "ok" allowed, "denied" (limits then come from the Claude CLI).
+    pub claude_keychain: String,
     /// Settings format: 1 turned the menu bar number off by default. A
     /// file without it is older (0), not the struct default.
     #[serde(default)]
@@ -60,7 +60,7 @@ impl Default for Settings {
             show_outages: true,
             // the icon alone; a number there is opt-in
             menu_bar: "off".into(),
-            claude_source: "statusline".into(),
+            claude_keychain: String::new(),
             version: 1,
         }
     }

@@ -3,6 +3,7 @@
 //! logs. Each provider fills the same `UsageInfo`, and
 //! whatever it can't tell stays empty, so one UI shows any of them.
 
+pub mod account;
 pub mod claude;
 pub mod codex;
 pub mod gemini;
@@ -82,8 +83,8 @@ pub struct UsageInfo {
     /// Extra plan detail that can tell the price, e.g. a rate-limit tier
     /// like "default_claude_max_20x".
     pub tier: String,
-    /// Where the limits came from: "Live" (Claude Code's own status line),
-    /// "CLI" or "Local" (session logs).
+    /// Where the limits came from: "API" (the provider's account), "CLI"
+    /// or "Local" (session logs). Not shown; kept for the logs and tests.
     pub source: &'static str,
     /// The last check failed: the limits shown are the last ones known, as
     /// of `fetched`.
