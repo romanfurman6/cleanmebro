@@ -1,6 +1,6 @@
 //! AI coding assistants on this Mac, behind one `Provider` trait: plan and
-//! limit windows, local token counts from session logs, and the projects
-//! the assistant worked in. Each provider fills the same `UsageInfo`, and
+//! limit windows and local token counts (per model and project) from session
+//! logs. Each provider fills the same `UsageInfo`, and
 //! whatever it can't tell stays empty, so one UI shows any of them.
 
 pub mod claude;
@@ -15,7 +15,7 @@ pub mod alerts;
 pub mod status;
 pub mod statusline;
 
-use crate::kit::claude_code::{Availability, Project};
+use crate::kit::claude_code::Availability;
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Utc};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -72,7 +72,6 @@ pub struct UsageInfo {
     pub error: Option<String>,
     pub fetched: Option<DateTime<Local>>,
     pub local: LocalTokens,
-    pub projects: Vec<Project>,
     pub data_bytes: u64,
     pub billing: Billing,
     /// Extra plan detail that can tell the price, e.g. a rate-limit tier
@@ -148,10 +147,6 @@ pub trait Provider: Send {
     fn fetch_account(&mut self, s: &Shared);
     /// Token counts from local session logs.
     fn local_tokens(&mut self) -> LocalTokens;
-    /// Projects the assistant worked in.
-    fn projects(&mut self) -> Vec<Project> {
-        Vec::new()
-    }
     /// The folder where the assistant keeps its data, for the size shown.
     fn data_dir(&self) -> Option<PathBuf> {
         None

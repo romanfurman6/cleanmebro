@@ -167,6 +167,10 @@ pub fn projects_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".claude/projects")
 }
 
+/// Claude Code's projects and whether their folders still exist. Looks at
+/// each project's own folder (and walks the disk to resolve its name), so a
+/// project in Downloads, Documents or Desktop makes macOS ask about that
+/// folder: call it only once Full Disk Access is granted (Cleanup's scan).
 pub fn scan_projects() -> Vec<Project> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(projects_dir()) else { return out };
