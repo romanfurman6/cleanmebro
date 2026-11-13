@@ -250,7 +250,7 @@ impl Tool for FanControl {
         "Fan Control"
     }
     fn about(&self) -> &'static str {
-        "Fan speed and chip temperatures"
+        "Chip temperatures and manual fan speed"
     }
     fn badge(&self) -> Badge {
         badge()

@@ -144,7 +144,7 @@ impl Tool for Lens {
         "Disk Map"
     }
     fn about(&self) -> &'static str {
-        "Find what takes space"
+        "Shows which folders and files take up your disk"
     }
     fn busy(&self) -> bool {
         self.lens.running.load(std::sync::atomic::Ordering::SeqCst) || self.ai.phase() == crate::kit::aicheck::Phase::Running
