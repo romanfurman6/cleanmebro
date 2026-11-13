@@ -4,7 +4,7 @@
 
 use crate::kit::sync::LockExt;
 use super::{balanced, find, recent_jsonl, Billing, Contrib, Limit, LocalTokens, LogCache, ParseCtx, Provider, Shared, UsageEntry, UsageInfo};
-use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd, projects_dir, scan_projects, Project};
+use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd, projects_dir};
 use chrono::{DateTime, Datelike, Local, TimeZone};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -63,9 +63,6 @@ impl Provider for ClaudeCode {
         // <project>/<session>.jsonl, and subagents' own logs in
         // <project>/<session>/subagents/, which count toward the limits too
         self.cache.update(recent_jsonl(&projects_dir(), 3), usage_entry)
-    }
-    fn projects(&mut self) -> Vec<Project> {
-        scan_projects()
     }
     fn data_dir(&self) -> Option<PathBuf> {
         dirs::home_dir().map(|h| h.join(".claude"))
@@ -316,7 +313,6 @@ pub fn demo_info() -> UsageInfo {
         error: None,
         fetched: Some(Local::now()),
         local: demo_local(),
-        projects: demo_projects(),
         data_bytes: 5_400_000_000,
         billing: Billing::Subscription,
         source: "Live",
@@ -328,16 +324,6 @@ fn demo_local() -> LocalTokens {
     let home = dirs::home_dir().unwrap_or_default();
     let p = |rel: &str| home.join(rel).display().to_string();
     super::demo_local(&[("claude-opus-4-6", 6), ("claude-sonnet-4-6", 3), ("claude-haiku-4-5", 1)], &[&p("Projects/cmdmeow"), &p("Projects/site"), &p("work/api-gateway"), &p("notes")], 3.0)
-}
-
-/// Sample Claude Code projects for screenshots.
-fn demo_projects() -> Vec<Project> {
-    let home = dirs::home_dir().unwrap_or_default();
-    let ago = |h: u64| Some(std::time::SystemTime::now() - std::time::Duration::from_secs(h * 3600));
-    [("Projects/cmdmeow", true, 0, 1_200_000_000), ("Projects/site", true, 3, 640_000_000), ("notes", true, 50, 88_000_000), ("Projects/old-experiment", false, 900, 412_000_000)]
-        .into_iter()
-        .map(|(rel, exists, hours, bytes)| Project { folder: home.join(".claude/projects").join(rel.replace('/', "-")), cwd: Some(home.join(rel)), cwd_exists: exists, last_used: ago(hours), bytes })
-        .collect()
 }
 
 #[cfg(test)]

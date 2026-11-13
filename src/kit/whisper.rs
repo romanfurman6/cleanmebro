@@ -47,6 +47,14 @@ impl Model {
         }
     }
 
+    /// The name setup shows, the same one Dictation uses for Accurate.
+    pub fn setup_name(self) -> &'static str {
+        match self {
+            Model::Accurate => "Whisper turbo",
+            Model::Fast => "Whisper small",
+        }
+    }
+
     pub fn about(self) -> &'static str {
         match self {
             Model::Accurate => "Whisper large-v3 turbo · best for most voices and languages",

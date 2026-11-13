@@ -79,6 +79,21 @@ impl Perm {
         }
     }
 
+    /// Why the app asks, in a few words (the permission rows).
+    pub fn why(self) -> &'static str {
+        match self {
+            Perm::Screen => "Screenshots and recordings",
+            Perm::Accessibility => "Shortcuts and typing dictation",
+            Perm::FullDisk => "Finding files to clean up",
+            Perm::SystemEvents => "Reading your login items",
+            Perm::Microphone => "Dictation and recording voice",
+            Perm::Camera => "Camera in recordings",
+            Perm::Bluetooth => "AirPods and device batteries",
+            Perm::Notifications => "Alerts from your tools",
+            Perm::Own { .. } => "",
+        }
+    }
+
     /// What the button says before anything was asked.
     pub fn ask_label(self) -> &'static str {
         match self {
@@ -163,11 +178,21 @@ pub fn screen_at_launch() -> bool {
     *AT.get_or_init(imp::screen_preflight)
 }
 
+/// The argument a restarted copy gets, so it knows a restart already happened.
+const RELAUNCHED: &str = "--relaunched";
+
+/// This copy was started by [`relaunch`]. When Screen Recording still isn't
+/// on here, another restart won't help: the grant in System Settings is for
+/// another copy of the app (or not on at all), so say that instead.
+pub fn relaunched() -> bool {
+    std::env::args().any(|a| a == RELAUNCHED)
+}
+
 /// Start the app again a second from now (to pick up Screen Recording);
 /// the caller quits this copy.
 pub fn relaunch() {
     if let Some(app) = app_bundle() {
-        let cmd = format!("sleep 1; /usr/bin/open -n {}", sh_quote(&app.to_string_lossy()));
+        let cmd = format!("sleep 1; /usr/bin/open -n {} --args {RELAUNCHED}", sh_quote(&app.to_string_lossy()));
         let _ = std::process::Command::new("/bin/sh").args(["-c", &cmd]).spawn();
     }
 }
@@ -232,11 +257,14 @@ mod imp {
         }
         let list: Retained<NSArray<NSDictionary<NSString, AnyObject>>> = unsafe { Retained::from_raw(raw.cast()) }.expect("window list");
         let me = std::process::id() as i32;
-        let (k_pid, k_name, k_owner) = (NSString::from_str("kCGWindowOwnerPID"), NSString::from_str("kCGWindowName"), NSString::from_str("kCGWindowOwnerName"));
+        let (k_pid, k_name, k_owner, k_layer) = (NSString::from_str("kCGWindowOwnerPID"), NSString::from_str("kCGWindowName"), NSString::from_str("kCGWindowOwnerName"), NSString::from_str("kCGWindowLayer"));
         list.iter().any(|w| {
             let pid = w.objectForKey(&k_pid).and_then(|n| n.downcast::<NSNumber>().ok()).map(|n| n.intValue()).unwrap_or(me);
             let owner = w.objectForKey(&k_owner).and_then(|n| n.downcast::<NSString>().ok()).map(|s| s.to_string()).unwrap_or_default();
-            pid != me && owner != "Window Server" && owner != "Dock" && w.objectForKey(&k_name).is_some()
+            // ordinary app windows only: menu bar items and system overlays
+            // (other layers) can carry a name without Screen Recording
+            let layer = w.objectForKey(&k_layer).and_then(|n| n.downcast::<NSNumber>().ok()).map(|n| n.intValue()).unwrap_or(-1);
+            pid != me && layer == 0 && owner != "Window Server" && owner != "Dock" && w.objectForKey(&k_name).is_some()
         })
     }
 
