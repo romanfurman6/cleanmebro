@@ -21,6 +21,9 @@ jobs:
   release:
     # Roman's own M1 (self-hosted, see macos.yml). Only Roman pushes tags.
     runs-on: [self-hosted, m1-personal]
+    # Signing + notarization secrets live in the "release" environment, which
+    # waits for Roman's approval, so no other workflow can use them.
+    environment: release
     timeout-minutes: 60
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0" # see macos.yml
