@@ -1,30 +1,46 @@
-// Cmd+Meow home page: copy button and the live desktop in the first screen.
+// Cmd+Meow home page: the live desktop in the first screen, the app window's
+// tour, and the download button on phones.
 (() => {
-  // Copy
-  document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
-    const el = document.getElementById(b.dataset.copy), label = b.querySelector('span');
-    const done = () => { if (!label) return; const o = label.textContent; label.textContent = 'Copied'; setTimeout(() => label.textContent = o, 1500); };
-    const select = () => { const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); };
-    (navigator.clipboard ? navigator.clipboard.writeText(el.textContent) : Promise.reject()).then(done, select);
-  }));
-
   const $ = id => document.getElementById(id);
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Live numbers tick only while their block is on screen
+  const seen = el => {
+    const st = { on: false };
+    if (el) new IntersectionObserver(es => { st.on = es[0].isIntersecting; }).observe(el);
+    return () => st.on && !document.hidden;
+  };
 
   // Clock in the menu bar
   const clock = $('clock');
   const tick = () => { if (clock) clock.textContent = new Date().toLocaleString('en-US', { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', ''); };
   tick(); setInterval(tick, 15000);
 
+  // Phones can't install a Mac app: send the link to the Mac instead
+  const get = $('get');
+  if (get && matchMedia('(hover: none) and (pointer: coarse)').matches) {
+    const url = 'https://cmdmeow.com/';
+    get.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14.5V3.5M7.5 8L12 3.5 16.5 8M5.5 12v8.5h13V12"/></svg><span class="gl-tx">Send link to my Mac</span><span class="gl-ok">Link copied</span>';
+    get.href = url;
+    get.addEventListener('click', async e => {
+      e.preventDefault();
+      if (navigator.share) { try { await navigator.share({ title: 'Cmd+Meow', text: 'Cmd+Meow: free Mac app', url }); return; } catch (err) { if (err && err.name === 'AbortError') return; } }
+      try { await navigator.clipboard.writeText(url); } catch { return; }
+      get.classList.add('done'); setTimeout(() => get.classList.remove('done'), 1800);
+    });
+  }
+
   // Windows rise in one after another
-  if (!still) ['.hero', '.drop', '.float', '.awake-mini', '.clean-mini'].forEach((s, i) => {
+  if (!still) ['.hero', '.drop'].forEach((s, i) => {
     const el = document.querySelector(s); if (el) { el.classList.add('reveal'); el.style.animationDelay = (i * 0.12) + 's'; }
   });
-  // Ten tools: the app window. Sidebar picks a pane; it cycles until someone clicks
+
+  // The app window. When it first comes into view it walks through the tools once,
+  // then rests on Cleanup. Pointing at the window or clicking stops the walk for good.
   const app = $('app');
   if (app) {
     const navs = [...app.querySelectorAll('.nv[data-p]')], panes = [...app.querySelectorAll('.pane')];
-    let sel = 0, held = false;
+    const STEP = 3500;
+    let sel = 0, held = false, timer = 0, started = false;
     const show = i => {
       sel = i; const key = navs[i].dataset.p;
       navs.forEach((b, k) => { b.classList.toggle('on', k === i); b.setAttribute('aria-pressed', k === i); });
@@ -32,14 +48,29 @@
       const row = navs[i].parentElement; // on phones the tabs scroll sideways: keep the picked one in view
       if (row.scrollWidth > row.clientWidth) row.scrollTo({ left: navs[i].offsetLeft - row.offsetLeft - 12, behavior: 'smooth' });
     };
-    navs.forEach((b, i) => b.addEventListener('click', () => { held = true; show(i); }));
-    // play.js: anything done inside the window stops the cycling; other parts can open a tool
-    app.addEventListener('pointerdown', () => { held = true; });
-    window.cmShow = key => { const i = navs.findIndex(b => b.dataset.p === key); if (i >= 0) { held = true; show(i); } };
-    let inView = false;
-    new IntersectionObserver(es => { inView = es[0].isIntersecting; }, { threshold: 0.4 }).observe(app);
-    if (!still) setInterval(() => { if (!held && inView && !document.hidden) show((sel + 1) % navs.length); }, 4000);
+    const mark = i => { navs.forEach(b => b.classList.remove('tick')); if (i >= 0) { void navs[i].offsetWidth; navs[i].classList.add('tick'); } };
+    const stop = () => { held = true; clearTimeout(timer); mark(-1); };
+    const step = () => {
+      if (held) return;
+      if (document.hidden) { timer = setTimeout(step, 500); return; }
+      const next = sel + 1;
+      if (next === navs.length) { show(0); mark(-1); held = true; return; }
+      show(next); mark(next); timer = setTimeout(step, STEP);
+    };
+    app.style.setProperty('--tick', STEP + 'ms');
+    navs.forEach((b, i) => b.addEventListener('click', () => { stop(); show(i); }));
+    // play.js: anything done inside the window stops the walk; other parts can open a tool
+    app.addEventListener('pointerdown', stop);
+    app.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') stop(); });
+    app.addEventListener('focusin', stop);
+    window.cmShow = key => { const i = navs.findIndex(b => b.dataset.p === key); if (i >= 0) { stop(); show(i); } };
+    if (!still) new IntersectionObserver((es, io) => {
+      if (!es[0].isIntersecting || started || held) return;
+      started = true; io.disconnect(); mark(0); timer = setTimeout(step, STEP);
+    }, { threshold: 0.4 }).observe(app);
+
     // Live numbers inside the window
+    const live = seen(app);
     const hb = $('hc-bars'), hc = $('hc-cpu'), leg = $('hc-leg'), sbr = $('sb-rpm');
     let hl = 16;
     const fanTick = still => {
@@ -48,6 +79,7 @@
     };
     window.cmFanTick = () => fanTick(true);
     if (!still) setInterval(() => {
+      if (!live()) return;
       hl = Math.max(6, Math.min(70, hl + (Math.random() - 0.5) * 12));
       if (hb) { const b = hb.firstElementChild; hb.appendChild(b); const h = 30 + hl; b.style.height = h + '%'; b.className = h > 90 ? 'hot' : ''; }
       if (hc) hc.textContent = Math.round(hl);
@@ -58,110 +90,22 @@
 
   if (still) return;
 
-  // Hero: the app it replaces rolls over, letter by letter
-  const swap = $('swap');
-  if (swap) {
-    const names = ['CleanMyMac', 'Loom', 'CleanShot X', 'Paste', 'iStat Menus', 'Wispr Flow', 'DaisyDisk'];
-    const word = t => { const w = document.createElement('span'); w.className = 'w'; [...t].forEach(ch => { const c = document.createElement('span'); c.className = 'c'; c.textContent = ch; w.append(c); }); return w; };
-    let k = 0, cur = swap.querySelector('.w');
-    cur.replaceWith(cur = word(names[0]));
-    setInterval(() => {
-      if (document.hidden) return;
-      k = (k + 1) % names.length;
-      const out = cur, next = word(names[k]); out.classList.add('out');
-      [...out.children].forEach((c, i) => c.animate(
-        [{ transform: 'none', opacity: 1, filter: 'blur(0)' }, { transform: 'translateY(-55%) rotateX(80deg)', opacity: 0, filter: 'blur(6px)' }],
-        { duration: 380, delay: i * 22, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'forwards' }));
-      setTimeout(() => out.remove(), 380 + out.children.length * 22);
-      swap.append(next); cur = next;
-      [...next.children].forEach((c, i) => c.animate(
-        [{ transform: 'translateY(60%) rotateX(-85deg)', opacity: 0, filter: 'blur(6px)' }, { transform: 'none', opacity: 1, filter: 'blur(0)' }],
-        { duration: 620, delay: 140 + i * 28, easing: 'cubic-bezier(.2,1.4,.4,1)', fill: 'backwards' }));
-    }, 2400);
-  }
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-  // CPU in the menu bar and the panel, a new sample every 0.8s
-  const cpu = $('cpu'), mbCpu = $('mb-cpu'), rpm = $('rpm');
-  const cpuRing = cpu && cpu.closest('.rw2').querySelector('circle:last-of-type');
-  const C = cpuRing ? +cpuRing.getAttribute('stroke-dasharray') : 0;
+  // First screen: CPU in the menu bar and the Keep Awake timer, while it's on screen
+  const top = seen(document.querySelector('.desk'));
+  const mbCpu = $('mb-cpu');
   let load = 16;
   setInterval(() => {
+    if (!top() || !mbCpu) return;
     load = Math.max(6, Math.min(78, load + (Math.random() - 0.48) * 14));
-    const v = Math.round(load) + '%';
-    if (cpu) cpu.textContent = v;
-    if (mbCpu) mbCpu.textContent = v;
-    if (cpuRing) cpuRing.setAttribute('stroke-dashoffset', (C * (1 - load / 100)).toFixed(1));
-    if (rpm) rpm.textContent = (1800 + Math.round(load * 18)).toLocaleString('en-US').replace(',', ' ');
+    mbCpu.textContent = Math.round(load) + '%';
   }, 800);
-
-  // Keep Awake counter
   const awT = $('aw-t'), ring = $('aw-ring');
   let secs = 1 * 3600 + 24 * 60 + 10;
   setInterval(() => {
-    secs++;
+    secs++; // the timer keeps real time, only the drawing waits
+    if (!awT || !top()) return;
     const h = Math.floor(secs / 3600), m = Math.floor(secs / 60) % 60, s = secs % 60;
-    if (!awT) return;
     awT.textContent = `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    ring.setAttribute('stroke-dashoffset', (119.4 * (1 - (secs % 7200) / 7200)).toFixed(1));
+    if (ring) ring.setAttribute('stroke-dashoffset', (119.4 * (1 - (secs % 7200) / 7200)).toFixed(1));
   }, 1000);
-
-  // Clean Up: a scan counts up, then starts over
-  const sizes = [1900, 1300, 1000], total = $('cl-total'), state = $('cl-state');
-  const fmt = mb => mb >= 1000 ? (mb / 1000).toFixed(1) + ' GB' : Math.round(mb) + ' MB';
-  async function scan() {
-    const t0 = performance.now(), dur = 3200;
-    state.textContent = 'Scanning';
-    await new Promise(done => {
-      const step = now => {
-        const k = Math.min(1, (now - t0) / dur); let sum = 0;
-        sizes.forEach((s, i) => {
-          const part = Math.min(1, Math.max(0, k * 1.6 - i * 0.3)), v = s * part; sum += v;
-          $('cl-s' + i).textContent = fmt(v); $('cl-b' + i).style.width = (v / 1900 * 100) + '%';
-        });
-        total.textContent = fmt(sum);
-        k < 1 ? requestAnimationFrame(step) : done();
-      };
-      requestAnimationFrame(step);
-    });
-    state.textContent = 'Ready to clean';
-  }
-  if (total) (async () => { for (;;) { await scan(); await sleep(5000); } })();
-
-  // Capture: the cursor drags a selection, the shot lands at the top of Clipboard
-  const snap = $('snap'), dims = $('dims'), cur = $('cursor'), toast = $('toast'), clip = $('clip');
-  const visible = el => el && getComputedStyle(el).display !== 'none';
-  async function shoot() {
-    if (!visible(snap) || document.hidden) return;
-    const W = 220 + Math.round(Math.random() * 120), H = 120 + Math.round(Math.random() * 60);
-    snap.style.width = snap.style.height = '0px'; snap.classList.add('on');
-    cur.style.transition = 'none'; cur.style.transform = 'translate(-40px,-30px)'; await sleep(50);
-    cur.style.transition = ''; cur.style.transform = 'translate(0,0)'; await sleep(700);
-    const t0 = performance.now(), dur = 1100;
-    await new Promise(done => {
-      const step = now => {
-        const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
-        const w = Math.round(W * e), h = Math.round(H * e);
-        snap.style.width = w + 'px'; snap.style.height = h + 'px';
-        cur.style.transition = 'none'; cur.style.transform = `translate(${w}px,${h}px)`;
-        dims.textContent = `${w * 2} × ${h * 2}`;
-        k < 1 ? requestAnimationFrame(step) : done();
-      };
-      requestAnimationFrame(step);
-    });
-    cur.style.transition = '';
-    snap.classList.add('flash'); await sleep(400); snap.classList.remove('flash');
-    toast.classList.add('on');
-    const row = document.createElement('div');
-    row.className = 'cp new';
-    row.innerHTML = `<span class="sq" style="background:linear-gradient(135deg,#3b4a6b,#1b2030)"></span><span class="t">Screenshot ${W * 2} × ${H * 2}</span><kbd>⌘1</kbd>`;
-    clip.querySelectorAll('.cp').forEach(c => c.classList.remove('cur'));
-    row.classList.add('cur'); clip.prepend(row);
-    const rows = clip.querySelectorAll('.cp');
-    rows.forEach((c, i) => { const k = c.querySelector('kbd'); if (k) k.textContent = '⌘' + (i + 1); });
-    if (rows.length > 4) rows[rows.length - 1].remove();
-    await sleep(1600);
-    toast.classList.remove('on'); snap.classList.remove('on'); cur.style.transform = 'translate(-40px,-30px)';
-  }
-  if (snap) (async () => { await sleep(1800); for (;;) { await shoot(); await sleep(3800); } })();
 })();

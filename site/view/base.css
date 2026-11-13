@@ -1,25 +1,57 @@
-/* Shared base for the player page (dark, D6 tokens). */
+/* Shared base for the share page: B3 Moss & Lime, the same look as the app and the home page.
+   Follows the system appearance. The player's own controls sit on the video and stay dark. */
 :root {
-  --bg: #0F1013;
-  --win: #1E1E20;
-  --card: #151517;
+  --bg: #070D07;
+  --glow: radial-gradient(120% 70% at 50% -10%, #22401D 0%, #132610 38%, #0A150A 70%, #070D07 100%);
+  --win: #0F1C0D;
+  --card: rgba(255,255,255,.055);
   --line: rgba(255,255,255,.08);
-  --text: rgba(255,255,255,.92);
-  --dim: rgba(255,255,255,.62);
-  --faint: rgba(255,255,255,.5);
-  --blue: #0A84FF;
-  --blue-hi: #4BA3FF;
+  --text: #FFFFFF;
+  --dim: rgba(255,255,255,.66);
+  --faint: rgba(255,255,255,.6);
+  --fill: rgba(255,255,255,.08);
+  --fill2: rgba(255,255,255,.14);
+  --acc: #C8F05A;
+  --acc-hi: #D4F576;
+  --on-acc: #0E1405;
+  --acc-soft: rgba(200,240,90,.16);
+  --acc-ink: #D9F78A;
+  --focus: #C8F05A;
+  --green: #C8F05A;
   --amber: #E8A33D;
-  --orange: #FF9F0A;
-  --green: #30D158;
+  --shadow: 0 32px 64px rgba(0,0,0,.45);
   --r: 12px;
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font: "Geist", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
   --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --w: 400;
   color-scheme: dark;
 }
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #D9E8C8;
+    --glow: radial-gradient(120% 70% at 50% -10%, #FFFFFF 0%, #EAF2DF 45%, #D9E8C8 100%);
+    --win: #F7FAF2;
+    --card: rgba(255,255,255,.75);
+    --line: rgba(20,24,26,.1);
+    --text: #14181A;
+    --dim: rgba(20,24,26,.7);
+    --faint: rgba(20,24,26,.66);
+    --fill: rgba(20,24,26,.06);
+    --fill2: rgba(20,24,26,.11);
+    --acc: #A8D83A;
+    --acc-hi: #B6E24E;
+    --acc-soft: rgba(125,181,25,.18);
+    --acc-ink: #3F6B0A;
+    --focus: #5A8A12;
+    --green: #3F6B0A;
+    --shadow: 0 24px 48px rgba(40,60,20,.18);
+    --w: 500;
+    color-scheme: light;
+  }
+}
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--font); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
-a { color: var(--blue-hi); text-decoration: none; }
+body { margin: 0; background: var(--bg) var(--glow) no-repeat; background-attachment: fixed; color: var(--text); font: var(--w) 16px/1.5 var(--font); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+a { color: var(--acc-ink); text-decoration: none; }
 a:hover { text-decoration: underline; }
 h1, h2, p { margin: 0; }
 code, .mono { font-family: var(--mono); font-size: .875em; }
@@ -27,36 +59,22 @@ code, .mono { font-family: var(--mono); font-size: .875em; }
 .dim { color: var(--dim); }
 .cap { font-size: 12px; line-height: 16px; color: var(--faint); }
 .sub { color: var(--dim); font-size: 15px; line-height: 22px; }
-.lead { font-size: 15px; font-weight: 600; line-height: 20px; }
-.big { font-size: 34px; line-height: 40px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.n22 { font-size: 22px; font-weight: 600; line-height: 26px; letter-spacing: -.01em; }
-.t { font-size: 13px; font-weight: 600; }
-.center { text-align: center; }
-.wrap { max-width: 1120px; margin: 0 auto; padding-left: 32px; padding-right: 32px; }
-.row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .ic { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .ph { fill: currentColor; flex: none; }
-.ic.b { color: var(--blue); }
 
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 32px; padding: 0 16px; border-radius: 8px; border: 0;
-  background: rgba(255,255,255,.12); color: #fff; font: 500 14px var(--font); cursor: pointer; white-space: nowrap; text-decoration: none !important; transition: background .15s, opacity .3s; }
-.btn:hover { background: rgba(255,255,255,.18); }
-.btn.p { background: var(--blue); font-weight: 600; }
-.btn.p:hover { background: #2490FF; }
-.btn.l { height: 48px; padding: 0 24px; font-size: 16px; border-radius: 12px; }
-.btn.sm { height: 28px; padding: 0 12px; font-size: 13px; border-radius: 7px; }
-.btn.xs { height: 22px; padding: 0 8px; font-size: 12px; border-radius: 6px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 32px; padding: 0 16px; border-radius: 10px; border: 0;
+  background: var(--fill2); color: var(--text); font: 500 14px var(--font); cursor: pointer; white-space: nowrap; text-decoration: none !important; transition: background .15s, opacity .3s; }
+.btn:hover { background: color-mix(in srgb, var(--fill2) 100%, var(--text) 8%); }
+.btn.p { background: var(--acc); color: var(--on-acc); box-shadow: 0 6px 18px rgba(200,240,90,.2), inset 0 -2px 0 rgba(0,0,0,.18); }
+.btn.p:hover { background: var(--acc-hi); }
+.btn.sm { height: 28px; padding: 0 12px; font-size: 13px; border-radius: 8px; }
+.btn.xs { height: 24px; padding: 0 8px; font-size: 12px; border-radius: 6px; }
 .btn.off { opacity: .35; }
-.btn:focus-visible, a:focus-visible, button:focus-visible { outline: 2px solid var(--blue-hi); outline-offset: 2px; }
+.btn:focus-visible, a:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 kbd, .kc { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 5px;
-  background: rgba(255,255,255,.1); box-shadow: inset 0 -1px 0 rgba(0,0,0,.4); font: 12px var(--font); color: rgba(255,255,255,.8); }
+  background: var(--fill2); box-shadow: inset 0 -1px 0 rgba(0,0,0,.25); font: 12px var(--font); color: var(--dim); }
 
 /* Header */
-.top { display: flex; align-items: center; gap: 24px; height: 64px; }
-.brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; font-size: 15px; }
+.brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-weight: 500; font-size: 15px; }
 .brand:hover { text-decoration: none; }
-.mark { width: 22px; height: 22px; }
-.top nav { margin-left: auto; display: flex; gap: 24px; font-size: 14px; }
-.top nav a { color: var(--dim); }
-.top nav a:hover { color: var(--text); text-decoration: none; }
-
+.mark { width: 22px; height: 22px; color: var(--text); }
