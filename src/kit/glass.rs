@@ -297,12 +297,40 @@ pub fn rounded_points(rect: Rect, r: f32) -> Vec<Pos2> {
 /// blur behind it shows through a little; `opaque` (screenshots)
 /// paints it solid.
 pub fn backdrop(painter: &Painter, rect: Rect, radius: f32, opaque: bool, _t: f64) {
-    let stops: &[(f32, Color32)] = if is_light() {
+    let light = is_light();
+    let alpha = if opaque { 1.0 } else { backdrop_alpha() };
+    // the mesh only changes with the window's size and the theme: build it
+    // once, not every frame (it's ~1.4k vertices of gradient math)
+    type Key = ([u32; 5], bool, u32);
+    static CACHE: std::sync::Mutex<Vec<(Key, std::sync::Arc<egui::epaint::Mesh>)>> = std::sync::Mutex::new(Vec::new());
+    let key: Key = ([rect.min.x.to_bits(), rect.min.y.to_bits(), rect.max.x.to_bits(), rect.max.y.to_bits(), radius.to_bits()], light, alpha.to_bits());
+    let mesh = {
+        let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
+            let hit = cache.remove(i);
+            let mesh = hit.1.clone();
+            cache.push(hit);
+            mesh
+        } else {
+            let mesh = std::sync::Arc::new(backdrop_mesh(rect, radius, light, alpha));
+            // a few windows (panel, app window, setup), newest last
+            if cache.len() >= 4 {
+                cache.remove(0);
+            }
+            cache.push((key, mesh.clone()));
+            mesh
+        }
+    };
+    painter.add(Shape::Mesh(mesh));
+    painter.rect_stroke(rect, radius, Stroke::new(1.0, white(HAIRLINE_STRONG)), StrokeKind::Inside);
+}
+
+fn backdrop_mesh(rect: Rect, radius: f32, light: bool, alpha: f32) -> egui::epaint::Mesh {
+    let stops: &[(f32, Color32)] = if light {
         &[(0.0, hex(0xFFFFFF)), (0.55, hex(0xEAF2DF)), (1.0, hex(0xD9E8C8))]
     } else {
         &[(0.0, hex(0x22401D)), (0.35, hex(0x132610)), (0.7, hex(0x0A150A)), (1.0, hex(0x070D07))]
     };
-    let alpha = if opaque { 1.0 } else { backdrop_alpha() };
     let glow = Pos2::new(rect.center().x, rect.top());
     // the glow is an ellipse: wide across, reaching the bottom edge
     let (rx, ry) = (rect.width() * 0.75, rect.height() * 1.05);
@@ -341,8 +369,7 @@ pub fn backdrop(painter: &Painter, rect: Rect, radius: f32, opaque: bool, _t: f6
             mesh.add_triangle(a + i, b + j, a + j);
         }
     }
-    painter.add(Shape::mesh(mesh));
-    painter.rect_stroke(rect, radius, Stroke::new(1.0, white(HAIRLINE_STRONG)), StrokeKind::Inside);
+    mesh
 }
 
 /// How much the backdrop covers what's behind live windows: solid by
@@ -583,7 +610,7 @@ fn ambient_state(ctx: &egui::Context) -> (f64, bool) {
         if moved {
             a.input = now;
         }
-        let live = now - a.input < AMBIENT_REST;
+        let live = now - a.input < ambient_tuning().1;
         if live && now > a.seen {
             // a long gap (window was hidden) doesn't jump the loops ahead
             a.clock += (now - a.seen).min(0.1);
@@ -605,8 +632,18 @@ pub fn ambient_clock(ctx: &egui::Context) -> f64 {
 pub fn ambient(ctx: &egui::Context) {
     if ambient_state(ctx).1 {
         let now = ctx.input(|i| i.time);
-        ctx.request_repaint_after(std::time::Duration::from_secs_f64(next_beat(now, AMBIENT_FPS)));
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(next_beat(now, ambient_tuning().0)));
     }
+}
+
+/// (fps, rest seconds) for decorative loops. `CMDMEOW_AMBIENT_FPS` and
+/// `CMDMEOW_AMBIENT_REST` override them, to measure what a frame costs.
+fn ambient_tuning() -> (f64, f64) {
+    static T: std::sync::OnceLock<(f64, f64)> = std::sync::OnceLock::new();
+    *T.get_or_init(|| {
+        let var = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse::<f64>().ok()).filter(|v| *v > 0.0).unwrap_or(d);
+        (var("CMDMEOW_AMBIENT_FPS", AMBIENT_FPS), var("CMDMEOW_AMBIENT_REST", AMBIENT_REST))
+    })
 }
 
 /// Seconds from `now` to the next tick of a `fps` clock (never under 4 ms).
