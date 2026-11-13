@@ -674,17 +674,19 @@
   })();
 
 
-  // One bar: the menu bar icons jump into Cmd+Meow, each becomes a live widget
+  // One bar: the menu bar icons jump into Cmd+Meow, each becomes a live widget.
+  // Plays once when it comes into view and stays on the open panel; the round button plays it again.
   (() => {
     const bars = document.getElementById('bars'); if (!bars) return;
-    const n = document.getElementById('bars-n'), ap = $$('.mi2.ap', bars), wg = $$('.wg', bars);
+    const again = document.getElementById('bars-again'), ap = $$('.mi2.ap', bars), wg = $$('.wg', bars);
     ap.forEach((ic, k) => ic.style.setProperty('--k', k));
     const wOf = i => wg.find(w => +w.dataset.i === i);
-    const label = async t => { n.classList.add('flip'); await sleep(300); n.textContent = t; n.classList.remove('flip'); };
-    const reset = () => { bars.className = 'bars'; ap.forEach(ic => ic.classList.remove('out')); wg.forEach(w => w.classList.remove('on')); n.textContent = '11 apps'; };
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { bars.classList.add('b-one', 'b-open'); ap.forEach(ic => ic.classList.add('out')); wg.forEach(w => w.classList.add('on')); n.textContent = '1 app'; return; }
-    const ORDER = [5, 0, 9, 3, 7, 2, 10, 6, 1, 8, 4];
-    let gen = 0, on = false;
+    const end = () => { bars.className = 'bars b-one b-open b-done'; ap.forEach(ic => ic.classList.add('out')); wg.forEach(w => w.classList.add('on')); };
+    const reset = () => { bars.className = 'bars'; ap.forEach(ic => ic.classList.remove('out')); wg.forEach(w => w.classList.remove('on')); };
+    const clearFlying = () => $$('.mi2.fly', document).forEach(f => f.parentNode && f.parentNode.removeChild(f));
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { end(); return; }
+    const ORDER = [7, 0, 12, 5, 11, 2, 13, 8, 1, 10, 4, 9, 3, 6];
+    let gen = 0, state = 'idle';
     const fly = (ic, w, i) => {
       const a = ic.getBoundingClientRect(), b = $('.wi', w).getBoundingClientRect();
       const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
@@ -696,28 +698,30 @@
         { transform: `translate(${dx * 0.35 + side}px, ${lift}px) scale(1.7) rotate(${tilt}deg)`, offset: 0.32, easing: 'cubic-bezier(.5,0,.3,1)' },
         { transform: `translate(${dx}px, ${dy}px) scale(1.05) rotate(0deg)` }
       ], { duration: 820 + (i * 53) % 220, fill: 'forwards' });
-      return new Promise(r => { an.onfinish = () => { f.remove(); w.classList.add('on'); r(); }; });
+      return new Promise(r => { an.onfinish = () => { if (f.parentNode) f.parentNode.removeChild(f); w.classList.add('on'); r(); }; });
     };
+    // Starts on the menu bar full of icons (they wiggle at once), ends on the panel and stays there
     const play = async id => {
-      reset(); await sleep(700); if (id !== gen) return;
-      bars.classList.add('b-wig'); await sleep(600); if (id !== gen) return;
+      again.hidden = true; reset(); bars.classList.add('b-wig'); await sleep(1100); if (id !== gen) return;
       bars.classList.add('b-one'); await sleep(420); bars.classList.add('b-open'); await sleep(380); if (id !== gen) return;
       bars.classList.remove('b-wig');
       const all = []; bars.classList.add('b-eat');
       for (const [k, i] of ORDER.entries()) {
         if (id !== gen) return;
         all.push(fly(ap[i], wOf(i), k));
-        await sleep(70 + (k * 29) % 70);
+        await sleep(60 + (k * 29) % 60);
       }
       await Promise.all(all); bars.classList.remove('b-eat'); if (id !== gen) return;
-      label('1 app');
-      await sleep(2600); if (id !== gen) return;
-      bars.classList.remove('b-open'); await sleep(1000); if (id === gen) play(id);
+      bars.classList.add('b-done'); again.hidden = false; state = 'done';
     };
+    const run = () => { state = 'run'; play(++gen); };
+    // Scrolled away mid-way: jump to the end, so it never waits half-done
+    const finish = () => { gen++; clearFlying(); end(); again.hidden = false; state = 'done'; };
     new IntersectionObserver(es => {
-      if (es[0].isIntersecting) { if (!on) { on = true; play(++gen); } }
-      else { on = false; gen++; $$('.mi2.fly').forEach(f => f.remove()); reset(); }
+      if (es[0].isIntersecting && state === 'idle') run();
+      else if (!es[0].isIntersecting && state === 'run') finish();
     }, { threshold: 0.45 }).observe(bars);
+    again.addEventListener('click', run);
   })();
 
   document.querySelectorAll('[data-go]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); window.cmShow && window.cmShow(a.dataset.go); app.scrollIntoView({ behavior: 'smooth', block: 'center' }); }));
@@ -728,16 +732,20 @@
   document.querySelectorAll('.app.pnl .wd').forEach(w => {
     const k = (w.querySelector('.dm, .kh b, .cl3 > span:last-child') || {}).textContent;
     const to = w.dataset.to || go[(k || '').trim()]; if (!to) return;
-    w.classList.add('link'); w.setAttribute('role', 'button'); w.tabIndex = 0;
+    w.classList.add('link');
     const open = () => { window.cmShow && window.cmShow(to); app.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
-    w.addEventListener('click', open); w.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    w.addEventListener('click', open);
   });
-  // Keyboard: span controls in the window act like buttons
+  // Keyboard: Tab walks the sidebar tabs only. The mock controls inside a pane are for the mouse,
+  // so the page doesn't take ~30 extra stops on its way to the footer.
   const CTL = '.rb, .act, .btn2, .gch, .seg > i, .tg, .fc, .stb, .fr .ck, .rbt, .tha i, .lk, .dots, .dwl i, .pv, .cbk, .smn span, .cdel, .akey, .usort, .cpr, .th, [role=button]';
-  const arm = () => $$(CTL, app).forEach(c => {
-    if (c.tabIndex < 0) { c.tabIndex = 0; c.setAttribute('role', c.classList.contains('tg') ? 'switch' : 'button'); }
-    if (c.classList.contains('tg')) c.setAttribute('aria-checked', String(!c.classList.contains('off')));
-  });
+  const arm = () => {
+    $$(CTL, app).forEach(c => {
+      if (!c.hasAttribute('role')) c.setAttribute('role', c.classList.contains('tg') ? 'switch' : 'button');
+      if (c.classList.contains('tg')) c.setAttribute('aria-checked', String(!c.classList.contains('off')));
+    });
+    $$('.pane button, .pane input, .pane select, .pane textarea, .pane a[href], .pane [tabindex]', app).forEach(c => { if (c.tabIndex !== -1) c.tabIndex = -1; });
+  };
   let armQ = 0; arm(); new MutationObserver(() => { if (!armQ) armQ = requestAnimationFrame(() => { armQ = 0; arm(); }); }).observe(app, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
   app.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches(CTL)) { e.preventDefault(); e.target.click(); } });
 })();

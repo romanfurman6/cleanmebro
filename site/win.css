@@ -456,7 +456,7 @@
 .pw .act.sm { flex: none; height: 24px; padding: 0 8px; font-size: 11.5px; }
 .pw .tr { flex: none; }
 .pw.aw { align-items: center; justify-content: center; gap: 4px; } .pw.aw .rg > .i { color: var(--lav); } .pw.aw b { font-size: 12px; }
-.clp { display: flex; flex-direction: column; justify-content: space-between; } .clp .kh { margin-bottom: 2px; }
+.clp { display: flex; flex-direction: column; }
 .pcr { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 6px; border-radius: 8px; font-size: 12px; }
 .pcr:nth-child(2) { background: rgba(255,255,255,.06); }
 .ct { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; font-size: 10px; font-weight: 600; color: var(--g); background: color-mix(in srgb, var(--g) 16%, transparent); }
@@ -661,7 +661,17 @@
 /* Hero panel spacing: header then rows, same rhythm in Clipboard, AI Usage and Display */
 .clp, .lim, .dsp { justify-content: space-between; gap: 0; } .clp .kh, .lim .kh, .dsp .kh { margin: 0; align-items: center; }
 .clp, .lim, .dsp { padding: 10px; } .clp .kh, .lim .kh, .dsp .kh { height: 16px; line-height: 16px; }
+/* Clipboard: same 8px header gap as AI Usage, four rows packed evenly */
+.clp { justify-content: flex-start; gap: 2px; } .clp .kh { flex: none; margin-bottom: 6px; } .clp .pcr { flex: none; height: 28px; }
 .pcr { margin: 0 -6px; } .pcr .ct { padding: 0; gap: 0; }
 .lim, .dsp { justify-content: flex-start; } .lim .kh, .dsp .kh { margin-bottom: 8px; } .lim .lr + .lr, .dsp .lr + .lr { margin-top: 4px; } .lim .lr, .dsp .lr { height: 14px; }
 .pw .pi { align-self: flex-start; }
 .rdot { top: -3px; right: -4px; animation: none; box-shadow: 0 0 0 2px rgba(20,24,20,.9); }
+
+/* Phones: the fan dial fits its card and the rpm sits under it; filters keep whole chips */
+@media (max-width: 600px) {
+  .switcher .fdl { flex: none; transform: scale(.8); margin: -10px 0 -20px; }
+  .switcher .frp { margin-top: 6px; } .switcher .frp b { font-size: 22px; }
+  .switcher .blk > span { white-space: nowrap; font-size: 10.5px; }
+  .switcher .ufl .srch2 { width: 140px; } .switcher .ufl .fc:nth-child(n+4), .switcher .ufl .usort { display: none; }
+}
