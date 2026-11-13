@@ -553,6 +553,21 @@ pub fn checkbox(ui: &mut Ui, rect: Rect, id: egui::Id, on: bool, enabled: bool) 
     resp
 }
 
+/// One choice of several (a filled dot when picked), the size of a checkbox.
+pub fn radio(ui: &mut Ui, rect: Rect, id: egui::Id, on: bool, enabled: bool) -> Response {
+    let resp = ui.interact(rect.expand(3.0), id, if enabled { Sense::click() } else { Sense::hover() });
+    let p = ui.painter();
+    let c = rect.center();
+    let r = rect.width().min(rect.height()) / 2.0;
+    if on && enabled {
+        p.circle_filled(c, r, BLUE());
+        p.circle_filled(c, r * 0.4, ON_ACTION);
+    } else {
+        stroke_circle(p, c, r - 0.75, Stroke::new(1.5, white(if enabled { 90 } else { 30 })));
+    }
+    resp
+}
+
 /// A small rounded status chip ("Safe", "Ask", "Kept"). `colors` = (fill, text).
 /// Returns the chip's rect.
 pub fn chip(p: &Painter, pos: Pos2, align: Align2, label: &str, colors: (Color32, Color32)) -> Rect {

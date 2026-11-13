@@ -3,6 +3,7 @@
 
 use crate::kit::sync::LockExt;
 use super::engine::{self as cleanup, Group, Item, Phase, Verdict, Who};
+use super::agent::{self, Agent};
 use super::Cleanup as App;
 use crate::core::tool::{Action, Cx};
 use crate::kit::claude_code::{self as cc, Availability};
@@ -30,6 +31,15 @@ fn claude_now(app: &App) -> Availability {
     } else {
         cc::availability()
     }
+}
+
+/// The agent that will check the paths, if it can right now.
+fn ai_agent(app: &App) -> Option<Agent> {
+    let ok = match app.agent {
+        Agent::Claude => claude_now(app).ready(),
+        a => app.demo || a.ready(),
+    };
+    (app.use_ai && ok).then_some(app.agent)
 }
 
 /// A calm note in place of the Claude switch: what's missing, how to turn it
@@ -100,7 +110,8 @@ fn short_path(p: &std::path::Path) -> String {
 fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let avail = claude_now(app);
-    let has_claude = avail.ready();
+    // the note only matters when Claude is the one picked
+    let has_claude = avail.ready() || app.agent != Agent::Claude;
     let p = ui.painter().clone();
     page_header(&p, r, "Cleanup", "", TEXT_DIM());
     let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - sp::L));
@@ -113,22 +124,23 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     glass_card(&p, bar_card, R_CARD, 0.0, false);
     let di = bar_card.shrink2(Vec2::new(sp::L, 0.0));
     let cy = di.center().y;
-    // right to left: Scan, the switch, a divider, the free space
+    // right to left: Scan, which agent checks, the AI switch, a divider, the free space
     let scan_w = button_width(&p, "Scan", BTN_PRIMARY).max(96.0);
     let scan_r = Rect::from_min_size(Pos2::new(di.right() + 4.0 - scan_w, cy - 17.0), Vec2::new(scan_w, 34.0));
     if pill_button(ui, scan_r, "Scan", BTN_PRIMARY, true).clicked() {
-        cleanup::start_scan(app.clean.clone(), ctx.clone(), app.use_ai && has_claude);
+        cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
     }
     let mut right = scan_r.left() - sp::L;
-    if has_claude {
-        let label = "Check with AI";
-        let lr = p.text(Pos2::new(right, cy), Align2::RIGHT_CENTER, label, ty::body(), TEXT());
-        let sw = Rect::from_min_size(Pos2::new(lr.left() - sp::S - 30.0, cy - 9.0), Vec2::new(30.0, 18.0));
-        if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
-            app.use_ai = !app.use_ai;
-        }
-        right = sw.left() - sp::L;
+    // which agent is picked once, in setup and Settings › AI Usage
+    if !app.demo {
+        app.agent = agent::main();
     }
+    let lr = p.text(Pos2::new(right, cy), Align2::RIGHT_CENTER, format!("Check with {}", app.agent.name()), ty::body(), TEXT());
+    let sw = Rect::from_min_size(Pos2::new(lr.left() - sp::S - 30.0, cy - 9.0), Vec2::new(30.0, 18.0));
+    if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
+        app.use_ai = !app.use_ai;
+    }
+    right = sw.left() - sp::L;
     p.line_segment([Pos2::new(right, cy - 14.0), Pos2::new(right, cy + 14.0)], Stroke::new(1.0, CARD_EDGE()));
     right -= sp::L;
     icon(&p, Icon::Disk, Rect::from_center_size(Pos2::new(di.left() + 9.0, cy), Vec2::splat(18.0)), TEXT_SOFT());
@@ -142,7 +154,7 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
 
     // a note when Claude is missing, at the bottom
     let mut chart_bottom = body.bottom();
-    if !has_claude {
+    if !has_claude && app.use_ai {
         let h = claude_note_height(&p, body.width(), avail);
         claude_note(ui, Pos2::new(body.left(), body.bottom() - h), body.width(), avail, tcx);
         chart_bottom -= h + sp::M;
@@ -224,18 +236,31 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
     let st = app.clean.lock_ok().clone();
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time);
+    let who = st.agent.map(|a| a.name()).unwrap_or("AI");
     let sub = match phase {
-        Phase::Judging => "Step 2 of 2 · Checking with AI",
-        Phase::Cleaning => "Cleaning…",
-        _ if !st.with_ai => "Looking for junk",
-        _ => "Step 1 of 2 · Looking for junk",
+        Phase::Judging => format!("Step 2 of 2 · Checking with {who}"),
+        Phase::Cleaning => "Cleaning…".into(),
+        _ if !st.with_ai => "Looking for junk".into(),
+        _ => "Step 1 of 2 · Looking for junk".into(),
     };
-    let btns = page_header(&p, r, "Cleanup", sub, TEXT_DIM());
-    if phase != Phase::Cleaning {
-        let w = button_width(&p, "Stop", BTN_SECONDARY).max(64.0);
+    let btns = page_header(&p, r, "Cleanup", &sub, TEXT_DIM());
+    // Stop: back to the start; Skip: the results now, by the built-in rules
+    let stop = match phase {
+        Phase::Scanning => Some("Stop"),
+        Phase::Judging => Some("Skip"),
+        _ => None,
+    };
+    if let Some(label) = stop {
+        let w = button_width(&p, label, BTN_SECONDARY).max(64.0);
         let sr = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
-        if pill_button(ui, sr, "Stop", BTN_SECONDARY, true).clicked() {
-            app.clean.lock_ok().stop = true;
+        if pill_button(ui, sr, label, BTN_SECONDARY, true).clicked() {
+            if phase == Phase::Judging {
+                cleanup::skip_ai(&app.clean);
+            } else {
+                cleanup::stop_scan(&app.clean);
+            }
+            ctx.request_repaint();
+            return;
         }
     }
 
@@ -278,7 +303,7 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
     // what it's doing right now
     match phase {
         Phase::Judging => {
-            let line = if st.ai_status.is_empty() { "Asking Claude…".to_string() } else { st.ai_status.clone() };
+            let line = if st.ai_status.is_empty() { format!("Asking {who}…") } else { st.ai_status.clone() };
             text_fit(&p, Pos2::new(x0, y + 7.0), Align2::LEFT_CENTER, &line, font(12.0), TEXT_FAINT(), x1 - x0);
         }
         _ => {
@@ -333,7 +358,6 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         let g = app.clean.lock_ok();
         (g.total(), g.pending_questions(), g.ai_used, g.ai_error.clone(), g.selected_bytes())
     };
-    let avail = claude_now(app);
     let mut sub = format!("{} found", human_bytes(total));
     if let Some(e) = &ai_error {
         sub = format!("{sub} · {e}");
@@ -343,7 +367,8 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let w = button_width(&p, "Scan again", BTN_SECONDARY);
     let sr = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
     if pill_button(ui, sr, "Scan again", BTN_SECONDARY, true).clicked() {
-        cleanup::start_scan(app.clean.clone(), ctx.clone(), app.use_ai && avail.ready());
+        // back to the start screen, where the scan can be set up and started
+        cleanup::stop_scan(&app.clean);
         return;
     }
     let hidden = app.clean.lock_ok().hidden_kept;
@@ -353,7 +378,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         let kr = Rect::from_min_max(Pos2::new(sr.left() - 8.0 - kw, btns.top()), Pos2::new(sr.left() - 8.0, btns.bottom()));
         if pill_button(ui, kr, &label, BTN_SECONDARY, true).on_hover_text("You chose to keep these before, so they are hidden. Show them again and scan.").clicked() {
             cleanup::forget_kept();
-            cleanup::start_scan(app.clean.clone(), ctx.clone(), app.use_ai && avail.ready());
+            cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
             return;
         }
     }
@@ -473,12 +498,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
             answer_items(app, &asks, v);
         }
         let area = Rect::from_min_max(Pos2::new(lc.left(), lc.top() + LABEL_H + sp::S), lc.max);
-        scroll_rows(ui, area, format!("asks-{:?}", app.clean_group), asks.len(), 60.0, sp::S, |ui, k, rr| ask_card(app, ui, asks[k], rr));
+        scroll_rows(ui, area, format!("asks-{:?}", app.clean_group), asks.len(), ASK_H, sp::S, |ui, k, rr| ask_card(app, ui, asks[k], rr));
     }
 
     // right: what will go (Safe) and what stays (Kept)
     if right.is_positive() {
-        let row_h = 36.0;
+        let row_h = sp::ROW_H;
         let need = |n: usize| if n == 0 { 0.0 } else { LABEL_H + sp::S + n as f32 * row_h + 8.0 };
         let (mut safe_h, mut kept_h) = (need(safe.len()), need(kept.len()));
         let gap = if safe_h > 0.0 && kept_h > 0.0 { sp::L } else { 0.0 };
@@ -583,36 +608,53 @@ fn answer_items(app: &mut App, idx: &[usize], v: Verdict) {
     }
 }
 
-/// Hover: the reason; double click: show in Finder.
-fn row_extras(ui: &mut Ui, rr: Rect, it: &Item) {
+/// A question card: name, path and the reason on three lines.
+const ASK_H: f32 = 78.0;
+
+/// Hover: a light highlight, and the path when the row doesn't show it;
+/// double click: show in Finder.
+fn row_extras(ui: &mut Ui, rr: Rect, it: &Item, path_tip: bool) {
     let resp = ui.interact(rr, ui.scope_id().with(("row", &it.path)), Sense::click());
     if resp.hovered() {
         ui.painter().rect_filled(rr, R_SMALL, white(6));
     }
-    let resp = resp.on_hover_text(format!("{}\n{}", short_path(&it.path), it.reason));
+    let resp = if path_tip { resp.on_hover_text(short_path(&it.path)) } else { resp };
     if resp.double_clicked() {
         let _ = std::process::Command::new("open").arg("-R").arg(&it.path).spawn();
     }
 }
 
-/// One question: name and size, the path, Allow and Keep.
+/// The reason on one line; the whole of it on hover when it doesn't fit.
+fn reason_line(ui: &mut Ui, pos: Pos2, align: Align2, it: &Item, color: Color32, max_w: f32) {
+    if it.reason.is_empty() {
+        return;
+    }
+    let p = ui.painter().clone();
+    let r = text_fit(&p, pos, align, &it.reason, ty::label(), color, max_w);
+    if p.layout_no_wrap(it.reason.clone(), ty::label(), color).size().x > max_w {
+        let _ = ui.interact(r, ui.scope_id().with(("why", &it.path)), Sense::hover()).on_hover_text(&it.reason);
+    }
+}
+
+/// One question: name and size, the path, the reason, Allow and Keep.
 fn ask_card(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let it = app.clean.lock_ok().items[i].clone();
     let p = ui.painter().clone();
     glass_card(&p, rr, R_CARD, 0.0, false);
-    row_extras(ui, rr, &it);
+    row_extras(ui, rr, &it, false);
     let kw = button_width(&p, "Keep", BTN_SECONDARY);
     let aw = button_width(&p, "Allow", BTN_PRIMARY);
     let kr = Rect::from_min_size(Pos2::new(rr.right() - sp::M - kw, rr.center().y - 14.0), Vec2::new(kw, 28.0));
     let ar = Rect::from_min_size(Pos2::new(kr.left() - sp::S - aw, kr.top()), Vec2::new(aw, 28.0));
     let tx = rr.left() + sp::L;
     let tw = ar.left() - sp::M - tx;
-    let t = text_fit(&p, Pos2::new(tx, rr.top() + 12.0), Align2::LEFT_TOP, &it.title, ty::title(), TEXT(), tw - 70.0);
+    let t = text_fit(&p, Pos2::new(tx, rr.top() + sp::M), Align2::LEFT_TOP, &it.title, ty::title(), TEXT(), tw - 70.0);
     let s = p.text(Pos2::new(t.right() + sp::S, t.top()), Align2::LEFT_TOP, human_bytes(it.bytes), ty::body(), TEXT_DIM());
     if it.permanent {
         chip(&p, Pos2::new(s.right() + sp::S, t.top() - 2.0), Align2::LEFT_TOP, "Permanent", CHIP_RISK());
     }
-    text_fit(&p, Pos2::new(tx, rr.top() + 32.0), Align2::LEFT_TOP, &middle_ellipsis(&short_path(&it.path), 80), mono(11.0), TEXT_FAINT(), tw);
+    let path = text_fit(&p, Pos2::new(tx, t.bottom() + sp::XS), Align2::LEFT_TOP, &middle_ellipsis(&short_path(&it.path), 80), mono(11.0), TEXT_FAINT(), tw);
+    reason_line(ui, Pos2::new(tx, path.bottom() + sp::XS), Align2::LEFT_TOP, &it, TEXT_SOFT(), tw);
     if pill_button(ui, ar, "Allow", BTN_PRIMARY, true).clicked() {
         answer_items(app, &[i], Verdict::Safe);
     }
@@ -626,7 +668,7 @@ fn safe_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let it = app.clean.lock_ok().items[i].clone();
     let p = ui.painter().clone();
     let rr = rr.shrink2(Vec2::new(4.0, 0.0));
-    row_extras(ui, rr, &it);
+    row_extras(ui, rr, &it, true);
     let can = !it.hard_keep;
     let cb = Rect::from_center_size(Pos2::new(rr.left() + sp::M + 8.0, rr.center().y), Vec2::splat(16.0));
     if checkbox(ui, cb, ui.scope_id().with(("sel", &it.path)), it.selected, can).clicked() && can {
@@ -639,7 +681,8 @@ fn safe_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
         right = chip(&p, Pos2::new(right, rr.center().y), Align2::RIGHT_CENTER, "Permanent", CHIP_RISK()).left() - sp::S;
     }
     let x = cb.right() + sp::M;
-    text_fit(&p, Pos2::new(x, rr.center().y), Align2::LEFT_CENTER, &it.title, ty::body(), TEXT(), right - x);
+    text_fit(&p, Pos2::new(x, rr.center().y - 1.0), Align2::LEFT_BOTTOM, &it.title, ty::body(), TEXT(), right - x);
+    reason_line(ui, Pos2::new(x, rr.center().y + 1.0), Align2::LEFT_TOP, &it, TEXT_DIM(), right - x);
 }
 
 /// One kept item: a lock, the name, the size, dimmed.
@@ -647,11 +690,12 @@ fn kept_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let it = app.clean.lock_ok().items[i].clone();
     let p = ui.painter().clone();
     let rr = rr.shrink2(Vec2::new(4.0, 0.0));
-    row_extras(ui, rr, &it);
+    row_extras(ui, rr, &it, true);
     icon(&p, Icon::Lock, Rect::from_center_size(Pos2::new(rr.left() + sp::M + 8.0, rr.center().y), Vec2::splat(14.0)), TEXT_FAINT());
     let sz = p.text(Pos2::new(rr.right() - sp::M, rr.center().y), Align2::RIGHT_CENTER, human_bytes(it.bytes), ty::body(), TEXT_DIM());
     let x = rr.left() + sp::M + 16.0 + sp::M;
-    text_fit(&p, Pos2::new(x, rr.center().y), Align2::LEFT_CENTER, &it.title, ty::body(), TEXT_DIM(), sz.left() - sp::M - x);
+    text_fit(&p, Pos2::new(x, rr.center().y - 1.0), Align2::LEFT_BOTTOM, &it.title, ty::body(), TEXT_DIM(), sz.left() - sp::M - x);
+    reason_line(ui, Pos2::new(x, rr.center().y + 1.0), Align2::LEFT_TOP, &it, TEXT_FAINT(), sz.left() - sp::M - x);
 }
 
 fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {

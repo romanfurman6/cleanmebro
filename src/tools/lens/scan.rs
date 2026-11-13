@@ -63,6 +63,8 @@ pub struct Scan {
     pub updating: AtomicBool,
     /// That update is an automatic one: nothing shows it's running.
     pub quiet: AtomicBool,
+    /// The map in `result` was stopped before it was finished.
+    pub partial: AtomicBool,
 }
 
 pub type Shared = Arc<Scan>;
@@ -154,9 +156,11 @@ fn full(shared: &Shared, root: &Path, ctx: &egui::Context) {
     let stopped = shared.stop.load(Ordering::SeqCst);
     // a stopped map is incomplete: no update may build on it
     let event = if stopped { None } else { event };
-    if root == Path::new("/") {
+    // nor replace the last finished map on disk
+    if root == Path::new("/") && !stopped {
         save(&node, now, event);
     }
+    shared.partial.store(stopped, Ordering::SeqCst);
     *shared.when.lock_ok() = Some(now);
     *shared.event.lock_ok() = event;
     *shared.result.lock_ok() = Some(node);
@@ -186,6 +190,8 @@ pub fn update(shared: Shared, ctx: egui::Context, quiet: bool) {
     }
     // the map stays on screen while it's brought up to date
     shared.quiet.store(quiet, Ordering::SeqCst);
+    // cleared once, now: a Stop while the history is read still counts
+    shared.stop.store(false, Ordering::SeqCst);
     shared.updating.store(true, Ordering::SeqCst);
     std::thread::spawn(move || {
         below_ui();
@@ -202,9 +208,17 @@ pub fn update(shared: Shared, ctx: egui::Context, quiet: bool) {
             }
             _ => None,
         };
+        if shared.stop.load(Ordering::SeqCst) {
+            shared.updating.store(false, Ordering::SeqCst);
+            shared.running.store(false, Ordering::SeqCst);
+            ctx.request_repaint();
+            return;
+        }
         let Some((old, changes, now_event)) = plan else {
             shared.updating.store(false, Ordering::SeqCst);
-            if quiet {
+            // Update clicked while this ran quietly: it turned `quiet` off
+            // and expects a new map
+            if quiet && shared.quiet.load(Ordering::SeqCst) {
                 shared.running.store(false, Ordering::SeqCst);
             } else {
                 full(&shared, &root, &ctx);
@@ -221,7 +235,6 @@ pub fn update(shared: Shared, ctx: egui::Context, quiet: bool) {
             ctx.request_repaint();
             return;
         }
-        shared.stop.store(false, Ordering::SeqCst);
         if !quiet {
             shared.files.store(0, Ordering::SeqCst);
             shared.bytes.store(0, Ordering::SeqCst);
@@ -237,6 +250,7 @@ pub fn update(shared: Shared, ctx: egui::Context, quiet: bool) {
             *shared.when.lock_ok() = Some(now);
             *shared.event.lock_ok() = now_event;
             *shared.result.lock_ok() = Some(node);
+            shared.partial.store(false, Ordering::SeqCst);
         }
         shared.updating.store(false, Ordering::SeqCst);
         shared.running.store(false, Ordering::SeqCst);
