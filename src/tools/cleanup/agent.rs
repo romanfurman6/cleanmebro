@@ -4,7 +4,7 @@
 
 use crate::kit::claude_code;
 use crate::kit::mechanics as m;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
