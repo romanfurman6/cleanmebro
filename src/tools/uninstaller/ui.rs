@@ -968,6 +968,7 @@ fn leftovers_ask(now: i64, orphans: &[super::Orphan]) -> aicheck::Ask {
         ],
         items,
         facts: Vec::new(),
+        answer: Vec::new(),
     }
 }
 

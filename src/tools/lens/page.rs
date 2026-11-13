@@ -2032,6 +2032,7 @@ fn map_ask(root: &Node) -> aicheck::Ask {
         ],
         items,
         facts,
+        answer: Vec::new(),
     }
 }
 

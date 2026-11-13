@@ -227,14 +227,19 @@ impl Tool for Cleanup {
                     icon: None,
                     name: name.into(),
                 };
+                let asks: Vec<String> = self.clean.lock_ok().items.iter().filter(|i| i.verdict == engine::Verdict::Ask).map(|i| i.path.display().to_string()).collect();
+                let tip = |key: &str, action: &str, label: &str, title: &str, value: &str, why: &str, name: &str| crate::kit::aicheck::Rec { key: key.into(), ..rec(key, action, label, title, value, why, name) };
+                let xcode = self.clean.lock_ok().items.iter().find(|i| i.title.starts_with("Derived")).map(|i| i.path.display().to_string()).unwrap_or_default();
                 self.ai.set_demo(
-                    "3 quick wins, one to keep",
+                    "Both questions answered, one more tip",
                     vec![
-                        rec("a", "select", "Select", "Remove Claude VM image", "9.00 GB", "Agent sandbox image; Claude downloads it again when needed", "Claude"),
-                        rec("b", "select", "Select", "Empty Trash", "1.10 GB", "Nothing in it newer than 30 days", "Trash"),
-                        rec("c", "keep", "Keep", "Keep Xcode archives", "3.40 GB", "Signed builds of shipped apps; can't be rebuilt", "Xcode"),
+                        tip(&asks[0], "select", "Allow", "Claude Desktop VM image", "9.00 GB", "Sandbox image; Claude downloads it again when needed", "Claude"),
+                        tip(&asks[1], "select", "Allow", "Project · old-experiment", "412 MB", "Chat history of a folder that no longer exists", "Claude"),
+                        tip(&xcode, "keep", "Keep", "Keep MyApp build data", "3.40 GB", "You built MyApp today; rebuilding takes 20 minutes", "Xcode"),
                     ],
                 );
+                self.ai.answer = asks.into_iter().collect();
+                self.ai.actions = vec![("select", "Allow"), ("keep", "Keep")];
                 Some(View::Page)
             }
             "cleanup-scanning" => {
