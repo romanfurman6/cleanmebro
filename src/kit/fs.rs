@@ -349,7 +349,13 @@ mod bulk {
             let dir = std::env::temp_dir().join(format!("cmb-links-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             let orig = dir.join("orig.bin");
-            std::fs::write(&orig, vec![3u8; 2_000_000]).unwrap();
+            {
+                use std::io::Write;
+                let mut f = std::fs::File::create(&orig).unwrap();
+                f.write_all(&vec![3u8; 2_000_000]).unwrap();
+                // APFS allocates blocks lazily: before a flush st_blocks can still be 0
+                f.sync_all().unwrap();
+            }
             let one = size(&dir, 64).unwrap();
             std::fs::hard_link(&orig, dir.join("link.bin")).unwrap();
             let linked = size(&dir, 64).unwrap();
