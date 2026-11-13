@@ -175,10 +175,10 @@ pub fn presign_get(b: &Bucket, key: &str, secs: u64, now: chrono::DateTime<chron
     format!("https://{}{path}?{query}&X-Amz-Signature={sig}", b.bucket_host())
 }
 
-/// Let the share page (`origin`, e.g. "https://cmdmeow.furman.cat") read
-/// files in the bucket from the browser, so it can edit a copy. Rules the
-/// bucket already has stay. Returns whether the bucket was changed. Blocks.
-pub fn ensure_cors(b: &Bucket, origin: &str) -> Result<bool, String> {
+/// Let the share page (`origins`, e.g. "https://cmdmeow.com") read files
+/// in the bucket from the browser, so it can edit a copy. Rules the bucket
+/// already has stay. Returns whether the bucket was changed. Blocks.
+pub fn ensure_cors(b: &Bucket, origins: &[&str]) -> Result<bool, String> {
     let agent = ureq::Agent::new_with_config(ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(20))).build());
     let empty = hex(&Sha256::digest(b""));
     // Read what is there now.
@@ -198,7 +198,7 @@ pub fn ensure_cors(b: &Bucket, origin: &str) -> Result<bool, String> {
         404 => None, // NoSuchCORSConfiguration
         _ => return Err(explain(status, &text).replace("Upload failed", "CORS check failed")),
     };
-    let Some(body) = cors_config(existing.as_deref(), origin) else { return Ok(false) };
+    let Some(body) = cors_config(existing.as_deref(), origins) else { return Ok(false) };
 
     let hash = hex(&Sha256::digest(body.as_bytes()));
     let md5 = base64(&md5::Md5::digest(body.as_bytes()));
@@ -224,17 +224,20 @@ pub fn ensure_cors(b: &Bucket, origin: &str) -> Result<bool, String> {
     Err(explain(status, &text).replace("Upload failed", "CORS setup failed"))
 }
 
-/// The bucket's CORS document with a read rule for `origin` added, or None
-/// when `origin` is already allowed.
-fn cors_config(existing: Option<&str>, origin: &str) -> Option<String> {
+/// The bucket's CORS document with one read rule added for the `origins`
+/// it doesn't allow yet, or None when all of them are allowed.
+fn cors_config(existing: Option<&str>, origins: &[&str]) -> Option<String> {
+    let existing = existing.map(str::trim).filter(|x| x.contains("</CORSConfiguration>"));
+    let allowed = |o: &str| existing.is_some_and(|x| x.contains(&format!("<AllowedOrigin>{o}</AllowedOrigin>")) || x.contains("<AllowedOrigin>*</AllowedOrigin>"));
+    let missing: String = origins.iter().filter(|o| !allowed(o)).map(|o| format!("<AllowedOrigin>{o}</AllowedOrigin>")).collect();
+    if missing.is_empty() {
+        return None;
+    }
     let rule = format!(
-        "<CORSRule><AllowedOrigin>{origin}</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>Content-Length</ExposeHeader><ExposeHeader>Content-Range</ExposeHeader><ExposeHeader>Content-Type</ExposeHeader><ExposeHeader>Accept-Ranges</ExposeHeader><MaxAgeSeconds>86400</MaxAgeSeconds></CORSRule>"
+        "<CORSRule>{missing}<AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>Content-Length</ExposeHeader><ExposeHeader>Content-Range</ExposeHeader><ExposeHeader>Content-Type</ExposeHeader><ExposeHeader>Accept-Ranges</ExposeHeader><MaxAgeSeconds>86400</MaxAgeSeconds></CORSRule>"
     );
-    match existing.map(str::trim).filter(|x| x.contains("</CORSConfiguration>")) {
+    match existing {
         Some(x) => {
-            if x.contains(&format!("<AllowedOrigin>{origin}</AllowedOrigin>")) || x.contains("<AllowedOrigin>*</AllowedOrigin>") {
-                return None;
-            }
             let at = x.rfind("</CORSConfiguration>")?;
             Some(format!("{}{rule}{}", &x[..at], &x[at..]))
         }
@@ -410,14 +413,23 @@ mod tests {
 
     #[test]
     fn cors_rule_is_added_once_and_keeps_other_rules() {
-        let o = "https://cmdmeow.furman.cat";
-        let new = cors_config(None, o).unwrap();
-        assert!(new.starts_with("<CORSConfiguration") && new.contains("<AllowedOrigin>https://cmdmeow.furman.cat</AllowedOrigin>") && new.contains("<AllowedHeader>*</AllowedHeader>"), "{new}");
-        assert_eq!(cors_config(Some(&new), o), None);
+        let o = ["https://cmdmeow.com", "https://cmdmeow.furman.cat"];
+        let new = cors_config(None, &o).unwrap();
+        assert!(new.starts_with("<CORSConfiguration") && new.contains("<AllowedOrigin>https://cmdmeow.com</AllowedOrigin>") && new.contains("<AllowedOrigin>https://cmdmeow.furman.cat</AllowedOrigin>") && new.contains("<AllowedHeader>*</AllowedHeader>"), "{new}");
+        assert_eq!(cors_config(Some(&new), &o), None);
         let other = "<?xml version=\"1.0\"?><CORSConfiguration><CORSRule><AllowedOrigin>https://a.b</AllowedOrigin><AllowedMethod>PUT</AllowedMethod></CORSRule></CORSConfiguration>";
-        let merged = cors_config(Some(other), o).unwrap();
-        assert!(merged.contains("https://a.b") && merged.contains(o) && merged.ends_with("</CORSRule></CORSConfiguration>"), "{merged}");
-        assert_eq!(cors_config(Some("<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>"), o), None);
+        let merged = cors_config(Some(other), &o).unwrap();
+        assert!(merged.contains("https://a.b") && merged.contains(o[0]) && merged.contains(o[1]) && merged.ends_with("</CORSRule></CORSConfiguration>"), "{merged}");
+        assert_eq!(cors_config(Some("<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>"), &o), None);
+    }
+
+    #[test]
+    fn cors_adds_only_the_new_site_to_a_bucket_set_up_before_the_move() {
+        let before = cors_config(None, &["https://cmdmeow.furman.cat"]).unwrap();
+        let after = cors_config(Some(&before), &["https://cmdmeow.com", "https://cmdmeow.furman.cat"]).unwrap();
+        assert_eq!(after.matches("<AllowedOrigin>https://cmdmeow.furman.cat</AllowedOrigin>").count(), 1, "{after}");
+        assert_eq!(after.matches("<AllowedOrigin>https://cmdmeow.com</AllowedOrigin>").count(), 1, "{after}");
+        assert_eq!(after.matches("<CORSRule>").count(), 2, "{after}");
     }
 
     #[test]

@@ -172,7 +172,7 @@ impl Loaded {
         config.model_config.transducer = OfflineTransducerModelConfig { encoder: s(FILES[0]), decoder: s(FILES[1]), joiner: s(FILES[2]) };
         config.model_config.tokens = s(FILES[3]);
         config.model_config.model_type = Some("nemo_transducer".into());
-        config.model_config.num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8) as i32;
+        config.model_config.num_threads = crate::kit::work_threads() as i32;
         config.model_config.provider = Some("cpu".into());
         let rec = OfflineRecognizer::create(&config).ok_or("The speech model didn't load")?;
         Ok(Loaded { rec })

@@ -661,5 +661,8 @@
 
 /* Hero panel spacing: header then rows, same rhythm in Clipboard, AI Usage and Display */
 .clp, .lim, .dsp { justify-content: space-between; gap: 0; } .clp .kh, .lim .kh, .dsp .kh { margin: 0; align-items: center; }
+.clp, .lim, .dsp { padding: 10px; } .clp .kh, .lim .kh, .dsp .kh { height: 16px; line-height: 16px; }
+.pcr { margin: 0 -6px; } .pcr .ct { padding: 0; gap: 0; }
+.lim, .dsp { justify-content: flex-start; } .lim .kh, .dsp .kh { margin-bottom: 8px; } .lim .lr + .lr, .dsp .lr + .lr { margin-top: 4px; } .lim .lr, .dsp .lr { height: 14px; }
 .pw .pi { align-self: flex-start; }
 .rdot { top: -3px; right: -4px; animation: none; box-shadow: 0 0 0 2px rgba(20,24,20,.9); }

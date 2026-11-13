@@ -101,7 +101,9 @@ function setupModes(enter, leave) {
 async function fetchCopy(item) {
   if (item.blob) return item.blob;
   try {
-    const r = await fetch(item.href, { mode: 'cors' });
+    // no-store: the <img>/<video> above loaded it without CORS, and a cached
+    // copy of that answer has no CORS headers, so it would fail here too.
+    const r = await fetch(item.href, { mode: 'cors', cache: 'no-store' });
     if (!r.ok) throw new Error(String(r.status));
     item.blob = await r.blob();
     return item.blob;

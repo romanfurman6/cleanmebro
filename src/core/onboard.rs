@@ -12,7 +12,7 @@ use std::collections::HashMap;
 pub const SETUP_W: f32 = 820.0;
 pub const SETUP_H: f32 = 600.0;
 /// Most steps setup can have (with the crash reports step).
-const MAX_STEPS: usize = 5;
+const MAX_STEPS: usize = 6;
 const TOP_H: f32 = 44.0;
 const BOTTOM_H: f32 = 64.0;
 /// Tools that start off on a fresh install (the rest start on).
@@ -23,6 +23,7 @@ pub const OFF_AT_FIRST: [&str; 2] = ["claude", "fan"];
 enum Kind {
     Welcome,
     Tools,
+    Agents,
     Perms,
     Crash,
     Ready,
@@ -31,7 +32,7 @@ enum Kind {
 /// The steps in order. The crash reports question only exists in official
 /// builds (screenshots show it too).
 fn kinds(app: &App) -> Vec<Kind> {
-    let mut v = vec![Kind::Welcome, Kind::Tools, Kind::Perms];
+    let mut v = vec![Kind::Welcome, Kind::Tools, Kind::Agents, Kind::Perms];
     if app.demo || crate::kit::crash_report::available() {
         v.push(Kind::Crash);
     }
@@ -316,6 +317,7 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     match kind {
         Kind::Welcome => next = welcome(app, ui, body, t),
         Kind::Tools => tools(app, ui, body, t),
+        Kind::Agents => agents(app, ui, body, t),
         Kind::Perms => permissions_step(app, ui, body, t, now),
         Kind::Crash => next = crash_step(app, ui, body, t),
         Kind::Ready => restart_now = ready(app, ui, body, t),
@@ -332,7 +334,7 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     let label = match kind {
         // these steps have their own buttons
         Kind::Welcome | Kind::Crash => None,
-        Kind::Tools | Kind::Perms => Some("Continue"),
+        Kind::Tools | Kind::Agents | Kind::Perms => Some("Continue"),
         Kind::Ready if needs_restart(app) => Some("Restart and open"),
         Kind::Ready => Some("Open panel"),
     };
@@ -594,6 +596,67 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     }
     if let Some((i, o)) = flip {
         app.set_tool_on(i, o);
+    }
+}
+
+/// The AI agents the person uses: one main (Cleanup checks with it), and
+/// the ones AI Usage tracks. Saved in the AI Usage settings, changed later in
+/// Settings › AI Usage.
+fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
+    use crate::kit::ai::{self, settings};
+    let p = ui.painter().clone();
+    let set = settings::get();
+    let head = body.top() + 6.0;
+    let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "AI agents", bold(22.0), TEXT());
+    let sub = p.text(Pos2::new(body.left(), g.bottom() + sp::S), Align2::LEFT_TOP, "Main checks Cleanup scans. Tracked ones show in AI Usage.", ty::body(), TEXT_DIM());
+    let w = body.width().min(560.0);
+    let x = body.left();
+    let col_track = x + w - sp::L - 8.0;
+    let col_main = col_track - 56.0;
+    let top = sub.bottom() + sp::XL;
+    p.text(Pos2::new(col_main, top), Align2::CENTER_TOP, "Main", ty::caption(), TEXT_FAINT());
+    p.text(Pos2::new(col_track, top), Align2::CENTER_TOP, "Track", ty::caption(), TEXT_FAINT());
+    let n = ai::PROVIDERS.len();
+    let a = ease(t / 0.4);
+    let card = Rect::from_min_size(Pos2::new(x, top + 20.0 + (1.0 - a) * 8.0), Vec2::new(w, n as f32 * sp::ROW_H));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    type Change = Box<dyn FnOnce(&mut settings::Settings)>;
+    let mut change: Option<Change> = None;
+    for (k, m) in ai::PROVIDERS.iter().enumerate() {
+        let r = Rect::from_min_size(Pos2::new(card.left(), card.top() + k as f32 * sp::ROW_H), Vec2::new(w, sp::ROW_H));
+        if k > 0 {
+            hairline(&p, Pos2::new(r.left() + sp::L, r.top()), Pos2::new(r.right() - sp::L, r.top()));
+        }
+        let found = app.demo || ai::make(k).data_dir().is_some_and(|d| d.exists());
+        let name = p.text(Pos2::new(r.left() + sp::L, r.center().y), Align2::LEFT_CENTER, m.name, ty::title(), TEXT());
+        p.text(Pos2::new(name.right() + sp::S, r.center().y), Align2::LEFT_CENTER, if found { "Found" } else { "Not found" }, ty::label(), if found { GREEN() } else { TEXT_FAINT() });
+        let main = set.main == m.id;
+        let on = set.is_on(m.id);
+        let rr = Rect::from_center_size(Pos2::new(col_main, r.center().y), Vec2::splat(16.0));
+        if radio(ui, rr, ui.scope_id().with(("setup-main", m.id)), main, true).clicked() && !main {
+            let id = m.id.to_string();
+            change = Some(Box::new(move |s| {
+                s.off.retain(|x| *x != id);
+                s.provider = id.clone();
+                s.main = id;
+            }));
+        }
+        // the main agent is always tracked
+        let cb = Rect::from_center_size(Pos2::new(col_track, r.center().y), Vec2::splat(16.0));
+        let track = checkbox(ui, cb, ui.scope_id().with(("setup-track", m.id)), on || main, true);
+        let track = if main { track.on_hover_text("The main agent is always tracked") } else { track };
+        if track.clicked() && !main {
+            let id = m.id.to_string();
+            change = Some(Box::new(move |s| {
+                s.off.retain(|x| *x != id);
+                if on {
+                    s.off.push(id);
+                }
+            }));
+        }
+    }
+    if let Some(f) = change {
+        settings::update(!app.demo, f);
     }
 }
 

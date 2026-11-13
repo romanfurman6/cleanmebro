@@ -248,6 +248,8 @@ pub struct Editor {
     /// A crop area picked with the Crop tool, applied on Enter.
     crop_pending: Option<Rect>,
     status: Option<(String, Instant)>,
+    /// How far the Share upload is (0..1), while it runs.
+    pub share_progress: Option<f32>,
     pub requests: Vec<Request>,
     /// The doc changed since it was opened (closing keeps the edit in history).
     pub edited: bool,
@@ -286,6 +288,7 @@ impl Editor {
             ocr_busy: false,
             crop_pending: None,
             status: None,
+            share_progress: None,
             requests: Vec::new(),
             edited: false,
         }
@@ -298,6 +301,11 @@ impl Editor {
     /// The finished picture with every mark burned in and the crop applied.
     pub fn rendered(&self) -> RgbaImage {
         render::render(&self.base, &self.doc)
+    }
+
+    /// Changes so far: equal numbers mean the same marks (no edit between).
+    pub fn revision(&self) -> usize {
+        self.undo.len()
     }
 
     pub fn flash(&mut self, msg: impl Into<String>) {
@@ -477,6 +485,12 @@ impl Editor {
             let w = if lay.icons_only { 34.0 } else { labeled_w(&p, *b) };
             let r = Rect::from_min_max(Pos2::new(rx - w, y - 14.0), Pos2::new(rx, y + 14.0));
             rx = r.left() - 8.0;
+            let uploading = if k == 2 { self.share_progress } else { None };
+            let label = &match uploading {
+                Some(f) => format!("{:.0}%", f.clamp(0.0, 1.0) * 100.0),
+                None => label.to_string(),
+            };
+            let label = label.as_str();
             let resp = if lay.icons_only {
                 let resp = pill_button(ui, r, "", kind, true);
                 icons::draw(ui.painter(), ic, Rect::from_center_size(r.center(), Vec2::splat(14.0)), if kind == BTN_PRIMARY { on_color(BLUE()) } else { TEXT() });
@@ -489,6 +503,13 @@ impl Editor {
             } else {
                 pill_button(ui, r, label, kind, true)
             };
+            if let Some(f) = uploading {
+                // the button fills up as the upload goes
+                let done = Rect::from_min_max(r.min, Pos2::new(r.left() + r.width() * f.clamp(0.02, 1.0), r.bottom()));
+                ui.painter().with_clip_rect(done).rect_filled(r, r.height() / 2.0, with_alpha(BLUE(), 0.35));
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                continue;
+            }
             if resp.on_hover_text(tip).clicked() {
                 self.requests.push([Request::Save, Request::Copy, Request::Share, Request::Pin][k].clone());
             }

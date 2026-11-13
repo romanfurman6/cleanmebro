@@ -24,7 +24,7 @@ use audio::{Mic, MODEL_RATE};
 use egui::{Color32, Pos2, Rect, Ui};
 use settings::{Engine, History, Said, Settings};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -102,8 +102,26 @@ pub enum Phase {
     /// `heard` is when the voice was last above a whisper; `ending` is set
     /// once they've asked to stop and the mic catches the last bit.
     Listening { mic: Mic, since: Instant, tapped: bool, heard: Instant, ending: Option<Instant> },
-    Working { job: u64 },
+    /// `done` is how much of the voice the model has finished (0..=1000),
+    /// `expect` how long the whole take should take, in seconds.
+    Working { job: u64, since: Instant, expect: f32, done: Arc<AtomicU32> },
     Showing { note: Note, until: Instant },
+}
+
+/// A guess at the model's pace (seconds of work per second of voice)
+/// before the first take has been timed.
+const START_PACE: f32 = 0.08;
+/// Work every take has, however short.
+const MIN_WORK_SECS: f32 = 0.25;
+
+/// How far a take is, 0..=1, for the pill: what the model reports, or the
+/// time spent against the time it should take, held short of the end
+/// until it's really done.
+pub fn work_progress(elapsed: f32, expect: f32, done: u32) -> f32 {
+    let guess = (elapsed / expect.max(0.05)).min(1.0);
+    // slows down near the end rather than stopping dead
+    let guess = 0.92 * (1.0 - (1.0 - guess).powi(2));
+    guess.max(done as f32 / 1000.0).clamp(0.0, 1.0)
 }
 
 /// How often the pill adds a bar while listening.
@@ -113,7 +131,7 @@ const LEVEL_EVERY: Duration = Duration::from_millis(33);
 enum Job {
     /// Load the model now, while the user is still talking.
     Warm(Engine),
-    Run { job: u64, engine: Engine, lang: Option<&'static str>, pcm: Vec<f32> },
+    Run { job: u64, engine: Engine, lang: Option<&'static str>, pcm: Vec<f32>, done: Arc<AtomicU32> },
 }
 
 struct Heard {
@@ -138,8 +156,8 @@ pub struct Dictation {
     tab: Tab,
     on: bool,
     target: mac::Target,
-    /// Where the pill goes: the caret, the mouse, the screen they're on.
-    place: (Option<Rect>, Option<Pos2>, Option<Rect>),
+    /// Where the pill goes: the caret and field, the mouse, the screen they're on.
+    place: (mac::Spot, Option<Pos2>, Option<Rect>),
     /// Loudness, newest last, for the pill's bars.
     levels: Vec<f32>,
     /// When the last bar was added.
@@ -158,6 +176,8 @@ pub struct Dictation {
     heard: Receiver<Heard>,
     next_job: u64,
     voice_secs: f32,
+    /// Seconds of work per second of voice, learned from the last takes.
+    pace: f32,
     /// The text around the caret when they started.
     around: Option<fit::Around>,
     paste_at: Option<(Instant, String)>,
@@ -195,7 +215,7 @@ impl Dictation {
             tab: Tab::History,
             on: false,
             target: mac::Target::default(),
-            place: (None, None, None),
+            place: (mac::Spot::default(), None, None),
             levels: Vec::new(),
             level_at: None,
             keys: None,
@@ -210,6 +230,7 @@ impl Dictation {
             heard,
             next_job: 0,
             voice_secs: 0.0,
+            pace: START_PACE,
             around: None,
             paste_at: None,
             pending: None,
@@ -316,11 +337,12 @@ impl Dictation {
     /// caret, start the mic.
     pub fn start(&mut self) {
         self.target = mac::front_app().unwrap_or_default();
-        let caret = mac::caret(&self.target);
+        let spot = mac::spot(&self.target);
         self.around = mac::around(&self.target);
         let mouse = mac::mouse();
-        let at = caret.map(|c| c.center()).or(mouse).unwrap_or(Pos2::new(600.0, 400.0));
-        self.place = (caret, mouse, mac::screen_at(at));
+        let at = spot.center().or(mouse).unwrap_or(Pos2::new(600.0, 400.0));
+        self.place = (spot, mouse, mac::screen_at(at));
+        eprintln!("[dictation] spot {:?}", self.place);
         self.levels.clear();
         match Perm::Microphone.status() {
             Status::Allowed => {}
@@ -379,11 +401,13 @@ impl Dictation {
         let pcm = if keep.len() < pcm.len() { pcm[keep].to_vec() } else { pcm };
         self.next_job += 1;
         self.voice_secs = secs;
-        let job = Job::Run { job: self.next_job, engine: self.settings.engine, lang: None, pcm };
+        let expect = MIN_WORK_SECS + pcm.len() as f32 / MODEL_RATE as f32 * self.pace;
+        let done = Arc::new(AtomicU32::new(0));
+        let job = Job::Run { job: self.next_job, engine: self.settings.engine, lang: None, pcm, done: done.clone() };
         if self.jobs.send(job).is_err() {
             return self.show(Note::Problem("Speech to text isn't running".into()), 2.5);
         }
-        self.phase = Phase::Working { job: self.next_job };
+        self.phase = Phase::Working { job: self.next_job, since: Instant::now(), expect, done };
     }
 
     fn follow(&mut self, link: Link) {
@@ -411,9 +435,13 @@ impl Dictation {
     }
 
     fn on_heard(&mut self, h: Heard) {
-        let Phase::Working { job, .. } = self.phase else { return };
-        if job != h.job {
+        let Phase::Working { job, since, .. } = &self.phase else { return };
+        if *job != h.job {
             return;
+        }
+        if h.text.is_ok() && self.voice_secs > 0.5 {
+            let pace = (since.elapsed().as_secs_f32() - MIN_WORK_SECS).max(0.0) / self.voice_secs;
+            self.pace = (self.pace * 0.6 + pace.min(2.0) * 0.4).max(0.01);
         }
         match h.text {
             Err(e) => self.show(Note::Problem(e), 3.0),
@@ -607,13 +635,18 @@ impl Loaded {
 
     /// The voice as one line of text. A long take goes in pieces cut at
     /// its pauses.
-    pub(crate) fn run(&self, pcm: &[f32], lang: Option<&str>) -> Result<String, String> {
+    pub(crate) fn run(&self, pcm: &[f32], lang: Option<&str>, done: Option<&AtomicU32>) -> Result<String, String> {
         let mut said = Vec::new();
         for piece in cut::split(pcm, MODEL_RATE) {
+            let end = piece.end;
+            let pcm_all = pcm;
             let pcm = &pcm[piece];
             match self {
                 Loaded::Parakeet(m) => said.push(m.run(pcm)?),
                 Loaded::Whisper(m) => said.extend(m.run(pcm, lang, None)?.into_iter().map(|s| s.2)),
+            }
+            if let Some(d) = done {
+                d.store((end as u64 * 1000 / pcm_all.len().max(1) as u64) as u32, Ordering::Relaxed);
             }
         }
         Ok(audio::tidy_text(&said))
@@ -654,10 +687,10 @@ fn worker(rx: Receiver<Job>, tx: Sender<Heard>, ctx: egui::Context) {
                 }
             }
         }
-        let Job::Run { job, lang, pcm, .. } = job else { continue };
+        let Job::Run { job, lang, pcm, done, .. } = job else { continue };
         let t0 = Instant::now();
         let text = match &loaded {
-            Some((_, m)) => m.run(&pcm, lang),
+            Some((_, m)) => m.run(&pcm, lang, Some(&done)),
             None => Err("The speech model didn't load".into()),
         };
         eprintln!("[dictation] {:.1} s of voice in {} ms", pcm.len() as f32 / MODEL_RATE as f32, t0.elapsed().as_millis());
@@ -847,10 +880,22 @@ mod tests {
     #[test]
     fn an_answer_for_an_old_job_is_ignored() {
         let mut d = demo();
-        d.phase = Phase::Working { job: 2 };
+        d.phase = Phase::Working { job: 2, since: Instant::now(), expect: 1.0, done: Default::default() };
         d.on_heard(Heard { job: 1, text: Ok("old".into()) });
         assert!(matches!(d.phase, Phase::Working { job: 2, .. }));
         d.on_heard(Heard { job: 2, text: Ok(String::new()) });
         assert!(matches!(&d.phase, Phase::Showing { note: Note::Problem(_), .. }));
+    }
+
+    #[test]
+    fn the_work_bar_moves_on_its_own_and_only_ends_when_done() {
+        assert_eq!(work_progress(0.0, 1.0, 0), 0.0);
+        let half = work_progress(0.5, 1.0, 0);
+        assert!(half > 0.5 && half < 0.92);
+        // late: waits just short of the end
+        assert!(work_progress(5.0, 1.0, 0) < 0.93);
+        // the model's own count wins when it's further
+        assert_eq!(work_progress(0.1, 1.0, 1000), 1.0);
+        assert!(work_progress(0.2, 1.0, 100) < work_progress(0.4, 1.0, 100));
     }
 }

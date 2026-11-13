@@ -29,3 +29,25 @@ pub mod tile;
 pub mod url_scheme;
 pub mod viewport;
 pub mod whisper;
+
+/// Threads for a heavy model run (speech to text): every core but two, so
+/// the UI keeps its frames while the model works.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn work_threads() -> usize {
+    work_threads_for(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4))
+}
+
+fn work_threads_for(cores: usize) -> usize {
+    cores.saturating_sub(2).clamp(2, 8)
+}
+
+#[cfg(test)]
+mod work_threads_tests {
+    #[test]
+    fn two_cores_stay_free_for_the_ui() {
+        assert_eq!(super::work_threads_for(8), 6);
+        assert_eq!(super::work_threads_for(4), 2);
+        assert_eq!(super::work_threads_for(2), 2);
+        assert_eq!(super::work_threads_for(16), 8);
+    }
+}

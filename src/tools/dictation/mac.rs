@@ -21,10 +21,37 @@ pub struct Saved {
     items: Vec<Vec<(String, Vec<u8>)>>,
 }
 
-/// Where to put the pill: the caret's rect in global points (top-left
-/// origin) when the focused app tells it, else None.
-pub fn caret(target: &Target) -> Option<Rect> {
-    imp::caret(target.pid)
+/// Where the typing happens, in global points (top-left origin): the
+/// caret's rect and the focused text field's frame, each when the app
+/// tells it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Spot {
+    pub caret: Option<Rect>,
+    pub field: Option<Rect>,
+}
+
+impl Spot {
+    /// A point to find the screen by.
+    pub fn center(&self) -> Option<Pos2> {
+        self.field.or(self.caret).map(|r| r.center())
+    }
+}
+
+/// The caret and the focused field of `target`.
+pub fn spot(target: &Target) -> Spot {
+    let (caret, frame) = imp::spot(target.pid);
+    // a caret outside its own field is made up (Chromium does this): drop
+    // it, even when the field is too tall to sit above
+    let frame = frame.filter(|f| f.is_finite() && !(f.min.x.abs() < 1.0 && f.min.y.abs() < 1.0) && f.width() >= 40.0);
+    let caret = caret.filter(|c| frame.is_none_or(|f| f.expand(24.0).intersects(*c)));
+    Spot { caret, field: frame.filter(|f| field_like(*f)) }
+}
+
+/// A frame that reads as a text field to sit above: not a whole document
+/// or web page, not a speck.
+pub fn field_like(r: Rect) -> bool {
+    let at_origin = r.min.x.abs() < 1.0 && r.min.y.abs() < 1.0;
+    r.is_finite() && !at_origin && r.width() >= 40.0 && r.height() >= 12.0 && r.height() <= 320.0
 }
 
 /// A rect that can't be a caret: empty at the origin, or absurdly big.
@@ -216,9 +243,10 @@ mod imp {
         unsafe { AXIsProcessTrusted() }
     }
 
-    pub fn caret(pid: i32) -> Option<Rect> {
+    /// The caret's rect and the focused element's frame.
+    pub fn spot(pid: i32) -> (Option<Rect>, Option<Rect>) {
         if pid <= 0 || !accessibility() {
-            return None;
+            return (None, None);
         }
         let app = Cf(unsafe { AXUIElementCreateApplication(pid) });
         unsafe {
@@ -228,23 +256,28 @@ mod imp {
             let key = NSString::from_str("AXManualAccessibility");
             AXUIElementSetAttributeValue(app.0, Retained::as_ptr(&key).cast(), kCFBooleanTrue);
         }
-        let focused = attr(app.0, "AXFocusedUIElement")?;
-        if let Some(sel) = attr(focused.0, "AXSelectedTextRange").and_then(|v| value::<CfRange>(&v, AX_VALUE_RANGE)) {
-            let tries = [sel, CfRange { location: sel.location, length: 1 }, CfRange { location: (sel.location - 1).max(0), length: 1 }];
-            for (k, r) in tries.iter().enumerate() {
-                if let Some(b) = rect_for(focused.0, *r) {
-                    if plausible_caret(b) {
-                        // the character before the caret: its right edge
-                        return Some(if k == 2 && sel.location > 0 { Rect::from_min_max(Pos2::new(b.right(), b.top()), b.max) } else { b });
-                    }
+        let Some(focused) = attr(app.0, "AXFocusedUIElement") else { return (None, None) };
+        (caret_in(&focused), frame(&focused))
+    }
+
+    fn frame(e: &Cf) -> Option<Rect> {
+        let pos: CgPoint = attr(e.0, "AXPosition").and_then(|v| value(&v, AX_VALUE_POINT))?;
+        let size: CgPoint = attr(e.0, "AXSize").and_then(|v| value(&v, AX_VALUE_SIZE))?;
+        Some(Rect::from_min_size(Pos2::new(pos.x as f32, pos.y as f32), Vec2::new(size.x as f32, size.y as f32)))
+    }
+
+    fn caret_in(focused: &Cf) -> Option<Rect> {
+        let sel = attr(focused.0, "AXSelectedTextRange").and_then(|v| value::<CfRange>(&v, AX_VALUE_RANGE))?;
+        let tries = [sel, CfRange { location: sel.location, length: 1 }, CfRange { location: (sel.location - 1).max(0), length: 1 }];
+        for (k, r) in tries.iter().enumerate() {
+            if let Some(b) = rect_for(focused.0, *r) {
+                if plausible_caret(b) {
+                    // the character before the caret: its right edge
+                    return Some(if k == 2 && sel.location > 0 { Rect::from_min_max(Pos2::new(b.right(), b.top()), b.max) } else { b });
                 }
             }
         }
-        // a one-line field without a caret rect: under its left edge
-        let pos: CgPoint = attr(focused.0, "AXPosition").and_then(|v| value(&v, AX_VALUE_POINT))?;
-        let size: CgPoint = attr(focused.0, "AXSize").and_then(|v| value(&v, AX_VALUE_SIZE))?;
-        let r = Rect::from_min_size(Pos2::new(pos.x as f32, pos.y as f32), Vec2::new(size.x as f32, size.y as f32));
-        (r.height() > 8.0 && r.height() < 60.0 && plausible_caret(Rect::from_min_size(r.min, Vec2::new(1.0, r.height())))).then(|| Rect::from_min_size(r.min, Vec2::new(1.0, r.height())))
+        None
     }
 
     fn string(v: &Cf) -> Option<String> {
@@ -518,8 +551,8 @@ mod imp {
     pub fn paste_tracked(_text: &str) -> Option<Pasted> {
         None
     }
-    pub fn caret(_pid: i32) -> Option<Rect> {
-        None
+    pub fn spot(_pid: i32) -> (Option<Rect>, Option<Rect>) {
+        (None, None)
     }
     pub fn front_app() -> Option<Target> {
         None
@@ -538,23 +571,34 @@ mod imp {
     pub fn restore(_saved: Saved, _count: isize) {}
 }
 
-/// Top-left of a `size` pill: just under the caret, else under the mouse,
-/// kept inside `screen`.
-pub fn pill_pos(caret: Option<Rect>, mouse: Option<Pos2>, screen: Option<Rect>, size: egui::Vec2) -> Pos2 {
-    let want = match (caret, mouse) {
-        (Some(c), _) => Pos2::new(c.left() - 14.0, c.bottom() + 8.0),
-        (None, Some(m)) => Pos2::new(m.x - size.x / 2.0, m.y + 22.0),
-        (None, None) => Pos2::new(600.0, 400.0),
+/// Top-left of a `size` pill: just above the text field's left edge
+/// (below it when there's no room above); in a big field (a document),
+/// just under the caret; else under the mouse. Kept inside `screen`.
+pub fn pill_pos(spot: Spot, mouse: Option<Pos2>, screen: Option<Rect>, size: egui::Vec2) -> Pos2 {
+    const GAP: f32 = 6.0;
+    let top = screen.map_or(f32::MIN, |s| s.top() + 4.0);
+    let bottom = screen.map_or(f32::MAX, |s| s.bottom() - 4.0);
+    let want = match (spot.field, spot.caret, mouse) {
+        (Some(f), _, _) => {
+            let above = f.top() - GAP - size.y;
+            let y = if above >= top { above } else if f.bottom() + GAP + size.y <= bottom { f.bottom() + GAP } else { above };
+            Pos2::new(f.left(), y)
+        }
+        (None, Some(c), _) => {
+            let below = c.bottom() + GAP;
+            Pos2::new(c.left() - 14.0, if below + size.y > bottom { c.top() - GAP - size.y } else { below })
+        }
+        (None, None, Some(m)) => {
+            let below = m.y + 22.0;
+            Pos2::new(m.x - size.x / 2.0, if below + size.y > bottom { bottom - size.y } else { below })
+        }
+        (None, None, None) => Pos2::new(600.0, 400.0),
     };
     let Some(s) = screen else { return want };
-    let mut p = want;
-    // no room below: above the caret instead
-    if p.y + size.y > s.bottom() - 4.0 {
-        p.y = caret.map(|c| c.top() - 8.0 - size.y).unwrap_or(s.bottom() - 4.0 - size.y);
-    }
-    p.x = p.x.clamp(s.left() + 4.0, (s.right() - 4.0 - size.x).max(s.left() + 4.0));
-    p.y = p.y.clamp(s.top() + 4.0, (s.bottom() - 4.0 - size.y).max(s.top() + 4.0));
-    p
+    Pos2::new(
+        want.x.clamp(s.left() + 4.0, (s.right() - 4.0 - size.x).max(s.left() + 4.0)),
+        want.y.clamp(s.top() + 4.0, (s.bottom() - 4.0 - size.y).max(s.top() + 4.0)),
+    )
 }
 
 #[cfg(test)]
@@ -587,18 +631,39 @@ mod tests {
     }
 
     #[test]
-    fn the_pill_sits_under_the_caret_and_stays_on_screen() {
+    fn the_pill_sits_above_the_field_at_its_left_edge() {
+        let screen = Some(Rect::from_min_size(Pos2::new(0.0, 25.0), Vec2::new(1440.0, 850.0)));
+        let size = Vec2::new(140.0, 36.0);
+        let field = Rect::from_min_size(Pos2::new(400.0, 600.0), Vec2::new(700.0, 80.0));
+        let caret = Rect::from_min_size(Pos2::new(900.0, 650.0), Vec2::new(1.0, 18.0));
+        let spot = Spot { caret: Some(caret), field: Some(field) };
+        assert_eq!(pill_pos(spot, None, screen, size), Pos2::new(400.0, 600.0 - 6.0 - 36.0));
+        // a field at the top of the screen: under it instead
+        let high = Spot { caret: None, field: Some(Rect::from_min_size(Pos2::new(400.0, 40.0), Vec2::new(300.0, 24.0))) };
+        assert_eq!(pill_pos(high, None, screen, size), Pos2::new(400.0, 40.0 + 24.0 + 6.0));
+        // at the right edge: pulled in
+        let right = Spot { caret: None, field: Some(Rect::from_min_size(Pos2::new(1400.0, 300.0), Vec2::new(40.0, 24.0))) };
+        assert_eq!(pill_pos(right, None, screen, size).x, 1440.0 - 4.0 - 140.0);
+    }
+
+    #[test]
+    fn without_a_field_the_pill_follows_the_caret_then_the_mouse() {
         let screen = Some(Rect::from_min_size(Pos2::new(0.0, 25.0), Vec2::new(1440.0, 850.0)));
         let size = Vec2::new(140.0, 36.0);
         let caret = Some(Rect::from_min_size(Pos2::new(500.0, 300.0), Vec2::new(1.0, 18.0)));
-        assert_eq!(pill_pos(caret, None, screen, size), Pos2::new(486.0, 326.0));
+        assert_eq!(pill_pos(Spot { caret, field: None }, None, screen, size), Pos2::new(486.0, 324.0));
         // at the bottom: above the caret
         let low = Some(Rect::from_min_size(Pos2::new(500.0, 850.0), Vec2::new(1.0, 18.0)));
-        assert_eq!(pill_pos(low, None, screen, size).y, 850.0 - 8.0 - 36.0);
-        // at the right edge: pulled in
-        let right = Some(Rect::from_min_size(Pos2::new(1435.0, 300.0), Vec2::new(1.0, 18.0)));
-        assert_eq!(pill_pos(right, None, screen, size).x, 1440.0 - 4.0 - 140.0);
-        // no caret: under the mouse
-        assert_eq!(pill_pos(None, Some(Pos2::new(700.0, 400.0)), screen, size), Pos2::new(630.0, 422.0));
+        assert_eq!(pill_pos(Spot { caret: low, field: None }, None, screen, size).y, 850.0 - 6.0 - 36.0);
+        // nothing: under the mouse
+        assert_eq!(pill_pos(Spot::default(), Some(Pos2::new(700.0, 400.0)), screen, size), Pos2::new(630.0, 422.0));
+    }
+
+    #[test]
+    fn documents_and_web_pages_are_not_fields() {
+        assert!(field_like(Rect::from_min_size(Pos2::new(400.0, 600.0), Vec2::new(700.0, 80.0))));
+        assert!(!field_like(Rect::from_min_size(Pos2::new(0.0, 25.0), Vec2::new(1440.0, 800.0))));
+        assert!(!field_like(Rect::from_min_size(Pos2::ZERO, Vec2::new(300.0, 24.0))));
+        assert!(!field_like(Rect::from_min_size(Pos2::new(10.0, 10.0), Vec2::new(10.0, 24.0))));
     }
 }

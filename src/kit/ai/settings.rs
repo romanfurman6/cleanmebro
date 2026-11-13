@@ -20,6 +20,9 @@ pub struct Settings {
     pub plan_usd: HashMap<String, f64>,
     /// Ids of providers turned off.
     pub off: Vec<String>,
+    /// Id of the agent the person mainly uses (picked in setup): Cleanup's
+    /// AI check runs with it.
+    pub main: String,
     /// Show dollar amounts.
     pub show_cost: bool,
     /// Notify when a limit (or budget) passes these percentages.
@@ -49,6 +52,7 @@ impl Default for Settings {
             budgets: HashMap::new(),
             plan_usd: HashMap::new(),
             off: Vec::new(),
+            main: "claude".into(),
             show_cost: true,
             notify_at: vec![80, 95],
             notify_reset: true,
@@ -118,6 +122,7 @@ mod tests {
         assert!(s.show_cost);
         assert_eq!(s.notify_at, vec![80, 95]);
         assert!(s.is_on("claude"));
+        assert_eq!(s.main, "claude");
         let s: Settings = serde_json::from_str("{\"off\":[\"gemini\"]}").unwrap();
         assert!(!s.is_on("gemini"));
     }
