@@ -149,13 +149,13 @@ pub fn card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let items: Vec<Item> = if c.files.is_empty() { c.store.shots.iter().filter(|s| s.kind != Kind::Recording).take(4).map(Item::from_shot).collect() } else { c.files.iter().take(4).map(|f| Item::from_file(c, f)).collect() };
     // the folder is chosen in Capture's settings; here it's only a label
     let label = "Recent".to_string();
-    let lr = ui.interact(Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, 13.0)), id.with("recent-label"), Sense::click());
-    text_fit(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &label, bold(11.0), if lr.hovered() { TEXT_SOFT() } else { TEXT_FAINT() }, lr.rect.width());
+    let lr = ui.interact(Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, line_h(&p, &ty::section()))), id.with("recent-label"), Sense::click());
+    text_fit(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &label, ty::section(), if lr.hovered() { TEXT_SOFT() } else { white(150) }, lr.rect.width());
     if lr.on_hover_text("Open the folder view").clicked() {
         c.tab = if c.files.is_empty() { Tab::History } else { Tab::Folder };
         cx.open_page(ID, if c.files.is_empty() { "history" } else { "folder" });
     }
-    y += 18.0;
+    y += line_h(&p, &ty::section()) + sp::S;
     if items.is_empty() {
         let r = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 48.0));
         dashed_rect(&p, r, 6.0, white(40));
@@ -446,13 +446,13 @@ fn grid(c: &mut Capture, ui: &mut Ui, list: Rect, items: &[Item], salt: &str) ->
     let mut acts = Vec::new();
     let mut child = ui.new_child(UiBuilder::new().max_rect(list));
     ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show(&mut child, |ui| {
-        let total: f32 = days.iter().map(|(_, v)| 24.0 + v.len().div_ceil(cols) as f32 * (cell_h + gap)).sum::<f32>() + 8.0;
-        let (area, _) = ui.allocate_exact_size(Vec2::new(list.width(), total), Sense::hover());
+        let total: f32 = days.iter().map(|(_, v)| sp::SECTION_H + v.len().div_ceil(cols) as f32 * (cell_h + gap)).sum::<f32>() + 8.0;
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), total), Sense::hover());
         let p = ui.painter().clone();
         let mut y = area.top();
         for (d, v) in &days {
-            section_header(&p, Pos2::new(x0, y), Align2::LEFT_TOP, &day_label(*d));
-            y += 24.0;
+            section_title(&p, x0, y, &day_label(*d));
+            y += sp::SECTION_H;
             for (i, it) in v.iter().enumerate() {
                 let (row, col) = (i / cols, i % cols);
                 let r = Rect::from_min_size(Pos2::new(x0 + col as f32 * (cw + gap), y + row as f32 * (cell_h + gap)), Vec2::new(cw, th));
@@ -950,7 +950,7 @@ pub fn sharing_page(c: &mut Capture, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     let mut act: Option<(usize, u8)> = None;
     let mut child = ui.new_child(UiBuilder::new().max_rect(list));
     ScrollArea::vertical().id_salt("shared-list").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(rw, shared.len() as f32 * (row_h + 6.0)), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(rw.min(ui.available_width()), shared.len() as f32 * (row_h + 6.0)), Sense::hover());
         let p = ui.painter().clone();
         for (k, (path, sh)) in shared.iter().enumerate() {
             let rr = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * (row_h + 6.0)), Vec2::new(rw, row_h));
@@ -997,7 +997,7 @@ fn settings_page(c: &mut Capture, ui: &mut Ui, body: Rect, cx: &mut Cx) {
     record_keys(c, ui, cx);
     let mut child = ui.new_child(UiBuilder::new().max_rect(body));
     ScrollArea::vertical().id_salt("capture-settings").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), 1220.0), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1220.0), Sense::hover());
         let p = ui.painter().clone();
         let gap = 20.0;
         let x0 = area.left() + 24.0;
@@ -1336,8 +1336,8 @@ fn video_card(c: &mut Capture, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     y += 30.0;
     modes(c, ui, &p, id, Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 52.0)), &[(Command::Record, "Record")], true);
     y += 52.0 + 10.0;
-    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Recent", bold(11.0), TEXT_FAINT());
-    y += 18.0;
+    p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Recent", ty::section(), white(150));
+    y += line_h(&p, &ty::section()) + sp::S;
     let items: Vec<Item> = recordings(c).into_iter().take(4).collect();
     if items.is_empty() {
         let r = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 48.0));
@@ -1418,7 +1418,7 @@ pub fn video_page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
             record_keys(c, ui, cx);
             let mut child = ui.new_child(UiBuilder::new().max_rect(body));
             ScrollArea::vertical().id_salt("video-settings").auto_shrink([false, false]).show(&mut child, |ui| {
-                let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), 900.0), Sense::hover());
+                let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 900.0), Sense::hover());
                 let p = ui.painter().clone();
                 let gap = 20.0;
                 let x0 = area.left() + 24.0;

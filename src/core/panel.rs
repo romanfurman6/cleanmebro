@@ -132,7 +132,7 @@ pub fn panel(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let scroll_r = Rect::from_min_max(area.min, Pos2::new(area.right() + PAD - 2.0, area.bottom()));
         let mut child = ui.new_child(UiBuilder::new().max_rect(scroll_r).layout(egui::Layout::top_down(egui::Align::Min)));
         // a slim bar, so even hovered it stays clear of the widgets
-        child.spacing_mut().scroll.bar_width = 6.0;
+        child.spacing_mut().scroll.floating_allocated_width = 0.0;
         child.set_clip_rect(area.expand2(Vec2::new(PAD, 8.0)));
         ScrollArea::vertical().id_salt("panel-widgets").auto_shrink([false, false]).show(&mut child, |ui| {
             let (origin, _) = ui.allocate_exact_size(Vec2::new(area.width(), need), Sense::hover());

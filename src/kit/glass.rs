@@ -181,6 +181,17 @@ pub mod sp {
     pub const ROW2_H: f32 = 52.0;
     /// Between columns of a row (name, schedule, state, buttons).
     pub const COL_GAP: f32 = 16.0;
+    /// The slim scroll bar, at its widest (hovered).
+    pub const SCROLL_BAR_W: f32 = 6.0;
+    /// Room a scrolling list leaves on its right for the bar: the bar sits
+    /// in the middle of it and never on the content.
+    pub const SCROLL_GUTTER: f32 = 14.0;
+    /// A list's section title row ("Open at login"): L above, the title
+    /// (and its link), M below to the first row.
+    pub const SECTION_H: f32 = 44.0;
+    /// A table's column-head row inside its card ("Name · Last used · Size"),
+    /// with M above and below the heads; the hairline sits at its bottom.
+    pub const TABLE_HEAD_H: f32 = 36.0;
 }
 
 /// The type ramp: seven styles, used everywhere instead of ad-hoc sizes.
@@ -199,6 +210,8 @@ pub mod ty {
     pub fn body() -> FontId { font(13.0) }
     /// 12/400: labels and legends.
     pub fn label() -> FontId { font(12.0) }
+    /// 12/600: section titles of a list ("Open at login").
+    pub fn section() -> FontId { bold(12.0) }
     /// 11/400: captions, in [`caption_color`].
     pub fn caption() -> FontId { font(11.0) }
     /// White at 50%: the caption colour.
@@ -673,6 +686,20 @@ pub fn group_header(p: &Painter, pos: Pos2, label: &str) -> Rect {
 
 pub fn section_header(p: &Painter, pos: Pos2, align: Align2, label: &str) -> Rect {
     p.text(pos, align, label, bold(11.0), white(120))
+}
+
+/// The title of a section of a list ("Open at login", "Background agents"),
+/// in a row [`sp::SECTION_H`] tall starting at `top`. Returns the title's
+/// centre y, for a link on the same line.
+pub fn section_title(p: &Painter, x: f32, top: f32, label: &str) -> f32 {
+    let cy = section_title_y(p, top);
+    p.text(Pos2::new(x, cy), Align2::LEFT_CENTER, label, ty::section(), white(150));
+    cy
+}
+
+/// The centre y of a section title in a row starting at `top`.
+pub fn section_title_y(p: &Painter, top: f32) -> f32 {
+    top + sp::SECTION_H - sp::M - line_h(p, &ty::section()) / 2.0
 }
 
 /// The header of a detail sheet: tint chip, title, subtitle, close button.

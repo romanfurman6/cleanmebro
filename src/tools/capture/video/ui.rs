@@ -754,7 +754,7 @@ fn transcript(v: &mut Viewer, ui: &mut Ui, r: Rect) {
     let shift = ui.input(|i| i.modifiers.shift);
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
         egui::ScrollArea::vertical().id_salt("video-lines").auto_shrink([false, false]).show(ui, |ui| {
-            let w = list.width() - 10.0;
+            let w = ui.available_width();
             for (i, l) in v.lines.iter().enumerate() {
                 let cut = speech::line_cut(l, &v.edl);
                 let picked = v.picked.is_some_and(|(a, b)| i >= a && i <= b);

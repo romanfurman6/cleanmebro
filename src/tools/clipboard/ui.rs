@@ -470,7 +470,7 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
     let h: f32 = rows.iter().map(|r| if matches!(r, Row::Head(_)) { 28.0 } else { ROW_H }).sum::<f32>() + 8.0;
     let mut child = ui.new_child(UiBuilder::new().max_rect(list.shrink2(Vec2::new(0.0, 4.0))));
     ScrollArea::vertical().id_salt("clip-list").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(list.width(), h), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
         let p = ui.painter().clone();
         let mut y = area.top();
         for row in rows.iter() {
@@ -747,7 +747,7 @@ fn settings_page(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     ScrollArea::vertical().id_salt("clip-settings").auto_shrink([false, false]).show(&mut child, |ui| {
         let rows = c.settings.ignore.len().max(1);
         let h = (500.0f32).max(330.0 + (rows + 2) as f32 * ROW_H + 120.0);
-        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
         let p = ui.painter().clone();
         let gap = 20.0;
         let x0 = area.left() + 24.0;

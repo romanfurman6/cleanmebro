@@ -382,15 +382,15 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     }
     glass_card(&p, list, R_CARD, 0.0, false);
     // column heads
-    let hy = list.top() + 15.0;
+    let hy = list.top() + sp::TABLE_HEAD_H / 2.0;
     let c_size = list.right() - 14.0;
     let c_used = c_size - 70.0 - 12.0;
     let c_name = list.left() + 14.0 + 16.0 + 10.0 + 26.0 + 10.0;
     section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_CENTER, "Name");
     section_header(&p, Pos2::new(c_used, hy), Align2::RIGHT_CENTER, "Last used");
     section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_CENTER, "Size");
-    hairline(&p, Pos2::new(list.left(), list.top() + 30.0), Pos2::new(list.right(), list.top() + 30.0));
-    let rows = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - 2.0));
+    hairline(&p, Pos2::new(list.left(), list.top() + sp::TABLE_HEAD_H), Pos2::new(list.right(), list.top() + sp::TABLE_HEAD_H));
+    let rows = Rect::from_min_max(Pos2::new(list.left(), list.top() + sp::TABLE_HEAD_H + 1.0), Pos2::new(list.right(), list.bottom() - 2.0));
     if ids.is_empty() {
         let (msg, hint) = match u.st.lock_ok().phase {
             // Idle = not scanned (no Full Disk Access yet: the lock says so)
@@ -407,7 +407,7 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
         let now = u.now();
         let mut budget = ICONS_PER_FRAME;
         ScrollArea::vertical().id_salt("un-apps").auto_shrink([false, false]).show(&mut child, |ui| {
-            let (area, _) = ui.allocate_exact_size(Vec2::new(rows.width(), ids.len() as f32 * ROW_H), Sense::hover());
+            let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ids.len() as f32 * ROW_H), Sense::hover());
             let p = ui.painter().clone();
             let clip = ui.clip_rect();
             for (k, &i) in ids.iter().enumerate() {
@@ -555,10 +555,10 @@ fn app_detail(u: &mut Uninstaller, ui: &mut Ui, r: Rect, sel: &Path) {
     child.set_clip_rect(files);
     let lib = u.roots.user_library.clone();
     ScrollArea::vertical().id_salt(("un-files", &a.path)).auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(files.width(), a.items.len() as f32 * 26.0), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), a.items.len() as f32 * 26.0), Sense::hover());
         let p = ui.painter().clone();
         for (k, it) in a.items.iter().enumerate() {
-            let rr = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * 26.0), Vec2::new(area.width() - 8.0, 26.0));
+            let rr = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * 26.0), Vec2::new(area.width(), 26.0));
             if !ui.is_rect_visible(rr) {
                 continue;
             }
@@ -648,7 +648,7 @@ fn review(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
     let opened = rv.open.clone();
     let mut budget = ICONS_PER_FRAME;
     ScrollArea::vertical().id_salt("un-review").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(lr.width(), rows_h), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), rows_h), Sense::hover());
         let p = ui.painter().clone();
         let mut yy = area.top();
         for (k, t) in targets.iter().enumerate() {
@@ -944,13 +944,13 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, chip_at: Pos2) {
     let c_when = c_size - 70.0 - 12.0;
     let c_where = c_when - 90.0 - 16.0 - 250.0;
     let c_name = list.left() + 14.0 + 16.0 + 12.0;
-    let hy = list.top() + 15.0;
+    let hy = list.top() + sp::TABLE_HEAD_H / 2.0;
     section_header(&p, Pos2::new(c_name, hy), Align2::LEFT_CENTER, "Removed app");
     section_header(&p, Pos2::new(c_where, hy), Align2::LEFT_CENTER, "Where");
     section_header(&p, Pos2::new(c_when, hy), Align2::RIGHT_CENTER, "Last touched");
     section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_CENTER, "Size");
-    hairline(&p, Pos2::new(list.left(), list.top() + 30.0), Pos2::new(list.right(), list.top() + 30.0));
-    let rows_r = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - sp::S));
+    hairline(&p, Pos2::new(list.left(), list.top() + sp::TABLE_HEAD_H), Pos2::new(list.right(), list.top() + sp::TABLE_HEAD_H));
+    let rows_r = Rect::from_min_max(Pos2::new(list.left(), list.top() + sp::TABLE_HEAD_H + 1.0), Pos2::new(list.right(), list.bottom() - sp::S));
     // whole rows only: a row cut in half by the card edge looks broken
     let rows_r = Rect::from_min_size(rows_r.min, Vec2::new(rows_r.width(), ((rows_r.height() / 40.0).floor() * 40.0).max(40.0).min(rows_r.height())));
     if orphans.is_empty() {
@@ -962,7 +962,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, chip_at: Pos2) {
     child.set_clip_rect(rows_r);
     let now = u.now();
     ScrollArea::vertical().id_salt("un-orphans").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(rows_r.width(), orphans.len() as f32 * sp::ROW2_H), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), orphans.len() as f32 * sp::ROW2_H), Sense::hover());
         let p = ui.painter().clone();
         for (k, o) in orphans.iter().enumerate() {
             let r = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * sp::ROW2_H), Vec2::new(area.width(), sp::ROW2_H));
