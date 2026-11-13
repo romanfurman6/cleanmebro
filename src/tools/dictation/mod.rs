@@ -503,6 +503,7 @@ impl Dictation {
 
     fn cancel(&mut self) {
         self.trying = false;
+        self.try_down = false;
         if let Phase::Listening { mic, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
             let _ = mic.stop();
         }

@@ -205,7 +205,11 @@ pub fn thumb(p: &egui::Painter, r: Rect, tex: Option<egui::TextureId>, size: (u3
 
 /// Nothing captured yet (recordings live on the Video page).
 fn no_shots(c: &Capture) -> bool {
-    !c.store.shots.iter().any(|s| s.kind != Kind::Recording)
+    only_recordings(&c.store.shots)
+}
+
+fn only_recordings(shots: &[Shot]) -> bool {
+    shots.iter().all(|s| s.kind == Kind::Recording)
 }
 
 pub fn page(c: &mut Capture, ui: &mut Ui, r: Rect, cx: &mut Cx) {
@@ -1262,6 +1266,14 @@ mod tests {
         assert!(!passes(2, &s(Kind::Area, false)));
         assert!(passes(4, &s(Kind::Window, true)));
         assert!(!passes(4, &s(Kind::Window, false)));
+    }
+
+    #[test]
+    fn recordings_alone_still_show_the_first_capture_screen() {
+        let s = |kind| Shot { id: 1, kind, w: 1, h: 1, saved: None, pinned: false, secs: None };
+        assert!(only_recordings(&[]));
+        assert!(only_recordings(&[s(Kind::Recording)]));
+        assert!(!only_recordings(&[s(Kind::Recording), s(Kind::Area)]));
     }
 }
 
