@@ -208,7 +208,9 @@ pub fn update(shared: Shared, ctx: egui::Context, quiet: bool) {
         };
         let Some((old, changes, now_event)) = plan else {
             shared.updating.store(false, Ordering::SeqCst);
-            if quiet {
+            // Update clicked while this ran quietly: it turned `quiet` off
+            // and expects a new map
+            if quiet && shared.quiet.load(Ordering::SeqCst) {
                 shared.running.store(false, Ordering::SeqCst);
             } else {
                 full(&shared, &root, &ctx);
