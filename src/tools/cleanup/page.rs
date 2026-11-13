@@ -20,7 +20,7 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     match phase {
         Phase::Intro => intro(app, ui, r, cx),
         Phase::Scanning | Phase::Judging | Phase::Cleaning => working(app, ui, r, phase),
-        Phase::Results => results(app, ui, r, cx),
+        Phase::Results => results(app, ui, r),
         Phase::Done => done(app, ui, r),
     }
 }
@@ -352,7 +352,7 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
 
 // ---------------------------------------------------------------- results
 
-fn results(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
+fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let (total, pending, ai_used, ai_error, selected) = {
@@ -400,16 +400,16 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
 
     let mut body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - PAGE_FOOTER_H - sp::L));
 
-    // AI Check: a column on the right
-    if aicheck::ui::shown(&app.ai, true) {
-        let (content, col) = aicheck::ui::split(body);
-        body.max.x = content.right();
+    // AI Check: a strip on top
+    {
         let scan = format!("{total}");
         let shared = app.clean.clone();
         app.ai.auto(&ctx, &scan, || check_ask(&shared));
         let n = app.clean.lock_ok().items.iter().filter(|i| i.verdict != Verdict::Keep).count();
-        let offer = format!("{n} item{} to look at", if n == 1 { "" } else { "s" });
-        match aicheck::ui::column(&mut app.ai, ui, col, &offer) {
+        let offer = format!("{n} item{} found", if n == 1 { "" } else { "s" });
+        let (aih, aiev) = aicheck::ui::strip(&mut app.ai, ui, body, &offer, n > 0);
+        body.min.y += aih;
+        match aiev {
             Some(Event::Start) => {
                 let ask = check_ask(&app.clean);
                 app.ai.start(&ctx, ask);
@@ -421,7 +421,6 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
                 }
                 app.ai.done(&rec);
             }
-            Some(Event::OpenSettings) => tcx.push(Action::OpenSettings { tools: false }),
             None => {}
         }
     }

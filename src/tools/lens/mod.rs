@@ -59,8 +59,6 @@ pub struct Lens {
     /// The sheet of everything in the folder is open ("Other").
     pub(crate) lens_other: bool,
     pub(crate) ai: crate::kit::aicheck::Check,
-    /// AI Check asked for Settings (handled where `Cx` is at hand).
-    pub(crate) ai_settings: bool,
     /// The list row the keyboard is on.
     pub(crate) lens_cursor: Option<usize>,
     /// Bytes moved to the Trash from the map since the app started.
@@ -94,7 +92,7 @@ pub(crate) fn save_prefs(app: &Lens) {
 }
 
 impl Lens {
-    pub fn new(_env: &ToolEnv) -> Self {
+    pub fn new(env: &ToolEnv) -> Self {
         let root = PathBuf::from("/");
         Lens {
             lens: Default::default(),
@@ -123,8 +121,7 @@ impl Lens {
             lens_pick: Default::default(),
             lens_trashed: vec![],
             lens_other: false,
-            ai: crate::kit::aicheck::Check::new(ID),
-            ai_settings: false,
+            ai: crate::kit::aicheck::Check::new(ID, env.demo),
             lens_cursor: None,
             lens_freed: 0,
             lens_confirm: false,
@@ -145,6 +142,9 @@ impl Tool for Lens {
     fn about(&self) -> &'static str {
         "Find what takes space"
     }
+    fn busy(&self) -> bool {
+        self.lens.running.load(std::sync::atomic::Ordering::SeqCst) || self.ai.phase() == crate::kit::aicheck::Phase::Running
+    }
     fn badge(&self) -> Badge {
         Badge { icon: Icon::Map, color: tint::DISK_MAP() }
     }
@@ -161,9 +161,6 @@ impl Tool for Lens {
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         page::page(self, ui, rect, cx);
-        if std::mem::take(&mut self.ai_settings) {
-            cx.push(crate::core::tool::Action::OpenSettings { tools: false });
-        }
     }
     fn menu_items(&self) -> Vec<MenuItem> {
         vec![MenuItem { id: "open", label: "Disk Map".into() }]
@@ -176,6 +173,16 @@ impl Tool for Lens {
     fn demo_view(&mut self, view: &str) -> Option<View> {
         if view == "lens" || view == "sizes" || view == "lens-rings" || view == "lens-files" {
             page::demo_tree(self);
+            {
+                use crate::kit::aicheck::Check;
+                self.ai.set_demo(
+                    "Two big folders you can drop",
+                    vec![
+                        Check::demo_rec("remove", "Remove", "Remove old iOS simulators", "18.4 GB", "Runtimes for iOS versions you no longer build for", "Xcode"),
+                        Check::demo_rec("open", "Open", "Look at Movies/Exports", "9.1 GB", "Rendered videos; the projects are still there", "Movies"),
+                    ],
+                );
+            }
             self.lens_view = match view {
                 "lens-rings" => 1,
                 "lens-files" => 2,

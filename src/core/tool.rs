@@ -221,6 +221,12 @@ pub trait Tool {
         String::new()
     }
 
+    /// Working in the background (a scan, an AI Check): the sidebar shows a
+    /// spinner in place of [`Tool::sidebar_meta`].
+    fn busy(&self) -> bool {
+        false
+    }
+
     // ---- what it needs from macOS (setup and Settings › Permissions)
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         Vec::new()

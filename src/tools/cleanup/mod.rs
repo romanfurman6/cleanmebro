@@ -50,7 +50,7 @@ impl Cleanup {
             clean_confirm: false,
             clean_log: false,
             demo_claude: None,
-            ai: crate::kit::aicheck::Check::new(ID),
+            ai: crate::kit::aicheck::Check::new(ID, env.demo),
         }
     }
 }
@@ -163,6 +163,10 @@ impl Tool for Cleanup {
         if route == "claude" {
             self.clean_group = None;
         }
+    }
+    fn busy(&self) -> bool {
+        let scanning = matches!(self.clean.lock_ok().phase, engine::Phase::Scanning | engine::Phase::Judging | engine::Phase::Cleaning);
+        scanning || self.ai.phase() == crate::kit::aicheck::Phase::Running
     }
     fn sidebar_meta(&self) -> String {
         let g = self.clean.lock_ok();

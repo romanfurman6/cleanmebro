@@ -175,14 +175,18 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     s.search = q;
 
     let mut body = Rect::from_min_max(Pos2::new(r.left() + 24.0, r.top() + PAGE_HEADER_H + 1.0), Pos2::new(r.right() - 24.0, r.bottom()));
-    if loaded && aicheck::ui::shown(&s.ai, !jobs.is_empty()) {
-        let (content, col) = aicheck::ui::split(Rect::from_min_max(Pos2::new(body.left(), body.top() + 16.0), Pos2::new(body.right(), body.bottom() - 16.0)));
-        body.max.x = content.right();
+    // AI Check: a strip on top
+    if loaded {
         let n = jobs.iter().filter(|j| j.on).count() + apps.iter().filter(|a| a.on).count();
         if n > 0 {
             s.ai.auto(&ctx, &format!("{}:{}", jobs.len(), apps.len()), || startup_ask(&jobs, &apps));
         }
-        match aicheck::ui::column(&mut s.ai, ui, col, &format!("{} start with your Mac", plural(n, "thing"))) {
+        let top = Rect::from_min_max(Pos2::new(body.left(), body.top() + sp::L), body.max);
+        let (aih, aiev) = aicheck::ui::strip(&mut s.ai, ui, top, &format!("{} start with your Mac", plural(n, "thing")), n > 0);
+        if aih > 0.0 {
+            body.min.y += aih + sp::L;
+        }
+        match aiev {
             Some(Event::Start) => {
                 let ask = startup_ask(&jobs, &apps);
                 s.ai.start(&ctx, ask);
@@ -201,7 +205,6 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                 }
                 s.ai.done(&rec);
             }
-            Some(Event::OpenSettings) => cx.push(crate::core::tool::Action::OpenSettings { tools: false }),
             None => {}
         }
     }

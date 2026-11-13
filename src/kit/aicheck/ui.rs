@@ -1,14 +1,15 @@
-//! The AI Check column: no card, a hairline on its left, then the header
-//! (sparkle, "AI Check", the agent's mark), and one state: start, checking,
-//! recommendations, all good, agent missing, or (switched off) an offer.
+//! The AI Check strip: one row across the top of a tool's page (sparkle,
+//! "AI Check", what's going on, one button), and under it, once checked,
+//! one row per recommendation. No card; a hairline closes it. It shows only
+//! when the tool has found something and the main agent can be used.
 
-use super::{settings, update, Check, Phase, Rec};
+use super::{Check, Phase, Rec};
 use crate::kit::agent::Agent;
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-/// Column width, its hairline included.
-pub const WIDTH: f32 = 300.0;
+const HEAD_H: f32 = 40.0;
+const ROW_H: f32 = 44.0;
 
 /// What the person pressed.
 #[derive(Clone, Debug, PartialEq)]
@@ -17,20 +18,99 @@ pub enum Event {
     Start,
     /// A recommendation's button.
     Act(Rec),
-    OpenSettings,
 }
 
-/// Whether the column shows: always when the tool's AI Check is on; when
-/// off, only once the tool has something to look at (it offers a check).
+/// Whether the strip shows: the tool found something to look at and the
+/// main agent can be used (screenshots: always).
 pub fn shown(c: &Check, has_data: bool) -> bool {
-    c.demo || settings().is_on(c.tool) || has_data
+    c.demo || (has_data && crate::kit::agent::main().ready())
 }
 
-/// Split a page body into (content, column) with `sp::L` between.
-pub fn split(body: Rect) -> (Rect, Rect) {
-    let col = Rect::from_min_max(Pos2::new(body.right() - WIDTH, body.top()), body.max);
-    let content = Rect::from_min_max(body.min, Pos2::new(col.left() - sp::L, body.bottom()));
-    (content, col)
+/// Draw the strip at the top of `body` when it shows. Returns the height it
+/// took (0 when hidden), the gap under it included, and what was pressed.
+/// `offer` says what there is to check ("12 removed apps").
+pub fn strip(c: &mut Check, ui: &mut Ui, body: Rect, offer: &str, has_data: bool) -> (f32, Option<Event>) {
+    if !shown(c, has_data) {
+        c.hovered = None;
+        return (0.0, None);
+    }
+    let p = ui.painter().clone();
+    let ai = tint::HEALTH();
+    let agent = if c.demo { Agent::Claude } else { crate::kit::agent::main() };
+    let phase = c.phase();
+    let recs = if phase == Phase::Done { c.recs() } else { vec![] };
+    let (x0, x1) = (body.left(), body.right());
+    let head = Rect::from_min_size(body.min, Vec2::new(body.width(), HEAD_H));
+    let cy = head.center().y;
+    let mut ev = None;
+
+    sparkle(&p, Pos2::new(x0 + 7.0, cy), 14.0, ai);
+    let t = p.text(Pos2::new(x0 + 22.0, cy), Align2::LEFT_CENTER, "AI Check", ty::title(), TEXT());
+
+    // the one control on the right
+    let right;
+    match &phase {
+        Phase::Idle | Phase::Failed(_) => {
+            let label = format!("Check with {}", agent.name());
+            let bw = button_width(&p, &label, BTN_SECONDARY) + 18.0;
+            let r = Rect::from_min_size(Pos2::new(x1 - bw, cy - sp::CONTROL_H / 2.0), Vec2::new(bw, sp::CONTROL_H));
+            if pill_button(ui, r, &format!("     {label}"), BTN_SECONDARY, true).clicked() {
+                ev = Some(Event::Start);
+            }
+            let tw = p.layout_no_wrap(label, bold(13.0), TEXT()).size().x;
+            agent_mark(&p, Rect::from_center_size(Pos2::new(r.center().x - tw / 2.0 - 4.0, cy), Vec2::splat(12.0)), agent, None);
+            right = r.left();
+        }
+        Phase::Running => {
+            let w = p.layout_no_wrap("Stop".into(), ty::body(), TEXT()).size().x;
+            let r = Rect::from_min_size(Pos2::new(x1 - w, cy - 10.0), Vec2::new(w, 20.0));
+            if ghost(ui, r, "Stop") {
+                c.stop();
+            }
+            right = r.left();
+        }
+        Phase::Done => {
+            let w = p.layout_no_wrap("Check again".into(), ty::body(), TEXT()).size().x;
+            let r = Rect::from_min_size(Pos2::new(x1 - w, cy - 10.0), Vec2::new(w, 20.0));
+            if ghost(ui, r, "Check again") {
+                ev = Some(Event::Start);
+            }
+            right = r.left();
+        }
+    }
+
+    // what's going on, between the title and the control
+    let mut mx = t.right() + sp::M;
+    let (line, col) = match &phase {
+        Phase::Idle => (offer.to_string(), TEXT_DIM()),
+        Phase::Running => {
+            spinner(&p, Pos2::new(mx + 6.0, cy), 6.0, ui.input(|i| i.time), ai);
+            mx += 20.0;
+            animate(ui.ctx());
+            (format!("{} is checking…", agent.name()), TEXT_DIM())
+        }
+        Phase::Failed(e) => (e.clone(), AMBER()),
+        Phase::Done => {
+            let h = c.headline();
+            (if recs.is_empty() && h.is_empty() { "All good here".to_string() } else { h }, TEXT_DIM())
+        }
+    };
+    if !line.is_empty() && right - sp::M > mx {
+        text_fit(&p, Pos2::new(mx, cy), Align2::LEFT_CENTER, &line, ty::body(), col, right - sp::M - mx);
+    }
+
+    // recommendations, one row each
+    c.hovered = None;
+    let mut y = head.bottom();
+    for r in &recs {
+        let rr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(body.width(), ROW_H));
+        if let Some(e) = rec_row(c, ui, rr, r) {
+            ev = Some(e);
+        }
+        y += ROW_H;
+    }
+    hairline(&p, Pos2::new(x0, y), Pos2::new(x1, y));
+    (y - body.top() + sp::L, ev)
 }
 
 /// The agent's mark: Claude's orange burst, Codex's prompt square.
@@ -58,133 +138,6 @@ fn sparkle(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
     icon(p, Icon::Sparkle, Rect::from_center_size(c, Vec2::splat(s)), col);
 }
 
-/// Draw the column in `rect` (from [`split`]); `offer` is the line shown
-/// while the tool's check is off ("12 leftovers to look at").
-pub fn column(c: &mut Check, ui: &mut Ui, rect: Rect, offer: &str) -> Option<Event> {
-    let p = ui.painter().clone();
-    let ai = tint::HEALTH();
-    hairline(&p, rect.left_top(), rect.left_bottom());
-    let x = rect.left() + sp::L;
-    let w = rect.right() - x;
-    let agent = crate::kit::agent::main();
-    let ready = c.demo || agent.ready();
-    let on = c.demo || settings().is_on(c.tool);
-    let phase = c.phase();
-    let mut ev = None;
-
-    // header
-    let hy = rect.top() + 10.0;
-    sparkle(&p, Pos2::new(x + 7.0, hy), 14.0, if ready { ai } else { TEXT_FAINT() });
-    p.text(Pos2::new(x + 22.0, hy), Align2::LEFT_CENTER, "AI Check", ty::title(), if ready { TEXT() } else { TEXT_DIM() });
-    if ready && phase != Phase::Idle {
-        let name = agent.name();
-        let g = p.layout_no_wrap(name.to_string(), bold(11.0), TEXT());
-        let cw = g.size().x + 30.0;
-        let cr = Rect::from_min_size(Pos2::new(rect.right() - cw, hy - 10.0), Vec2::new(cw, 20.0));
-        p.rect_filled(cr, 6.0, white(14));
-        agent_mark(&p, Rect::from_center_size(Pos2::new(cr.left() + 12.0, cr.center().y), Vec2::splat(11.0)), agent, None);
-        p.galley(Pos2::new(cr.left() + 22.0, cr.center().y - g.size().y / 2.0), g, TEXT());
-    }
-    let mut y = hy + 10.0 + sp::M;
-    let check_btn = |ui: &mut Ui, y: f32, primary: bool| -> bool {
-        let label = format!("Check with {}", agent.name());
-        let bw = button_width(ui.painter(), &label, BTN_PRIMARY) + 18.0;
-        let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(bw.min(w), sp::CONTROL_H));
-        let clicked = pill_button(ui, r, &format!("     {label}"), if primary { BTN_PRIMARY } else { BTN_SECONDARY }, true).clicked();
-        let ink = if primary { Some(on_color(BLUE())) } else { None };
-        let tw = ui.painter().layout_no_wrap(label, bold(13.0), TEXT()).size().x;
-        agent_mark(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x - tw / 2.0 - 4.0, r.center().y), Vec2::splat(12.0)), agent, ink);
-        clicked
-    };
-
-    if !ready {
-        let why = format!("{} — {}", agent.name(), agent.why_not());
-        let g = p.layout(why, ty::label(), TEXT_DIM(), w);
-        let h = g.size().y;
-        p.galley(Pos2::new(x, y), g, TEXT_DIM());
-        y += h + sp::M;
-        let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(button_width(&p, "Open Settings", BTN_SECONDARY), sp::CONTROL_H));
-        if pill_button(ui, r, "Open Settings", BTN_SECONDARY, true).clicked() {
-            ev = Some(Event::OpenSettings);
-        }
-        return ev;
-    }
-
-    match phase {
-        Phase::Idle if !on => {
-            if !offer.is_empty() {
-                let g = p.layout(offer.to_string(), ty::lead(), TEXT(), w);
-                let h = g.size().y;
-                p.galley(Pos2::new(x, y), g, TEXT());
-                y += h + sp::M;
-            }
-            if check_btn(ui, y, true) {
-                ev = Some(Event::Start);
-            }
-            let bw = button_width(&p, "Always on", BTN_SECONDARY);
-            let r = Rect::from_min_size(Pos2::new(x, y + sp::CONTROL_H + sp::S), Vec2::new(bw, sp::CONTROL_H));
-            if ghost(ui, r, "Always on") {
-                let tool = c.tool.to_string();
-                update(true, |s| {
-                    s.on.insert(tool, true);
-                });
-                ev = Some(Event::Start);
-            }
-        }
-        Phase::Idle => {
-            if check_btn(ui, y, true) {
-                ev = Some(Event::Start);
-            }
-        }
-        Phase::Running => {
-            let t = ui.input(|i| i.time);
-            spinner(&p, Pos2::new(x + 7.0, y + 10.0), 6.0, t, ai);
-            p.text(Pos2::new(x + 22.0, y + 10.0), Align2::LEFT_CENTER, "Checking…", ty::body(), TEXT_DIM());
-            let r = Rect::from_min_size(Pos2::new(rect.right() - 48.0, y), Vec2::new(48.0, 20.0));
-            if ghost(ui, r, "Stop") {
-                c.stop();
-            }
-            animate(ui.ctx());
-        }
-        Phase::Failed(e) => {
-            let g = p.layout(e, ty::label(), TEXT_DIM(), w);
-            let h = g.size().y;
-            p.galley(Pos2::new(x, y), g, TEXT_DIM());
-            y += h + sp::M;
-            if check_btn(ui, y, false) {
-                ev = Some(Event::Start);
-            }
-        }
-        Phase::Done => {
-            let head = c.headline();
-            if !head.is_empty() {
-                let g = p.layout(head, ty::lead(), TEXT(), w);
-                let h = g.size().y;
-                p.galley(Pos2::new(x, y), g, TEXT());
-                y += h + sp::M;
-            }
-            let recs = c.recs();
-            if recs.is_empty() {
-                p.text(Pos2::new(x + w / 2.0, y + 18.0), Align2::CENTER_CENTER, "All good here", ty::label(), TEXT_DIM());
-                y += 36.0 + sp::S;
-            }
-            c.hovered = None;
-            for r in &recs {
-                let (h, e) = rec_row(c, ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 0.0)), r);
-                if let Some(e) = e {
-                    ev = Some(e);
-                }
-                y += h;
-            }
-            let r = Rect::from_min_size(Pos2::new(x, y + sp::S), Vec2::new(button_width(&p, "Check again", BTN_SECONDARY) - 28.0, 20.0));
-            if ghost(ui, r, "Check again") {
-                ev = Some(Event::Start);
-            }
-        }
-    }
-    ev
-}
-
 /// Text-only button: dim, brighter on hover. True when clicked.
 fn ghost(ui: &mut Ui, r: Rect, label: &str) -> bool {
     let resp = ui.interact(r, ui.scope_id().with(("ai-ghost", label, r.min.x as i32, r.min.y as i32)), Sense::click());
@@ -196,39 +149,44 @@ fn ghost(ui: &mut Ui, r: Rect, label: &str) -> bool {
     resp.clicked()
 }
 
-/// One recommendation under a hairline: icon, title and value, why, then
-/// its button and Skip. Returns (height, event).
-fn rec_row(c: &mut Check, ui: &mut Ui, at: Rect, r: &Rec) -> (f32, Option<Event>) {
+/// One recommendation on one line under a hairline: icon, title, why
+/// (dim), value, its button and Skip.
+fn rec_row(c: &mut Check, ui: &mut Ui, rr: Rect, r: &Rec) -> Option<Event> {
     let p = ui.painter().clone();
-    let (x, w) = (at.left(), at.width());
-    let top = at.top();
-    hairline(&p, Pos2::new(x, top), Pos2::new(x + w, top));
-    let ic = Rect::from_min_size(Pos2::new(x, top + sp::M), Vec2::splat(28.0));
-    rec_icon(c, ui.ctx(), &p, ic, r);
-    let tx = ic.right() + 10.0;
-    let tw = x + w - tx;
-    let vr = if r.value.is_empty() { Rect::from_min_size(Pos2::new(x + w, top + sp::M), Vec2::ZERO) } else { p.text(Pos2::new(x + w, top + sp::M), Align2::RIGHT_TOP, &r.value, ty::title(), TEXT()) };
-    let t = text_fit(&p, Pos2::new(tx, top + sp::M), Align2::LEFT_TOP, &r.title, ty::title(), TEXT(), vr.left() - sp::S - tx);
-    let g = p.layout(r.why.clone(), ty::label(), TEXT_DIM(), tw);
-    let gh = g.size().y;
-    p.galley(Pos2::new(tx, t.bottom() + sp::XS), g, TEXT_DIM());
-    let by = t.bottom() + sp::XS + gh + sp::S;
-    let bw = button_width(&p, &r.label, BTN_PRIMARY);
-    let br = Rect::from_min_size(Pos2::new(tx, by), Vec2::new(bw, sp::CONTROL_H));
-    let mut ev = None;
-    let h = by + sp::CONTROL_H + sp::M - top;
-    let row = Rect::from_min_size(Pos2::new(x - 6.0, top), Vec2::new(w + 12.0, h));
-    if ui.rect_contains_pointer(row) {
+    let cy = rr.center().y;
+    hairline(&p, rr.left_top(), rr.right_top());
+    if ui.rect_contains_pointer(rr) {
         c.hovered = Some(r.key.clone());
+        p.rect_filled(rr.shrink2(Vec2::new(0.0, 1.0)), R_SMALL, white(6));
     }
-    if pill_button(ui, br, &r.label, BTN_PRIMARY, true).clicked() {
-        ev = Some(Event::Act(r.clone()));
-    }
-    let sr = Rect::from_min_size(Pos2::new(br.right() + sp::M, by), Vec2::new(36.0, sp::CONTROL_H));
+    let ic = Rect::from_center_size(Pos2::new(rr.left() + 12.0 + 4.0, cy), Vec2::splat(24.0));
+    rec_icon(c, ui.ctx(), &p, ic, r);
+    // right to left: Skip, the button, the value
+    let sw = p.layout_no_wrap("Skip".into(), ty::body(), TEXT()).size().x;
+    let sr = Rect::from_min_size(Pos2::new(rr.right() - sp::S - sw, cy - 10.0), Vec2::new(sw, 20.0));
     if ghost(ui, sr, "Skip") {
         c.skip(r);
     }
-    (h, ev)
+    let bw = button_width(&p, &r.label, BTN_PRIMARY);
+    let br = Rect::from_min_size(Pos2::new(sr.left() - sp::M - bw, cy - sp::CONTROL_H / 2.0), Vec2::new(bw, sp::CONTROL_H));
+    let mut ev = None;
+    if pill_button(ui, br, &r.label, BTN_PRIMARY, true).clicked() {
+        ev = Some(Event::Act(r.clone()));
+    }
+    let mut right = br.left() - sp::L;
+    if !r.value.is_empty() {
+        let v = p.text(Pos2::new(right, cy), Align2::RIGHT_CENTER, &r.value, ty::body(), TEXT());
+        right = v.left() - sp::L;
+    }
+    let tx = ic.right() + sp::M;
+    let t = text_fit(&p, Pos2::new(tx, cy), Align2::LEFT_CENTER, &r.title, ty::title(), TEXT(), (right - tx).min(260.0));
+    if right > t.right() + sp::M + 40.0 {
+        let wr = text_fit(&p, Pos2::new(t.right() + sp::M, cy), Align2::LEFT_CENTER, &r.why, ty::label(), TEXT_DIM(), right - t.right() - sp::M);
+        if p.layout_no_wrap(r.why.clone(), ty::label(), TEXT_DIM()).size().x > right - t.right() - sp::M {
+            let _ = ui.interact(wr, ui.scope_id().with(("ai-why", &r.key)), Sense::hover()).on_hover_text(&r.why);
+        }
+    }
+    ev
 }
 
 fn rec_icon(c: &mut Check, ctx: &egui::Context, p: &egui::Painter, r: Rect, rec: &Rec) {

@@ -56,12 +56,19 @@ pub fn window_ui(app: &mut App, ui: &mut Ui, full: Rect, draw_lights: bool, cx: 
             y += 18.0;
         }
         let t = &app.tools[i];
-        let (label, badge, meta, id) = (t.name(), t.badge(), t.sidebar_meta(), t.id());
+        let busy = t.busy();
+        let (label, badge, meta, id) = (t.name(), t.badge(), if busy { String::new() } else { t.sidebar_meta() }, t.id());
         let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, SIDEBAR_ROW_H));
         if sidebar_item(ui, r, ui.scope_id().with(("nav", id)), badge.icon, badge.color, label, &meta, app.page == i && !app.settings_open, false).clicked() {
             app.page = i;
             app.settings_open = false;
             app.drag = None;
+        }
+        if busy {
+            // working in the background: a small spinner where the count sits
+            let now = ctx.input(|i| i.time);
+            spinner(&p, Pos2::new(r.right() - 14.0, r.center().y), 5.0, now, TEXT_DIM());
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
         y += SIDEBAR_ROW_H + 2.0;
     }

@@ -660,9 +660,9 @@ fn ai_check_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     }
     y += 56.0 + 28.0;
 
-    // where it's offered: each tool with its own badge
+    // which tools check by themselves after a scan (otherwise: on a click)
     let set = aicheck::settings();
-    title(&mut y, "Use in");
+    title(&mut y, "Check after each scan");
     let rows: Vec<(&str, &str, Icon, Color32)> = aicheck::TOOLS
         .iter()
         .filter_map(|(id, name, _)| app.tools.iter().find(|t| t.id() == *id).map(|t| (*id, *name, t.badge().icon, t.badge().color)))
@@ -683,20 +683,10 @@ fn ai_check_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
             flip = Some((id.to_string(), !on));
         }
     }
-    y = card.bottom() + 16.0;
-    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, row_h));
-    glass_card(&p, card, R_CARD, 0.0, false);
-    p.text(Pos2::new(card.left() + 16.0, card.center().y), Align2::LEFT_CENTER, "Check after each scan", font(13.0), TEXT());
-    let auto_flip = switch(ui, sw_in(card), ui.scope_id().with("ai-check-auto"), set.auto, true).clicked();
     y = card.bottom() + 28.0;
-    if flip.is_some() || auto_flip {
+    if let Some((id, on)) = flip {
         aicheck::update(!demo, |s| {
-            if let Some((id, on)) = flip {
-                s.on.insert(id, on);
-            }
-            if auto_flip {
-                s.auto = !s.auto;
-            }
+            s.on.insert(id, on);
         });
     }
 

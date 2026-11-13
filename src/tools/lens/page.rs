@@ -1328,17 +1328,17 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
     }
 
     let mut body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, hr.bottom() + 16.0), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - 16.0));
-    // AI Check: a column on the right, once the map is final
+    // AI Check: a strip on top, once the map is final and whole
     let mut ai_act: Option<(MenuAct, PathBuf, u64)> = None;
     let mut ai_go: Option<PathBuf> = None;
-    if !busy && aicheck::ui::shown(&app.ai, true) {
-        let (content, col) = aicheck::ui::split(body);
-        body.max.x = content.right();
+    if !busy && !partial {
         let scan = format!("{}:{}", root.path.display(), root.bytes);
         app.ai.auto(&ctx, &scan, || map_ask(root));
         let n = big_folders(root).len();
-        let offer = format!("{n} big folder{} to look at", if n == 1 { "" } else { "s" });
-        match aicheck::ui::column(&mut app.ai, ui, col, &offer) {
+        let offer = format!("{n} big folder{}", if n == 1 { "" } else { "s" });
+        let (aih, aiev) = aicheck::ui::strip(&mut app.ai, ui, body, &offer, n > 0);
+        body.min.y += aih;
+        match aiev {
             Some(Event::Start) => {
                 let ask = map_ask(root);
                 app.ai.start(&ctx, ask);
@@ -1353,7 +1353,6 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
                 }
                 app.ai.done(&rec);
             }
-            Some(Event::OpenSettings) => app.ai_settings = true,
             None => {}
         }
     }

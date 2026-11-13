@@ -208,7 +208,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     match u.tab {
         Tab::Apps => apps_tab(u, ui, body),
-        Tab::Leftovers => leftovers_tab(u, ui, body, cx),
+        Tab::Leftovers => leftovers_tab(u, ui, body),
     }
 
     // a drop on the window
@@ -784,25 +784,26 @@ fn short_path(s: &str) -> String {
 
 // ---------------------------------------------------------------- Leftovers
 
-fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, cx: &mut Cx) {
+fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let p = ui.painter().clone();
     let (orphans, phase) = {
         let g = u.st.lock_ok();
         (g.orphans.clone(), g.phase)
     };
-    // AI Check on the right
-    let mut x1 = body.right() - 24.0;
-    if aicheck::ui::shown(&u.ai, !orphans.is_empty()) {
-        let inner = Rect::from_min_max(Pos2::new(body.left() + 24.0, body.top() + 16.0), Pos2::new(x1, body.bottom() - 20.0));
-        let (content, col) = aicheck::ui::split(inner);
-        x1 = content.right();
-        let offer = format!("{} to look at", plural_n(orphans.len(), "removed app"));
+    // AI Check: a strip on top
+    let x1 = body.right() - 24.0;
+    let mut y = body.top() + 16.0;
+    {
+        let strip_at = Rect::from_min_max(Pos2::new(body.left() + 24.0, y), Pos2::new(x1, body.bottom() - 20.0));
+        let offer = format!("Leftovers of {}", plural_n(orphans.len(), "removed app"));
         if !orphans.is_empty() {
             let scan = format!("{}:{}", orphans.len(), orphans.iter().map(|o| o.bytes()).sum::<u64>());
             let now = u.now();
             u.ai.auto(ui.ctx(), &scan, || leftovers_ask(now, &orphans));
         }
-        match aicheck::ui::column(&mut u.ai, ui, col, &offer) {
+        let (aih, aiev) = aicheck::ui::strip(&mut u.ai, ui, strip_at, &offer, !orphans.is_empty());
+        y += aih;
+        match aiev {
             Some(Event::Start) => {
                 let ask = leftovers_ask(u.now(), &orphans);
                 u.ai.start(ui.ctx(), ask);
@@ -820,12 +821,10 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, cx: &mut Cx) {
                 }
                 u.ai.done(&r);
             }
-            Some(Event::OpenSettings) => cx.push(crate::core::tool::Action::OpenSettings { tools: false }),
             None => {}
         }
     }
     let x0 = body.left() + 24.0;
-    let mut y = body.top() + 16.0;
     let sel: Vec<&super::Orphan> = orphans.iter().filter(|o| o.selected).collect();
     let total: u64 = orphans.iter().map(|o| o.bytes()).sum();
     let sel_bytes: u64 = sel.iter().map(|o| o.bytes()).sum();
@@ -1326,6 +1325,17 @@ pub mod demo {
         u.selected = Some(PathBuf::from("/Applications/Docker.app"));
         match view {
             "uninstaller" | "uninstaller-apps" => {}
+            "uninstaller-leftovers" => {
+                u.tab = Tab::Leftovers;
+                use crate::kit::aicheck::Check;
+                u.ai.set_demo(
+                    "Leftovers of 2 removed apps",
+                    vec![
+                        Check::demo_rec("remove", "Remove", "Remove Zoom leftovers", "412 MB", "Zoom was removed in March; nothing else uses these", "Zoom"),
+                        Check::demo_rec("review", "Review", "Review Docker data", "6.8 GB", "Holds images and volumes; check before removing", "Docker"),
+                    ],
+                );
+            }
             "uninstaller-review" => {
                 u.filter = Filter::Unused;
                 let g = u.st.lock_ok();

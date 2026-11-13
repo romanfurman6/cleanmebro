@@ -310,7 +310,7 @@ impl Uninstaller {
             want_page: false,
             done_until: None,
             on: true,
-            ai: crate::kit::aicheck::Check::new(ID),
+            ai: crate::kit::aicheck::Check::new(ID, env.demo),
         };
         if env.demo {
             ui::demo::fill(&mut u, "uninstaller");
@@ -860,6 +860,13 @@ impl Tool for Uninstaller {
     }
     fn about(&self) -> &'static str {
         "Remove apps with everything they leave behind"
+    }
+    fn busy(&self) -> bool {
+        let working = {
+            let g = self.st.lock_ok();
+            g.working.is_some() || matches!(g.phase, Phase::Listing | Phase::Sizing { .. })
+        };
+        working || self.ai.phase() == crate::kit::aicheck::Phase::Running
     }
     fn sidebar_meta(&self) -> String {
         let g = self.st.lock_ok();

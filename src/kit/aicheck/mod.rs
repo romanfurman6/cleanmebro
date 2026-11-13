@@ -18,11 +18,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// Tools with an AI Check, in Settings order: (tool id, name, on by default).
+/// Tools with an AI Check, in Settings order: (tool id, name, checks by
+/// itself after a scan by default). Nothing goes to the agent without a
+/// click unless the person turns that on.
 pub const TOOLS: [(&str, &str, bool); 5] = [
-    ("cleanup", "Cleanup", true),
-    ("uninstaller", "Uninstaller", true),
-    ("startup", "Startup", true),
+    ("cleanup", "Cleanup", false),
+    ("uninstaller", "Uninstaller", false),
+    ("startup", "Startup", false),
     ("lens", "Disk Map", false),
     ("system", "Mac Health", false),
 ];
@@ -96,7 +98,7 @@ pub struct Check {
 }
 
 impl Check {
-    pub fn new(tool: &'static str) -> Check {
+    pub fn new(tool: &'static str, demo: bool) -> Check {
         Check {
             tool,
             inner: Arc::new(Mutex::new(Inner { phase: Phase::Idle, headline: String::new(), recs: Vec::new() })),
@@ -104,7 +106,7 @@ impl Check {
             hovered: None,
             icons: HashMap::new(),
             auto_for: None,
-            demo: false,
+            demo,
         }
     }
 
@@ -163,15 +165,15 @@ impl Check {
         });
     }
 
-    /// Start once per scan when "Check after each scan" is on and the tool's
-    /// AI Check is on. `scan` names the scan (its time, its size).
+    /// Start once per scan when the tool checks by itself (Settings › AI
+    /// Check). `scan` names the scan (its time, its size).
     pub fn auto(&mut self, ctx: &egui::Context, scan: &str, ask: impl FnOnce() -> Ask) {
         if self.demo || self.auto_for.as_deref() == Some(scan) {
             return;
         }
         self.auto_for = Some(scan.to_string());
         let s = settings();
-        if s.auto && s.is_on(self.tool) && crate::kit::agent::main().ready() {
+        if s.is_on(self.tool) && crate::kit::agent::main().ready() {
             self.start(ctx, ask());
         }
     }
@@ -203,6 +205,17 @@ impl Check {
     /// Hide a recommendation now and on later checks.
     pub fn skip(&mut self, r: &Rec) {
         add_skipped(self.tool, skip_id(r), !self.demo);
+    }
+
+    /// A sample recommendation for screenshots.
+    pub fn demo_rec(action: &str, label: &str, title: &str, value: &str, why: &str, name: &str) -> Rec {
+        Rec { key: title.into(), action: action.into(), label: label.into(), title: title.into(), value: value.into(), why: why.into(), icon: None, name: name.into() }
+    }
+
+    /// A check in progress, for screenshots.
+    pub fn set_demo_running(&mut self) {
+        self.demo = true;
+        self.inner.lock_ok().phase = Phase::Running;
     }
 
     /// Sample answer for screenshots.
@@ -312,10 +325,9 @@ fn parse(text: &str, ask: &Ask) -> Option<(String, Vec<Rec>)> {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(default)]
 pub struct Settings {
-    /// Tools switched away from their default, by id.
+    /// Tools that check by itself after a scan (switched away from their
+    /// default), by id.
     pub on: HashMap<String, bool>,
-    /// Check after each scan without a click.
-    pub auto: bool,
 }
 
 impl Settings {
@@ -483,7 +495,7 @@ mod tests {
     #[test]
     fn defaults_follow_the_tool_list() {
         let mut s = Settings::default();
-        assert!(s.is_on("cleanup") && s.is_on("startup") && !s.is_on("lens") && !s.is_on("system"));
+        assert!(!s.is_on("cleanup") && !s.is_on("startup") && !s.is_on("lens") && !s.is_on("system"));
         assert!(!s.is_on("capture"));
         s.on.insert("lens".into(), true);
         s.on.insert("cleanup".into(), false);

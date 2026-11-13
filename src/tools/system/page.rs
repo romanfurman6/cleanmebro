@@ -66,17 +66,19 @@ pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendati
     }
 
     let mut body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
-    let mut inner = body.shrink2(Vec2::new(sp::PAGE_EDGE, 0.0));
+    let inner = body.shrink2(Vec2::new(sp::PAGE_EDGE, 0.0));
 
-    // AI Check: a column on the right of the overview
-    if !show_settings && s.ready && aicheck::ui::shown(ai, true) {
-        let col_area = Rect::from_min_max(Pos2::new(inner.left(), inner.top() + sp::L), Pos2::new(inner.right(), inner.bottom() - sp::L));
-        let (content, col) = aicheck::ui::split(col_area);
-        inner.max.x = content.right();
-        body.max.x = content.right() + sp::PAGE_EDGE;
+    // AI Check: a strip on top of the overview
+    if !show_settings {
+        let top = body.top() + sp::L;
+        let at = Rect::from_min_max(Pos2::new(inner.left(), top), Pos2::new(inner.right(), inner.bottom()));
         let n = s.procs.iter().filter(|p| p.cpu >= 20.0).count();
-        let offer = if n > 0 { format!("{n} busy app{}", if n == 1 { "" } else { "s" }) } else { "Your Mac right now".to_string() };
-        match aicheck::ui::column(ai, ui, col, &offer) {
+        let offer = if n > 0 { format!("{n} busy app{}", if n == 1 { "" } else { "s" }) } else { String::new() };
+        let (aih, aiev) = aicheck::ui::strip(ai, ui, at, &offer, s.ready);
+        if aih > 0.0 {
+            body.min.y = top + aih - sp::L;
+        }
+        match aiev {
             Some(Event::Start) => ai.start(ui.ctx(), health_ask(&s)),
             Some(Event::Act(rec)) => {
                 match rec.action.as_str() {
@@ -92,7 +94,6 @@ pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendati
                 }
                 ai.done(&rec);
             }
-            Some(Event::OpenSettings) => cx.push(crate::core::tool::Action::OpenSettings { tools: false }),
             None => {}
         }
     }
