@@ -114,7 +114,6 @@ pub struct Project {
     pub cwd: Option<PathBuf>,
     pub cwd_exists: bool,
     pub last_used: Option<SystemTime>,
-    pub bytes: u64,
 }
 
 impl Project {
@@ -209,8 +208,7 @@ pub fn scan_projects() -> Vec<Project> {
             cwd = Some(PathBuf::from(enc.replace('-', "/")));
         }
         let cwd_exists = cwd.as_ref().map(|c| c.exists()).unwrap_or(false);
-        let bytes = crate::kit::fs::dir_size(&folder);
-        out.push(Project { folder, cwd, cwd_exists, last_used: last, bytes });
+        out.push(Project { folder, cwd, cwd_exists, last_used: last });
     }
     out.sort_by_key(|p| std::cmp::Reverse(p.last_used));
     out

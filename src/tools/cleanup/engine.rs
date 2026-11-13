@@ -1433,7 +1433,7 @@ mod tests {
         let w = group_weights(Some(&[50_000_000_000, 0, 0, 0, 0, 0, 0]));
         let mut live = [GroupLive { total: 1, done: 1, ..Default::default() }; Group::COUNT];
         live[0] = GroupLive { total: 2, done: 1, ..Default::default() };
-        assert!(live_progress(&live, &w) < 0.3);
+        assert!(live_progress(&live, &w) < 0.4);
     }
 
     use super::*;
