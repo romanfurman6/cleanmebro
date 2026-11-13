@@ -470,8 +470,8 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     }
     let bob = if t > 1.8 { ((t - 1.8) * 1.6).sin() * 3.0 } else { 0.0 };
     app_mark(&p, c + Vec2::new(0.0, bob), 96.0, ease((t - 0.3) / 1.2));
-    p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT());
-    p.text(Pos2::new(c.x, c.y + 156.0), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(13.0), TEXT_FAINT());
+    let name = p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT());
+    p.text(Pos2::new(c.x, name.bottom() + sp::LINE_GAP), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(13.0), TEXT_FAINT());
     let r = Rect::from_center_size(Pos2::new(c.x, c.y + 214.0), Vec2::new(128.0, 40.0));
     pill_button(ui, r, "Set up", BTN_PRIMARY, true).clicked()
 }
@@ -488,8 +488,8 @@ fn crash_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
         p.rect_stroke(mark, 18.0 * z, Stroke::new(1.0, white(24)), StrokeKind::Inside);
         icon(&p, Icon::Shield, mark.shrink(20.0 * z), BLUE());
     }
-    p.text(Pos2::new(c.x, c.y + 62.0), Align2::CENTER_TOP, "Send crash reports?", bold(22.0), TEXT());
-    p.text(Pos2::new(c.x, c.y + 96.0), Align2::CENTER_TOP, "They help fix bugs faster. Your personal data stays on your Mac.", font(13.0), TEXT_FAINT());
+    let q = p.text(Pos2::new(c.x, c.y + 62.0), Align2::CENTER_TOP, "Send crash reports?", bold(22.0), TEXT());
+    p.text(Pos2::new(c.x, q.bottom() + sp::LINE_GAP), Align2::CENTER_TOP, "They help fix bugs faster. Your personal data stays on your Mac.", font(13.0), TEXT_FAINT());
     // what a report has, and what it never has
     let facts: [(bool, &str); 3] = [(true, "What went wrong and where in the app"), (true, "App and macOS version"), (false, "Files, names or IP address")];
     let w = 400.0;
@@ -585,11 +585,14 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
             let b = app.tools[i].badge();
             icon(&p, b.icon, ib.shrink(8.0), lerp_color(TEXT_MUTED(), ON_ACTION, s));
             let tx = ib.right() + 10.0;
-            text_fit(&p, Pos2::new(tx, r.top() + 15.0), Align2::LEFT_TOP, app.tools[i].name(), bold(13.0), lerp_color(TEXT_MUTED(), TEXT(), s), r.right() - tx - 24.0);
+            // name + permission icons as one block, centered, LINE_GAP apart
+            let block = if app.tools[i].needs().is_empty() { 16.0 } else { 16.0 + sp::LINE_GAP + 12.0 };
+            let ny = r.center().y - block / 2.0;
+            text_fit(&p, Pos2::new(tx, ny), Align2::LEFT_TOP, app.tools[i].name(), bold(13.0), lerp_color(TEXT_MUTED(), TEXT(), s), r.right() - tx - 24.0);
             // what it will ask for
             let mut gx = tx;
             for n in app.tools[i].needs() {
-                icon(&p, n.perm.icon(), Rect::from_min_size(Pos2::new(gx, r.top() + 37.0), Vec2::splat(12.0)), TEXT_MUTED());
+                icon(&p, n.perm.icon(), Rect::from_min_size(Pos2::new(gx, ny + 16.0 + sp::LINE_GAP), Vec2::splat(12.0)), TEXT_MUTED());
                 gx += 16.0;
             }
             if s > 0.01 {
@@ -621,7 +624,7 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let set = settings::get();
     let head = body.top() + 6.0;
     let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "AI agents", bold(22.0), TEXT());
-    let sub = p.text(Pos2::new(body.left(), g.bottom() + sp::S), Align2::LEFT_TOP, "Main does AI Check in Cleanup, Uninstaller, Startup, Disk Map and Mac Health. Tracked agents show in AI Usage.", ty::body(), TEXT_DIM());
+    let sub = text_wrap(&p, Pos2::new(body.left(), g.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, "Main does AI Check in Cleanup, Uninstaller, Startup, Disk Map and Mac Health. Tracked agents show in AI Usage.", ty::body(), TEXT_DIM(), body.width().min(560.0), 3);
     let w = body.width().min(560.0);
     let x = body.left();
     let col_track = x + w - sp::L - 8.0;
@@ -683,7 +686,7 @@ fn models_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let p = ui.painter().clone();
     let head = body.top() + 6.0;
     let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Download models", bold(22.0), TEXT());
-    let sub = p.text(Pos2::new(body.left(), g.bottom() + sp::S), Align2::LEFT_TOP, "They run on this Mac. The download keeps going if you continue.", ty::body(), TEXT_DIM());
+    let sub = text_wrap(&p, Pos2::new(body.left(), g.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, "They run on this Mac. The download keeps going if you continue.", ty::body(), TEXT_DIM(), body.width().min(560.0), 3);
     let list = models(app);
     let w = body.width().min(620.0);
     let row_h = 76.0;
@@ -1008,8 +1011,12 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
         let blue = false;
         p.rect_filled(r, 9.0, (if blue { BLUE() } else { SIDEBAR() }).gamma_multiply(a.min(1.0)));
         let fg = if blue { ON_ACTION } else { TEXT_SOFT() };
-        icon(&p, app.tools[i].badge().icon, Rect::from_center_size(r.center() - Vec2::new(0.0, 8.0), Vec2::splat(18.0 * a)), fg);
-        text_fit(&p, Pos2::new(r.center().x, r.bottom() - 9.0), Align2::CENTER_BOTTOM, app.tools[i].name(), font(11.0), fg.gamma_multiply(0.85 * a.min(1.0)), r.width() - 8.0);
+        // the whole name (R10): on two lines when one is too narrow, the icon moves up
+        let name = app.tools[i].name();
+        let two = p.layout_no_wrap(name.to_string(), font(11.0), fg).size().x > r.width() - 8.0;
+        let icon_up = if two { 14.0 } else { 8.0 };
+        icon(&p, app.tools[i].badge().icon, Rect::from_center_size(r.center() - Vec2::new(0.0, icon_up), Vec2::splat(18.0 * a)), fg);
+        text_wrap(&p, Pos2::new(r.center().x, r.bottom() - if two { 5.0 } else { 9.0 }), Align2::CENTER_BOTTOM, name, font(11.0), fg.gamma_multiply(0.85 * a.min(1.0)), r.width() - 8.0, 2);
     }
     restart
 }

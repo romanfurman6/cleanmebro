@@ -12,7 +12,6 @@ use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 const CHIP_H: f32 = 26.0;
 const POP_W: f32 = 560.0;
 const POP_HEAD_H: f32 = 44.0;
-const POP_ROW_H: f32 = 58.0;
 const POP_SEC_H: f32 = 28.0;
 
 /// What the person pressed.
@@ -136,7 +135,19 @@ fn popover(c: &mut Check, ui: &mut Ui, chip: Rect) -> Option<Event> {
     let answers: Vec<Rec> = recs.iter().filter(|r| c.is_answer(r)).cloned().collect();
     let others: Vec<Rec> = recs.iter().filter(|r| !c.is_answer(r)).cloned().collect();
     let sections = if answers.is_empty() { 0.0 } else if others.is_empty() { 1.0 } else { 2.0 };
-    let h = POP_HEAD_H + recs.len() as f32 * POP_ROW_H + sections * POP_SEC_H;
+    let (line, col) = match &phase {
+        Phase::Failed(e) => (e.clone(), AMBER()),
+        _ => {
+            let hl = c.headline();
+            (if recs.is_empty() && hl.is_empty() { "Nothing to do here".to_string() } else { hl }, TEXT_DIM())
+        }
+    };
+    // the agent's words wrap, never cut (R10): rows grow to fit them
+    let pm = ui.painter().clone();
+    let line_h = wrapped_h(&pm, &line, ty::body(), w - 28.0, 3);
+    let head_h = POP_HEAD_H + line_h + sp::M;
+    let row_hs: Vec<f32> = answers.iter().chain(others.iter()).map(|r| rec_height(&pm, c, r, w)).collect();
+    let h = head_h + row_hs.iter().sum::<f32>() + sections * POP_SEC_H;
     let x = chip.left().min(screen.right() - sp::L - w).max(screen.left() + sp::L);
     let rect = Rect::from_min_size(Pos2::new(x, chip.bottom() + 6.0), Vec2::new(w, h));
     let mut ev = None;
@@ -145,26 +156,20 @@ fn popover(c: &mut Check, ui: &mut Ui, chip: Rect) -> Option<Event> {
         let p = ui.painter().clone();
         p.rect_filled(rr, 12.0, POPOVER());
         p.rect_stroke(rr, 12.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
-        // header: sparkle, AI Check, the headline (or the error), Check again
+        // header: sparkle, AI Check, Check again; the headline (or the error) under it
         let cy = rr.top() + POP_HEAD_H / 2.0;
         sparkle(&p, Pos2::new(rr.left() + 14.0 + 7.0, cy), 14.0, tint::HEALTH());
-        let t = p.text(Pos2::new(rr.left() + 14.0 + 20.0, cy), Align2::LEFT_CENTER, "AI Check", ty::title(), TEXT());
+        p.text(Pos2::new(rr.left() + 14.0 + 20.0, cy), Align2::LEFT_CENTER, "AI Check", ty::title(), TEXT());
         let again = if matches!(phase, Phase::Failed(_)) { "Try again" } else { "Check again" };
         let aw = p.layout_no_wrap(again.into(), ty::body(), TEXT()).size().x;
         let ar = Rect::from_min_size(Pos2::new(rr.right() - 14.0 - aw, cy - 10.0), Vec2::new(aw, 20.0));
         if ghost(ui, ar, again) {
             ev = Some(Event::Start);
         }
-        let (line, col) = match &phase {
-            Phase::Failed(e) => (e.clone(), AMBER()),
-            _ => {
-                let hl = c.headline();
-                (if recs.is_empty() && hl.is_empty() { "Nothing to do here".to_string() } else { hl }, TEXT_DIM())
-            }
-        };
-        text_fit(&p, Pos2::new(t.right() + sp::M, cy), Align2::LEFT_CENTER, &line, ty::body(), col, ar.left() - sp::M - t.right() - sp::M);
+        text_wrap(&p, Pos2::new(rr.left() + 14.0, rr.top() + POP_HEAD_H - sp::XS), Align2::LEFT_TOP, &line, ty::body(), col, rr.width() - 28.0, 3);
         c.hovered = None;
-        let mut y = rr.top() + POP_HEAD_H;
+        let mut y = rr.top() + head_h;
+        let mut k = 0;
         // what waited on the user first, under its own label; then the rest
         let groups: [(&str, &Vec<Rec>); 2] = [("Needs your OK", &answers), ("Also", &others)];
         for (label, list) in groups {
@@ -178,11 +183,12 @@ fn popover(c: &mut Check, ui: &mut Ui, chip: Rect) -> Option<Event> {
                 y += POP_SEC_H;
             }
             for r in list.iter() {
-                let row = Rect::from_min_size(Pos2::new(rr.left(), y), Vec2::new(rr.width(), POP_ROW_H));
+                let row = Rect::from_min_size(Pos2::new(rr.left(), y), Vec2::new(rr.width(), row_hs[k]));
                 if let Some(e) = rec_row(c, ui, row, r) {
                     ev = Some(e);
                 }
-                y += POP_ROW_H;
+                y += row_hs[k];
+                k += 1;
             }
         }
     });
@@ -234,8 +240,46 @@ fn ghost(ui: &mut Ui, r: Rect, label: &str) -> bool {
     resp.clicked()
 }
 
-/// One recommendation under a hairline: icon, title and value on the first
-/// line, why under it, then its button and Skip.
+/// Height of `text` wrapped to `w` on at most `rows` lines.
+fn wrapped_h(p: &egui::Painter, text: &str, font: egui::FontId, w: f32, rows: usize) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    let mut job = egui::text::LayoutJob::simple(text.to_owned(), font, TEXT(), w.max(1.0));
+    job.wrap.max_rows = rows;
+    p.layout_job(job).size().y
+}
+
+/// A recommendation's buttons: the agent's pick, then Skip (an answer: the
+/// other choice). Their labels and the width they take on the right.
+fn rec_buttons(p: &egui::Painter, c: &Check, r: &Rec) -> (Option<(&'static str, &'static str)>, f32) {
+    let alt = if c.is_answer(r) { c.actions.iter().find(|(id, _)| *id != r.action).copied() } else { None };
+    let second = match alt {
+        Some((_, label)) => button_width(p, label, BTN_SECONDARY),
+        None => p.layout_no_wrap("Skip".into(), ty::body(), TEXT()).size().x,
+    };
+    (alt, 14.0 + second + sp::M + button_width(p, &r.label, BTN_PRIMARY))
+}
+
+/// Where a recommendation's text goes in a row `w` wide: its left edge
+/// (from the row's) and its width.
+fn rec_text_span(p: &egui::Painter, c: &Check, r: &Rec, w: f32) -> (f32, f32) {
+    let (_, bw) = rec_buttons(p, c, r);
+    let tx = 14.0 + 24.0 + sp::M;
+    (tx, w - tx - bw - sp::L)
+}
+
+/// A row's height: title (with its value) over why, both wrapped.
+fn rec_height(p: &egui::Painter, c: &Check, r: &Rec, w: f32) -> f32 {
+    let (_, tw) = rec_text_span(p, c, r, w);
+    let vw = if r.value.is_empty() { 0.0 } else { p.layout_no_wrap(r.value.clone(), ty::title(), TEXT()).size().x + sp::M };
+    let th = wrapped_h(p, &r.title, ty::title(), tw - vw, 2);
+    let wh = wrapped_h(p, &r.why, ty::label(), tw, 3);
+    (2.0 * sp::M + th + if wh > 0.0 { sp::LINE_GAP + wh } else { 0.0 }).max(sp::ROW2_H)
+}
+
+/// One recommendation under a hairline: icon, title and value, why under
+/// them (both wrap), then its button and Skip.
 fn rec_row(c: &mut Check, ui: &mut Ui, rr: Rect, r: &Rec) -> Option<Event> {
     let p = ui.painter().clone();
     let cy = rr.center().y;
@@ -247,8 +291,7 @@ fn rec_row(c: &mut Check, ui: &mut Ui, rr: Rect, r: &Rec) -> Option<Event> {
     let ic = Rect::from_center_size(Pos2::new(rr.left() + 14.0 + 12.0, cy), Vec2::splat(24.0));
     rec_icon(c, ui.ctx(), &p, ic, r);
     let mut ev = None;
-    // right to left: Skip (an answer: the other choice), then the agent's pick
-    let alt = if c.is_answer(r) { c.actions.iter().find(|(id, _)| *id != r.action).copied() } else { None };
+    let (alt, _) = rec_buttons(&p, c, r);
     let sr = if let Some((id, label)) = alt {
         let aw = button_width(&p, label, BTN_SECONDARY);
         let ar = Rect::from_min_size(Pos2::new(rr.right() - 14.0 - aw, cy - sp::CONTROL_H / 2.0), Vec2::new(aw, sp::CONTROL_H));
@@ -269,17 +312,18 @@ fn rec_row(c: &mut Check, ui: &mut Ui, rr: Rect, r: &Rec) -> Option<Event> {
     if pill_button(ui, br, &r.label, BTN_PRIMARY, true).clicked() {
         ev = Some(Event::Act(r.clone()));
     }
-    let tx = ic.right() + sp::M;
-    let right = br.left() - sp::L;
-    let mut tr = right;
+    let (tx, tw) = rec_text_span(&p, c, r, rr.width());
+    let tx = rr.left() + tx;
+    let vw = if r.value.is_empty() { 0.0 } else { p.layout_no_wrap(r.value.clone(), ty::title(), TEXT()).size().x + sp::M };
+    let th = wrapped_h(&p, &r.title, ty::title(), tw - vw, 2);
+    let wh = wrapped_h(&p, &r.why, ty::label(), tw, 3);
+    let top = cy - (th + if wh > 0.0 { sp::LINE_GAP + wh } else { 0.0 }) / 2.0;
+    let t = text_wrap(&p, Pos2::new(tx, top), Align2::LEFT_TOP, &r.title, ty::title(), TEXT(), tw - vw, 2);
     if !r.value.is_empty() {
-        let v = p.text(Pos2::new(right, cy - 9.0), Align2::RIGHT_CENTER, &r.value, ty::title(), tint::HEALTH());
-        tr = v.left() - sp::M;
+        p.text(Pos2::new(tx + tw, top), Align2::RIGHT_TOP, &r.value, ty::title(), tint::HEALTH());
     }
-    text_fit(&p, Pos2::new(tx, cy - 9.0), Align2::LEFT_CENTER, &r.title, ty::title(), TEXT(), tr - tx);
-    let wr = text_fit(&p, Pos2::new(tx, cy + 10.0), Align2::LEFT_CENTER, &r.why, ty::label(), TEXT_DIM(), right - tx);
-    if p.layout_no_wrap(r.why.clone(), ty::label(), TEXT_DIM()).size().x > right - tx {
-        let _ = ui.interact(wr, ui.scope_id().with(("ai-why", &r.key)), Sense::hover()).on_hover_text(&r.why);
+    if wh > 0.0 {
+        text_wrap(&p, Pos2::new(tx, t.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, &r.why, ty::label(), TEXT_DIM(), tw, 3);
     }
     ev
 }

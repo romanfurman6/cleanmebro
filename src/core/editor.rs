@@ -716,14 +716,14 @@ fn ai_check_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
             }
         }
     };
-    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 72.0));
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 2.0 * sp::M + line_h(&p, &bold(22.0)) + sp::LINE_GAP + line_h(&p, &font(12.0))));
     glass_card(&p, card, R_CARD, 0.0, false);
     let tokens = if t.tokens >= 1_000_000 { format!("{:.1}M", t.tokens as f64 / 1e6) } else if t.tokens >= 1_000 { format!("{}k", t.tokens / 1_000) } else { t.tokens.to_string() };
     let stats = [(t.calls.to_string(), "checks", TEXT()), (tokens, "tokens", TEXT()), (format!("${:.2}", t.cost), "at API prices", tint::HEALTH())];
     let mut sx = card.left() + 16.0;
     for (v, l, c) in stats {
-        let a = p.text(Pos2::new(sx, card.top() + 14.0), Align2::LEFT_TOP, &v, bold(22.0), c);
-        let b = p.text(Pos2::new(sx, a.bottom() + 4.0), Align2::LEFT_TOP, l, font(12.0), TEXT_DIM());
+        let a = p.text(Pos2::new(sx, card.top() + sp::M), Align2::LEFT_TOP, &v, bold(22.0), c);
+        let b = p.text(Pos2::new(sx, a.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, l, font(12.0), TEXT_DIM());
         sx = a.right().max(b.right()) + 32.0;
     }
     card.bottom() + 24.0

@@ -172,12 +172,12 @@ fn intro(ui: &mut Ui, r: Rect, name: &str) -> Option<bool> {
     }
     icon(&p, Icon::Disk, Rect::from_center_size(c, Vec2::splat(34.0)), TEXT_SOFT());
     let mut y = top + ring_r * 2.0 + 28.0;
-    p.text(Pos2::new(c.x, y), Align2::CENTER_TOP, name, bold(20.0), TEXT());
-    y += 26.0;
+    let nr = p.text(Pos2::new(c.x, y), Align2::CENTER_TOP, name, bold(20.0), TEXT());
+    y = nr.bottom() + sp::LINE_GAP;
     if total > 0 {
         p.text(Pos2::new(c.x, y), Align2::CENTER_TOP, format!("{} of {} used", human_bytes(total - free), human_bytes(total)), ty::body(), TEXT_DIM());
     }
-    y += 22.0 + 32.0;
+    y += line_h(&p, &ty::body()) + 32.0;
     let br = Rect::from_center_size(Pos2::new(c.x, y + 22.0), Vec2::new(200.0, 44.0));
     let resp = ui.interact(br, ui.scope_id().with("map-disk"), Sense::click());
     let hov = ui.ctx().animate_bool(resp.id, resp.hovered());

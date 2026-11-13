@@ -396,8 +396,12 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
                 p.text(Pos2::new(c_size - area.left() + area.left(), r.center().y), Align2::RIGHT_CENTER, size, font(13.0), tc);
                 let stale = a.last_used.is_some_and(|t| now - t > UNUSED_DAYS * 86400) && !dim;
                 p.text(Pos2::new(c_used, r.center().y), Align2::RIGHT_CENTER, ago(now, a.last_used), font(12.0), if stale { AMBER() } else { TEXT_FAINT() });
-                let name_r = text_fit(&p, Pos2::new(c_name, r.center().y), Align2::LEFT_CENTER, &a.name, font(13.0), tc, c_used - 80.0 - c_name - 70.0);
-                let src = if dim && a.locked == Some("This is Cmd+Meow") { None } else { Some(a.source) };
+                // the name gets the room first; the source chip only shows
+                // when both fit
+                let room = c_used - 80.0 - c_name;
+                let name_w = p.layout_no_wrap(a.name.clone(), font(13.0), tc).size().x;
+                let src = if (dim && a.locked == Some("This is Cmd+Meow")) || name_w + 70.0 > room { None } else { Some(a.source) };
+                let name_r = text_fit(&p, Pos2::new(c_name, r.center().y), Align2::LEFT_CENTER, &a.name, font(13.0), tc, room);
                 if let Some(s) = src {
                     source_chip(&p, Pos2::new(name_r.right() + 7.0, r.center().y), s);
                 }

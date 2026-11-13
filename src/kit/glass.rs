@@ -766,8 +766,17 @@ pub fn page_header_room(p: &Painter, r: Rect, title: &str, sub: &str, sub_col: C
     let sx = if room > 0.0 { at.x + room + 10.0 } else { at.x };
     // status sits on the same line as the title, like a macOS toolbar
     let sub_col = if sub_col == TEXT_DIM() { ty::caption_color() } else { sub_col };
-    if sub_right - sx > 40.0 {
-        text_fit(p, Pos2::new(sx, cy + 1.0), Align2::LEFT_CENTER, sub, ty::label(), sub_col, sub_right - sx);
+    // never cut the status: drop its trailing " · " parts until it fits,
+    // or leave it out
+    let avail = sub_right - sx;
+    let mut parts: Vec<&str> = sub.split(" · ").collect();
+    while !parts.is_empty() {
+        let s = parts.join(" · ");
+        if p.layout_no_wrap(s.clone(), ty::label(), sub_col).size().x <= avail {
+            p.text(Pos2::new(sx, cy + 1.0), Align2::LEFT_CENTER, s, ty::label(), sub_col);
+            break;
+        }
+        parts.pop();
     }
     p.line_segment([Pos2::new(r.left(), r.top() + PAGE_HEADER_H), Pos2::new(r.right(), r.top() + PAGE_HEADER_H)], Stroke::new(1.0, Color32::from_black_alpha(115)));
     let h = sp::HEADER_CONTROL_H / 2.0;
