@@ -107,8 +107,15 @@ jobs:
           echo "HARDENED=1" >> "$GITHUB_ENV"
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
+      # Official builds only: the Sentry DSN is compiled in from a repository
+      # secret here and nowhere else (src/kit/crash_report.rs). Forks, PR CI
+      # and local builds have no DSN, so crash reporting is off in them.
       - name: Bundle CmdMeow.app (universal)
-        run: UNIVERSAL=1 scripts/bundle-mac.sh
+        env:
+          CMDMEOW_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: |
+          if [[ -z "$CMDMEOW_SENTRY_DSN" ]]; then echo "::warning::No SENTRY_DSN secret: release has no crash reporting"; fi
+          UNIVERSAL=1 scripts/bundle-mac.sh
 
       - name: Make dmg
         run: |

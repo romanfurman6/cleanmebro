@@ -88,6 +88,7 @@ Every action has a link for scripts, Raycast or Shortcuts: `open cmdmeow://…`
 ## Privacy and safety
 
 - No account, no telemetry. Files, clipboard, recordings and dictation never leave the Mac unless you share them.
+- Crash reports are opt-in: official releases ask once during setup (and in Settings › General). If you agree, a crash sends the error, stack trace, app and macOS version to Sentry. No files, hostname or IP address, and the home folder is replaced with `~`. Builds from source never send anything.
 - Cleanup never reads file contents. If you turn on the AI review, only paths, sizes and ages go to Claude.
 - Documents, Desktop, Projects, Keychains, `.ssh` and any folder with `.git` are always kept.
 - Removed items go to the Trash unless you choose "Delete right away".
@@ -170,6 +171,7 @@ users must right-click › Open.
 | `NOTARY_KEY_P8` | contents of the App Store Connect API key `AuthKey_XXXX.p8` |
 | `NOTARY_KEY_ID` | that key's Key ID |
 | `NOTARY_ISSUER_ID` | Issuer ID from App Store Connect › Users and Access › Integrations |
+| `SENTRY_DSN` | Sentry project DSN for crash reports (Project Settings › Client Keys). Compiled into release builds only |
 
 The signed app runs with the hardened runtime and `assets/CmdMeow.entitlements`
 (microphone, camera, Apple Events).
