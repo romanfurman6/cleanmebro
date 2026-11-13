@@ -75,6 +75,12 @@ pub fn availability() -> Availability {
     }
 }
 
+/// The CLI is there and not known to be signed out, whatever the AI Usage
+/// switch says (AI Check runs the CLI without that tool).
+pub fn cli_ready() -> bool {
+    claude_bin().is_some() && SIGNED_IN.load(Ordering::Relaxed) != 2
+}
+
 pub fn tool_on() -> bool {
     TOOL_ON.load(Ordering::Relaxed)
 }

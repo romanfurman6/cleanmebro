@@ -218,9 +218,21 @@ fn ring_stat(p: &egui::Painter, area: Rect, frac: f32, color: Color32, value: &s
     let c = area.center();
     let w = (rr * 0.14).clamp(8.0, 12.0);
     tile::ring(p, c, rr - w / 2.0, w, frac.max(0.01), color);
-    let inner = (rr - w) * 1.6;
-    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, value, ty::number(), TEXT(), inner);
-    p.text(c + Vec2::new(0.0, 15.0), Align2::CENTER_CENTER, unit, ty::caption(), ty::caption_color());
+    // the full chord through the centre, less a little air
+    let inner = 2.0 * (rr - w) - 8.0;
+    // "1.44 TB" + "free": the number alone, its unit goes to the caption ("TB free")
+    let (num, caption) = match value.split_once(' ') {
+        Some((n, u)) => (n, format!("{u} {unit}")),
+        None => (value, unit.to_string()),
+    };
+    // shrink the number to fit the ring rather than cut it
+    let mut font = ty::number();
+    let tw = p.layout_no_wrap(num.to_string(), font.clone(), TEXT()).size().x;
+    if tw > inner {
+        font.size = (font.size * inner / tw).max(11.0);
+    }
+    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, num, font, TEXT(), inner);
+    p.text(c + Vec2::new(0.0, 15.0), Align2::CENTER_CENTER, caption, ty::caption(), ty::caption_color());
 }
 
 fn level_status(l: Level) -> Color32 {

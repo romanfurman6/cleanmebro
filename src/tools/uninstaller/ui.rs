@@ -880,7 +880,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     }
 
     // list
-    let list = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, sc.top() - 14.0));
+    let list = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, sc.top() - sp::L));
     glass_card(&p, list, R_CARD, 0.0, false);
     let c_size = list.right() - 14.0;
     let c_when = c_size - 70.0 - 12.0;
@@ -892,7 +892,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     section_header(&p, Pos2::new(c_when, hy), Align2::RIGHT_CENTER, "Last touched");
     section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_CENTER, "Size");
     hairline(&p, Pos2::new(list.left(), list.top() + 30.0), Pos2::new(list.right(), list.top() + 30.0));
-    let rows_r = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - 2.0));
+    let rows_r = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - sp::S));
     if orphans.is_empty() {
         let msg = if busy { "Still looking…" } else { "Nothing left behind" };
         p.text(rows_r.center(), Align2::CENTER_CENTER, msg, font(13.0), TEXT_DIM());
