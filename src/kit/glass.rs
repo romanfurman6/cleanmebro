@@ -636,6 +636,14 @@ pub fn ambient(ctx: &egui::Context) {
     }
 }
 
+/// Time to just past the next whole second of the wall clock. Live numbers
+/// and clocks that change by the second all ask for this one frame, so an
+/// open window that nothing else moves draws about once a second.
+pub fn next_second() -> std::time::Duration {
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_millis()).unwrap_or(0);
+    std::time::Duration::from_millis(1000 - ms as u64 + 5)
+}
+
 /// (fps, rest seconds) for decorative loops. `CMDMEOW_AMBIENT_FPS` and
 /// `CMDMEOW_AMBIENT_REST` override them, to measure what a frame costs.
 fn ambient_tuning() -> (f64, f64) {
