@@ -398,10 +398,15 @@ impl Capture {
     /// Upload `path` for a link (again, if it was shared before: the link
     /// stays the same).
     fn share(&mut self, path: PathBuf) {
-        let (s, account) = self.share_for(&path);
-        if let Err(e) = self.uploads.start(&s, account, path, &self.ctx) {
+        if let Err(e) = self.try_share(path) {
             self.hud(e);
         }
+    }
+
+    /// [`Capture::share`] that hands a failure back instead of a toast.
+    fn try_share(&mut self, path: PathBuf) -> Result<(), String> {
+        let (s, account) = self.share_for(&path);
+        self.uploads.start(&s, account, path, &self.ctx)
     }
 
     /// The sharing settings for `path`: the one storage, with the video's
@@ -434,16 +439,47 @@ impl Capture {
         }
         match share::link_for(&path) {
             Some(link) => {
-                self.copy_text(&link);
+                self.copy_known_link(&link);
                 self.hud("Link copied");
             }
             None => self.share(path),
         }
     }
 
+    /// Put a link made earlier on the clipboard, and make sure the share
+    /// page can still read the bucket (it may have moved since).
+    fn copy_known_link(&mut self, link: &str) {
+        self.copy_text(link);
+        if self.settings.share.set_up(share::VIDEO_ACCOUNT) {
+            share::allow_page_later(self.settings.share.bucket(share::VIDEO_ACCOUNT));
+        }
+    }
+
     /// Finished uploads: copy the link, say so.
     fn uploads_done(&mut self) {
         for (path, r) in self.uploads.poll() {
+            // the editor's Share: its own button shows the progress, and one
+            // note at its bottom says how it ended
+            if self.editor.as_ref().is_some_and(|ew| ew.share.as_deref() == Some(path.as_path())) {
+                let note = match r {
+                    Ok(link) => {
+                        self.copy_text(&link);
+                        Some("Link copied".to_string())
+                    }
+                    Err(e) if e == "Stopped" => None,
+                    Err(e) => {
+                        eprintln!("[share] {}: {e}", path.display());
+                        Some(e)
+                    }
+                };
+                if let Some(ew) = self.editor.as_mut() {
+                    ew.share = None;
+                    if let Some(n) = note {
+                        ew.ed.flash(n);
+                    }
+                }
+                continue;
+            }
             match r {
                 Ok(link) => {
                     if self.share_for(&path).0.copy_link {
