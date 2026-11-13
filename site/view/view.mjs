@@ -14,6 +14,10 @@ function note(text, ms) {
 }
 
 function showEmpty(title, text) {
+  // Nothing to act on: no View/Edit, no copy of a broken link
+  ['modes', 'copy', 'dl'].forEach((id) => { $(id).hidden = true; });
+  $('title').textContent = '';
+  document.body.classList.remove('editing');
   $('empty').hidden = false;
   if (title) $('empty-h').textContent = title;
   if (text) $('empty-p').textContent = text;

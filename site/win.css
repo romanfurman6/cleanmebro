@@ -666,3 +666,11 @@
 .lim, .dsp { justify-content: flex-start; } .lim .kh, .dsp .kh { margin-bottom: 8px; } .lim .lr + .lr, .dsp .lr + .lr { margin-top: 4px; } .lim .lr, .dsp .lr { height: 14px; }
 .pw .pi { align-self: flex-start; }
 .rdot { top: -3px; right: -4px; animation: none; box-shadow: 0 0 0 2px rgba(20,24,20,.9); }
+
+/* Phones: the fan dial fits its card and the rpm sits under it; filters keep whole chips */
+@media (max-width: 600px) {
+  .switcher .fdl { flex: none; transform: scale(.8); margin: -10px 0 -20px; }
+  .switcher .frp { margin-top: 6px; } .switcher .frp b { font-size: 22px; }
+  .switcher .blk > span { white-space: nowrap; font-size: 10.5px; }
+  .switcher .ufl .srch2 { width: 140px; } .switcher .ufl .fc:nth-child(n+4), .switcher .ufl .usort { display: none; }
+}
