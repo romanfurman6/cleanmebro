@@ -14,7 +14,9 @@ Approved by Roman on 2026-11-12. The tokens live in `src/kit/glass.rs` (`sp::*`,
 | R8 | Numbers in lists and tables are right-aligned. | |
 | R9 | A title with a detail line under it ("Ollama" over "com.ollama.ollama") keeps 6 between the lines; such rows are 52 tall. Columns in a row sit 16 apart. | `sp::LINE_GAP`, `two_lines_y()`, `sp::ROW2_H`, `sp::COL_GAP` |
 | R10 | Text the app writes (times, states, counts) is never cut with "…": it wraps or the layout changes. Only names and paths people bring (apps, files, projects) may be cut. Find cut text with `CMDMEOW_FIT_LOG=1`. | `text_wrap()` |
+| R11 | A list's section title ("Open at login", "Today") is 12/600 in a 44 row: 16 above, 12 below to the first row; its link ("Open in System Settings") sits on the same line. A table's column heads sit in a 36 row with the hairline at its bottom. | `section_title()`, `sp::SECTION_H`, `sp::TABLE_HEAD_H` |
+| R12 | Scroll bars float in a 14 gutter the content leaves on the right, so a hovered bar never covers a row or button. Content in a scroll area takes `ui.available_width()`, never the outer rect's width. | `sp::SCROLL_GUTTER` |
 
 **Spacing scale:** 4, 8, 12, 16, 24, 32 (`sp::XS` to `sp::XXL`). Nothing in between.
 
-**Type ramp:** hero 28/600, number 22/600, lead 15/600, title 13/600, body 13/400, label 12/400, caption 11/400 (`ty::*`). Bold 11 and 12 are allowed for chips and small values. Only exceptions: the speed dial (52) and the app mark (40).
+**Type ramp:** hero 28/600, number 22/600, lead 15/600, title 13/600, section 12/600, body 13/400, label 12/400, caption 11/400 (`ty::*`). Bold 11 and 12 are allowed for chips and small values. Only exceptions: the speed dial (52) and the app mark (40).

@@ -791,7 +791,7 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area));
         child.set_clip_rect(area);
         egui::ScrollArea::vertical().id_salt("setup-perms").auto_shrink([false, false]).show(&mut child, |ui| {
-            let (r, _) = ui.allocate_exact_size(Vec2::new(area.width() - 10.0, need), Sense::hover());
+            let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), need), Sense::hover());
             perm_list(app, ui, r, &list, t, now);
         });
     }
@@ -810,9 +810,10 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
     for (k, r) in list.iter().enumerate() {
         if r.optional && !opt_head {
             opt_head = true;
-            y += 6.0;
-            p.text(Pos2::new(area.left() + 2.0, y), Align2::LEFT_TOP, "Optional", font(11.0), TEXT_FAINT());
-            y += 20.0;
+            // a section title like the others (26 in all: 4 above, the title, 7 below)
+            y += sp::XS;
+            p.text(Pos2::new(area.left() + 4.0, y), Align2::LEFT_TOP, "Optional", ty::section(), white(150));
+            y += 22.0;
         }
         let a = ease((t - 0.05 * k as f32) / 0.4);
         let rr = Rect::from_min_size(Pos2::new(area.left(), y - (1.0 - a) * 10.0), Vec2::new(area.width(), row_h));

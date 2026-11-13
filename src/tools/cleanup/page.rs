@@ -592,7 +592,7 @@ fn scroll_rows(ui: &mut Ui, area: Rect, salt: String, n: usize, row_h: f32, gap:
     ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show(&mut child, |ui| {
         ui.spacing_mut().item_spacing.y = gap;
         for k in 0..n {
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(area.width(), row_h), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
             if ui.is_rect_visible(rect) {
                 f(ui, k, rect);
             }

@@ -177,7 +177,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     child.set_clip_rect(list_r);
     ScrollArea::vertical().id_salt("gallery-list").auto_shrink([false, false]).show(&mut child, |ui| {
         let w = ui.available_width();
-        let h: f32 = groups.iter().map(|(_, its)| 26.0 + its.len() as f32 * LIST_ROW_H).sum::<f32>() + sp::S;
+        let h: f32 = groups.iter().map(|(_, its)| sp::SECTION_H + its.len() as f32 * LIST_ROW_H).sum::<f32>() + sp::S;
         let (origin, _) = ui.allocate_exact_size(Vec2::new(w, h.max(60.0)), Sense::hover());
         let p = ui.painter().clone();
         if groups.is_empty() {
@@ -185,8 +185,8 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
         }
         let mut y = origin.top();
         for (name, items) in &groups {
-            section_header(&p, Pos2::new(origin.left() + 4.0, y + 12.0), Align2::LEFT_TOP, name);
-            y += 26.0;
+            section_title(&p, origin.left() + 4.0, y, name);
+            y += sp::SECTION_H;
             for it in items {
                 let rr = Rect::from_min_size(Pos2::new(origin.left(), y), Vec2::new(w, LIST_ROW_H - 2.0));
                 y += LIST_ROW_H;
@@ -261,7 +261,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let scroll_r = Rect::from_min_max(area.min, Pos2::new(area.right() + panel::PAD - 2.0, area.bottom()));
     let mut child = ui.new_child(UiBuilder::new().max_rect(scroll_r).layout(egui::Layout::top_down(egui::Align::Min)));
     // a slim bar, so even hovered it stays clear of the widgets
-    child.spacing_mut().scroll.bar_width = 6.0;
+    child.spacing_mut().scroll.floating_allocated_width = 0.0;
     child.set_clip_rect(area.expand2(Vec2::new(panel::PAD, 10.0)));
     ScrollArea::vertical().id_salt("preview").auto_shrink([false, false]).show(&mut child, |ui| {
         // room above the first row for its "−" badges
@@ -352,7 +352,7 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
     let mut out = None;
     let dragging = app.drag.is_some();
     ScrollArea::vertical().id_salt(("gallery-sizes", key)).auto_shrink([false, false]).show(&mut child, |ui| {
-        let (origin, _) = ui.allocate_exact_size(Vec2::new(area.width(), total + sp::S), Sense::hover());
+        let (origin, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), total + sp::S), Sense::hover());
         let p = ui.painter().clone();
         let mut y = origin.top();
         for row in &rows {
@@ -573,7 +573,7 @@ fn scroll_body(ui: &mut Ui, body: Rect, salt: &str, f: impl FnOnce(&mut Ui, Rect
     child.set_clip_rect(body);
     ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show(&mut child, |ui| {
         let top = ui.cursor().min;
-        let r = Rect::from_min_size(top, body.size());
+        let r = Rect::from_min_size(top, Vec2::new(ui.available_width(), body.height()));
         let bottom = f(ui, r);
         ui.allocate_rect(Rect::from_min_max(top, Pos2::new(r.right(), bottom.max(top.y))), Sense::hover());
     });
