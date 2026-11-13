@@ -75,7 +75,7 @@ impl Tool for Cleanup {
         "Cleanup"
     }
     fn about(&self) -> &'static str {
-        "Safe junk removal, checked by AI when it's on"
+        "Clears caches, logs, developer junk and Trash, with an optional AI check"
     }
     fn badge(&self) -> Badge {
         badge()

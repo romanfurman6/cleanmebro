@@ -114,7 +114,6 @@ pub struct Project {
     pub cwd: Option<PathBuf>,
     pub cwd_exists: bool,
     pub last_used: Option<SystemTime>,
-    pub bytes: u64,
 }
 
 impl Project {
@@ -167,6 +166,10 @@ pub fn projects_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".claude/projects")
 }
 
+/// Claude Code's projects and whether their folders still exist. Looks at
+/// each project's own folder (and walks the disk to resolve its name), so a
+/// project in Downloads, Documents or Desktop makes macOS ask about that
+/// folder: call it only once Full Disk Access is granted (Cleanup's scan).
 pub fn scan_projects() -> Vec<Project> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(projects_dir()) else { return out };
@@ -201,12 +204,11 @@ pub fn scan_projects() -> Vec<Project> {
         // (a session's logged cwd may be a subfolder; trust it when it exists)
         if let Some(real) = resolve_encoded(&enc) {
             cwd = Some(real);
-        } else if cwd.as_ref().is_none_or(|c| !c.exists()) {
+        } else if cwd.as_ref().is_none_or(|c| !exists_quiet(c)) {
             cwd = Some(PathBuf::from(enc.replace('-', "/")));
         }
-        let cwd_exists = cwd.as_ref().map(|c| c.exists()).unwrap_or(false);
-        let bytes = crate::kit::fs::dir_size(&folder);
-        out.push(Project { folder, cwd, cwd_exists, last_used: last, bytes });
+        let cwd_exists = cwd.as_ref().map(|c| exists_quiet(c)).unwrap_or(false);
+        out.push(Project { folder, cwd, cwd_exists, last_used: last });
     }
     out.sort_by_key(|p| std::cmp::Reverse(p.last_used));
     out
@@ -217,10 +219,19 @@ pub fn encode(path: &str) -> String {
     path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
+/// Does `p` exist? A path in Downloads/Desktop/Documents (without Full
+/// Disk Access) counts as there: looking would make macOS ask the user about
+/// the folder, and a project must never be called gone because we didn't look.
+fn exists_quiet(p: &Path) -> bool {
+    crate::kit::fs::behind_folder_prompt(p) || p.exists()
+}
+
 /// Walk the disk to find the folder whose encoded path equals `enc`.
 fn resolve_encoded(enc: &str) -> Option<PathBuf> {
     fn go(dir: &Path, rest: &str, depth: usize) -> Option<PathBuf> {
-        if depth > 14 {
+        // never list a folder macOS guards with a question (the first launch
+        // asked about Downloads because of a project there)
+        if depth > 14 || crate::kit::fs::behind_folder_prompt(dir) {
             return None;
         }
         for e in std::fs::read_dir(dir).ok()?.flatten() {

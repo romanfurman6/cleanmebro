@@ -58,7 +58,8 @@ fn letter_color(name: &str) -> Color32 {
 /// The app's own icon (macOS), else a colored square with its first letter.
 fn app_icon(u: &mut Uninstaller, ctx: &egui::Context, p: &egui::Painter, r: Rect, path: Option<&Path>, name: &str, budget: &mut usize) {
     if let Some(path) = path {
-        if !u.icons.contains_key(path) && *budget > 0 && !u.demo {
+        // an app in Downloads etc. isn't read (nor cached) before Full Disk Access
+        if !u.icons.contains_key(path) && *budget > 0 && !u.demo && !crate::kit::fs::behind_folder_prompt(path) {
             *budget -= 1;
             let tex = mac::app_icon(path, 64).map(|(n, rgba)| ctx.load_texture(format!("app-icon:{}", path.display()), egui::ColorImage::from_rgba_unmultiplied([n, n], &rgba), egui::TextureOptions::LINEAR));
             u.icons.insert(path.to_path_buf(), tex);
@@ -168,14 +169,29 @@ fn files_in(ctx: &egui::Context, dropped: bool) -> Vec<PathBuf> {
 pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
-    let idle = {
-        let mut g = u.st.lock_ok();
-        g.page_seen = true;
-        g.phase == Phase::Idle
+    let (idle, seen) = {
+        let g = u.st.lock_ok();
+        (g.phase == Phase::Idle, g.page_seen || u.demo)
     };
     // the scan reads other apps' data: never before Full Disk Access
     // (the page shows its lock till then, and macOS would ask on its own)
-    if idle && crate::kit::perms::Perm::FullDisk.status() == crate::kit::perms::Status::Allowed {
+    let fda = || crate::kit::perms::Perm::FullDisk.status() == crate::kit::perms::Status::Allowed;
+    // nothing scanned yet: a start screen, the scan only on a click
+    // (an app dropped on it goes straight to the page and its review)
+    if !seen {
+        if files_in(&ctx, true).is_empty() {
+            page_header(&p, r, "Uninstaller", "", TEXT_DIM());
+            let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
+            if fresh_start(ui, body) && fda() {
+                u.st.lock_ok().page_seen = true;
+                u.rescan();
+            }
+            return;
+        }
+        u.st.lock_ok().page_seen = true;
+    }
+    // the listing scan in the background leaves the page idle: measure now
+    if idle && fda() {
         u.rescan();
     }
     let (n_apps, total, phase, orphan_bytes) = {
@@ -192,8 +208,9 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     // AI Check: a chip after the title, on Leftovers
     let ai_data = u.tab == Tab::Leftovers && orphan_bytes > 0;
     let cw = if u.tab == Tab::Leftovers { aicheck::ui::chip_width(&u.ai, ui, ai_data) } else { 0.0 };
-    // the status ends before "Startup items" and the tabs
-    let sub_right = r.right() - sp::PAGE_EDGE - 260.0 - 16.0 - 100.0;
+    // the status ends before Rescan (once a scan is done) and the tabs
+    let rescan_room = if phase == Phase::Ready { 60.0 } else { 0.0 };
+    let sub_right = r.right() - sp::PAGE_EDGE - 260.0 - 16.0 - rescan_room;
     let (btns, chip_at) = page_header_room(&p, r, "Uninstaller", &sub, TEXT_DIM(), cw, sub_right);
     let labels_owned = [
         "Apps".to_string(),
@@ -209,15 +226,23 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     if let Some(i) = segmented(ui, tr, ui.scope_id().with("un-tab"), &labels, cur) {
         u.tab = [Tab::Apps, Tab::Leftovers][i];
     }
-    // what starts with the Mac moved to its own tool
-    if link(ui, Pos2::new(tr.left() - 16.0, tr.center().y), Align2::RIGHT_CENTER, "Startup items", 12.0).on_hover_text("Turn off what starts with your Mac").clicked() {
-        cx.open_page("startup", "");
+    // scan again (apps and leftovers), once the last scan is done
+    if phase == Phase::Ready && link(ui, Pos2::new(tr.left() - 16.0, tr.center().y), Align2::RIGHT_CENTER, "Rescan", 12.0).on_hover_text("Look for apps and leftovers again").clicked() {
+        u.rescan();
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
-    match u.tab {
-        Tab::Apps => apps_tab(u, ui, body),
-        Tab::Leftovers => leftovers_tab(u, ui, body, chip_at),
-    }
+    // a dialog on top (the review, or the move under way) holds the page
+    // still: its lists don't scroll along with the dialog's
+    let modal = u.review.is_some() || u.st.lock_ok().working.is_some();
+    ui.scope(|ui| {
+        if modal {
+            ui.disable();
+        }
+        match u.tab {
+            Tab::Apps => apps_tab(u, ui, body),
+            Tab::Leftovers => leftovers_tab(u, ui, body, chip_at),
+        }
+    });
 
     // a drop on the window
     let hovering = files_in(&ctx, false).iter().any(|f| f.extension().is_some_and(|e| e == "app"));
@@ -255,6 +280,28 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         tool_chip(&p, Rect::from_center_size(pr.center() - Vec2::new(0.0, 30.0), Vec2::splat(56.0)), Icon::AppRemove, TINT());
         p.text(pr.center() + Vec2::new(0.0, 22.0), Align2::CENTER_CENTER, "Drop to uninstall", bold(22.0), TEXT());
     }
+}
+
+/// The start screen before the first scan: what the scan finds, and Scan for
+/// apps. Returns true when it was clicked.
+fn fresh_start(ui: &mut Ui, area: Rect) -> bool {
+    let p = ui.painter().clone();
+    let c = area.center() - Vec2::new(0.0, 40.0);
+    tool_chip(&p, Rect::from_center_size(c - Vec2::new(0.0, 70.0), Vec2::splat(64.0)), Icon::AppRemove, TINT());
+    p.text(Pos2::new(c.x, c.y - 18.0), Align2::CENTER_CENTER, "Remove apps and what they leave behind", bold(18.0), TEXT());
+    let w = area.width().min(440.0);
+    text_wrap(&p, Pos2::new(c.x, c.y + 6.0), Align2::CENTER_TOP, "The scan lists your apps with their size and files, and finds data left by apps that are gone. Nothing is removed until you choose.", ty::body(), TEXT_DIM(), w, 3);
+    let btn = Vec2::new(200.0, 44.0);
+    let br = Rect::from_center_size(Pos2::new(c.x, c.y + 104.0), btn);
+    let resp = ui.interact(br, ui.scope_id().with("un-fresh-scan"), Sense::click());
+    let hov = ui.ctx().animate_bool(resp.id, resp.hovered());
+    liquid_capsule(&p, br, Some(BLUE()), if resp.is_pointer_button_down_on() { 1.6 } else { hov }, 1.0);
+    p.text(br.center(), Align2::CENTER_CENTER, "Scan for apps", bold(16.0), on_color(BLUE()));
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    p.text(Pos2::new(c.x, br.bottom() + 22.0), Align2::CENTER_CENTER, "Or drop an app on this window to remove it", font(12.0), TEXT_FAINT());
+    resp.clicked()
 }
 
 // ---------------------------------------------------------------- Apps

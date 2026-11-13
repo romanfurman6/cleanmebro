@@ -175,7 +175,7 @@ impl Tool for Displays {
         "Utilities"
     }
     fn about(&self) -> &'static str {
-        "Brightness and volume of external monitors"
+        "Brightness and volume of external monitors from the menu bar"
     }
     fn sidebar_meta(&self) -> String {
         let v = self.view.lock_ok();
