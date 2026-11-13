@@ -164,6 +164,8 @@ pub struct State {
     pub log: Vec<String>,
     /// Set to stop this run (Stop, Skip, a new scan); each run has its own.
     pub cancel: Arc<AtomicBool>,
+    /// Which scan this is (counts up per run): AI Check checks once per scan.
+    pub run: u64,
     /// The agent checking this scan's paths, if any.
     pub agent: Option<super::agent::Agent>,
     /// Found, but hidden: the person chose to keep them before.
@@ -541,7 +543,9 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, agent: Option<super::agent
 fn begin_run(shared: &Shared, agent: Option<super::agent::Agent>) -> Arc<AtomicBool> {
     let mut g = shared.lock_ok();
     g.cancel.store(true, Ordering::SeqCst);
-    *g = State { phase: Phase::Scanning, with_ai: agent.is_some(), agent, ..Default::default() };
+    static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let run = RUNS.fetch_add(1, Ordering::SeqCst) + 1;
+    *g = State { phase: Phase::Scanning, with_ai: agent.is_some(), agent, run, ..Default::default() };
     g.cancel.clone()
 }
 

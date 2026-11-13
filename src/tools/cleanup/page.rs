@@ -392,7 +392,9 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - PAGE_FOOTER_H - sp::L));
 
     {
-        let scan = format!("{total}");
+        // one automatic check per scan (the total changes with every Keep,
+        // so it can't name the scan)
+        let scan = app.clean.lock_ok().run.to_string();
         let shared = app.clean.clone();
         app.ai.auto(&ctx, &scan, || check_ask(&shared));
         match aicheck::ui::chip(&mut app.ai, ui, chip_at, ai_n > 0) {
@@ -589,15 +591,22 @@ fn scroll_rows(ui: &mut Ui, area: Rect, salt: String, n: usize, row_h: f32, gap:
     }
     let mut child = ui.new_child(UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(area.intersect(ui.clip_rect()));
+    // when it scrolls, the rows stop short of the scroll bar
+    let w = area.width() - if scrolls(area.height(), n, row_h, gap) { sp::M } else { 0.0 };
     ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show(&mut child, |ui| {
         ui.spacing_mut().item_spacing.y = gap;
         for k in 0..n {
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(area.width(), row_h), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, row_h), Sense::hover());
             if ui.is_rect_visible(rect) {
                 f(ui, k, rect);
             }
         }
     });
+}
+
+/// Whether `n` rows of `row_h`, `gap` apart, are taller than `h`.
+fn scrolls(h: f32, n: usize, row_h: f32, gap: f32) -> bool {
+    n as f32 * row_h + n.saturating_sub(1) as f32 * gap > h + 0.5
 }
 
 /// Answer questions: Allow selects them, Keep remembers them as kept.
@@ -979,5 +988,18 @@ fn check_ask(clean: &cleanup::Shared) -> aicheck::Ask {
         items,
         facts: Vec::new(),
         answer,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scrolls;
+
+    #[test]
+    fn rows_leave_room_for_the_scroll_bar_only_when_they_scroll() {
+        assert!(!scrolls(200.0, 2, 84.0, 8.0));
+        assert!(!scrolls(176.0, 2, 84.0, 8.0));
+        assert!(scrolls(200.0, 3, 84.0, 8.0));
+        assert!(!scrolls(0.0, 0, 84.0, 8.0));
     }
 }
