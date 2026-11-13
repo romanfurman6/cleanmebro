@@ -320,7 +320,9 @@ pub fn widget(k: &mut KeepAwake, size: Size, ui: &mut Ui, rect: Rect, cx: &mut c
             scene(&p, sr, st, frac, t);
             let x = sr.right() + 10.0;
             let right = if size == Size::S14 { rect.right() - 60.0 } else { rect.right() - 8.0 };
-            text_fit(&p, Pos2::new(x, rect.center().y - 9.0), Align2::LEFT_CENTER, &title, bold(if size == Size::S14 { 17.0 } else { 14.0 }), TEXT(), right - x);
+            let tf = bold(if size == Size::S14 { 17.0 } else { 14.0 });
+            let (ly1, ly2) = two_lines_y(&p, rect.center().y, &tf, &font(11.0));
+            text_fit(&p, Pos2::new(x, ly1), Align2::LEFT_CENTER, &title, tf, TEXT(), right - x);
             // Wide has room for a few words only
             let short = match st {
                 State::Off => "Sleeps as usual".to_string(),
@@ -329,7 +331,7 @@ pub fn widget(k: &mut KeepAwake, size: Size, ui: &mut Ui, rect: Rect, cx: &mut c
                 State::WindDown { .. } => "Then sleeps".to_string(),
             };
             let reason = if size == Size::S12 { short } else { reason };
-            text_fit(&p, Pos2::new(x, rect.center().y + 11.0), Align2::LEFT_CENTER, &reason, font(11.0), lk.soft, right - x);
+            text_fit(&p, Pos2::new(x, ly2), Align2::LEFT_CENTER, &reason, font(11.0), lk.soft, right - x);
             if size == Size::S14 {
                 let sw = Rect::from_min_size(Pos2::new(rect.right() - 12.0 - 38.0, rect.center().y - 11.0), Vec2::new(38.0, 22.0));
                 if switch(ui, sw, id.with("sw"), sw_on, true).on_hover_text(tip).clicked() && sw_enabled {
