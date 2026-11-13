@@ -9,6 +9,7 @@ use super::leftovers::{Item, Kind};
 use super::remove::Target;
 use super::{mac, Drop, Filter, Origin, Phase, Review, Sort, Tab, Uninstaller, ID, TINT, UNDO_FOR, UNUSED_DAYS};
 use crate::core::tool::Cx;
+use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::glass::*;
 use crate::kit::tile;
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId};
@@ -172,7 +173,9 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         g.page_seen = true;
         g.phase == Phase::Idle
     };
-    if idle {
+    // the scan reads other apps' data: never before Full Disk Access
+    // (the page shows its lock till then, and macOS would ask on its own)
+    if idle && crate::kit::perms::Perm::FullDisk.status() == crate::kit::perms::Status::Allowed {
         u.rescan();
     }
     let (n_apps, total, phase, orphan_bytes) = {
@@ -181,11 +184,17 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     };
     let sub = match (u.tab, phase) {
         (Tab::Leftovers, _) => "Data left behind by apps that are no longer installed".to_string(),
+        (_, Phase::Idle) => String::new(),
         (_, Phase::Listing) => "Looking for apps…".to_string(),
         (_, Phase::Sizing { done, total: t }) => format!("{n_apps} apps · measuring {done} of {t}…"),
         _ => format!("{n_apps} apps · {} · drop any app on this window to remove it", human_bytes(total)),
     };
-    let btns = page_header(&p, r, "Uninstaller", &sub, TEXT_DIM());
+    // AI Check: a chip after the title, on Leftovers
+    let ai_data = u.tab == Tab::Leftovers && orphan_bytes > 0;
+    let cw = if u.tab == Tab::Leftovers { aicheck::ui::chip_width(&u.ai, ui, ai_data) } else { 0.0 };
+    // the status ends before "Startup items" and the tabs
+    let sub_right = r.right() - sp::PAGE_EDGE - 260.0 - 16.0 - 100.0;
+    let (btns, chip_at) = page_header_room(&p, r, "Uninstaller", &sub, TEXT_DIM(), cw, sub_right);
     let labels_owned = [
         "Apps".to_string(),
         if orphan_bytes > 0 { format!("Leftovers · {}", human_bytes(orphan_bytes)) } else { "Leftovers".into() },
@@ -207,7 +216,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     match u.tab {
         Tab::Apps => apps_tab(u, ui, body),
-        Tab::Leftovers => leftovers_tab(u, ui, body),
+        Tab::Leftovers => leftovers_tab(u, ui, body, chip_at),
     }
 
     // a drop on the window
@@ -337,7 +346,9 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     let rows = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - 2.0));
     if ids.is_empty() {
         let (msg, hint) = match u.st.lock_ok().phase {
-            Phase::Listing | Phase::Idle => ("Looking for apps…", ""),
+            // Idle = not scanned (no Full Disk Access yet: the lock says so)
+            Phase::Idle => ("", ""),
+            Phase::Listing => ("Looking for apps…", ""),
             _ if u.search.is_empty() && u.filter == Filter::All => ("No apps found", "Apps in /Applications and ~/Applications show here."),
             _ => ("Nothing matches", "Try another filter or search."),
         };
@@ -390,8 +401,12 @@ fn apps_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
                 p.text(Pos2::new(c_size - area.left() + area.left(), r.center().y), Align2::RIGHT_CENTER, size, font(13.0), tc);
                 let stale = a.last_used.is_some_and(|t| now - t > UNUSED_DAYS * 86400) && !dim;
                 p.text(Pos2::new(c_used, r.center().y), Align2::RIGHT_CENTER, ago(now, a.last_used), font(12.0), if stale { AMBER() } else { TEXT_FAINT() });
-                let name_r = text_fit(&p, Pos2::new(c_name, r.center().y), Align2::LEFT_CENTER, &a.name, font(13.0), tc, c_used - 80.0 - c_name - 70.0);
-                let src = if dim && a.locked == Some("This is Cmd+Meow") { None } else { Some(a.source) };
+                // the name gets the room first; the source chip only shows
+                // when both fit
+                let room = c_used - 80.0 - c_name;
+                let name_w = p.layout_no_wrap(a.name.clone(), font(13.0), tc).size().x;
+                let src = if (dim && a.locked == Some("This is Cmd+Meow")) || name_w + 70.0 > room { None } else { Some(a.source) };
+                let name_r = text_fit(&p, Pos2::new(c_name, r.center().y), Align2::LEFT_CENTER, &a.name, font(13.0), tc, room);
                 if let Some(s) = src {
                     source_chip(&p, Pos2::new(name_r.right() + 7.0, r.center().y), s);
                 }
@@ -785,15 +800,42 @@ fn short_path(s: &str) -> String {
 
 // ---------------------------------------------------------------- Leftovers
 
-fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
+fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, chip_at: Pos2) {
     let p = ui.painter().clone();
-    let x0 = body.left() + 24.0;
-    let x1 = body.right() - 24.0;
-    let mut y = body.top() + 16.0;
     let (orphans, phase) = {
         let g = u.st.lock_ok();
         (g.orphans.clone(), g.phase)
     };
+    let x1 = body.right() - 24.0;
+    let mut y = body.top() + 16.0;
+    {
+        if !orphans.is_empty() {
+            let scan = format!("{}:{}", orphans.len(), orphans.iter().map(|o| o.bytes()).sum::<u64>());
+            let now = u.now();
+            u.ai.auto(ui.ctx(), &scan, || leftovers_ask(now, &orphans));
+        }
+        match aicheck::ui::chip(&mut u.ai, ui, chip_at, !orphans.is_empty()) {
+            Some(Event::Start) => {
+                let ask = leftovers_ask(u.now(), &orphans);
+                u.ai.start(ui.ctx(), ask);
+            }
+            Some(Event::Act(r)) => {
+                if let Some(o) = orphans.iter().find(|o| o.id == r.key) {
+                    if r.action == "remove" {
+                        u.review = Some(Review { targets: vec![o.target()], open: [0].into() });
+                    } else {
+                        let mut g = u.st.lock_ok();
+                        for x in g.orphans.iter_mut() {
+                            x.selected = x.id == o.id;
+                        }
+                    }
+                }
+                u.ai.done(&r);
+            }
+            None => {}
+        }
+    }
+    let x0 = body.left() + 24.0;
     let sel: Vec<&super::Orphan> = orphans.iter().filter(|o| o.selected).collect();
     let total: u64 = orphans.iter().map(|o| o.bytes()).sum();
     let sel_bytes: u64 = sel.iter().map(|o| o.bytes()).sum();
@@ -849,7 +891,7 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     }
 
     // list
-    let list = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, sc.top() - 14.0));
+    let list = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, sc.top() - sp::L));
     glass_card(&p, list, R_CARD, 0.0, false);
     let c_size = list.right() - 14.0;
     let c_when = c_size - 70.0 - 12.0;
@@ -861,7 +903,9 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
     section_header(&p, Pos2::new(c_when, hy), Align2::RIGHT_CENTER, "Last touched");
     section_header(&p, Pos2::new(c_size, hy), Align2::RIGHT_CENTER, "Size");
     hairline(&p, Pos2::new(list.left(), list.top() + 30.0), Pos2::new(list.right(), list.top() + 30.0));
-    let rows_r = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - 2.0));
+    let rows_r = Rect::from_min_max(Pos2::new(list.left(), list.top() + 31.0), Pos2::new(list.right(), list.bottom() - sp::S));
+    // whole rows only: a row cut in half by the card edge looks broken
+    let rows_r = Rect::from_min_size(rows_r.min, Vec2::new(rows_r.width(), ((rows_r.height() / 40.0).floor() * 40.0).max(40.0).min(rows_r.height())));
     if orphans.is_empty() {
         let msg = if busy { "Still looking…" } else { "Nothing left behind" };
         p.text(rows_r.center(), Align2::CENTER_CENTER, msg, font(13.0), TEXT_DIM());
@@ -908,6 +952,36 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
             text_fit(&p, Pos2::new(c_name, ly2), Align2::LEFT_CENTER, &o.id, font(11.0), TEXT_FAINT(), c_where - c_name - 16.0);
         }
     });
+}
+
+fn plural_n(n: usize, what: &str) -> String {
+    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
+
+/// What AI Check gets: one line per removed app's leftovers.
+fn leftovers_ask(now: i64, orphans: &[super::Orphan]) -> aicheck::Ask {
+    let items = orphans
+        .iter()
+        .map(|o| {
+            let paths: Vec<String> = o.items.iter().take(6).map(|i| format!("{} ({})", short_path(&i.path.display().to_string()), human_bytes(i.bytes))).collect();
+            aicheck::Item {
+                key: o.id.clone(),
+                line: format!("{} ({}) · {} total · last touched {} · {}", o.name, o.id, human_bytes(o.bytes()), ago(now, o.touched), paths.join("; ")),
+                icon: None,
+                name: o.name.clone(),
+            }
+        })
+        .collect();
+    aicheck::Ask {
+        task: "This is the Uninstaller's Leftovers list: data left behind by apps that are no longer installed. Point out what is worth removing (big, old, clearly orphaned) and anything that needs a look first, such as documents, recordings or data another installed app may share.".into(),
+        actions: vec![
+            ("remove", "move that app's leftovers to the Trash (the user confirms in a review sheet first)", "Remove"),
+            ("review", "select it in the list so the user can look at its files first", "Review"),
+        ],
+        items,
+        facts: Vec::new(),
+        answer: Vec::new(),
+    }
 }
 
 // ---------------------------------------------------------------- panel widget
@@ -1268,6 +1342,17 @@ pub mod demo {
         u.selected = Some(PathBuf::from("/Applications/Docker.app"));
         match view {
             "uninstaller" | "uninstaller-apps" => {}
+            "uninstaller-leftovers" => {
+                u.tab = Tab::Leftovers;
+                use crate::kit::aicheck::Check;
+                u.ai.set_demo(
+                    "Leftovers of 2 removed apps",
+                    vec![
+                        Check::demo_rec("remove", "Remove", "Remove Zoom leftovers", "412 MB", "Zoom was removed in March; nothing else uses these", "Zoom"),
+                        Check::demo_rec("review", "Review", "Review Docker data", "6.8 GB", "Holds images and volumes; check before removing", "Docker"),
+                    ],
+                );
+            }
             "uninstaller-review" => {
                 u.filter = Filter::Unused;
                 let g = u.st.lock_ok();
@@ -1287,7 +1372,6 @@ pub mod demo {
                 let t = u.st.lock_ok().apps.iter().find(|a| a.name == "Docker").unwrap().target(true);
                 u.review = Some(Review { targets: vec![t], open: [0].into() });
             }
-            "uninstaller-leftovers" => u.tab = Tab::Leftovers,
             _ => return None,
         }
         Some(View::Page)

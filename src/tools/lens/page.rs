@@ -1,6 +1,7 @@
 //! Disk Map screens: choose what to map (with live progress while it runs)
 //! → bubbles you can zoom into folder by folder, with a list to pick from → review and move to Trash.
 
+use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::sync::LockExt;
 use super::scan::{self, Node};
 use super::Lens as App;
@@ -149,23 +150,47 @@ fn tilde(p: &Path) -> String {
 
 // ---------------------------------------------------------------- start
 
-/// Before the first map: the button that maps the disk, and one to pick a
-/// folder instead. Some(true): map the disk; Some(false): choose a folder.
+/// Before the first map, centred: the disk as a ring (how full it is), its
+/// name and space, a big Map disk and a quiet link to map a folder instead.
+/// Some(true): map the disk; Some(false): choose a folder.
 fn intro(ui: &mut Ui, r: Rect, name: &str) -> Option<bool> {
     let p = ui.painter().clone();
-    page_header(&p, r, "Disk Map", name, TEXT_DIM());
-    let w = (r.width() - 48.0).min(520.0);
-    let pr = Rect::from_center_size(Pos2::new(r.center().x, r.top() + PAGE_HEADER_H + 28.0 + 50.0), Vec2::new(w, 100.0));
-    glass_card(&p, pr, R_CARD, 0.0, false);
-    p.text(Pos2::new(pr.left() + 16.0, pr.top() + 14.0), Align2::LEFT_TOP, format!("Map {name}"), bold(15.0), TEXT());
-    let bw = button_width(&p, "Map disk", BTN_PRIMARY) + 28.0;
-    let map = Rect::from_min_size(Pos2::new(pr.left() + 16.0, pr.bottom() - 48.0), Vec2::new(bw, 32.0));
-    let cw = button_width(&p, "Choose Folder…", BTN_SECONDARY) + 12.0;
-    let pick = Rect::from_min_size(Pos2::new(map.right() + 8.0, map.top()), Vec2::new(cw, 32.0));
-    if pill_button(ui, map, "Map disk", BTN_PRIMARY, true).clicked() {
+    page_header(&p, r, "Disk Map", "", TEXT_DIM());
+    let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H), r.max);
+    let (total, free) = crate::kit::fs::volume_space("/");
+    let used = if total > 0 { 1.0 - free as f32 / total as f32 } else { 0.0 };
+    let ring_r = 64.0;
+    let block_h = ring_r * 2.0 + 28.0 + 26.0 + 22.0 + 32.0 + 44.0 + 22.0 + 20.0;
+    let top = body.center().y - block_h / 2.0;
+    let c = Pos2::new(body.center().x, top + ring_r);
+    // the ring: used space from 12 o'clock, clockwise
+    use egui::epaint::{PathShape, PathStroke};
+    let a0 = -std::f32::consts::FRAC_PI_2;
+    p.add(PathShape::line(arc_points(c, ring_r, 0.0, std::f32::consts::TAU, 96), PathStroke::new(12.0, white(16))));
+    if used > 0.0 {
+        p.add(PathShape::line(arc_points(c, ring_r, a0, a0 + std::f32::consts::TAU * used.clamp(0.01, 1.0), 96), PathStroke::new(12.0, tint::DISK_MAP())));
+    }
+    icon(&p, Icon::Disk, Rect::from_center_size(c, Vec2::splat(34.0)), TEXT_SOFT());
+    let mut y = top + ring_r * 2.0 + 28.0;
+    let nr = p.text(Pos2::new(c.x, y), Align2::CENTER_TOP, name, bold(20.0), TEXT());
+    y = nr.bottom() + sp::LINE_GAP;
+    if total > 0 {
+        p.text(Pos2::new(c.x, y), Align2::CENTER_TOP, format!("{} of {} used", human_bytes(total - free), human_bytes(total)), ty::body(), TEXT_DIM());
+    }
+    y += line_h(&p, &ty::body()) + 32.0;
+    let br = Rect::from_center_size(Pos2::new(c.x, y + 22.0), Vec2::new(200.0, 44.0));
+    let resp = ui.interact(br, ui.scope_id().with("map-disk"), Sense::click());
+    let hov = ui.ctx().animate_bool(resp.id, resp.hovered());
+    liquid_capsule(&p, br, Some(BLUE()), if resp.is_pointer_button_down_on() { 1.6 } else { hov }, 1.0);
+    p.text(br.center(), Align2::CENTER_CENTER, "Map disk", bold(16.0), on_color(BLUE()));
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if resp.clicked() {
         return Some(true);
     }
-    pill_button(ui, pick, "Choose Folder…", BTN_SECONDARY, true).clicked().then_some(false)
+    y += 44.0 + 22.0;
+    link(ui, Pos2::new(c.x, y), Align2::CENTER_TOP, "or choose a folder", 13.0).clicked().then_some(false)
 }
 
 /// A folder dragged over the window: an outline says it can be dropped.
@@ -296,7 +321,31 @@ fn begin_at(app: &mut App, ctx: &egui::Context, root: PathBuf) {
         return;
     }
     show_root(app, root.clone());
+    // folders (not disks or Home) are offered again in the switcher
+    if remember_folder(&mut app.lens_recent, &root, &home()) {
+        super::save_prefs(app);
+    }
     scan::start(app.lens.clone(), root, ctx.clone());
+}
+
+/// Put a mapped folder first in `recent` (no repeats, at most 5). Disks,
+/// volumes and Home are in the switcher already: false, nothing changes.
+fn remember_folder(recent: &mut Vec<PathBuf>, root: &Path, home: &Path) -> bool {
+    let volume = root == Path::new("/") || root.parent() == Some(Path::new("/Volumes"));
+    if volume || root == home {
+        return false;
+    }
+    recent.retain(|r| r != root);
+    recent.insert(0, root.to_path_buf());
+    recent.truncate(5);
+    true
+}
+
+/// A small ▾ that says a control opens a menu.
+fn chevron_down(p: &egui::Painter, c: Pos2, color: Color32) {
+    let s = Stroke::new(1.4, color);
+    p.line_segment([Pos2::new(c.x - 3.5, c.y - 1.8), Pos2::new(c.x, c.y + 1.8)], s);
+    p.line_segment([Pos2::new(c.x, c.y + 1.8), Pos2::new(c.x + 3.5, c.y - 1.8)], s);
 }
 
 /// Point the page at a new place to map; nothing is measured yet.
@@ -1233,16 +1282,33 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
             nav = Some(Nav::Up);
         }
     });
-    // where to map: the disk, Home, other volumes, any folder
-    let loc = Rect::from_min_size(Pos2::new(hr.left() + 20.0 + 64.0, hr.center().y - 14.0), Vec2::splat(28.0));
+    // what's mapped, as one switcher: disks, Home, recent folders, any folder
+    let volume = base == Path::new("/") || base.parent() == Some(Path::new("/Volumes"));
+    let tg = p.layout_no_wrap(root_label.clone(), bold(13.0), TEXT());
+    let loc = Rect::from_min_size(Pos2::new(hr.left() + 20.0 + 64.0, hr.center().y - 14.0), Vec2::new((tg.size().x + 56.0).min(240.0), 28.0));
     let lr_resp = ui.interact(loc, ui.scope_id().with("map-where"), if peek.is_none() { Sense::click() } else { Sense::hover() });
-    p.rect_filled(loc, R_SMALL, white(if peek.is_some() { 8 } else if lr_resp.hovered() { 32 } else { 20 }));
-    icon(&p, Icon::Disk, loc.shrink(6.0), if peek.is_none() { TEXT_SOFT() } else { TEXT_MUTED() });
+    let at_top = node.path == base;
+    p.rect_filled(loc, R_SMALL, white(if peek.is_some() { 8 } else if lr_resp.hovered() { 32 } else if at_top { 20 } else { 14 }));
+    icon(&p, if volume { Icon::Disk } else { Icon::Folder }, Rect::from_center_size(Pos2::new(loc.left() + 16.0, loc.center().y), Vec2::splat(16.0)), if peek.is_none() { ACCENT() } else { TEXT_MUTED() });
+    text_fit(&p, Pos2::new(loc.left() + 30.0, loc.center().y), Align2::LEFT_CENTER, &root_label, bold(13.0), if at_top { TEXT() } else { TEXT_DIM() }, loc.width() - 50.0);
+    chevron_down(&p, Pos2::new(loc.right() - 12.0, loc.center().y), TEXT_DIM());
+    if peek.is_none() && lr_resp.hovered() {
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
     let mut pick_root: Option<Option<PathBuf>> = None;
     egui::Popup::menu(&lr_resp).show(|ui| {
         for (name, path) in locations() {
             if ui.button(name).clicked() {
                 pick_root = Some(Some(path));
+            }
+        }
+        let recent: Vec<PathBuf> = app.lens_recent.iter().filter(|r| r.is_dir()).cloned().collect();
+        if !recent.is_empty() {
+            ui.separator();
+            for path in recent {
+                if ui.button(tilde(&path)).clicked() {
+                    pick_root = Some(Some(path));
+                }
             }
         }
         ui.separator();
@@ -1279,33 +1345,66 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
         (Some(w), _, _) => format!("Mapped {}", ago(w)),
         (None, _, _) => String::new(),
     };
-    let hint = p.text(Pos2::new(new_r.left() - 14.0, hr.center().y), Align2::RIGHT_CENTER, when, font(12.0), TEXT_FAINT());
+    // the map's state sits right against its action: a stopped map is an
+    // amber "Partial map" chip next to Map again
+    let hint = if partial && !busy {
+        chip(&p, Pos2::new(new_r.left() - 8.0, hr.center().y), Align2::RIGHT_CENTER, "Partial map", (with_alpha(AMBER(), 0.16), AMBER()))
+    } else {
+        p.text(Pos2::new(new_r.left() - 10.0, hr.center().y), Align2::RIGHT_CENTER, when, font(12.0), TEXT_DIM())
+    };
     if updating || peek.is_some() {
         spinner(&p, Pos2::new(hint.left() - 12.0, hr.center().y), 5.0, ctx.input(|i| i.time), tint::DISK_MAP());
         crate::kit::glass::animate(&ctx);
     }
-    let seg_r = Rect::from_min_size(Pos2::new(hint.left() - 30.0 - 186.0, hr.center().y - 13.0), Vec2::new(186.0, 26.0));
+    // the view switch in the middle of the header, away from the map's state
+    let seg_w = 186.0;
+    let seg_x = (hr.center().x - seg_w / 2.0).min(hint.left() - 40.0 - seg_w);
+    let seg_r = Rect::from_min_size(Pos2::new(seg_x, hr.center().y - 13.0), Vec2::new(seg_w, 26.0));
     if let Some(i) = segmented(ui, seg_r, ui.scope_id().with("map-view"), &["Bubbles", "Rings", "Files"], app.lens_view as usize) {
         app.lens_view = i as u8;
         super::save_prefs(app);
         app.lens_morph = Some((None, node.path.clone(), ctx.input(|i| i.time)));
     }
-    let mut x = loc.right() + 8.0;
+    // AI Check: a chip left of the view switch, once the map is final and whole
+    let ai_data = !busy && !partial && !big_folders(root).is_empty();
+    let cw = if !busy && !partial { aicheck::ui::chip_width(&app.ai, ui, ai_data) } else { 0.0 };
+    let chip_at = Pos2::new(seg_r.left() - 16.0 - cw, hr.center().y);
+    let crumbs_end = if cw > 0.0 { chip_at.x - 12.0 } else { seg_r.left() - 16.0 };
+    let mut x = loc.right() + 2.0;
+    if crumbs.len() > 1 {
+        p.text(Pos2::new(x + 4.0, hr.center().y), Align2::CENTER_CENTER, "›", font(13.0), TEXT_MUTED());
+        x += 10.0;
+    }
     let n_crumbs = crumbs.len();
-    for (k, (label, path)) in crumbs.iter().enumerate() {
+    // the first crumb is the switcher itself. When the path doesn't fit, the
+    // folders in between give way ("…") so the one you're in always shows
+    let limit = crumbs_end;
+    let crumb_w = |k: usize| p.layout_no_wrap(crumbs[k].0.clone(), if k + 1 == n_crumbs { bold(13.0) } else { font(13.0) }, TEXT()).size().x + 16.0 + 12.0;
+    let mut first = 1;
+    while first + 1 < n_crumbs && x + (first..n_crumbs).map(crumb_w).sum::<f32>() + if first > 1 { 22.0 } else { 0.0 } > limit {
+        first += 1;
+    }
+    if first > 1 {
+        p.text(Pos2::new(x + 8.0, hr.center().y), Align2::CENTER_CENTER, "…", font(13.0), TEXT_MUTED());
+        x += 16.0;
+        p.text(Pos2::new(x + 4.0, hr.center().y), Align2::CENTER_CENTER, "›", font(13.0), TEXT_MUTED());
+        x += 10.0;
+    }
+    for (k, (label, path)) in crumbs.iter().enumerate().skip(first) {
         let last = k + 1 == n_crumbs;
-        let g = p.layout_no_wrap(label.clone(), if last { bold(13.0) } else { font(13.0) }, TEXT());
-        let br = Rect::from_min_size(Pos2::new(x, hr.center().y - 12.0), Vec2::new(g.size().x + 16.0, 24.0));
-        if br.right() > seg_r.left() - 16.0 {
+        let f = if last { bold(13.0) } else { font(13.0) };
+        let tw = (p.layout_no_wrap(label.clone(), f.clone(), TEXT()).size().x).min(limit - x - 16.0);
+        if tw < 24.0 {
             break;
         }
+        let br = Rect::from_min_size(Pos2::new(x, hr.center().y - 12.0), Vec2::new(tw + 16.0, 24.0));
         let resp = ui.interact(br, ui.scope_id().with(("crumb", k)), Sense::click());
         if last {
             p.rect_filled(br, 6.0, white(20));
         } else if resp.hovered() {
             p.rect_filled(br, 6.0, white(10));
         }
-        p.galley(Pos2::new(br.left() + 8.0, br.center().y - g.size().y / 2.0), g, if last { TEXT() } else { TEXT_DIM() });
+        text_fit(&p, Pos2::new(br.left() + 8.0, br.center().y), Align2::LEFT_CENTER, label, f, if last { TEXT() } else { TEXT_DIM() }, tw);
         if resp.clicked() && !last {
             go_to = Some((path.clone(), None));
         }
@@ -1317,6 +1416,14 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
     }
     if pill_button(ui, new_r, btn, BTN_SECONDARY, true).clicked() {
         act = if busy { Act::Stop } else { Act::Update };
+    }
+    // the place already mapped: back to its top (a stopped map maps again)
+    let same = matches!(&pick_root, Some(Some(path)) if *path == base && peek.is_none() && !app.lens.partial.load(Ordering::SeqCst));
+    if same {
+        if node.path != base {
+            go_to = Some((base.clone(), None));
+        }
+        pick_root = None;
     }
     let picked = pick_root.is_some();
     match pick_root {
@@ -1330,6 +1437,29 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
     }
 
     let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, hr.bottom() + 16.0), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - 16.0));
+    let mut ai_act: Option<(MenuAct, PathBuf, u64)> = None;
+    let mut ai_go: Option<PathBuf> = None;
+    if !busy && !partial {
+        let scan = format!("{}:{}", root.path.display(), root.bytes);
+        app.ai.auto(&ctx, &scan, || map_ask(root));
+        match aicheck::ui::chip(&mut app.ai, ui, chip_at, ai_data) {
+            Some(Event::Start) => {
+                let ask = map_ask(root);
+                app.ai.start(&ctx, ask);
+            }
+            Some(Event::Act(rec)) => {
+                let path = PathBuf::from(&rec.key);
+                let bytes = scan::find(root, &path).map(|n| n.bytes).unwrap_or(0);
+                match ai_action(&rec.action, &path) {
+                    "open" => ai_go = Some(path),
+                    "reveal" => ai_act = Some((MenuAct::Reveal, path, bytes)),
+                    _ => ai_act = Some((MenuAct::Trash, path, bytes)),
+                }
+                app.ai.done(&rec);
+            }
+            None => {}
+        }
+    }
     let picked_total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     let list_w = (body.width() * 0.36).clamp(260.0, LIST_W);
     let lr = Rect::from_min_max(body.min, Pos2::new(body.left() + list_w, body.bottom()));
@@ -1340,6 +1470,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
     let mut hover_item: Option<(PathBuf, u64)> = None;
     let mut menu_act: Option<(MenuAct, PathBuf, u64)> = None;
     let mut toggle: Option<(PathBuf, u64)> = None;
+    if let Some(a) = ai_act {
+        menu_act = Some(a);
+    }
+    if let Some(p) = ai_go {
+        go_to = Some((p, None));
+    }
 
     // ---- the list: this folder, everything in it, the disk. While a
     // folder on the map is under the pointer, the list shows what's in it.
@@ -1398,10 +1534,13 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
         let resp = ui.interact(rr, ui.scope_id().with(("lens-row", i)), Sense::click());
         let selectable = !scan::is_essential(&k.path);
         let on = app.lens_selected.iter().any(|(q, _)| q == &k.path);
-        // its share of the folder, as a faint bar behind the row
+        // its share of the folder, as a faint fill behind the whole row
         let f = (k.bytes as f32 / shown_node.bytes.max(1) as f32).clamp(0.0, 1.0);
-        let bar_r = Rect::from_min_size(Pos2::new(rr.left() + 50.0, rr.bottom() - 4.0), Vec2::new((rr.width() - 58.0) * f, 2.0));
-        lp.rect_filled(bar_r, 1.0, with_alpha(ACCENT(), 0.35));
+        let fw = rr.width() * f;
+        if fw >= 3.0 {
+            let fr = Rect::from_min_size(rr.min + Vec2::new(0.0, 2.0), Vec2::new(fw, rr.height() - 4.0));
+            lp.rect_filled(fr, fw.min(R_SMALL * 2.0) / 2.0, with_alpha(ACCENT(), 0.10));
+        }
         let lit = !previewing && app.lens_hover.as_ref().is_some_and(|h| h.starts_with(&k.path));
         if resp.hovered() || lit || cursor == Some(i) {
             lp.rect_filled(rr, R_SMALL, white(12));
@@ -1475,10 +1614,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
     if app.lens_morph.as_ref().is_none_or(|m| m.1 != node.path) {
         app.lens_morph = Some((None, node.path.clone(), now));
     }
+    // a hovered AI Check row lights its folder on the map
+    let lit_path = hover_path.clone().or_else(|| app.ai.hovered.as_ref().map(PathBuf::from));
     let out = match app.lens_view {
-        1 => rings(app, ui, pa, root, node, &here, free, hover_path.as_deref(), can_up),
+        1 => rings(app, ui, pa, root, node, &here, free, lit_path.as_deref(), can_up),
         2 => files(app, ui, pa, node),
-        _ => bubbles(app, ui, pa, node, &here, free, hover_path.as_deref()),
+        _ => bubbles(app, ui, pa, node, &here, free, lit_path.as_deref()),
     };
     if out.other {
         app.lens_other = true;
@@ -1829,12 +1970,94 @@ pub fn demo_live(app: &mut App) {
     app.lens_selected.clear();
 }
 
+/// Folders worth a look: big ones up to four levels down.
+fn big_folders(root: &Node) -> Vec<&Node> {
+    fn walk<'a>(n: &'a Node, depth: usize, min: u64, out: &mut Vec<&'a Node>) {
+        for k in &n.children {
+            if k.bytes >= min && !k.children.is_empty() {
+                out.push(k);
+                if depth < 4 {
+                    walk(k, depth + 1, min, out);
+                }
+            }
+        }
+    }
+    let min = (root.bytes / 100).max(1_000_000_000);
+    let mut out = vec![];
+    walk(root, 1, min, &mut out);
+    out.sort_by_key(|n| std::cmp::Reverse(n.bytes));
+    out.truncate(40);
+    out
+}
+
+/// Whether the map would offer "Move to Trash…" for `p`: never for
+/// essential folders or a protected folder holding a git repo.
+fn can_trash(p: &Path) -> bool {
+    !(scan::is_essential(p) || crate::kit::fs::is_protected(p).is_some() && p.join(".git").exists())
+}
+
+/// The AI Check action to run: a Remove on a folder the map would never
+/// trash opens it on the map instead.
+fn ai_action<'a>(action: &'a str, p: &Path) -> &'a str {
+    match action {
+        "open" | "reveal" => action,
+        _ if can_trash(p) => "trash",
+        _ => "open",
+    }
+}
+
+/// What AI Check gets: the big folders on the map with their biggest parts.
+fn map_ask(root: &Node) -> aicheck::Ask {
+    let items = big_folders(root)
+        .into_iter()
+        .map(|n| {
+            let mut kids: Vec<&Node> = n.children.iter().collect();
+            kids.sort_by_key(|k| std::cmp::Reverse(k.bytes));
+            let top: Vec<String> = kids.iter().take(4).map(|k| format!("{} {}", k.name, human_bytes(k.bytes))).collect();
+            aicheck::Item {
+                key: n.path.display().to_string(),
+                line: format!("{} · {} · {} items · biggest inside: {}{}", n.path.display(), human_bytes(n.bytes), n.items, top.join(", "), if can_trash(&n.path) { "" } else { " · system folder: open or reveal only, never trash" }),
+                icon: None,
+                name: n.name.clone(),
+            }
+        })
+        .collect();
+    let mut facts = vec![format!("Mapped: {} ({})", root.path.display(), human_bytes(root.bytes))];
+    if let Some((free, total)) = disk_space(&root.path) {
+        facts.push(format!("Disk: {} free of {}", human_bytes(free), human_bytes(total)));
+    }
+    aicheck::Ask {
+        task: "This is Disk Map: the biggest folders on this Mac. Point out the few biggest wins: what is safe to remove or can be made smaller (caches, old simulators, VM and container disks, downloads, duplicates), and say how. Skip system folders and the user's own documents unless clearly stale.".into(),
+        actions: vec![
+            ("trash", "put it in the remove list (the user reviews and confirms before anything moves to the Trash)", "Remove"),
+            ("open", "open that folder on the map to look inside", "Open"),
+            ("reveal", "show it in Finder", "Show in Finder"),
+        ],
+        items,
+        facts,
+        answer: Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn n(path: &str, bytes: u64, items: u64, other: u64, children: Vec<Node>) -> Node {
         Node { name: path.rsplit('/').next().unwrap().into(), path: PathBuf::from(path), bytes, items, children, other }
+    }
+
+    #[test]
+    fn ai_check_never_trashes_essential_folders() {
+        assert_eq!(ai_action("trash", Path::new("/Applications")), "open");
+        assert_eq!(ai_action("trash", Path::new("/System/Library")), "open");
+        assert_eq!(ai_action("trash", Path::new("/Applications/Foo.app")), "trash");
+        assert_eq!(ai_action("reveal", Path::new("/Applications")), "reveal");
+        // the agent is told which folders are open/reveal only
+        let root = n("/", 400_000_000_000, 10, 0, vec![n("/Applications", 50_000_000_000, 5, 0, vec![n("/Applications/Foo.app", 1, 1, 0, vec![])])]);
+        let ask = map_ask(&root);
+        let apps = ask.items.iter().find(|i| i.key == "/Applications").unwrap();
+        assert!(apps.line.contains("never trash"));
     }
 
     #[test]
@@ -1864,6 +2087,21 @@ mod tests {
         assert!(!is_app_data(&h.join("Library/Application Support")));
         assert!(!is_app_data(&h.join("Downloads/x.dmg")));
         assert!(!is_app_data(&h.join("Library/Caches/foo")));
+    }
+
+    #[test]
+    fn mapped_folders_are_remembered_newest_first() {
+        let home = Path::new("/Users/me");
+        let mut r = vec![];
+        assert!(!remember_folder(&mut r, Path::new("/"), home));
+        assert!(!remember_folder(&mut r, Path::new("/Volumes/Backup"), home));
+        assert!(!remember_folder(&mut r, home, home));
+        for n in 1..=6 {
+            assert!(remember_folder(&mut r, &home.join(format!("p{n}")), home));
+        }
+        assert!(remember_folder(&mut r, &home.join("p3"), home));
+        let names: Vec<_> = r.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["p3", "p6", "p5", "p4", "p2"]);
     }
 
     #[test]

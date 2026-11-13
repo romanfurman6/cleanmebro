@@ -3,9 +3,10 @@
 
 use crate::kit::sync::LockExt;
 use super::engine::{self as cleanup, Group, Item, Phase, Verdict, Who};
-use super::agent::{self, Agent};
+use super::agent::Agent;
 use super::Cleanup as App;
-use crate::core::tool::{Action, Cx};
+use crate::core::tool::Cx;
+use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::claude_code::{self as cc, Availability};
 use crate::kit::glass::{self, *};
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
@@ -42,61 +43,6 @@ fn ai_agent(app: &App) -> Option<Agent> {
     (app.use_ai && ok).then_some(app.agent)
 }
 
-/// A calm note in place of the Claude switch: what's missing, how to turn it
-/// on, and that the built-in rules are used meanwhile. Returns its height.
-fn claude_note_height(p: &egui::Painter, width: f32, a: Availability) -> f32 {
-    let text_h = p.layout(a.how().to_string(), font(12.0), TEXT_DIM(), width - 54.0).size().y;
-    32.0 + text_h + 12.0 + 26.0 + 14.0
-}
-
-fn claude_note(ui: &mut Ui, pos: Pos2, width: f32, a: Availability, cx: &mut Cx) -> f32 {
-    let p = ui.painter().clone();
-    let x = pos.x + 40.0;
-    let w = width - 54.0;
-    let body = a.how().to_string();
-    let r = Rect::from_min_size(pos, Vec2::new(width, claude_note_height(&p, width, a)));
-    glass_card(&p, r, R_CARD, 0.0, false);
-    icon(&p, Icon::Gauge, Rect::from_min_size(r.min + Vec2::new(14.0, 14.0), Vec2::splat(16.0)), TEXT_FAINT());
-    text_fit(&p, Pos2::new(x, r.top() + 13.0), Align2::LEFT_TOP, a.title(), bold(13.0), TEXT(), w);
-    paragraph(&p, Pos2::new(x, r.top() + 32.0), &body, font(12.0), TEXT_DIM(), w);
-    // buttons, bottom left
-    let by = r.bottom() - 12.0 - 26.0;
-    let mut bx = x;
-    let mut btn = |ui: &mut Ui, label: &str, kind: u8| {
-        let bw = button_width(&p, label, kind);
-        let br = Rect::from_min_size(Pos2::new(bx, by), Vec2::new(bw, 26.0));
-        bx += bw + 8.0;
-        pill_button(ui, br, label, kind, true).clicked()
-    };
-    match a {
-        Availability::Off => {
-            if btn(ui, "Open Settings", BTN_SECONDARY) {
-                cx.push(Action::OpenSettings { tools: true });
-            }
-        }
-        Availability::NotInstalled => {
-            if btn(ui, "Get Claude Code", BTN_SECONDARY) {
-                cc::open_download_page();
-            }
-            if btn(ui, "Check again", BTN_SECONDARY) {
-                cc::request_recheck();
-                cx.toast("Looking for Claude Code…");
-            }
-        }
-        Availability::SignedOut => {
-            if btn(ui, "Open Terminal", BTN_SECONDARY) {
-                cc::open_terminal();
-            }
-            if btn(ui, "Check again", BTN_SECONDARY) {
-                cc::request_recheck();
-                cx.toast("Checking your Claude sign-in…");
-            }
-        }
-        Availability::Ready => {}
-    }
-    r.height()
-}
-
 fn home_str() -> String {
     dirs::home_dir().unwrap_or_default().display().to_string()
 }
@@ -107,11 +53,8 @@ fn short_path(p: &std::path::Path) -> String {
 
 // ---------------------------------------------------------------- start
 
-fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
+fn intro(app: &mut App, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     let ctx = ui.ctx().clone();
-    let avail = claude_now(app);
-    // the note only matters when Claude is the one picked
-    let has_claude = avail.ready() || app.agent != Agent::Claude;
     let p = ui.painter().clone();
     page_header(&p, r, "Cleanup", "", TEXT_DIM());
     let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - sp::L));
@@ -124,25 +67,23 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     glass_card(&p, bar_card, R_CARD, 0.0, false);
     let di = bar_card.shrink2(Vec2::new(sp::L, 0.0));
     let cy = di.center().y;
-    // right to left: Scan, which agent checks, the AI switch, a divider, the free space
-    let scan_w = button_width(&p, "Scan", BTN_PRIMARY).max(96.0);
-    let scan_r = Rect::from_min_size(Pos2::new(di.right() + 4.0 - scan_w, cy - 17.0), Vec2::new(scan_w, 34.0));
-    if pill_button(ui, scan_r, "Scan", BTN_PRIMARY, true).clicked() {
-        cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
-    }
-    let mut right = scan_r.left() - sp::L;
-    // which agent is picked once, in setup and Settings › AI Usage
-    if !app.demo {
-        app.agent = agent::main();
-    }
-    let lr = p.text(Pos2::new(right, cy), Align2::RIGHT_CENTER, format!("Check with {}", app.agent.name()), ty::body(), TEXT());
-    let sw = Rect::from_min_size(Pos2::new(lr.left() - sp::S - 30.0, cy - 9.0), Vec2::new(30.0, 18.0));
-    if switch(ui, sw, ui.scope_id().with("use-ai"), app.use_ai, true).clicked() {
-        app.use_ai = !app.use_ai;
-    }
-    right = sw.left() - sp::L;
-    p.line_segment([Pos2::new(right, cy - 14.0), Pos2::new(right, cy + 14.0)], Stroke::new(1.0, CARD_EDGE()));
-    right -= sp::L;
+    // right to left: Scan, a divider, the free space (AI Check runs after the scan, in its strip)
+    // never scanned: the big Scan in the middle is the only one
+    let last = if app.demo && !app.demo_fresh { Some(super::engine::LastScan { when: chrono::Utc::now().timestamp() - 2 * 86400, groups: vec![14_200_000_000, 9_800_000_000, 21_600_000_000, 6_100_000_000, 2_200_000_000, 1_300_000_000, 3_400_000_000] }) } else { super::engine::last_scan() };
+    let hist = if app.demo_fresh { Vec::new() } else { super::engine::history() };
+    let fresh = last.is_none() && hist.is_empty();
+    let right = if fresh {
+        di.right()
+    } else {
+        let scan_w = button_width(&p, "Scan", BTN_PRIMARY).max(96.0);
+        let scan_r = Rect::from_min_size(Pos2::new(di.right() + 4.0 - scan_w, cy - 17.0), Vec2::new(scan_w, 34.0));
+        if pill_button(ui, scan_r, "Scan", BTN_PRIMARY, true).clicked() {
+            cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
+        }
+        let div = scan_r.left() - sp::L;
+        p.line_segment([Pos2::new(div, cy - 14.0), Pos2::new(div, cy + 14.0)], Stroke::new(1.0, CARD_EDGE()));
+        div - sp::L
+    };
     icon(&p, Icon::Disk, Rect::from_center_size(Pos2::new(di.left() + 9.0, cy), Vec2::splat(18.0)), TEXT_SOFT());
     let name = p.text(Pos2::new(di.left() + 18.0 + sp::M, cy), Align2::LEFT_CENTER, "Macintosh HD", ty::title(), TEXT());
     let free_s = if total > 0 { format!("{} free of {}", human_bytes(free), human_bytes(total)) } else { String::new() };
@@ -153,19 +94,21 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     }
 
     // a note when Claude is missing, at the bottom
-    let mut chart_bottom = body.bottom();
-    if !has_claude && app.use_ai {
-        let h = claude_note_height(&p, body.width(), avail);
-        claude_note(ui, Pos2::new(body.left(), body.bottom() - h), body.width(), avail, tcx);
-        chart_bottom -= h + sp::M;
+    let chart_bottom = body.bottom();
+
+    // never scanned: what a scan looks through, and one big Scan
+    if fresh {
+        let area = Rect::from_min_max(Pos2::new(body.left(), bar_card.bottom() + sp::M), Pos2::new(body.right(), chart_bottom));
+        if fresh_start(ui, area) {
+            cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
+        }
+        return;
     }
 
     // the chart card
     let card = Rect::from_min_max(Pos2::new(body.left(), bar_card.bottom() + sp::M), Pos2::new(body.right(), chart_bottom));
     glass_card(&p, card, R_CARD, 0.0, false);
     let ci = card.shrink(sp::XL);
-    let last = if app.demo { Some(super::engine::LastScan { when: chrono::Utc::now().timestamp() - 2 * 86400, groups: vec![14_200_000_000, 9_800_000_000, 21_600_000_000, 6_100_000_000, 2_200_000_000, 1_300_000_000, 3_400_000_000] }) } else { super::engine::last_scan() };
-    let hist = super::engine::history();
     let sizes: Vec<u64> = Group::ALL.iter().enumerate().map(|(i, _)| last.as_ref().and_then(|l| l.groups.get(i).copied()).unwrap_or(0)).collect();
     let found: u64 = sizes.iter().sum();
     let mut top = ci.top();
@@ -215,22 +158,64 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
         let with_icon = nw + 22.0 <= avail;
         let lx = if with_icon { x + (cw - nw - 22.0) / 2.0 } else { x + (cw - nw.min(avail)) / 2.0 - 22.0 };
         let ir = Rect::from_center_size(Pos2::new(lx + 8.0, ny), Vec2::splat(16.0));
-        let drawn = !with_icon || (matches!(g, Group::Developer) && symbol(&p, "hammer", ir, col));
-        if !drawn {
-            let ic = match g {
-                Group::AiTools => Icon::Gauge,
-                Group::AppCaches => Icon::Folder,
-                Group::Developer => Icon::Gear,
-                Group::Projects => Icon::Folder,
-                Group::Installers => Icon::Down,
-                Group::Logs => Icon::Doc,
-                Group::Trash => Icon::Trash,
-            };
-            icon(&p, ic, ir, col);
+        if with_icon {
+            group_icon(&p, g, ir, col);
         }
         text_fit(&p, Pos2::new(lx + 22.0, ny), Align2::LEFT_CENTER, g.title(), ty::body(), TEXT_SOFT(), avail);
     }
     p.line_segment([Pos2::new(ci.left(), base), Pos2::new(ci.right(), base)], Stroke::new(1.0, CARD_EDGE()));
+}
+
+/// A group's glyph (Developer: the SF hammer when there is one).
+fn group_icon(p: &egui::Painter, g: Group, r: Rect, col: Color32) {
+    if matches!(g, Group::Developer) && symbol(p, "hammer", r, col) {
+        return;
+    }
+    let ic = match g {
+        Group::AiTools => Icon::Gauge,
+        Group::AppCaches => Icon::Folder,
+        Group::Developer => Icon::Gear,
+        Group::Projects => Icon::Folder,
+        Group::Installers => Icon::Down,
+        Group::Logs => Icon::Doc,
+        Group::Trash => Icon::Trash,
+    };
+    icon(p, ic, r, col);
+}
+
+/// Before the first scan: every group a scan looks through as a round icon
+/// with its name, in one row (two when narrow), and a big Scan under them,
+/// all centred in `area`. True when Scan was clicked.
+fn fresh_start(ui: &mut Ui, area: Rect) -> bool {
+    let p = ui.painter().clone();
+    let n = Group::ALL.len();
+    let cell = 112.0;
+    let per_row = if area.width() >= cell * n as f32 { n } else { n.div_ceil(2) };
+    let rows = n.div_ceil(per_row);
+    let cell_h = 92.0;
+    let btn = Vec2::new(200.0, 44.0);
+    let block_h = rows as f32 * cell_h + sp::XXL + btn.y;
+    let top = area.center().y - block_h / 2.0;
+    for (k, g) in Group::ALL.into_iter().enumerate() {
+        let row = k / per_row;
+        let in_row = if row + 1 == rows { n - row * per_row } else { per_row };
+        let col_i = k % per_row;
+        let x0 = area.center().x - in_row as f32 * cell / 2.0;
+        let c = Pos2::new(x0 + (col_i as f32 + 0.5) * cell, top + row as f32 * cell_h + 26.0);
+        let col = junk_ramp(k);
+        p.circle_filled(c, 26.0, with_alpha(col, 0.14));
+        group_icon(&p, g, Rect::from_center_size(c, Vec2::splat(22.0)), col);
+        text_fit(&p, Pos2::new(c.x, c.y + 40.0), Align2::CENTER_CENTER, g.title(), ty::body(), TEXT_SOFT(), cell - 8.0);
+    }
+    let br = Rect::from_center_size(Pos2::new(area.center().x, top + rows as f32 * cell_h + sp::XXL + btn.y / 2.0), btn);
+    let resp = ui.interact(br, ui.scope_id().with("fresh-scan"), Sense::click());
+    let hov = ui.ctx().animate_bool(resp.id, resp.hovered());
+    liquid_capsule(&p, br, Some(BLUE()), if resp.is_pointer_button_down_on() { 1.6 } else { hov }, 1.0);
+    p.text(br.center(), Align2::CENTER_CENTER, "Scan", bold(16.0), on_color(BLUE()));
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
 }
 
 // ---------------------------------------------------------------- scanning / judging / cleaning
@@ -367,12 +352,16 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         sub = format!("{sub} · {e}");
     }
     let _ = ai_used;
-    let btns = page_header(&p, r, "Cleanup", &sub, if ai_error.is_some() { AMBER() } else { TEXT_DIM() });
+    // AI Check: a chip after the title
+    let ai_n = app.clean.lock_ok().items.iter().filter(|i| i.verdict != Verdict::Keep).count();
+    let cw = aicheck::ui::chip_width(&app.ai, ui, ai_n > 0);
+    let (btns, chip_at) = page_header_room(&p, r, "Cleanup", &sub, if ai_error.is_some() { AMBER() } else { TEXT_DIM() }, cw, r.right() - 260.0);
     let w = button_width(&p, "Scan again", BTN_SECONDARY);
     let sr = Rect::from_min_max(Pos2::new(btns.right() - w, btns.top()), btns.max);
     if pill_button(ui, sr, "Scan again", BTN_SECONDARY, true).clicked() {
         // back to the start screen, where the scan can be set up and started
         cleanup::stop_scan(&app.clean);
+        app.ai.reset();
         return;
     }
     let hidden = app.clean.lock_ok().hidden_kept;
@@ -401,6 +390,26 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     }
 
     let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - PAGE_FOOTER_H - sp::L));
+
+    {
+        let scan = format!("{total}");
+        let shared = app.clean.clone();
+        app.ai.auto(&ctx, &scan, || check_ask(&shared));
+        match aicheck::ui::chip(&mut app.ai, ui, chip_at, ai_n > 0) {
+            Some(Event::Start) => {
+                let ask = check_ask(&app.clean);
+                app.ai.start(&ctx, ask);
+            }
+            Some(Event::Act(rec)) => {
+                let i = app.clean.lock_ok().items.iter().position(|it| it.path.display().to_string() == rec.key);
+                if let Some(i) = i {
+                    answer_items(app, &[i], if rec.action == "keep" { Verdict::Keep } else { Verdict::Safe });
+                }
+                app.ai.done(&rec);
+            }
+            None => {}
+        }
+    }
 
     // the groups as tabs: All, then each group that found something
     let mut tabs: Vec<(Option<Group>, String, u64, usize, Color32)> = vec![];
@@ -598,6 +607,8 @@ fn answer_items(app: &mut App, idx: &[usize], v: Verdict) {
         let mut g = app.clean.lock_ok();
         for &i in idx {
             let it = &mut g.items[i];
+            // decided here: AI Check's answer for it goes
+            app.ai.answered(&it.path.display().to_string());
             if v == Verdict::Keep {
                 kept.push(it.path.clone());
             }
@@ -645,6 +656,10 @@ fn ask_card(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let it = app.clean.lock_ok().items[i].clone();
     let p = ui.painter().clone();
     glass_card(&p, rr, R_CARD, 0.0, false);
+    // the AI Check answer under the pointer points at its card
+    if app.ai.hovered.as_deref() == Some(it.path.display().to_string().as_str()) {
+        p.rect_stroke(rr, R_CARD, Stroke::new(2.0, with_alpha(tint::HEALTH(), 0.7)), StrokeKind::Inside);
+    }
     row_extras(ui, rr, &it, false);
     let kw = button_width(&p, "Keep", BTN_SECONDARY);
     let aw = button_width(&p, "Allow", BTN_PRIMARY);
@@ -675,6 +690,9 @@ fn safe_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let p = ui.painter().clone();
     let rr = rr.shrink2(Vec2::new(4.0, 0.0));
     row_extras(ui, rr, &it, true);
+    if app.ai.hovered.as_deref() == Some(it.path.display().to_string().as_str()) {
+        p.rect_stroke(rr, R_SMALL, Stroke::new(2.0, with_alpha(tint::HEALTH(), 0.7)), StrokeKind::Inside);
+    }
     let can = !it.hard_keep;
     let cb = Rect::from_center_size(Pos2::new(rr.left() + sp::M + 8.0, rr.center().y), Vec2::splat(16.0));
     if checkbox(ui, cb, ui.scope_id().with(("sel", &it.path)), it.selected, can).clicked() && can {
@@ -923,4 +941,43 @@ pub fn demo_done() -> cleanup::State {
     st.trashed_bytes = sel.iter().filter(|i| !i.permanent && !i.rebuilds()).map(|i| i.bytes).sum();
     st.log = sel.iter().map(|i| format!("Moved to Trash: {}", i.path.display())).collect();
     st
+}
+
+/// What AI Check gets: the biggest things found, with what the rules or the
+/// path check said about each.
+fn check_ask(clean: &cleanup::Shared) -> aicheck::Ask {
+    let g = clean.lock_ok();
+    let mut idx: Vec<usize> = (0..g.items.len()).filter(|&i| g.items[i].verdict != Verdict::Keep).collect();
+    // what waits on the user first (all of it is sent), then by size
+    idx.sort_by_key(|&i| (g.items[i].verdict != Verdict::Ask, std::cmp::Reverse(g.items[i].bytes)));
+    let answer: Vec<String> = idx.iter().filter(|&&i| g.items[i].verdict == Verdict::Ask && g.items[i].by != Who::You).take(aicheck::MAX_ANSWERS).map(|&i| g.items[i].path.display().to_string()).collect();
+    let items = idx
+        .into_iter()
+        .take(40)
+        .map(|i| {
+            let it = &g.items[i];
+            let now = match it.verdict {
+                Verdict::Safe => "marked safe",
+                Verdict::Ask => "needs the user's OK",
+                Verdict::Keep => "kept",
+            };
+            let why = if it.reason.is_empty() { String::new() } else { format!(" ({})", it.reason) };
+            aicheck::Item {
+                key: it.path.display().to_string(),
+                line: format!("{} · {} · {} · {} · untouched {} days · {}{}{}", it.group.title(), it.title, short_path(&it.path), human_bytes(it.bytes), it.age_days.round(), now, why, if it.selected { " · ticked for cleaning" } else { "" }),
+                icon: None,
+                name: it.title.clone(),
+            }
+        })
+        .collect();
+    aicheck::Ask {
+        task: "This is Cleanup's results: caches, logs and leftovers found on this Mac. Some items need the user's OK: say for each whether to clean it (select) or keep it. Then point out anything ticked for cleaning that the user would likely miss (documents, settings, data that cannot be downloaded again), or a big clearly safe win.".into(),
+        actions: vec![
+            ("select", "clean it: tick it for cleaning (the user still presses Clean and confirms)", "Allow"),
+            ("keep", "untick it and remember it as kept", "Keep"),
+        ],
+        items,
+        facts: Vec::new(),
+        answer,
+    }
 }

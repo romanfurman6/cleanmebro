@@ -6,6 +6,7 @@ use super::items::{Job, LoginApp, Scope, Why};
 use super::sign::Flag;
 use super::{plural, trust_key, Filter, Gone, Startup};
 use crate::core::tool::{Cx, Size};
+use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::glass::*;
 use crate::kit::{macos, tile};
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
@@ -156,7 +157,14 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     } else {
         format!("{} · {running} running", plural(total, "item"))
     };
-    let btns = page_header(&p, r, "Startup", &sub, TEXT_DIM());
+    // AI Check: a chip after the title
+    let ai_n = jobs.iter().filter(|j| j.on).count() + apps.iter().filter(|a| a.on).count();
+    let ai_data = loaded && ai_n > 0;
+    let cw = aicheck::ui::chip_width(&s.ai, ui, ai_data);
+    // the status ends where search starts (tabs, then a 190 pt field)
+    let n_tabs = if flagged > 0 { 4.0 } else { 3.0 };
+    let sub_right = r.right() - sp::PAGE_EDGE - 100.0 * n_tabs - 12.0 - 190.0 - 12.0;
+    let (btns, chip_at) = page_header_room(&p, r, "Startup", &sub, TEXT_DIM(), cw, sub_right);
 
     // filter + search on the right of the header
     let mut tabs = vec![(Filter::All, format!("All {total}")), (Filter::Suggested, format!("Suggested {}", suggested.len()))];
@@ -176,6 +184,32 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     s.search = q;
 
     let body = Rect::from_min_max(Pos2::new(r.left() + 24.0, r.top() + PAGE_HEADER_H + 1.0), Pos2::new(r.right() - 24.0, r.bottom()));
+    if loaded {
+        if ai_n > 0 {
+            s.ai.auto(&ctx, &format!("{}:{}", jobs.len(), apps.len()), || startup_ask(&jobs, &apps));
+        }
+        match aicheck::ui::chip(&mut s.ai, ui, chip_at, ai_data) {
+            Some(Event::Start) => {
+                let ask = startup_ask(&jobs, &apps);
+                s.ai.start(&ctx, ask);
+            }
+            Some(Event::Act(rec)) => {
+                if let Some(name) = rec.key.strip_prefix("app:") {
+                    if let Some(a) = apps.iter().find(|a| a.name == name && a.on) {
+                        s.toggle_app(a);
+                    }
+                } else if let Some(j) = jobs.iter().find(|j| j.label == rec.key) {
+                    if rec.action == "remove" && j.orphan && !j.bundled {
+                        s.trash(j);
+                    } else if j.on {
+                        s.toggle_job(j);
+                    }
+                }
+                s.ai.done(&rec);
+            }
+            None => {}
+        }
+    }
     if !loaded {
         spinner(&p, Pos2::new(body.left() + 8.0, body.top() + 30.0), 7.0, ctx.input(|i| i.time), ACCENT());
         p.text(Pos2::new(body.left() + 24.0, body.top() + 30.0), Align2::LEFT_CENTER, "Reading what starts with your Mac…", font(13.0), TEXT_DIM());
@@ -673,6 +707,47 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
 }
 
 /// "2 updaters that check in the background, Steam Cleaner, and 1 agent of an app you removed."
+/// What AI Check gets: each login app and background job that's on.
+fn startup_ask(jobs: &[Job], apps: &[LoginApp]) -> aicheck::Ask {
+    let mut items: Vec<aicheck::Item> = apps
+        .iter()
+        .filter(|a| a.on)
+        .map(|a| aicheck::Item { key: format!("app:{}", a.name), line: format!("login app {} ({}){}", a.name, a.path.display(), if a.hidden { ", opens hidden" } else { "" }), icon: Some(a.path.clone()), name: a.name.clone() })
+        .collect();
+    for j in jobs.iter().filter(|j| j.on && !j.apple()) {
+        let kind = match j.scope {
+            Scope::System => "system daemon (admin)",
+            _ => "background agent",
+        };
+        let mut notes = Vec::new();
+        if j.orphan {
+            notes.push("its app is gone".to_string());
+        }
+        if j.pid.is_some() {
+            notes.push("running now".into());
+        }
+        if let Some(w) = j.why() {
+            notes.push(format!("rule says: {}", w.short()));
+        }
+        items.push(aicheck::Item {
+            key: j.label.clone(),
+            line: format!("{kind} {} · label {} · runs {} · {} · {}", j.name, j.label, j.command(), j.when.label(j.scope), notes.join(", ")),
+            icon: j.owner.clone(),
+            name: j.name.clone(),
+        });
+    }
+    aicheck::Ask {
+        task: "This is the Startup list: apps and background jobs that start with the user's Mac. Point out what can be turned off without breaking anything the user relies on (updaters that run when the app opens anyway, helpers of apps they rarely use, agents of removed apps). Say plainly when turning something off would break a feature.".into(),
+        actions: vec![
+            ("turn_off", "stop it starting with the Mac (the user can turn it back on)", "Turn off"),
+            ("remove", "move the job's file to the Trash; only for jobs whose app is gone", "Remove"),
+        ],
+        items,
+        facts: Vec::new(),
+        answer: Vec::new(),
+    }
+}
+
 fn why_line(list: &[&Job]) -> String {
     let n = |w: Why| list.iter().filter(|j| j.why() == Some(w)).count();
     let mut parts = Vec::new();

@@ -7,6 +7,7 @@
 //! Each card shows real readings only: no chart is drawn for data the
 //! monitor does not keep a history of.
 
+use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::sync::LockExt;
 use super::monitor::{self, Level, Snapshot};
 use super::sheets::Action as SheetAction;
@@ -28,7 +29,7 @@ fn level_color(l: Level) -> Color32 {
     }
 }
 
-pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect, cx: &mut Cx) {
+pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendation], ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let s = mon.lock_ok().clone();
     let p = ui.painter().clone();
     let settings_id = ui.scope_id().with("health-settings");
@@ -49,7 +50,11 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
         Some(rec) => (rec.title.clone(), AMBER()),
         None => { let _ = sub; (String::new(), TEXT_DIM()) }
     };
-    let btns = page_header(&p, r, "Mac Health", &sub, sub_col);
+    // AI Check: a chip after the title, on the overview
+    let cw = if show_settings { 0.0 } else { aicheck::ui::chip_width(ai, ui, s.ready) };
+    let rec_w = recs.first().map(|rec| button_width(&p, &rec.action, BTN_PRIMARY) + sp::M).unwrap_or(0.0);
+    let sub_right = r.right() - sp::PAGE_EDGE - 180.0 - sp::M - rec_w - sp::M;
+    let (btns, chip_at) = page_header_room(&p, r, "Mac Health", &sub, sub_col, cw, sub_right);
     let mut right = btns.right();
     let tr = Rect::from_min_max(Pos2::new(right - 180.0, btns.top()), Pos2::new(right, btns.bottom()));
     if let Some(i) = segmented(ui, tr, ui.scope_id().with("health-tab"), &["Overview", "Settings"], show_settings as usize) {
@@ -66,6 +71,27 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
 
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     let inner = body.shrink2(Vec2::new(sp::PAGE_EDGE, 0.0));
+
+    if !show_settings {
+        match aicheck::ui::chip(ai, ui, chip_at, s.ready) {
+            Some(Event::Start) => ai.start(ui.ctx(), health_ask(&s)),
+            Some(Event::Act(rec)) => {
+                match rec.action.as_str() {
+                    "quit" => {
+                        // only the same process, still running, and the user's own
+                        if let Some(pid) = quit_target(&mon.lock_ok().procs, &rec.key, &rec.name) {
+                            super::procs::quit(pid);
+                        }
+                    }
+                    _ => {
+                        let _ = std::process::Command::new("open").args(["-a", "Activity Monitor"]).spawn();
+                    }
+                }
+                ai.done(&rec);
+            }
+            None => {}
+        }
+    }
     let mut action = SheetAction::None;
 
     let mut dev_action = None;
@@ -187,9 +213,21 @@ fn ring_stat(p: &egui::Painter, area: Rect, frac: f32, color: Color32, value: &s
     let c = area.center();
     let w = (rr * 0.14).clamp(8.0, 12.0);
     tile::ring(p, c, rr - w / 2.0, w, frac.max(0.01), color);
-    let inner = (rr - w) * 1.6;
-    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, value, ty::number(), TEXT(), inner);
-    p.text(c + Vec2::new(0.0, 15.0), Align2::CENTER_CENTER, unit, ty::caption(), ty::caption_color());
+    // the full chord through the centre, less a little air
+    let inner = 2.0 * (rr - w) - 8.0;
+    // "1.44 TB" + "free": the number alone, its unit goes to the caption ("TB free")
+    let (num, caption) = match value.split_once(' ') {
+        Some((n, u)) => (n, format!("{u} {unit}")),
+        None => (value, unit.to_string()),
+    };
+    // shrink the number to fit the ring rather than cut it
+    let mut font = ty::number();
+    let tw = p.layout_no_wrap(num.to_string(), font.clone(), TEXT()).size().x;
+    if tw > inner {
+        font.size = (font.size * inner / tw).max(11.0);
+    }
+    text_fit(p, c - Vec2::new(0.0, 7.0), Align2::CENTER_CENTER, num, font, TEXT(), inner);
+    p.text(c + Vec2::new(0.0, 15.0), Align2::CENTER_CENTER, caption, ty::caption(), ty::caption_color());
 }
 
 fn level_status(l: Level) -> Color32 {
@@ -378,4 +416,67 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
         x = br.right() + sp::S;
     }
     out
+}
+
+/// The pid an AI Check "Quit" may signal: the rec's process must still be in
+/// the live list under the same name and run as the user (a pid can be
+/// reused by another process while the rec sits on screen).
+fn quit_target(live: &[super::procs::Proc], key: &str, name: &str) -> Option<u32> {
+    let pid = key.strip_prefix("pid:")?.parse::<u32>().ok()?;
+    live.iter().find(|p| p.pid == pid && p.name == name && p.mine).map(|p| p.pid)
+}
+
+/// What AI Check gets: the busiest processes and how the Mac is doing.
+fn health_ask(s: &monitor::Snapshot) -> aicheck::Ask {
+    let items = s
+        .procs
+        .iter()
+        .map(|p| aicheck::Item {
+            key: format!("pid:{}", p.pid),
+            line: format!("{} (pid {}) · {:.0}% CPU{}", p.name, p.pid, p.cpu, if p.mine { "" } else { " · system process, can't be quit" }),
+            icon: None,
+            name: p.name.clone(),
+        })
+        .collect();
+    let gb = |b: u64| human_bytes(b);
+    let mut facts = vec![
+        format!("Mac: {} {}", s.model, s.chip),
+        format!("Up {}", human_duration(s.uptime_secs)),
+        format!("CPU load {:.0}% (user {:.0}%, system {:.0}%)", s.cpu_load * 100.0, s.cpu_user * 100.0, s.cpu_system * 100.0),
+        format!("Memory: pressure {:.0}%, {} total, {} compressed, swap {} of {}", s.mem_pressure * 100.0, gb(s.mem_total), gb(s.mem_compressed), gb(s.swap_used), gb(s.swap_total)),
+        format!("Thermal state: {}", ["nominal", "fair", "serious", "critical"][s.thermal.min(3) as usize]),
+        format!("Disk: {} free of {}", gb(s.disk_free), gb(s.disk_total)),
+    ];
+    if s.battery.present {
+        facts.push(format!("Battery {}%{}, {} cycles", s.battery.percent, if s.battery.charging { " charging" } else { "" }, s.battery.cycles));
+    }
+    aicheck::Ask {
+        task: "This is Mac Health: how this Mac is doing right now and its busiest processes. Point out what is slowing it down, heating it or draining the battery, and what to do about it. Only suggest quitting a process the user runs.".into(),
+        actions: vec![
+            ("quit", "quit that process (like Activity Monitor's Quit)", "Quit"),
+            ("activity", "open Activity Monitor to look at it", "Open Activity Monitor"),
+        ],
+        items,
+        facts,
+        answer: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::system::procs::Proc;
+
+    #[test]
+    fn ai_quit_only_the_same_live_process_of_the_user() {
+        let live = vec![Proc { pid: 10, name: "Chrome".into(), cpu: 60.0, mine: true }, Proc { pid: 11, name: "WindowServer".into(), cpu: 30.0, mine: false }];
+        assert_eq!(quit_target(&live, "pid:10", "Chrome"), Some(10));
+        // pid reused by another process
+        assert_eq!(quit_target(&live, "pid:10", "Docker"), None);
+        // exited
+        assert_eq!(quit_target(&live, "pid:12", "Docker"), None);
+        // not the user's
+        assert_eq!(quit_target(&live, "pid:11", "WindowServer"), None);
+        assert_eq!(quit_target(&live, "10", "Chrome"), None);
+    }
 }

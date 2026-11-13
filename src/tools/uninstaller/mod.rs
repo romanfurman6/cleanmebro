@@ -272,6 +272,8 @@ pub struct Uninstaller {
     /// The drop zone keeps showing the result until then.
     pub done_until: Option<Instant>,
     on: bool,
+    /// AI Check beside the leftovers.
+    pub ai: crate::kit::aicheck::Check,
 }
 
 /// Which surface started a removal.
@@ -308,6 +310,7 @@ impl Uninstaller {
             want_page: false,
             done_until: None,
             on: true,
+            ai: crate::kit::aicheck::Check::new(ID, env.demo),
         };
         if env.demo {
             ui::demo::fill(&mut u, "uninstaller");
@@ -723,11 +726,18 @@ pub fn pretty_name(id: &str) -> String {
 /// Watch the app folders: when an app disappears that we didn't remove,
 /// offer its leftovers; when anything changes, scan again.
 fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) {
-    start_scan(st.clone(), app_roots.clone(), roots.clone(), ctx.clone());
     std::thread::Builder::new()
         .name("uninstaller-watch".into())
         .spawn(move || {
             crate::kit::activity::low_priority();
+            // the scan reads apps all over the home folder (macOS asks about
+            // Downloads and other apps' data): not before first-run setup is
+            // finished and Full Disk Access is granted (the page is locked till then)
+            let fda = || crate::kit::perms::Perm::FullDisk.status() == crate::kit::perms::Status::Allowed;
+            while !crate::core::onboard::is_done() || !fda() {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            start_scan(st.clone(), app_roots.clone(), roots.clone(), ctx.clone());
             static CHANGED: crate::kit::activity::Kick = crate::kit::activity::Kick::new();
             // app folders change rarely: wait for macOS to say so, with a slow
             // look now and then in case an event was missed
@@ -857,6 +867,13 @@ impl Tool for Uninstaller {
     }
     fn about(&self) -> &'static str {
         "Remove apps with everything they leave behind"
+    }
+    fn busy(&self) -> bool {
+        let working = {
+            let g = self.st.lock_ok();
+            g.working.is_some() || matches!(g.phase, Phase::Listing | Phase::Sizing { .. })
+        };
+        working || self.ai.phase() == crate::kit::aicheck::Phase::Running
     }
     fn sidebar_meta(&self) -> String {
         let g = self.st.lock_ok();

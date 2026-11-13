@@ -224,13 +224,15 @@ pub struct Startup {
     apps_requested: bool,
     /// System Events access, read at most once a second while the page shows.
     pub events: (crate::kit::perms::Status, Option<std::time::Instant>),
+    /// AI Check beside the list.
+    pub ai: crate::kit::aicheck::Check,
 }
 
 impl Startup {
     pub fn new(env: &ToolEnv) -> Self {
         let user_library = crate::kit::fs::home().join("Library");
         let st: Shared = Arc::new(Mutex::new(State::default()));
-        let me = Startup { st: st.clone(), ctx: env.ctx.clone(), demo: env.demo, user_library: user_library.clone(), filter: Filter::All, search: String::new(), apps_requested: false, icons: Default::default(), events: (crate::kit::perms::Status::NotAsked, None) };
+        let me = Startup { st: st.clone(), ctx: env.ctx.clone(), demo: env.demo, user_library: user_library.clone(), filter: Filter::All, search: String::new(), apps_requested: false, icons: Default::default(), events: (crate::kit::perms::Status::NotAsked, None), ai: crate::kit::aicheck::Check::new(ID, env.demo) };
         if env.demo {
             demo(&mut st.lock_ok(), false);
             return me;
@@ -801,6 +803,9 @@ impl Tool for Startup {
     fn about(&self) -> &'static str {
         "See what starts with your Mac and turn off what you don't need"
     }
+    fn busy(&self) -> bool {
+        self.ai.phase() == crate::kit::aicheck::Phase::Running
+    }
     fn sidebar_meta(&self) -> String {
         let g = self.state();
         let n = g.suggested().len() + g.flagged(true).len();
@@ -879,6 +884,11 @@ impl Tool for Startup {
                     "startup-flagged" => Filter::Flagged,
                     _ => Filter::All,
                 };
+                use crate::kit::aicheck::Check;
+                self.ai.set_demo(
+                    "Mostly lean; one updater you don't need",
+                    vec![Check::demo_rec("off", "Turn off", "Stop Ollama updater at login", "", "Only checks for updates; Ollama still updates when you open it", "Ollama")],
+                );
                 Some(View::Page)
             }
             _ => None,

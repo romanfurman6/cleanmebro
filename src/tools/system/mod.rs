@@ -26,12 +26,13 @@ pub const ID: ToolId = "system";
 
 pub struct System {
     mon: monitor::Shared,
+    ai: crate::kit::aicheck::Check,
 }
 
 impl System {
     pub fn new(env: &ToolEnv) -> Self {
         let mon = if env.demo { Arc::new(Mutex::new(monitor::demo_snapshot())) } else { monitor::start(env.ctx.clone(), false) };
-        System { mon }
+        System { mon, ai: crate::kit::aicheck::Check::new(ID, env.demo) }
     }
 }
 
@@ -55,6 +56,9 @@ impl Tool for System {
     }
     fn about(&self) -> &'static str {
         "Disk, memory, CPU, battery, network, devices"
+    }
+    fn busy(&self) -> bool {
+        self.ai.phase() == crate::kit::aicheck::Phase::Running
     }
     fn badge(&self) -> Badge {
         Badge { icon: Icon::Pulse, color: tint::HEALTH() }
@@ -89,7 +93,7 @@ impl Tool for System {
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let mut recs = self.recommendations();
         recs.sort_by(|a, b| b.priority.cmp(&a.priority));
-        page::page(&self.mon, &recs, ui, rect, cx);
+        page::page(&self.mon, &mut self.ai, &recs, ui, rect, cx);
     }
 
     /// Ranked like the original's health recommendations (AssistantDomain:
@@ -128,7 +132,19 @@ impl Tool for System {
     }
 
     fn demo_view(&mut self, view: &str) -> Option<View> {
+        if view == "health-checking" {
+            self.ai.set_demo_running();
+            return Some(View::Page);
+        }
         if view == "health" {
+            use crate::kit::aicheck::Check;
+            self.ai.set_demo(
+                "Chrome helpers are the main load",
+                vec![
+                    Check::demo_rec("quit", "Quit", "Quit Google Chrome Helper", "68% CPU", "A background tab is playing video", "Google Chrome"),
+                    Check::demo_rec("monitor", "Activity Monitor", "Check Docker", "3.2 GB", "VM memory stays reserved while it runs", "Docker"),
+                ],
+            );
             return Some(View::Page);
         }
         WIDGETS.iter().filter(|w| w.id != "health").find(|w| w.id == view).map(|w| View::Detail(w.id))

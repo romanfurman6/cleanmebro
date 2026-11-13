@@ -592,6 +592,12 @@ mod imp {
         std::thread::Builder::new()
             .name("display-keys".into())
             .spawn(move || loop {
+                // never create the tap before Accessibility is granted: the
+                // attempt itself makes macOS show its alert (setup asks instead)
+                if crate::kit::perms::Perm::Accessibility.status() != crate::kit::perms::Status::Allowed {
+                    std::thread::sleep(Duration::from_secs(10));
+                    continue;
+                }
                 let port = unsafe { CGEventTapCreate(1, 0, 0, 1u64 << NX_SYSDEFINED, on_event, tap as *const Tap as *mut c_void) };
                 if port.is_null() {
                     std::thread::sleep(Duration::from_secs(10));

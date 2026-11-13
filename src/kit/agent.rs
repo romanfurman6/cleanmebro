@@ -1,4 +1,5 @@
-//! Which AI agent checks the scan's paths: Claude Code or Codex CLI.
+//! The AI agent CLIs Cmd+Meow can ask (Claude Code or Codex): Cleanup's
+//! path check and every tool's AI Check.
 //! Scanned file names are untrusted text in the prompt, so an agent is only
 //! offered when it runs without tools (Claude) or in a read-only sandbox
 //! (Codex).
@@ -46,12 +47,12 @@ impl Agent {
         }
     }
 
-    /// Whether it can judge paths now. Claude also needs its tool on and a
-    /// sign-in; the others only need their CLI (a signed-out one fails, and
-    /// the built-in rules are used).
+    /// Whether it can judge paths now: its CLI is installed (Claude: and not
+    /// known to be signed out). The AI Usage tool being off doesn't matter.
+    /// A signed-out CLI fails and the built-in rules are used.
     pub fn ready(self) -> bool {
         match self {
-            Agent::Claude => claude_code::availability().ready(),
+            Agent::Claude => claude_code::cli_ready(),
             _ => self.bin().is_some(),
         }
     }
@@ -65,8 +66,10 @@ impl Agent {
     }
 
     /// Ask the agent: `system` rules, then the `lines` to judge. Returns its
-    /// answer text. Gives up (Err) when `cancel` is set, killing the CLI.
-    pub fn ask(self, system: &str, lines: &str, cancel: &Arc<AtomicBool>) -> Result<String, String> {
+    /// answer text and what it cost: tokens from the CLI's own report
+    /// (Claude), or a size estimate when the CLI doesn't give one. Gives up
+    /// (Err) when `cancel` is set, killing the CLI.
+    pub fn ask_usage(self, system: &str, lines: &str, cancel: &Arc<AtomicBool>) -> Result<(String, Usage), String> {
         let bin = self.bin().ok_or_else(|| self.why_not())?;
         let tmp = std::env::temp_dir();
         let mut cmd = Command::new(&bin);
@@ -91,13 +94,53 @@ impl Agent {
             return Err(err);
         }
         Ok(match self {
-            Agent::Claude => serde_json::from_slice::<serde_json::Value>(&out.stdout).ok().and_then(|v| v["result"].as_str().map(|s| s.to_string())).unwrap_or_default(),
+            Agent::Claude => {
+                let v = serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap_or_default();
+                let text = v["result"].as_str().unwrap_or_default().to_string();
+                (text, Usage::from_claude(&v))
+            }
             Agent::Codex => {
                 let s = std::fs::read_to_string(&last).unwrap_or_else(|_| String::from_utf8_lossy(&out.stdout).into_owned());
                 let _ = std::fs::remove_file(&last);
-                s
+                let u = Usage::estimate(both.len(), s.len());
+                (s, u)
             }
         })
+    }
+}
+
+/// Tokens one answer took, and its price when the CLI reports one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Usage {
+    pub input: u64,
+    pub output: u64,
+    /// Dollars at API prices, as the CLI reported it.
+    pub cost: Option<f64>,
+    /// True when the tokens are guessed from the text size.
+    pub estimate: bool,
+}
+
+impl Usage {
+    /// From `claude -p --output-format json`: `usage` (input, cache and
+    /// output tokens) and `total_cost_usd`.
+    pub fn from_claude(v: &serde_json::Value) -> Usage {
+        let u = &v["usage"];
+        let n = |k: &str| u[k].as_u64().unwrap_or(0);
+        Usage {
+            input: n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens"),
+            output: n("output_tokens"),
+            cost: v["total_cost_usd"].as_f64(),
+            estimate: false,
+        }
+    }
+
+    /// About four characters a token.
+    pub fn estimate(sent: usize, got: usize) -> Usage {
+        Usage { input: (sent / 4) as u64, output: (got / 4) as u64, cost: None, estimate: true }
+    }
+
+    pub fn tokens(&self) -> u64 {
+        self.input + self.output
     }
 }
 
@@ -152,7 +195,7 @@ fn find_bin(exe: &str) -> Option<PathBuf> {
 // ---------------------------------------------------------------- the choice
 
 impl Agent {
-    fn id(self) -> &'static str {
+    pub fn id(self) -> &'static str {
         self.exe()
     }
 }
@@ -184,6 +227,17 @@ mod tests {
         // Gemini can't judge paths with its tools off: the next one on does
         assert_eq!(pick("gemini", |id| id == "codex"), Agent::Codex);
         assert_eq!(pick("gemini", |_| false), Agent::Claude);
+    }
+
+    #[test]
+    fn usage_reads_claude_json() {
+        let v: serde_json::Value = serde_json::from_str(r#"{"result":"[]","total_cost_usd":0.0123,"usage":{"input_tokens":10,"cache_read_input_tokens":900,"cache_creation_input_tokens":90,"output_tokens":40}}"#).unwrap();
+        let u = Usage::from_claude(&v);
+        assert_eq!((u.input, u.output, u.tokens()), (1000, 40, 1040));
+        assert_eq!(u.cost, Some(0.0123));
+        assert!(!u.estimate);
+        let e = Usage::estimate(400, 80);
+        assert_eq!((e.input, e.output, e.cost, e.estimate), (100, 20, None, true));
     }
 
     #[test]

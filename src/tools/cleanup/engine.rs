@@ -32,7 +32,7 @@ impl Group {
         match self {
             Group::AiTools => "AI Tools",
             Group::AppCaches => "App Caches",
-            Group::Developer => "Developer Tools",
+            Group::Developer => "Developer",
             Group::Projects => "Projects",
             Group::Installers => "Installers",
             Group::Logs => "Logs",
@@ -961,7 +961,10 @@ fn judge(shared: &Shared, ctx: &egui::Context, agent: super::agent::Agent, cance
             g.progress = bi as f32 / n as f32;
         }
         ctx.request_repaint();
-        let answer = agent.ask(&system, &lines, cancel);
+        let answer = agent.ask_usage(&system, &lines, cancel).map(|(t, u)| {
+            crate::kit::aicheck::log_usage("cleanup", agent, u);
+            t
+        });
         let mut g = shared.lock_ok();
         // stopped: the page moved on; this run writes nothing more
         if cancel.load(Ordering::SeqCst) {

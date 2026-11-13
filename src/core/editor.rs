@@ -59,14 +59,24 @@ enum Target {
     Nothing,
 }
 
+/// Settings tabs by id, and the order they're shown in.
+const TAB_NAMES: [&str; 5] = ["Widgets", "Tools", "General", "AI Usage", "AI Check"];
+const TAB_ORDER: [usize; 5] = [2, 1, 3, 4, 0];
+/// The tab Settings opens on from the sidebar.
+pub const TAB_GENERAL: usize = 2;
+
 pub fn settings_page(app: &mut App, ui: &mut Ui, r: Rect) {
     let p = ui.painter().clone();
     let top = Rect::from_min_size(r.min, Vec2::new(r.width(), TOP_H));
     hairline(&p, top.left_bottom(), top.right_bottom());
     p.text(Pos2::new(top.left() + 24.0, top.center().y), Align2::LEFT_CENTER, "Settings", bold(15.0), TEXT());
-    let tabs = Rect::from_center_size(top.center(), Vec2::new(360.0, 28.0));
-    if let Some(t) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &["Widgets", "Tools", "General", "AI Usage"], app.settings_tab) {
-        app.settings_tab = t;
+    // shown General first; `settings_tab` keeps its ids (0 Widgets, 1 Tools,
+    // 2 General, 3 AI Usage, 4 AI Check) so links and Edit widgets… land on the right tab
+    let labels: Vec<&str> = TAB_ORDER.iter().map(|&t| TAB_NAMES[t]).collect();
+    let tabs = Rect::from_center_size(top.center(), Vec2::new(90.0 * labels.len() as f32, 28.0));
+    let shown = TAB_ORDER.iter().position(|&t| t == app.settings_tab).unwrap_or(0);
+    if let Some(k) = segmented(ui, tabs, ui.scope_id().with("settings-tabs"), &labels, shown) {
+        app.settings_tab = TAB_ORDER[k];
         app.drag = None;
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), top.bottom() + 1.0), r.max);
@@ -74,6 +84,7 @@ pub fn settings_page(app: &mut App, ui: &mut Ui, r: Rect) {
         0 => widgets_tab(app, ui, body),
         1 => tools_tab(app, ui, body),
         2 => general_tab(app, ui, body),
+        4 => scroll_body(ui, body, "settings-ai-check", |ui, body| ai_check_list(app, ui, body)),
         _ => {
             let demo = app.demo;
             scroll_body(ui, body, "settings-ai", |ui, body| crate::tools::claude::settings_ui::list(ui, body, demo));
@@ -609,6 +620,115 @@ fn tools_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     card.bottom() + 24.0
 }
 
+/// Settings › AI Check: the agent, which tools offer a check, checking after
+/// each scan, and what Cmd+Meow's own checks took.
+fn ai_check_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
+    use crate::kit::agent::Agent;
+    use crate::kit::aicheck;
+    let p = ui.painter().clone();
+    let demo = app.demo;
+    let w = 600.0f32.min(body.width() - 48.0);
+    let x = body.center().x - w / 2.0;
+    let mut y = body.top() + 24.0;
+    let row_h = sp::SETTINGS_ROW_H;
+    let sw_in = |r: Rect| Rect::from_min_size(Pos2::new(r.right() - 42.0, r.center().y - 9.0), Vec2::new(30.0, 18.0));
+    let title = |y: &mut f32, t: &str| {
+        p.text(Pos2::new(x, *y), Align2::LEFT_TOP, t, bold(15.0), TEXT());
+        *y += 28.0;
+    };
+
+    // the agent: one card each, the picked one lit; a click picks it
+    title(&mut y, "Agent");
+    let main = if demo { Agent::Claude } else { crate::kit::agent::main() };
+    let cw = (w - sp::M) / 2.0;
+    for (k, a) in Agent::ALL.into_iter().enumerate() {
+        let r = Rect::from_min_size(Pos2::new(x + k as f32 * (cw + sp::M), y), Vec2::new(cw, 56.0));
+        let on = a == main;
+        let resp = ui.interact(r, ui.scope_id().with(("ai-check-agent", k)), Sense::click());
+        let hv = ui.ctx().animate_bool(resp.id, resp.hovered());
+        glass_card(&p, r, R_CARD, hv, on);
+        if on {
+            p.rect_stroke(r, R_CARD, Stroke::new(1.0, with_alpha(BLUE(), 0.6)), StrokeKind::Inside);
+        }
+        let m = Rect::from_center_size(Pos2::new(r.left() + 16.0 + 10.0, r.center().y), Vec2::splat(20.0));
+        aicheck::ui::agent_mark(&p, m, a, None);
+        let ready = demo || a.ready();
+        let (label, col) = if ready { ("Ready".to_string(), BLUE()) } else { (a.why_not(), TEXT_DIM()) };
+        let c = chip(&p, Pos2::new(r.right() - 16.0, r.center().y), Align2::RIGHT_CENTER, &label, (with_alpha(col, 0.16), col));
+        text_fit(&p, Pos2::new(m.right() + 10.0, r.center().y), Align2::LEFT_CENTER, a.name(), bold(13.0), TEXT(), c.left() - m.right() - 20.0);
+        if resp.clicked() && !on && !demo {
+            let id = a.id().to_string();
+            crate::kit::ai::settings::update(true, move |s| {
+                s.off.retain(|x| *x != id);
+                s.main = id;
+            });
+            crate::kit::claude_code::request_recheck();
+        }
+        if resp.hovered() && !on {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+    y += 56.0 + 28.0;
+
+    // which tools check by themselves after a scan (otherwise: on a click)
+    let set = aicheck::settings();
+    title(&mut y, "Check after each scan");
+    let rows: Vec<(&str, &str, Icon, Color32)> = aicheck::TOOLS
+        .iter()
+        .filter_map(|(id, name, _)| app.tools.iter().find(|t| t.id() == *id).map(|t| (*id, *name, t.badge().icon, t.badge().color)))
+        .collect();
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, rows.len() as f32 * row_h));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    let mut flip: Option<(String, bool)> = None;
+    for (k, (id, name, glyph, color)) in rows.iter().enumerate() {
+        let r = Rect::from_min_size(Pos2::new(card.left(), card.top() + k as f32 * row_h), Vec2::new(w, row_h));
+        if k > 0 {
+            hairline(&p, Pos2::new(r.left() + 16.0, r.top()), Pos2::new(r.right() - 16.0, r.top()));
+        }
+        let ch = Rect::from_min_size(Pos2::new(r.left() + 16.0, r.center().y - 12.0), Vec2::splat(24.0));
+        tool_chip(&p, ch, *glyph, *color);
+        p.text(Pos2::new(ch.right() + 12.0, r.center().y), Align2::LEFT_CENTER, *name, font(13.0), TEXT());
+        let on = set.is_on(id);
+        if switch(ui, sw_in(r), ui.scope_id().with(("ai-check-on", *id)), on, true).clicked() {
+            flip = Some((id.to_string(), !on));
+        }
+    }
+    y = card.bottom() + 28.0;
+    if let Some((id, on)) = flip {
+        aicheck::update(!demo, |s| {
+            s.on.insert(id, on);
+        });
+    }
+
+    // what Cmd+Meow's own checks took (read now and then, not every frame)
+    title(&mut y, "Used by Cmd+Meow · 30 days");
+    let now = ui.ctx().input(|i| i.time);
+    let key = ui.scope_id().with("ai-check-total");
+    let t = if demo {
+        aicheck::Total { calls: 42, tokens: 186_000, cost: 0.58 }
+    } else {
+        match ui.ctx().data(|d| d.get_temp::<(f64, aicheck::Total)>(key)) {
+            Some((at, t)) if now - at < 5.0 => t,
+            _ => {
+                let t = aicheck::total(30);
+                ui.ctx().data_mut(|d| d.insert_temp(key, (now, t)));
+                t
+            }
+        }
+    };
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 2.0 * sp::M + line_h(&p, &bold(22.0)) + sp::LINE_GAP + line_h(&p, &font(12.0))));
+    glass_card(&p, card, R_CARD, 0.0, false);
+    let tokens = if t.tokens >= 1_000_000 { format!("{:.1}M", t.tokens as f64 / 1e6) } else if t.tokens >= 1_000 { format!("{}k", t.tokens / 1_000) } else { t.tokens.to_string() };
+    let stats = [(t.calls.to_string(), "checks", TEXT()), (tokens, "tokens", TEXT()), (format!("${:.2}", t.cost), "at API prices", tint::HEALTH())];
+    let mut sx = card.left() + 16.0;
+    for (v, l, c) in stats {
+        let a = p.text(Pos2::new(sx, card.top() + sp::M), Align2::LEFT_TOP, &v, bold(22.0), c);
+        let b = p.text(Pos2::new(sx, a.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, l, font(12.0), TEXT_DIM());
+        sx = a.right().max(b.right()) + 32.0;
+    }
+    card.bottom() + 24.0
+}
+
 /// Open at login, sounds, crash reports, what macOS allows the tools (live), and setup again.
 fn general_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     scroll_body(ui, body, "settings-general", |ui, body| general_list(app, ui, body));
@@ -670,4 +790,19 @@ fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     p.text(Pos2::new(x + w, y + 15.0), Align2::RIGHT_CENTER, version_label(), font(11.0), TEXT_FAINT());
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
     y + 30.0 + 24.0
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::*;
+
+    #[test]
+    fn every_settings_tab_shows_once_general_first_widgets_last() {
+        let mut ids = TAB_ORDER.to_vec();
+        ids.sort();
+        assert_eq!(ids, (0..TAB_NAMES.len()).collect::<Vec<_>>());
+        assert_eq!(TAB_NAMES[TAB_ORDER[0]], "General");
+        assert_eq!(TAB_ORDER[0], TAB_GENERAL);
+        assert_eq!(TAB_NAMES[*TAB_ORDER.last().unwrap()], "Widgets");
+    }
 }

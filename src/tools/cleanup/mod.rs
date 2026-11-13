@@ -4,7 +4,7 @@
 //! Page routes: "" (as left), "claude" (open on the Claude group).
 
 use crate::kit::sync::LockExt;
-pub mod agent;
+pub use crate::kit::agent;
 pub mod engine;
 mod inuse;
 mod journal;
@@ -35,6 +35,9 @@ pub struct Cleanup {
     pub(crate) clean_log: bool,
     /// Screenshots: show Cleanup as if Claude were in this state.
     pub(crate) demo_claude: Option<crate::kit::claude_code::Availability>,
+    pub(crate) ai: crate::kit::aicheck::Check,
+    /// Screenshots: the page before any scan.
+    pub(crate) demo_fresh: bool,
 }
 
 impl Cleanup {
@@ -42,13 +45,15 @@ impl Cleanup {
         Cleanup {
             clean: Default::default(),
             demo: env.demo,
-            use_ai: true,
+            use_ai: false,
             agent: if env.demo { agent::Agent::Claude } else { agent::main() },
             delete_now: false,
             clean_group: None,
             clean_confirm: false,
             clean_log: false,
             demo_claude: None,
+            ai: crate::kit::aicheck::Check::new(ID, env.demo),
+            demo_fresh: false,
         }
     }
 }
@@ -162,6 +167,10 @@ impl Tool for Cleanup {
             self.clean_group = None;
         }
     }
+    fn busy(&self) -> bool {
+        let scanning = matches!(self.clean.lock_ok().phase, engine::Phase::Scanning | engine::Phase::Judging | engine::Phase::Cleaning);
+        scanning || self.ai.phase() == crate::kit::aicheck::Phase::Running
+    }
     fn sidebar_meta(&self) -> String {
         let g = self.clean.lock_ok();
         if g.phase == engine::Phase::Results { human_bytes(g.total()) } else { String::new() }
@@ -198,12 +207,39 @@ impl Tool for Cleanup {
     fn demo_view(&mut self, view: &str) -> Option<View> {
         match view {
             "cleanup" => Some(View::Page),
+            "cleanup-fresh" => {
+                self.demo_fresh = true;
+                Some(View::Page)
+            }
             "cleanup-no-claude" => {
                 self.demo_claude = Some(crate::kit::claude_code::Availability::NotInstalled);
                 Some(View::Page)
             }
             "results" => {
                 *self.clean.lock_ok() = page::demo_results();
+                let rec = |key: &str, action: &str, label: &str, title: &str, value: &str, why: &str, name: &str| crate::kit::aicheck::Rec {
+                    key: key.into(),
+                    action: action.into(),
+                    label: label.into(),
+                    title: title.into(),
+                    value: value.into(),
+                    why: why.into(),
+                    icon: None,
+                    name: name.into(),
+                };
+                let asks: Vec<String> = self.clean.lock_ok().items.iter().filter(|i| i.verdict == engine::Verdict::Ask).map(|i| i.path.display().to_string()).collect();
+                let tip = |key: &str, action: &str, label: &str, title: &str, value: &str, why: &str, name: &str| crate::kit::aicheck::Rec { key: key.into(), ..rec(key, action, label, title, value, why, name) };
+                let xcode = self.clean.lock_ok().items.iter().find(|i| i.title.starts_with("Derived")).map(|i| i.path.display().to_string()).unwrap_or_default();
+                self.ai.set_demo(
+                    "Both questions answered, one more tip",
+                    vec![
+                        tip(&asks[0], "select", "Allow", "Claude Desktop VM image", "9.00 GB", "Sandbox image; Claude downloads it again when needed", "Claude"),
+                        tip(&asks[1], "select", "Allow", "Project · old-experiment", "412 MB", "Chat history of a folder that no longer exists", "Claude"),
+                        tip(&xcode, "keep", "Keep", "Keep MyApp build data", "3.40 GB", "You built MyApp today; rebuilding takes 20 minutes", "Xcode"),
+                    ],
+                );
+                self.ai.answer = asks.into_iter().collect();
+                self.ai.actions = vec![("select", "Allow"), ("keep", "Keep")];
                 Some(View::Page)
             }
             "cleanup-scanning" => {
