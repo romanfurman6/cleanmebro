@@ -331,7 +331,7 @@ impl App {
                 if all || view == "setup-tools-preview" {
                     let mut s = super::onboard::Setup::new(1);
                     s.all_tools = all;
-                    // the pointer on "Screenshots & recording"
+                    // the pointer on "Screenshots & video"
                     s.demo_hover = (!all).then_some(1);
                     self.setup = Some(s);
                 }

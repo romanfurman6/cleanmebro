@@ -686,7 +686,7 @@ pub const GOALS: [Goal; 6] = {
     use crate::tools::*;
     [
         Goal { name: "Clean my Mac", tools: &[cleanup::ID, lens::ID, uninstaller::ID] },
-        Goal { name: "Screenshots & recording", tools: &[capture::ID, capture::VIDEO_ID, capture::SHARING_ID] },
+        Goal { name: "Screenshots & video", tools: &[capture::ID, capture::VIDEO_ID, capture::SHARING_ID] },
         Goal { name: "Clipboard", tools: &[clipboard::ID] },
         Goal { name: "Voice typing", tools: &[dictation::ID] },
         Goal { name: "Watch my Mac", tools: &[system::ID, startup::ID, displays::ID] },
@@ -786,7 +786,12 @@ fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) -> Option<Vec<usiz
     let cw = (area.width() - gap) / 2.0;
     // three rows fill the step
     let ch = ((area.height() - sp::L - gap * 2.0) / 3.0).clamp(96.0, 116.0);
-    let now = ui.ctx().input(|i| i.time);
+    // the cards' loops always run; screenshots catch them mid-way. The
+    // clock wraps at a multiple of every loop's period, so f32 stays exact.
+    let now = if app.demo { 2.0 } else { (ui.ctx().input(|i| i.time) % 32760.0) as f32 };
+    if !app.demo {
+        animate(ui.ctx());
+    }
     let mut flip = None;
     let mut hot = None;
     for (k, goal) in GOALS.iter().enumerate() {
@@ -806,37 +811,41 @@ fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) -> Option<Vec<usiz
         let fill = lerp_color(lerp_color(CARD(), white(30), hov * 0.15), with_alpha(BLUE(), 0.10), s);
         p.rect_filled(r, 12.0, fill.gamma_multiply(a));
         p.rect_stroke(r, 12.0, Stroke::new(1.0, lerp_color(CARD_EDGE(), with_alpha(BLUE(), 0.55), s).gamma_multiply(a)), StrokeKind::Inside);
-        // the goal's tools, as their chips
+        // the goal's tools, as their chips; the check and name sit below,
+        // so the space right of the chips is free for the goal's loop
         let inner = r.shrink(14.0);
         let jolt = ui.ctx().animate_bool_with_time(id.with("jolt"), picked, 0.32);
         let bump = 4.0 * jolt * (1.0 - jolt) * if picked { 0.12 } else { -0.08 };
-        let mut chips = Rect::NOTHING;
-        for (j, &i) in idx.iter().enumerate() {
-            let c = Pos2::new(inner.left() + 15.0 + j as f32 * 36.0, inner.top() + 15.0);
+        let ny = inner.bottom() - 8.0;
+        let chips: Vec<(Rect, &'static str)> = idx
+            .iter()
+            .enumerate()
+            .map(|(j, &i)| {
+                let c = Pos2::new(inner.left() + 15.0 + j as f32 * 36.0, inner.top() + 15.0);
+                (Rect::from_center_size(c, Vec2::splat(30.0)), app.tools[i].id())
+            })
+            .collect();
+        let last = chips.last().map_or(inner.left(), |c| c.0.right());
+        let free = Rect::from_min_max(Pos2::new(last + 14.0, inner.top() - 2.0), Pos2::new(inner.right(), ny - 12.0));
+        card_loop(&p.with_clip_rect(r), k, r, free, &chips, now);
+        for (&i, &(cr, tid)) in idx.iter().zip(&chips) {
             let b = app.tools[i].badge();
-            let cr = Rect::from_center_size(c, Vec2::splat(30.0 * (1.0 + bump)));
+            let (off, sc) = chip_motion(tid, now);
+            let cr = Rect::from_center_size(cr.center() + off, cr.size() * sc * (1.0 + bump));
             tool_chip(&p, cr, b.icon, b.color);
-            chips = chips.union(cr);
-        }
-        // a short wordless loop while the pointer is on the card
-        let live = ui.ctx().animate_bool_with_time(id.with("live"), resp.hovered() && !app.demo, 0.2);
-        if live > 0.0 {
-            card_loop(&p.with_clip_rect(r), k, r, chips, now as f32, live);
-            ui.ctx().request_repaint();
         }
         if resp.hovered() {
             hot = Some(idx.clone());
         }
-        // check, top right
-        let cc = Pos2::new(inner.right() - 9.0, inner.top() + 15.0);
+        // check, then name, bottom left
+        let cc = Pos2::new(inner.left() + 9.0, ny);
         p.circle_stroke(cc, 8.5, Stroke::new(1.5, lerp_color(white(40), BLUE(), s)));
         if s > 0.01 {
             let z = pop(s);
             p.circle_filled(cc, 9.0 * z, BLUE());
             check(&p, cc, 7.0 * z, ON_ACTION);
         }
-        // name, and what it will ask macOS for
-        let ny = inner.bottom() - 8.0;
+        // and what it will ask macOS for, bottom right
         let mut px = inner.right();
         let mut need: Vec<Perm> = Vec::new();
         for &i in &idx {
@@ -852,7 +861,8 @@ fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) -> Option<Vec<usiz
             ui.interact(ir, id.with(("perm", perm.name())), Sense::hover()).on_hover_text(perm.name());
             px -= 17.0;
         }
-        text_fit(&p, Pos2::new(inner.left(), ny), Align2::LEFT_CENTER, goal.name, bold(14.0), TEXT(), px - inner.left() - 6.0);
+        let nx = inner.left() + 26.0;
+        text_fit(&p, Pos2::new(nx, ny), Align2::LEFT_CENTER, goal.name, bold(14.0), TEXT(), px - nx - 6.0);
         if resp.clicked() {
             flip = Some((idx, !picked));
         }
@@ -868,86 +878,396 @@ fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) -> Option<Vec<usiz
     hot
 }
 
-/// Goal card `k`'s loop, `k` in [`GOALS`] order, drawn round its tool
-/// `chips` at `now` seconds, faded by `a`.
-fn card_loop(p: &egui::Painter, k: usize, card: Rect, chips: Rect, now: f32, a: f32) {
-    use std::f32::consts::TAU;
-    let tail = |ph: f32, rise: f32| if ph < rise { ph / rise } else { 1.0 - (ph - rise) / (1.0 - rise) };
-    let right = Pos2::new(chips.right() + 12.0, chips.center().y);
+/// A value through `(phase, value)` keys, eased between neighbours; holds
+/// the last value past the last key.
+fn keys(ph: f32, k: &[(f32, f32)]) -> f32 {
+    for w in k.windows(2) {
+        let ((a, va), (b, vb)) = (w[0], w[1]);
+        if ph <= b {
+            let x = if b > a { ((ph - a) / (b - a)).clamp(0.0, 1.0) } else { 1.0 };
+            return va + (vb - va) * x * x * (3.0 - 2.0 * x);
+        }
+    }
+    k.last().map_or(0.0, |l| l.1)
+}
+
+/// `v` turned by `a` radians round the origin.
+fn turn(v: Vec2, a: f32) -> Vec2 {
+    let (s, c) = a.sin_cos();
+    Vec2::new(v.x * c - v.y * s, v.x * s + v.y * c)
+}
+
+/// How a goal card's chip moves with its loop: an offset and a scale.
+fn chip_motion(tool: &str, now: f32) -> (Vec2, Vec2) {
+    use crate::tools::*;
+    match tool {
+        // the bin dips as each piece of junk lands
+        uninstaller::ID => {
+            let ph = (now / 4.8).fract();
+            let b = [0.19f32, 0.52, 0.85].iter().map(|&a| (1.0 - (ph - a).abs() / 0.025).max(0.0)).fold(0.0, f32::max);
+            (Vec2::new(0.0, 2.0 * b), Vec2::new(1.0, 1.0 - 0.07 * b))
+        }
+        // the clipboard takes each clip in
+        clipboard::ID => {
+            let b = keys((now / 1.5).fract(), &[(0.0, 0.0), (0.25, 0.0), (0.32, 1.0), (0.45, 0.0)]);
+            (Vec2::ZERO, Vec2::splat(1.0 + 0.12 * b))
+        }
+        // the cup takes a sip as the limit resets
+        keep_awake::ID => {
+            let y = keys((now / 5.0).fract(), &[(0.0, 0.0), (0.86, 0.0), (0.90, -3.0), (0.93, 0.5), (0.96, 0.0)]);
+            (Vec2::new(0.0, y), Vec2::splat(1.0))
+        }
+        _ => (Vec2::ZERO, Vec2::splat(1.0)),
+    }
+}
+
+/// Goal card `k`'s loop, `k` in [`GOALS`] order: wordless and always
+/// running, in `free` (right of the chips) at `now` seconds.
+fn card_loop(p: &egui::Painter, k: usize, card: Rect, free: Rect, chips: &[(Rect, &str)], now: f32) {
+    use crate::tools::*;
+    if free.width() < 40.0 || free.height() < 30.0 {
+        return;
+    }
+    let chip = |id: &str| chips.iter().find(|c| c.1 == id).map(|c| c.0);
     match GOALS[k].tools.first().copied() {
-        // Clean: dust blown off the chips
-        Some(crate::tools::cleanup::ID) => {
-            for (j, dy) in [0.0f32, 6.0, -5.0, 2.0].into_iter().enumerate() {
-                let ph = (now / 1.8 + j as f32 * 0.25).fract();
-                let c = Pos2::new(chips.right() + 2.0 + 46.0 * ph, chips.center().y + dy - 14.0 * ph);
-                p.circle_filled(c, 2.0 * (0.6 + 0.6 * ph), with_alpha(tint::CLEANUP(), 0.9 * tail(ph, 0.15) * a));
+        Some(cleanup::ID) => {
+            if let Some(bin) = chip(uninstaller::ID).or(chips.last().map(|c| c.0)) {
+                loop_clean(p, free, bin, now);
             }
         }
-        // Screenshots: crop corners close in, then a flash
-        Some(crate::tools::capture::ID) => {
-            let ph = (now / 2.2).fract();
-            let z = if ph < 0.3 { 1.5 - 0.5 * ease(ph / 0.3) } else { 1.0 };
-            let al = if ph < 0.3 { ph / 0.3 } else if ph < 0.7 { 1.0 } else { 1.0 - (ph - 0.7) / 0.3 };
-            let b = Rect::from_center_size(chips.center(), (chips.size() + Vec2::splat(12.0)) * z);
-            let st = Stroke::new(2.0, with_alpha(tint::CAPTURE(), al * a));
-            let l = 10.0;
-            for (c, dx, dy) in [(b.left_top(), 1.0, 1.0), (b.right_top(), -1.0, 1.0), (b.left_bottom(), 1.0, -1.0), (b.right_bottom(), -1.0, -1.0)] {
-                p.line_segment([c, c + Vec2::new(l * dx, 0.0)], st);
-                p.line_segment([c, c + Vec2::new(0.0, l * dy)], st);
-            }
-            if (0.32..0.5).contains(&ph) {
-                let f = if ph < 0.36 { (ph - 0.32) / 0.04 } else { 1.0 - (ph - 0.36) / 0.14 };
-                p.rect_filled(card, 12.0, Color32::from_white_alpha((46.0 * f * a) as u8));
+        Some(capture::ID) => loop_capture(p, card, free, now),
+        Some(clipboard::ID) => loop_clipboard(p, free, now),
+        Some(dictation::ID) => {
+            if let Some(mic) = chip(dictation::ID) {
+                loop_voice(p, free, mic, now);
             }
         }
-        // Clipboard: a copy slides off the chip
-        Some(crate::tools::clipboard::ID) => {
-            for j in 0..2 {
-                let ph = (now / 1.8 + j as f32 * 0.5).fract();
-                let r = chips.translate(Vec2::new(22.0 * ph, -10.0 * ph));
-                p.rect_stroke(r, 8.0, Stroke::new(1.5, with_alpha(tint::CAPTURE(), 0.9 * tail(ph, 0.2) * a)), StrokeKind::Inside);
-            }
-        }
-        // Voice typing: a sound wave by the mic
-        Some(crate::tools::dictation::ID) => {
-            for j in 0..5 {
-                let v = 0.5 - 0.5 * (TAU * (now / 0.9 - j as f32 * 0.133)).cos();
-                let h = 20.0 * (0.2 + 0.8 * v);
-                let x = right.x - 2.0 + j as f32 * 6.0;
-                p.rect_filled(Rect::from_center_size(Pos2::new(x, right.y), Vec2::new(3.0, h)), 1.5, with_alpha(tint::CAPTURE(), a));
-            }
-        }
-        // Watch my Mac: a pulse runs across
-        Some(crate::tools::system::ID) => {
-            let ph = (now / 2.0).fract();
-            let shown = (ph / 0.7).min(1.0);
-            let al = if ph < 0.7 { 1.0 } else { 1.0 - (ph - 0.7) / 0.3 };
-            let pts = [(0.0, 0.0), (22.0, 0.0), (28.0, -9.0), (36.0, 9.0), (42.0, 0.0), (90.0, 0.0)].map(|(x, y)| right + Vec2::new(x, y));
-            let total: f32 = pts.windows(2).map(|w| w[0].distance(w[1])).sum();
-            let mut left = total * shown;
-            let mut line = vec![pts[0]];
-            for w in pts.windows(2) {
-                let d = w[0].distance(w[1]);
-                if left >= d {
-                    line.push(w[1]);
-                    left -= d;
-                } else {
-                    line.push(w[0] + (w[1] - w[0]) * (left / d));
-                    break;
-                }
-            }
-            p.add(egui::Shape::line(line, Stroke::new(2.0, with_alpha(tint::HEALTH(), al * a))));
-        }
-        // For developers: a gauge needle swings
-        Some(crate::tools::claude::ID) => {
-            let c = Pos2::new(right.x + 14.0, right.y + 7.0);
-            p.add(egui::Shape::line(arc_points(c, 13.0, std::f32::consts::PI, TAU, 24), Stroke::new(2.0, with_alpha(tint::HEALTH(), 0.45 * a))));
-            let v = 0.5 - 0.5 * (TAU * now / 2.0).cos();
-            let ang = (-60.0 + 110.0 * v).to_radians() - std::f32::consts::FRAC_PI_2;
-            p.line_segment([c, c + Vec2::new(ang.cos(), ang.sin()) * 10.0], Stroke::new(2.0, with_alpha(tint::HEALTH(), a)));
-        }
+        Some(system::ID) => loop_watch(p, free, chips.first().map_or(free.center().y, |c| c.0.center().y), now),
+        Some(claude::ID) => loop_dev(p, free, now),
         _ => {}
     }
+}
+
+/// Clean my Mac: junk arcs into the bin, the disk bar shrinks, then a check.
+fn loop_clean(p: &egui::Painter, f: Rect, bin: Rect, now: f32) {
+    use std::f32::consts::PI;
+    let ph = (now / 4.8).fract();
+    let w = f.width().min(64.0);
+    let bar = Rect::from_min_size(Pos2::new(f.right() - w, f.bottom() - 5.0), Vec2::new(w, 5.0));
+    p.rect_filled(bar, 2.5, white(20));
+    let v = keys(ph, &[(0.0, 0.92), (0.17, 0.92), (0.21, 0.74), (0.50, 0.74), (0.54, 0.58), (0.83, 0.58), (0.87, 0.44), (0.94, 0.44), (1.0, 0.92)]);
+    p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(w * v, 5.0)), 2.5, tint::CLEANUP());
+    let s = keys(ph, &[(0.0, 0.0), (0.86, 0.0), (0.89, 1.3), (0.92, 1.0), (0.96, 1.0), (1.0, 0.0)]);
+    if s > 0.01 {
+        let c = Pos2::new(bar.left() - 12.0, bar.center().y);
+        p.circle_filled(c, 6.0 * s, tint::CLEANUP());
+        check(p, c, 6.5 * s, ON_ACTION);
+    }
+    let cols = [tint::CLEANUP(), tint::CAPTURE(), tint::HEALTH()];
+    for (j, (at, dx, dy, spin)) in [(0.02f32, 0.0f32, 0.0f32, -1.0f32), (0.35, -12.0, 8.0, 1.2), (0.68, 4.0, -6.0, -0.9)].into_iter().enumerate() {
+        let q = (ph - at) / 0.19;
+        if !(0.0..1.0).contains(&q) {
+            continue;
+        }
+        let m = keys(q, &[(0.0, 0.0), (0.9, 1.0)]);
+        let a0 = Pos2::new(f.right() - 8.0 + dx, f.center().y - 6.0 + dy);
+        let e = bin.center();
+        let c = Pos2::new((a0.x + e.x) / 2.0, f.top() - 16.0);
+        let u = 1.0 - m;
+        let pos = Pos2::new(u * u * a0.x + 2.0 * u * m * c.x + m * m * e.x, u * u * a0.y + 2.0 * u * m * c.y + m * m * e.y);
+        let sc = if q < 0.9 { 1.0 - 0.3 * m } else { 0.7 - 0.4 * (q - 0.9) / 0.1 };
+        let al = (q / 0.12).min(1.0) * if q > 0.9 { 1.0 - (q - 0.9) / 0.1 } else { 1.0 };
+        let ang = spin * 1.2 * PI * m;
+        let at = |x: f32, y: f32| pos + turn(Vec2::new(x, y) * sc, ang);
+        let col = cols[j];
+        let fill = with_alpha(col, 0.25 * al);
+        let st = Stroke::new(1.2, with_alpha(col, al));
+        match j {
+            // a document with a folded corner
+            0 => {
+                p.add(egui::Shape::convex_polygon(vec![at(-5.0, -6.0), at(1.0, -6.0), at(5.0, -2.0), at(5.0, 6.0), at(-5.0, 6.0)], fill, st));
+                p.add(egui::Shape::line(vec![at(1.0, -6.0), at(1.0, -2.0), at(5.0, -2.0)], st));
+            }
+            // an app
+            1 => {
+                let pts = rounded_points(Rect::from_center_size(Pos2::ZERO, Vec2::splat(10.0)), 3.0).into_iter().map(|q| at(q.x, q.y)).collect();
+                p.add(egui::Shape::convex_polygon(pts, fill, st));
+            }
+            // a folder
+            _ => {
+                p.add(egui::Shape::convex_polygon(vec![at(-6.0, -5.0), at(-1.5, -5.0), at(0.0, -3.0), at(-6.0, -3.0)], fill, st));
+                p.add(egui::Shape::convex_polygon(vec![at(-6.0, -3.0), at(6.0, -3.0), at(6.0, 5.0), at(-6.0, 5.0)], fill, st));
+            }
+        }
+    }
+}
+
+/// Screenshots: a crosshair drags a selection, the rest dims, handles, a
+/// flash, and the shot shrinks to a thumbnail that slides away.
+fn loop_capture(p: &egui::Painter, card: Rect, f: Rect, now: f32) {
+    let ph = (now / 3.6).fract();
+    if ph >= 0.9 {
+        return;
+    }
+    let w = (f.width() - 6.0).min(110.0);
+    let h = (w * 0.6).min(f.height() - 10.0);
+    let a0 = Pos2::new(f.left() + 2.0, f.top() + 4.0);
+    let full = Rect::from_min_size(a0, Vec2::new(w, h));
+    let (sel, al) = if ph < 0.6 {
+        let g = ease(ph / 0.34);
+        (Rect::from_min_size(a0, Vec2::new(w * g, h * g)), 1.0)
+    } else {
+        let m = keys(ph, &[(0.6, 0.0), (0.8, 1.0)]);
+        let to = Pos2::new(f.right() - w * 0.18 - 2.0, f.bottom() - h * 0.18);
+        let mut c = full.center().lerp(to, m);
+        let n = ((ph - 0.8) / 0.1).clamp(0.0, 1.0);
+        c.x += 30.0 * ease(n);
+        (Rect::from_center_size(c, full.size() * (1.0 - 0.64 * m)), 1.0 - n)
+    };
+    let dim = keys(ph, &[(0.0, 0.0), (0.06, 0.28), (0.52, 0.28), (0.60, 0.0)]) * if is_light() { 0.45 } else { 1.0 };
+    if dim > 0.003 && sel.width() > 0.5 {
+        let shade = Color32::from_black_alpha((dim * 255.0) as u8);
+        let top = CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 };
+        let bottom = CornerRadius { nw: 0, ne: 0, sw: 12, se: 12 };
+        p.rect_filled(Rect::from_min_max(card.min, Pos2::new(card.right(), sel.top())), top, shade);
+        p.rect_filled(Rect::from_min_max(Pos2::new(card.left(), sel.bottom()), card.max), bottom, shade);
+        p.rect_filled(Rect::from_min_max(Pos2::new(card.left(), sel.top()), Pos2::new(sel.left(), sel.bottom())), 0.0, shade);
+        p.rect_filled(Rect::from_min_max(Pos2::new(sel.right(), sel.top()), Pos2::new(card.right(), sel.bottom())), 0.0, shade);
+    }
+    let col = tint::CAPTURE();
+    if ph >= 0.54 {
+        p.rect_filled(sel, 2.0, with_alpha(col, 0.18 * al));
+    }
+    if ph < 0.53 {
+        let path = vec![sel.left_top(), sel.right_top(), sel.right_bottom(), sel.left_bottom(), sel.left_top()];
+        p.extend(egui::Shape::dashed_line(&path, Stroke::new(1.0, col), 3.0, 2.0));
+    } else {
+        p.rect_stroke(sel, 2.0, Stroke::new(1.0, with_alpha(col, al)), StrokeKind::Inside);
+    }
+    let ink = if is_light() { TEXT() } else { Color32::WHITE };
+    let ca = keys(ph, &[(0.0, 1.0), (0.40, 1.0), (0.46, 0.0)]);
+    if ca > 0.0 {
+        let c = sel.right_bottom();
+        let st = Stroke::new(1.0, with_alpha(ink, ca));
+        p.line_segment([c - Vec2::new(7.5, 0.0), c + Vec2::new(7.5, 0.0)], st);
+        p.line_segment([c - Vec2::new(0.0, 7.5), c + Vec2::new(0.0, 7.5)], st);
+    }
+    let ha = keys(ph, &[(0.0, 0.0), (0.36, 0.0), (0.40, 1.0), (0.52, 1.0), (0.56, 0.0)]);
+    if ha > 0.0 {
+        for c in [sel.left_top(), sel.right_top(), sel.left_bottom(), sel.right_bottom()] {
+            p.rect_filled(Rect::from_center_size(c, Vec2::splat(4.5)), 1.0, with_alpha(ink, ha));
+        }
+    }
+    let fl = keys(ph, &[(0.0, 0.0), (0.52, 0.0), (0.54, 0.22), (0.64, 0.0)]);
+    if fl > 0.0 {
+        p.rect_filled(card, 12.0, Color32::from_white_alpha((fl * 255.0) as u8));
+    }
+}
+
+/// Clipboard: clips of different kinds fly in and stack; the oldest drops off.
+fn loop_clipboard(p: &egui::Painter, f: Rect, now: f32) {
+    let ph = (now / 6.0).fract();
+    let size = Vec2::new(56.0f32.min(f.width() * 0.5), 34.0);
+    let base = Pos2::new(f.left() + f.width() * 0.45, f.top() + 4.0 + size.y / 2.0);
+    let mut items: Vec<(f32, usize)> = (0..4).map(|i| ((ph - i as f32 * 0.25).rem_euclid(1.0), i)).collect();
+    // oldest first, so the newest lands on top
+    items.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (q, i) in items {
+        if q >= 0.83 {
+            continue;
+        }
+        let r0 = [-6.0f32, 4.0, -3.0, 5.0][i];
+        let lv = |n: f32| (Vec2::new(-6.0 * n, 6.0 * n), r0 - 2.0 * n, 1.0 - 0.03 * n);
+        let ((off, deg, sc), al) = if q < 0.08 {
+            let m = ease(q / 0.08);
+            ((Vec2::new(-110.0, 10.0) * (1.0 - m), -12.0 + (r0 + 12.0) * m, 0.6 + 0.4 * m), m)
+        } else if q < 0.25 {
+            (lv(0.0), 1.0)
+        } else if q < 0.33 {
+            (lv(ease((q - 0.25) / 0.08)), 1.0)
+        } else if q < 0.5 {
+            (lv(1.0), 1.0)
+        } else if q < 0.58 {
+            let m = ease((q - 0.5) / 0.08);
+            (lv(1.0 + m), 1.0 - 0.15 * m)
+        } else if q < 0.75 {
+            (lv(2.0), 0.85)
+        } else {
+            let m = ease((q - 0.75) / 0.08);
+            let (o, d, s) = lv(2.0);
+            ((o + Vec2::new(-18.0, 28.0) * m, d - 8.0 * m, s - 0.04 * m), 0.85 * (1.0 - m))
+        };
+        clip_card(p, base + off, size * sc, deg.to_radians(), i, al);
+    }
+}
+
+/// One clip in the clipboard loop: text, a colour, an image or a link.
+fn clip_card(p: &egui::Painter, c: Pos2, size: Vec2, ang: f32, kind: usize, al: f32) {
+    let at = |x: f32, y: f32| c + turn(Vec2::new(x, y), ang);
+    let outline: Vec<Pos2> = rounded_points(Rect::from_center_size(Pos2::ZERO, size), 7.0).into_iter().map(|q| at(q.x, q.y)).collect();
+    let shadow = outline.iter().map(|q| *q + Vec2::new(0.0, 3.0)).collect();
+    p.add(egui::Shape::convex_polygon(shadow, Color32::from_black_alpha((70.0 * al) as u8), Stroke::NONE));
+    p.add(egui::Shape::convex_polygon(outline, with_alpha(POPOVER(), al), Stroke::new(1.0, with_alpha(tint::CAPTURE(), 0.45 * al))));
+    let (l, t) = (-size.x / 2.0 + 7.0, -size.y / 2.0);
+    let line = |x0: f32, x1: f32, y: f32, col: Color32| p.line_segment([at(x0, y), at(x1, y)], Stroke::new(3.0, with_alpha(col, al)));
+    let ink = white(140);
+    let span = size.x - 14.0;
+    match kind {
+        0 => {
+            line(l, l + span * 0.9, t + 9.0, ink);
+            line(l, l + span * 0.6, t + 16.0, ink);
+            line(l, l + span * 0.75, t + 23.0, ink);
+        }
+        1 => {
+            p.circle_filled(at(l + 5.0, 0.0), 5.0 * size.y / 34.0, with_alpha(tint::CLEANUP(), al));
+            line(l + 14.0, l + span * 0.85, -2.5, ink);
+            line(l + 14.0, l + span * 0.6, 3.5, white(70));
+        }
+        2 => {
+            let (b, r) = (size.y / 2.0 - 6.0, size.x / 2.0 - 6.0);
+            p.add(egui::Shape::convex_polygon(vec![at(-r, -b), at(r, -b), at(r, b), at(-r, b)], with_alpha(tint::HEALTH(), 0.14 * al), Stroke::NONE));
+            p.add(egui::Shape::convex_polygon(vec![at(-r + 1.0, b), at(-r * 0.25, -b * 0.3), at(r * 0.45, b)], with_alpha(tint::HEALTH(), 0.75 * al), Stroke::NONE));
+            p.add(egui::Shape::convex_polygon(vec![at(r * 0.05, b), at(r * 0.5, b * 0.1), at(r - 1.0, b)], with_alpha(tint::HEALTH(), 0.5 * al), Stroke::NONE));
+            p.circle_filled(at(r - 5.0, -b + 4.0), 2.8, with_alpha(tint::CAPTURE(), al));
+        }
+        _ => {
+            let st = Stroke::new(1.5, with_alpha(tint::CAPTURE(), al));
+            p.circle_stroke(at(l + 3.5, 0.0), 3.5, st);
+            p.circle_stroke(at(l + 8.5, 0.0), 3.5, st);
+            line(l + 17.0, l + span * 0.9, 0.0, with_alpha(tint::HEALTH(), 0.85));
+        }
+    }
+}
+
+/// Voice typing: the voice wave runs from the mic and comes out as words.
+fn loop_voice(p: &egui::Painter, f: Rect, mic: Rect, now: f32) {
+    use std::f32::consts::TAU;
+    const SAID: [&str; 3] = ["Ship it today", "Call me at 5", "Sounds good!"];
+    let said = SAID[(now / 4.2) as usize % SAID.len()];
+    let q = (now / 4.2).fract() * 4.2;
+    let fnt = font(11.5);
+    let widest = SAID.iter().map(|s| p.layout_no_wrap((*s).into(), fnt.clone(), TEXT()).size().x).fold(0.0, f32::max);
+    let n = (((f.width() - 10.0 - widest) / 6.0).floor() as i32).clamp(5, 12) as usize;
+    let cy = mic.center().y;
+    // the wave is loud while words come, quiet in between
+    let loud = keys(q / 4.2, &[(0.0, 0.35), (0.06, 1.0), (0.42, 1.0), (0.55, 0.35)]);
+    for j in 0..n {
+        let x = j as f32;
+        let v = 0.5 + 0.25 * (TAU * (now / 0.9 + x * 0.17)).sin() + 0.25 * (TAU * (now / 1.3 - x * 0.29) + x).sin();
+        let h = 30.0 * (0.12 + 0.88 * v * loud);
+        let fade = (1.0 - (x - n as f32 * 0.6) / (n as f32 * 0.4 + 1.0)).clamp(0.0, 1.0);
+        p.rect_filled(Rect::from_center_size(Pos2::new(f.left() + 1.5 + 6.0 * x, cy), Vec2::new(3.0, h)), 1.5, with_alpha(tint::CAPTURE(), fade));
+    }
+    let x = f.left() + n as f32 * 6.0 + 8.0;
+    let shown = (((q - 0.35) / 0.11).floor() as i32 + 1).clamp(0, said.len() as i32) as usize;
+    let al = if q > 3.85 { 1.0 - (q - 3.85) / 0.35 } else { 1.0 };
+    let g = p.text(Pos2::new(x, cy), Align2::LEFT_CENTER, &said[..shown], fnt, with_alpha(TEXT(), al));
+    if (now / 0.8).fract() < 0.5 {
+        let cx = if shown == 0 { x } else { g.right() + 1.5 };
+        p.rect_filled(Rect::from_center_size(Pos2::new(cx, cy), Vec2::new(1.5, 13.0)), 0.5, with_alpha(tint::CAPTURE(), al));
+    }
+    // the mic glows with the voice
+    let v = 0.5 - 0.5 * (TAU * now / 0.9).cos();
+    p.rect_stroke(mic.expand(1.0 + 2.0 * v), 10.0, Stroke::new(3.0, with_alpha(tint::CAPTURE(), 0.2 * v)), StrokeKind::Outside);
+}
+
+/// Watch my Mac: an endless heartbeat trace on a grid, a slow CPU line
+/// behind it, a bright head at "now".
+fn loop_watch(p: &egui::Painter, f: Rect, cy: f32, now: f32) {
+    let mh = f.height().min(44.0);
+    let top = (cy - mh / 2.0).clamp(f.top(), f.bottom() - mh);
+    let m = Rect::from_min_size(Pos2::new(f.left(), top), Vec2::new(f.width(), mh));
+    let p = p.with_clip_rect(m.intersect(p.clip_rect()));
+    let col = tint::HEALTH();
+    let grid = Stroke::new(1.0, with_alpha(col, 0.08));
+    let mut x = m.left() + 6.0;
+    while x < m.right() {
+        p.line_segment([Pos2::new(x, m.top()), Pos2::new(x, m.bottom())], grid);
+        x += 12.0;
+    }
+    let mut y = m.top() + 5.5;
+    while y < m.bottom() {
+        p.line_segment([Pos2::new(m.left(), y), Pos2::new(m.right(), y)], grid);
+        y += 11.0;
+    }
+    let head = m.left() + m.width() * 0.88;
+    let sy = mh / 44.0;
+    let fade = |x: f32| ((x - m.left()) / (m.width() * 0.45)).clamp(0.0, 1.0);
+    // CPU, slow and soft
+    let mut prev: Option<Pos2> = None;
+    let mut x = m.left();
+    while x <= head {
+        let u = (x - m.left() + now * 22.5) / 60.0 * std::f32::consts::TAU;
+        let q = Pos2::new(x, m.top() + (31.0 + 3.0 * u.sin() + 1.5 * (u * 2.3).sin()) * sy);
+        if let Some(a) = prev {
+            p.line_segment([a, q], Stroke::new(1.5, with_alpha(tint::CLEANUP(), 0.45 * fade(x))));
+        }
+        prev = Some(q);
+        x += 3.0;
+    }
+    // heartbeat, one beat every 50 px, scrolling left
+    const BEAT: [(f32, f32); 8] = [(0.0, 22.0), (20.0, 22.0), (23.0, 18.0), (26.0, 22.0), (30.0, 22.0), (34.0, 8.0), (39.0, 36.0), (43.0, 22.0)];
+    let off = (now / 1.5).fract() * 50.0;
+    let mut pts = Vec::new();
+    let mut x0 = m.left() - 50.0 - off;
+    while x0 <= head + 50.0 {
+        pts.extend(BEAT.iter().map(|&(x, y)| Pos2::new(x0 + x, m.top() + y * sy)));
+        x0 += 50.0;
+    }
+    let mut tip = None;
+    for w in pts.windows(2) {
+        let (a, mut b) = (w[0], w[1]);
+        if a.x >= head {
+            break;
+        }
+        if b.x > head {
+            b = a + (b - a) * ((head - a.x) / (b.x - a.x));
+            tip = Some(b);
+        }
+        p.line_segment([a, b], Stroke::new(1.8, with_alpha(col, fade((a.x + b.x) / 2.0))));
+    }
+    if let Some(t) = tip {
+        p.circle_filled(t, 5.0, with_alpha(col, 0.3));
+        p.circle_filled(t, 2.5, if is_light() { col } else { Color32::WHITE });
+    }
+}
+
+/// For developers: a usage gauge climbs green → amber → red, the limit
+/// resets and the needle drops back.
+fn loop_dev(p: &egui::Painter, f: Rect, now: f32) {
+    use std::f32::consts::PI;
+    let ph = (now / 5.0).fract();
+    let v = keys(ph, &[(0.0, 0.0), (0.06, 0.0), (0.30, 0.42), (0.34, 0.38), (0.70, 0.84), (0.80, 0.84), (0.83, 0.81), (0.90, 0.0)]);
+    let r = (f.width() / 2.0 - 9.0).min(f.height() - 14.0).min(24.0);
+    let c = Pos2::new(f.center().x, f.top() + r + 8.0);
+    let ang = |x: f32| PI + x * PI;
+    let arc = |a: f32, b: f32, col: Color32, w: f32| {
+        if b > a {
+            let n = (((b - a) * 32.0).ceil() as usize).max(2);
+            p.add(egui::Shape::line(arc_points(c, r, ang(a), ang(b), n), Stroke::new(w, col)));
+        }
+    };
+    arc(0.0, 1.0, white(20), 5.0);
+    arc(0.7, 1.0, with_alpha(RED(), 0.16), 5.0);
+    arc(0.0, v.min(0.45), tint::CLEANUP(), 5.0);
+    arc(0.45, v.min(0.7), AMBER(), 5.0);
+    arc(0.7, v, RED(), 5.0);
+    for i in 0..=20 {
+        let x = i as f32 / 20.0;
+        let major = i % 5 == 0;
+        let d = Vec2::angled(ang(x));
+        let (a, b, col) = if major { (r + 4.5, r + 7.0, white(100)) } else { (r + 4.5, r + 5.8, white(45)) };
+        p.line_segment([c + d * a, c + d * b], Stroke::new(if major { 1.0 } else { 0.8 }, col));
+    }
+    let rs = keys(ph, &[(0.0, 0.0), (0.86, 0.0), (0.90, 1.0), (0.98, 1.35)]);
+    let ra = keys(ph, &[(0.0, 0.0), (0.86, 0.0), (0.90, 0.9), (0.98, 0.0)]);
+    if ra > 0.0 {
+        p.circle_stroke(c, 9.0 * (0.6 + 0.4 * rs), Stroke::new(1.4, with_alpha(tint::CLEANUP(), ra)));
+    }
+    let d = Vec2::angled(ang(v));
+    p.line_segment([c - d * 3.0, c + d * (r - 5.0)], Stroke::new(1.6, TEXT()));
+    p.circle_filled(c, 3.0, TEXT());
+    p.circle_filled(c, 1.1, BG());
 }
 
 /// Every tool with a switch, by section in two columns. Returns the tool
