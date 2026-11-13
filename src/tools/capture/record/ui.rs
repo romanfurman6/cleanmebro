@@ -275,7 +275,7 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
                                 let sb = tr.shrink(5.0);
                                 let sr = ui.interact(sb, ui.scope_id().with("area-start"), Sense::click());
                                 p.rect_filled(sb, sb.height() / 2.0, if sr.hovered() { lerp_color(tint::CAPTURE(), Color32::WHITE, 0.12) } else { tint::CAPTURE() });
-                                p.text(sb.center(), Align2::CENTER_CENTER, "Start  ↵", bold(13.0), Color32::WHITE);
+                                p.text(sb.center(), Align2::CENTER_CENTER, "Start  Enter", bold(13.0), Color32::WHITE);
                                 if sr.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                                     todo.push(Do::Start(ch));
                                 }
@@ -375,9 +375,9 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
         let (ly1, ly2) = two_lines_y(&p, start.center().y, &bold(15.0), &font(11.0));
         p.text(Pos2::new(dot.x + 26.0, ly1), Align2::LEFT_CENTER, "Start recording", bold(15.0), Color32::WHITE);
         p.text(Pos2::new(dot.x + 26.0, ly2), Align2::LEFT_CENTER, "Saves an mp4 to your Capture folder", font(11.0), Color32::from_rgb(0xE4, 0xDE, 0xFA));
-        let kr = Rect::from_center_size(Pos2::new(start.right() - 26.0, start.center().y), Vec2::new(24.0, 22.0));
+        let kr = Rect::from_center_size(Pos2::new(start.right() - 36.0, start.center().y), Vec2::new(44.0, 22.0));
         p.rect_filled(kr, 6.0, white(46));
-        p.text(kr.center(), Align2::CENTER_CENTER, "↵", bold(12.0), Color32::WHITE);
+        p.text(kr.center(), Align2::CENTER_CENTER, "Enter", bold(11.0), Color32::WHITE);
         if sr.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
