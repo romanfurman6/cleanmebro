@@ -64,6 +64,7 @@ pub fn visible() -> bool {
 }
 
 /// Ask for a frame if someone can see it.
+#[track_caller]
 pub fn repaint(ctx: &egui::Context) {
     if visible() {
         ctx.request_repaint();

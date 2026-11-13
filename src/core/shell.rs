@@ -612,6 +612,7 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        crate::kit::repaint_log::begin(ctx);
         crate::kit::url_scheme::after_launch();
         self.follow_links(ctx);
         crate::kit::update::tick();
@@ -838,6 +839,7 @@ impl eframe::App for App {
         }
         self.screenshot_step(&ctx);
         crate::kit::viewport::end_pass();
+        crate::kit::repaint_log::end();
     }
 }
 

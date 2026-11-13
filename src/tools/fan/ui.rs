@@ -40,10 +40,11 @@ pub fn spin(key: &str, t: f64, rpm: f32) -> f32 {
     (*turns as f32) * TAU
 }
 
-/// Ask for the next frame soon while any blade is turning.
+/// Ask for the next frame while any blade is turning (decorative pace,
+/// resting when nobody touches the window: see `glass::ambient`).
 pub fn keep_spinning(ui: &Ui, s: &Snapshot) {
     if s.fans.iter().any(|f| f.rpm > 0.0) {
-        crate::kit::glass::animate(ui.ctx());
+        crate::kit::glass::ambient(ui.ctx());
     }
 }
 
@@ -183,7 +184,7 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         }
         return;
     }
-    let t = ui.ctx().input(|i| i.time);
+    let t = crate::kit::glass::ambient_clock(ui.ctx());
     let id = ui.scope_id().with("w-fans");
     let sel = cx.is_detail_open(ID, SHEET);
     let rpm = s.avg_rpm();
@@ -279,7 +280,7 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let bw = (x1 - x0 - gap * (n as f32 - 1.0)) / n as f32;
         for (i, f) in s.fans.iter().take(n).enumerate() {
             let r = Rect::from_min_size(Pos2::new(x0 + i as f32 * (bw + gap), fy), Vec2::new(bw, fh));
-            mini_fan(&p, r, f, &fan_name(i, s.fans.len()), t);
+            mini_fan(&p, r, f, &fan_name(i, s.fans.len()), crate::kit::glass::ambient_clock(ui.ctx()));
         }
         keep_spinning(ui, s);
     }
@@ -314,11 +315,11 @@ fn card_resp(ui: &mut Ui, rect: Rect, selected: bool) -> egui::Response {
 }
 
 /// One fan in the panel card: ring with blades, name and speed.
-fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str, t: f64) {
+fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str, clock: f64) {
     p.rect_filled(r, 8.0, white(8));
     let c = Pos2::new(r.left() + 8.0 + 18.0, r.center().y);
     ring(p, c, 17.0, 3.0, f.frac(), LINE());
-    blades(p, c, 12.0, spin(name, t, f.rpm), BLADE(), CARD());
+    blades(p, c, 12.0, spin(name, clock, f.rpm), BLADE(), CARD());
     let x = c.x + 26.0;
     let (ly1, ly2) = two_lines_y(&p, r.center().y, &font(11.0), &bold(15.0));
     p.text(Pos2::new(x, ly1), Align2::LEFT_CENTER, name, font(11.0), TEXT_DIM());
