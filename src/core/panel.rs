@@ -6,7 +6,7 @@
 
 use super::layout;
 use super::shell::App;
-use super::tool::{Cx, Size, GRID_COLUMNS};
+use super::tool::{self, Cx, Size, GRID_COLUMNS};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
 use egui::{Align2, Id, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
@@ -100,13 +100,28 @@ pub fn draw_at(app: &mut App, ui: &mut Ui, owner: Option<usize>, id: &'static st
             }
             // screenshots only: CMB_DEMO_LOADING shows every tool that can load as loading
             let demo = std::env::var_os("CMB_DEMO_LOADING").is_some() && matches!(app.tools[i].id(), "system" | "startup" | "fan");
-            if lock.is_none() && (demo || app.tools[i].widget_loading(id)) {
+            let tid = app.tools[i].id();
+            let drawn = if tool::is_broken(tid) {
+                false
+            } else if lock.is_none() && (demo || app.tools[i].widget_loading(id)) {
                 let b = app.tools[i].badge();
                 let title = app.tools[i].widgets().into_iter().find(|w| w.id == id).map(|w| w.title).unwrap_or_else(|| app.tools[i].name());
                 let lid = child.scope_id().with("loading");
                 crate::kit::tile::loading(&mut child, r, lid, b.icon, b.color, title);
+                true
             } else {
-                app.tools[i].widget_ui(id, size, &mut child, r, cx);
+                let t = &mut app.tools[i];
+                tool::guard(tid, || t.widget_ui(id, size, &mut child, r, cx)).is_some()
+            };
+            if !drawn {
+                // the tool stopped after an error: say so where its widget was
+                let mut over = ui.new_child(UiBuilder::new().max_rect(r).id_salt((salt, "stopped")));
+                let title = app.tools[i].widgets().into_iter().find(|w| w.id == id).map(|w| w.title).unwrap_or_else(|| app.tools[i].name());
+                let sid = over.scope_id();
+                if crate::kit::tile::stopped(&mut over, r, sid, app.tools[i].badge().icon, title).clicked() {
+                    crate::kit::perms::relaunch();
+                    cx.quit();
+                }
             }
             if let Some(perm) = lock {
                 super::gate::widget_cover(app, ui, r, perm, ui.scope_id().with(salt));
@@ -132,7 +147,7 @@ pub fn panel(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let scroll_r = Rect::from_min_max(area.min, Pos2::new(area.right() + PAD - 2.0, area.bottom()));
         let mut child = ui.new_child(UiBuilder::new().max_rect(scroll_r).layout(egui::Layout::top_down(egui::Align::Min)));
         // a slim bar, so even hovered it stays clear of the widgets
-        child.spacing_mut().scroll.bar_width = 6.0;
+        child.spacing_mut().scroll.floating_allocated_width = 0.0;
         child.set_clip_rect(area.expand2(Vec2::new(PAD, 8.0)));
         ScrollArea::vertical().id_salt("panel-widgets").auto_shrink([false, false]).show(&mut child, |ui| {
             let (origin, _) = ui.allocate_exact_size(Vec2::new(area.width(), need), Sense::hover());
@@ -146,9 +161,6 @@ pub fn panel(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         update_banner(ui, r);
     }
     footer(app, ui, rect);
-    if app.gear_open {
-        gear_menu(app, ui, rect, cx);
-    }
 }
 
 /// The title line: the first enabled tool that offers one, or the app name.
@@ -172,22 +184,27 @@ pub fn title_line(app: &App, p: &egui::Painter, x0: f32, top: f32, width: f32) {
     }
 }
 
-/// Title and status from the first tool that offers one, then the window
-/// and settings buttons.
+/// Title and status from the first tool that offers one, then the one
+/// button that opens the full app (tools, Settings, Quit).
 fn header(app: &mut App, ui: &mut Ui, rect: Rect) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
-    let gear = Rect::from_min_size(Pos2::new(rect.right() - 14.0 - 30.0, rect.top() + 16.0), Vec2::splat(30.0));
-    let win = gear.translate(Vec2::new(-38.0, 0.0));
+    let win = Rect::from_min_size(Pos2::new(rect.right() - 14.0 - 30.0, rect.top() + 16.0), Vec2::splat(30.0));
     let x0 = rect.left() + 16.0;
     title_line(app, &p, x0, rect.top(), win.left() - x0 - 10.0);
-    let pages = app.page_tools();
-    if !pages.is_empty() && icon_button(ui, win, Icon::Window, "Open Cmd+Meow").clicked() {
-        let page = if app.tools.get(app.page).is_some_and(|t| t.has_page()) { app.page } else { pages[0] };
-        app.open_window(&ctx, page);
+    if icon_button(ui, win, Icon::Window, "Open Cmd+Meow").clicked() {
+        open_app(app, &ctx);
     }
-    if icon_button(ui, gear, Icon::Gear, "Settings").clicked() {
-        app.gear_open = !app.gear_open;
+}
+
+/// The full app on the last tool page; with no page tools on, on Settings.
+fn open_app(app: &mut App, ctx: &egui::Context) {
+    let pages = app.page_tools();
+    if pages.is_empty() {
+        app.open_settings(ctx, false);
+    } else {
+        let page = if app.tools.get(app.page).is_some_and(|t| t.has_page()) { app.page } else { pages[0] };
+        app.open_window(ctx, page);
     }
 }
 
@@ -313,58 +330,13 @@ fn footer(app: &mut App, ui: &mut Ui, rect: Rect) {
     }
 }
 
-/// The settings menu under the gear: edit widgets, each tool's entries, quit.
-fn gear_menu(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
-    enum Row {
-        Customize,
-        Tool(usize, &'static str),
-        Quit,
-    }
-    let mut rows: Vec<(Row, String)> = vec![(Row::Customize, "Edit widgets…".into())];
-    for (i, t) in app.tools.iter().enumerate().filter(|(i, _)| app.tool_on(*i)) {
-        for item in t.menu_items() {
-            rows.push((Row::Tool(i, item.id), item.label));
-        }
-    }
-    rows.push((Row::Quit, "Quit Cmd+Meow".into()));
-    let rh = 28.0;
-    let h = rows.len() as f32 * rh + 10.0;
-    let menu = Rect::from_min_size(Pos2::new(rect.right() - 14.0 - 210.0, rect.top() + 52.0), Vec2::new(210.0, h));
-    let p = ui.painter().clone();
-    p.rect_filled(menu.translate(Vec2::new(0.0, 4.0)).expand(2.0), R_CARD, egui::Color32::from_black_alpha(60));
-    p.rect_filled(menu, R_CARD, POPOVER());
-    p.rect_stroke(menu, R_CARD, Stroke::new(1.0, white(HAIRLINE_STRONG)), egui::StrokeKind::Inside);
-    let mut picked = None;
-    for (k, (row, label)) in rows.iter().enumerate() {
-        let rr = Rect::from_min_size(menu.min + Vec2::new(5.0, 5.0 + k as f32 * rh), Vec2::new(menu.width() - 10.0, rh));
-        if matches!(row, Row::Quit) {
-            hairline(&p, Pos2::new(rr.left() + 6.0, rr.top()), Pos2::new(rr.right() - 6.0, rr.top()));
-        }
-        let resp = ui.interact(rr, ui.scope_id().with(("gear", k)), Sense::click());
-        if resp.hovered() {
-            p.rect_filled(rr.shrink2(Vec2::new(0.0, 1.0)), R_SMALL, with_alpha(BLUE(), 0.18));
-        }
-        p.text(rr.left_center() + Vec2::new(10.0, 0.0), Align2::LEFT_CENTER, label, font(13.0), TEXT());
-        if resp.clicked() {
-            picked = Some(k);
-        }
-    }
-    if let Some(k) = picked {
-        app.gear_open = false;
-        match rows[k].0 {
-            Row::Customize => {
-                let ctx = ui.ctx().clone();
-                app.open_settings(&ctx, false);
-            }
-            Row::Tool(i, id) => app.tools[i].menu_action(id, cx),
-            Row::Quit => cx.quit(),
-        }
-    }
-}
-
 /// The sheet beside the panel; the tool draws all of it, header included.
 pub fn detail(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let Some((i, d)) = app.detail.clone() else { return };
-    let mut child = ui.new_child(UiBuilder::new().max_rect(rect).id_salt(("detail", app.tools[i].id(), &d)));
-    app.tools[i].detail_ui(&d, &mut child, rect, cx);
+    let tid = app.tools[i].id();
+    let mut child = ui.new_child(UiBuilder::new().max_rect(rect).id_salt(("detail", tid, &d)));
+    let t = &mut app.tools[i];
+    if tool::guard(tid, || t.detail_ui(&d, &mut child, rect, cx)).is_none() {
+        app.detail = None;
+    }
 }

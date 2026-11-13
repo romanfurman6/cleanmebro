@@ -392,7 +392,9 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - PAGE_FOOTER_H - sp::L));
 
     {
-        let scan = format!("{total}");
+        // one automatic check per scan (the total changes with every Keep,
+        // so it can't name the scan)
+        let scan = app.clean.lock_ok().run.to_string();
         let shared = app.clean.clone();
         app.ai.auto(&ctx, &scan, || check_ask(&shared));
         match aicheck::ui::chip(&mut app.ai, ui, chip_at, ai_n > 0) {
@@ -504,7 +506,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         if a.clicked() {
             answer = Some(Verdict::Keep);
         }
-        if link(ui, Pos2::new(a.rect.left() - sp::M, lab.center().y), Align2::RIGHT_CENTER, "Allow all", 12.0).clicked() {
+        if link(ui, Pos2::new(a.rect.left() - sp::M, lab.center().y), Align2::RIGHT_CENTER, "Clean all", 12.0).clicked() {
             answer = Some(Verdict::Safe);
         }
         if let Some(v) = answer {
@@ -513,6 +515,14 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         let area = Rect::from_min_max(Pos2::new(lc.left(), lc.top() + LABEL_H + sp::S), lc.max);
         scroll_rows(ui, area, format!("asks-{:?}", app.clean_group), asks.len(), ASK_H, sp::S, |ui, k, rr| ask_card(app, ui, asks[k], rr));
     }
+
+    // AI Check tips go under the right column
+    let tips = if right.is_positive() { app.ai.tips() } else { Vec::new() };
+    let tip_w = right.width();
+    let tip_hs: Vec<f32> = tips.iter().map(|t| tip_height(&p, t, tip_w)).collect();
+    // at most a third of the column, so the lists always keep room
+    let tips_h: f32 = if tips.is_empty() { 0.0 } else { (sp::M + tip_hs.iter().sum::<f32>() + sp::S * (tips.len() - 1) as f32).min(right.height() / 3.0) };
+    let right = if right.is_positive() { Rect::from_min_max(right.min, Pos2::new(right.right(), right.bottom() - tips_h)) } else { right };
 
     // right: what will go (Safe) and what stays (Kept)
     if right.is_positive() {
@@ -548,6 +558,34 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
             let card = Rect::from_min_max(Pos2::new(kr.left(), kr.top() + LABEL_H + sp::S), kr.max);
             glass_card(&p, card, R_CARD, 0.0, false);
             scroll_rows(ui, card.shrink2(Vec2::new(0.0, 4.0)), format!("kept-{:?}", app.clean_group), kept.len(), row_h, 0.0, |ui, k, rr| kept_row(app, ui, kept[k], rr));
+        }
+        // under the lists, right after the last one
+        let mut ty_ = right.top() + safe_h + gap + kept_h + sp::M;
+        let mut act = None;
+        for (t, h) in tips.iter().zip(&tip_hs) {
+            if ty_ + h > right.bottom() + tips_h {
+                break;
+            }
+            if let Some(e) = tip_row(ui, Rect::from_min_size(Pos2::new(right.left(), ty_), Vec2::new(tip_w, *h)), t) {
+                act = Some(e);
+            }
+            ty_ += h + sp::S;
+        }
+        if let Some(rec) = act {
+            let i = app.clean.lock_ok().items.iter().position(|it| it.path.display().to_string() == rec.key);
+            if let Some(i) = i {
+                let ask = app.clean.lock_ok().items[i].verdict == Verdict::Ask;
+                if rec.action == "keep" {
+                    answer_items(app, &[i], Verdict::Keep);
+                } else if ask {
+                    answer_items(app, &[i], Verdict::Safe);
+                } else {
+                    let mut g = app.clean.lock_ok();
+                    let it = &mut g.items[i];
+                    it.selected = !it.hard_keep && !it.permanent;
+                }
+            }
+            app.ai.done(&rec);
         }
     }
 
@@ -589,10 +627,13 @@ fn scroll_rows(ui: &mut Ui, area: Rect, salt: String, n: usize, row_h: f32, gap:
     }
     let mut child = ui.new_child(UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(area.intersect(ui.clip_rect()));
+    // when it scrolls, the rows stop short of the scroll bar
+    let w = area.width() - if scrolls(area.height(), n, row_h, gap) { sp::M } else { 0.0 };
     ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show(&mut child, |ui| {
         ui.spacing_mut().item_spacing.y = gap;
         for k in 0..n {
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(area.width(), row_h), Sense::hover());
+            // never past the scroll gutter (sp::SCROLL_GUTTER) either
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w.min(ui.available_width()), row_h), Sense::hover());
             if ui.is_rect_visible(rect) {
                 f(ui, k, rect);
             }
@@ -600,22 +641,26 @@ fn scroll_rows(ui: &mut Ui, area: Rect, salt: String, n: usize, row_h: f32, gap:
     });
 }
 
-/// Answer questions: Allow selects them, Keep remembers them as kept.
+/// Whether `n` rows of `row_h`, `gap` apart, are taller than `h`.
+fn scrolls(h: f32, n: usize, row_h: f32, gap: f32) -> bool {
+    n as f32 * row_h + n.saturating_sub(1) as f32 * gap > h + 0.5
+}
+
+/// Answer questions: Clean ticks them, Keep remembers them as kept.
 fn answer_items(app: &mut App, idx: &[usize], v: Verdict) {
     let mut kept = Vec::new();
     {
         let mut g = app.clean.lock_ok();
         for &i in idx {
             let it = &mut g.items[i];
-            // decided here: AI Check's answer for it goes
-            app.ai.answered(&it.path.display().to_string());
+            // AI Check's answer stays: Undo brings the card back with it
             if v == Verdict::Keep {
                 kept.push(it.path.clone());
             }
             it.verdict = v;
             it.by = Who::You;
             it.selected = v == Verdict::Safe;
-            it.reason = if v == Verdict::Safe { "You allowed it".into() } else { "You chose to keep it".into() };
+            it.reason = if v == Verdict::Safe { "You said clean".into() } else { "You said keep".into() };
         }
     }
     if !kept.is_empty() {
@@ -623,8 +668,60 @@ fn answer_items(app: &mut App, idx: &[usize], v: Verdict) {
     }
 }
 
-/// A question card: name, path and the reason on three lines.
-const ASK_H: f32 = 84.0;
+/// "✦ Tip: title. why" wrapped, with its action as a link on the right.
+fn tip_text(t: &aicheck::Rec, w: f32) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    job.append("Tip: ", 0.0, egui::TextFormat { font_id: bold(12.0), color: tint::HEALTH(), ..Default::default() });
+    let title = t.title.trim_end_matches('.');
+    let body = if t.why.is_empty() { format!("{title}.") } else { format!("{title}. {}", t.why) };
+    job.append(&body, 0.0, egui::TextFormat { font_id: ty::label(), color: TEXT_SOFT(), ..Default::default() });
+    job.wrap.max_width = w.max(1.0);
+    job.wrap.max_rows = 3;
+    job
+}
+
+const TIP_LINK_W: f32 = 64.0;
+
+fn tip_height(p: &egui::Painter, t: &aicheck::Rec, w: f32) -> f32 {
+    p.layout_job(tip_text(t, w - 18.0 - TIP_LINK_W)).size().y.max(16.0)
+}
+
+fn tip_row(ui: &mut Ui, r: Rect, t: &aicheck::Rec) -> Option<aicheck::Rec> {
+    let p = ui.painter().clone();
+    icon(&p, Icon::Sparkle, Rect::from_center_size(Pos2::new(r.left() + 6.0, r.top() + 8.0), Vec2::splat(12.0)), tint::HEALTH());
+    let g = p.layout_job(tip_text(t, r.width() - 18.0 - TIP_LINK_W));
+    p.galley(Pos2::new(r.left() + 18.0, r.top()), g, TEXT());
+    link(ui, Pos2::new(r.right(), r.top() + 8.0), Align2::RIGHT_CENTER, &t.label, 12.0).clicked().then(|| t.clone())
+}
+
+/// Undo the person's Clean / Keep: the item goes back to what the rules
+/// said (a question goes back to "Needs your OK").
+fn undo_item(app: &mut App, i: usize) {
+    let mut g = app.clean.lock_ok();
+    if undo(&mut g.items[i]) {
+        cleanup::forget_kept_one(&g.items[i].path);
+    }
+}
+
+/// Put an item back to what the rules said; true when it had been kept.
+fn undo(it: &mut Item) -> bool {
+    let was_kept = it.verdict == Verdict::Keep;
+    it.verdict = it.rule_verdict;
+    it.by = Who::Rule;
+    it.selected = it.rule_verdict == Verdict::Safe && !it.permanent && !it.hard_keep;
+    it.reason = it.rule_reason.clone();
+    was_kept
+}
+
+/// Whether the person decided this item here (it can go back).
+fn undoable(it: &Item) -> bool {
+    it.by == Who::You
+}
+
+/// A question card: name and size, what it is, the path, then a strip with
+/// the agent's answer and Clean / Keep.
+const ASK_H: f32 = 144.0;
+const STRIP_H: f32 = 48.0;
 
 /// Hover: a light highlight, and the path when the row doesn't show it;
 /// double click: show in Finder.
@@ -651,35 +748,72 @@ fn reason_line(ui: &mut Ui, pos: Pos2, align: Align2, it: &Item, color: Color32,
     }
 }
 
-/// One question: name and size, the path, the reason, Allow and Keep.
+/// One question: name and size, what it is, the path; under them a strip
+/// with the agent's answer (its button lit) and Clean / Keep.
 fn ask_card(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let it = app.clean.lock_ok().items[i].clone();
+    let key = it.path.display().to_string();
     let p = ui.painter().clone();
     glass_card(&p, rr, R_CARD, 0.0, false);
     // the AI Check answer under the pointer points at its card
-    if app.ai.hovered.as_deref() == Some(it.path.display().to_string().as_str()) {
+    if app.ai.hovered.as_deref() == Some(key.as_str()) {
         p.rect_stroke(rr, R_CARD, Stroke::new(2.0, with_alpha(tint::HEALTH(), 0.7)), StrokeKind::Inside);
     }
     row_extras(ui, rr, &it, false);
-    let kw = button_width(&p, "Keep", BTN_SECONDARY);
-    let aw = button_width(&p, "Allow", BTN_PRIMARY);
-    let kr = Rect::from_min_size(Pos2::new(rr.right() - sp::M - kw, rr.center().y - 14.0), Vec2::new(kw, 28.0));
-    let ar = Rect::from_min_size(Pos2::new(kr.left() - sp::S - aw, kr.top()), Vec2::new(aw, 28.0));
     let tx = rr.left() + sp::L;
-    let tw = ar.left() - sp::M - tx;
-    // title, path and reason, LINE_GAP apart, the block centred in the card
-    let block = line_h(&p, &ty::title()) + line_h(&p, &mono(11.0)) + line_h(&p, &ty::label()) + 2.0 * sp::LINE_GAP;
-    let t = text_fit(&p, Pos2::new(tx, rr.center().y - block / 2.0), Align2::LEFT_TOP, &it.title, ty::title(), TEXT(), tw - 70.0);
-    let s = p.text(Pos2::new(t.right() + sp::S, t.top()), Align2::LEFT_TOP, human_bytes(it.bytes), ty::body(), TEXT_DIM());
+    let tw = rr.right() - sp::L - tx;
+    // name … size
+    let mut y = rr.top() + sp::L;
+    let sz = p.text(Pos2::new(rr.right() - sp::L, y), Align2::RIGHT_TOP, human_bytes(it.bytes), ty::title(), TEXT());
+    let mut right = sz.left() - sp::M;
     if it.permanent {
-        chip(&p, Pos2::new(s.right() + sp::S, t.top() - 2.0), Align2::LEFT_TOP, "Permanent", CHIP_RISK());
+        right = chip(&p, Pos2::new(right, y - 2.0), Align2::RIGHT_TOP, "Permanent", CHIP_RISK()).left() - sp::S;
     }
-    let path = text_fit(&p, Pos2::new(tx, t.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, &middle_ellipsis(&short_path(&it.path), 80), mono(11.0), TEXT_FAINT(), tw);
-    reason_line(ui, Pos2::new(tx, path.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, &it, TEXT_SOFT(), tw);
-    if pill_button(ui, ar, "Allow", BTN_PRIMARY, true).clicked() {
+    let t = text_fit(&p, Pos2::new(tx, y), Align2::LEFT_TOP, &it.title, ty::title(), TEXT(), right - tx);
+    y = t.bottom() + sp::LINE_GAP;
+    // what it is (the rule's words), then where
+    let what = if it.rule_reason.is_empty() { it.kind.to_string() } else { it.rule_reason.clone() };
+    let w = text_fit(&p, Pos2::new(tx, y), Align2::LEFT_TOP, &what, ty::label(), TEXT_SOFT(), tw);
+    y = w.bottom() + sp::LINE_GAP;
+    text_fit(&p, Pos2::new(tx, y), Align2::LEFT_TOP, &middle_ellipsis(&short_path(&it.path), 90), mono(11.0), TEXT_FAINT(), tw);
+
+    // the strip: the agent's answer, Clean and Keep
+    let strip = Rect::from_min_max(Pos2::new(rr.left() + sp::M, rr.bottom() - sp::M - STRIP_H), Pos2::new(rr.right() - sp::M, rr.bottom() - sp::M));
+    let ans = app.ai.answer_for(&key);
+    let agent = if app.demo { Agent::Claude.name() } else { super::agent::main().name() };
+    let ai = tint::HEALTH();
+    p.rect_filled(strip, R_SMALL, if ans.is_some() { with_alpha(ai, 0.08) } else { white(5) });
+    let keep_lit = ans.as_ref().is_some_and(|a| a.action == "keep");
+    let clean_lit = !keep_lit;
+    let style = |lit: bool| if lit { BTN_PRIMARY } else { BTN_SECONDARY };
+    let cy = strip.center().y;
+    let kw = button_width(&p, "Keep", style(keep_lit));
+    let cw = button_width(&p, "Clean", style(clean_lit));
+    let kr = Rect::from_min_size(Pos2::new(strip.right() - sp::S - kw, cy - sp::CONTROL_H / 2.0), Vec2::new(kw, sp::CONTROL_H));
+    let cr = Rect::from_min_size(Pos2::new(kr.left() - sp::S - cw, kr.top()), Vec2::new(cw, sp::CONTROL_H));
+    let lx = strip.left() + sp::M;
+    let lw = cr.left() - sp::M - lx;
+    let running = app.ai.phase() == aicheck::Phase::Running && app.ai.answer.contains(&key);
+    if let Some(a) = &ans {
+        icon(&p, Icon::Sparkle, Rect::from_center_size(Pos2::new(lx + 6.0, cy), Vec2::splat(12.0)), ai);
+        let verdict = if keep_lit { "keep" } else { "clean" };
+        let mut job = egui::text::LayoutJob::default();
+        job.append(&format!("{}: {verdict}. ", agent), 0.0, egui::TextFormat { font_id: bold(12.0), color: ai, ..Default::default() });
+        job.append(&a.why, 0.0, egui::TextFormat { font_id: ty::label(), color: TEXT(), ..Default::default() });
+        job.wrap.max_width = (lw - 18.0).max(1.0);
+        job.wrap.max_rows = 2;
+        let g = p.layout_job(job);
+        let gr = Align2::LEFT_CENTER.anchor_size(Pos2::new(lx + 18.0, cy), g.size());
+        p.galley(gr.min, g, TEXT());
+    } else if running {
+        spinner(&p, Pos2::new(lx + 6.0, cy), 5.0, ui.input(|i| i.time), ai);
+        p.text(Pos2::new(lx + 18.0, cy), Align2::LEFT_CENTER, format!("{} is checking…", agent), ty::label(), TEXT_DIM());
+        ui.ctx().request_repaint();
+    }
+    if pill_button(ui, cr, "Clean", style(clean_lit), true).clicked() {
         answer_items(app, &[i], Verdict::Safe);
     }
-    if pill_button(ui, kr, "Keep", BTN_SECONDARY, true).clicked() {
+    if pill_button(ui, kr, "Keep", style(keep_lit), true).clicked() {
         answer_items(app, &[i], Verdict::Keep);
     }
 }
@@ -707,7 +841,22 @@ fn safe_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let x = cb.right() + sp::M;
     let (ly1, ly2) = two_lines_y(&p, rr.center().y, &ty::body(), &ty::label());
     text_fit(&p, Pos2::new(x, ly1), Align2::LEFT_CENTER, &it.title, ty::body(), TEXT(), right - x);
-    reason_line(ui, Pos2::new(x, ly2), Align2::LEFT_CENTER, &it, TEXT_DIM(), right - x);
+    let rw = undo_link(app, ui, i, &it, Pos2::new(x, ly2), right - x);
+    reason_line(ui, Pos2::new(x, ly2), Align2::LEFT_CENTER, &it, TEXT_DIM(), rw);
+}
+
+/// "Undo" after the reason of an answered question; the width left for the
+/// reason before it.
+fn undo_link(app: &mut App, ui: &mut Ui, i: usize, it: &Item, at: Pos2, w: f32) -> f32 {
+    if !undoable(it) {
+        return w;
+    }
+    let p = ui.painter().clone();
+    let rw = p.layout_no_wrap(it.reason.clone(), ty::label(), TEXT_DIM()).size().x.min(w - 60.0);
+    if link(ui, Pos2::new(at.x + rw + sp::S, at.y), Align2::LEFT_CENTER, "Undo", 12.0).clicked() {
+        undo_item(app, i);
+    }
+    rw
 }
 
 /// One kept item: a lock, the name, the size, dimmed.
@@ -721,7 +870,8 @@ fn kept_row(app: &mut App, ui: &mut Ui, i: usize, rr: Rect) {
     let x = rr.left() + sp::M + 16.0 + sp::M;
     let (ly1, ly2) = two_lines_y(&p, rr.center().y, &ty::body(), &ty::label());
     text_fit(&p, Pos2::new(x, ly1), Align2::LEFT_CENTER, &it.title, ty::body(), TEXT_DIM(), sz.left() - sp::M - x);
-    reason_line(ui, Pos2::new(x, ly2), Align2::LEFT_CENTER, &it, TEXT_FAINT(), sz.left() - sp::M - x);
+    let rw = undo_link(app, ui, i, &it, Pos2::new(x, ly2), sz.left() - sp::M - x);
+    reason_line(ui, Pos2::new(x, ly2), Align2::LEFT_CENTER, &it, TEXT_FAINT(), rw);
 }
 
 fn confirm(app: &mut App, ui: &mut Ui, r: Rect) {
@@ -927,6 +1077,14 @@ pub fn demo_results() -> cleanup::State {
         mk(Group::Developer, "npm cache", "~/.npm/_cacache", 640_000_000, "Caches", Verdict::Safe, "npm downloads, fetched again when needed", Who::Ai),
         mk(Group::Projects, "old-site · node_modules", "~/Code/old-site/node_modules", 870_000_000, "Build Data", Verdict::Safe, "Node build output, idle 94 days, rebuilds itself", Who::Rule),
     ];
+    let mut items = items;
+    // a question already answered here: "You said clean · Undo"
+    let mut tg = mk(Group::AppCaches, "Telegram cache", "~/Library/Group Containers/6N38VWS5BX.ru.keepcoder.Telegram/stable/postbox/media", 2_300_000_000, "Caches", Verdict::Safe, "You said clean", Who::You);
+    tg.rule_verdict = Verdict::Ask;
+    tg.rule_reason = "Media downloaded from chats".into();
+    items.push(tg);
+    items.push(mk(Group::Developer, "Gradle caches", "~/.gradle/caches", 1_100_000_000, "Caches", Verdict::Safe, "Gradle downloads, fetched again when needed", Who::Rule));
+    items.push(mk(Group::Developer, "CocoaPods cache", "~/Library/Caches/CocoaPods", 310_000_000, "Caches", Verdict::Safe, "Pod downloads, fetched again when needed", Who::Rule));
     cleanup::State { phase: Phase::Results, items, ai_used: true, ..Default::default() }
 }
 
@@ -973,11 +1131,47 @@ fn check_ask(clean: &cleanup::Shared) -> aicheck::Ask {
     aicheck::Ask {
         task: "This is Cleanup's results: caches, logs and leftovers found on this Mac. Some items need the user's OK: say for each whether to clean it (select) or keep it. Then point out anything ticked for cleaning that the user would likely miss (documents, settings, data that cannot be downloaded again), or a big clearly safe win.".into(),
         actions: vec![
-            ("select", "clean it: tick it for cleaning (the user still presses Clean and confirms)", "Allow"),
+            ("select", "clean it: tick it for cleaning (the user still presses Clean and confirms)", "Clean"),
             ("keep", "untick it and remember it as kept", "Keep"),
         ],
         items,
         facts: Vec::new(),
         answer,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn undo_puts_a_question_back() {
+        let mut st = demo_results();
+        let it = st.items.iter_mut().find(|i| i.verdict == Verdict::Ask).unwrap();
+        let rule_reason = it.rule_reason.clone();
+        // the person said keep
+        it.verdict = Verdict::Keep;
+        it.by = Who::You;
+        it.reason = "You said keep".into();
+        assert!(undoable(it));
+        assert!(undo(it));
+        assert_eq!((it.verdict, it.by, it.selected), (Verdict::Ask, Who::Rule, false));
+        assert_eq!(it.reason, rule_reason);
+        assert!(!undoable(it));
+        // a safe item the person kept goes back ticked
+        let it = st.items.iter_mut().find(|i| i.rule_verdict == Verdict::Safe && !i.permanent).unwrap();
+        it.verdict = Verdict::Keep;
+        it.by = Who::You;
+        it.selected = false;
+        assert!(undo(it));
+        assert!(it.selected && it.verdict == Verdict::Safe);
+    }
+
+    #[test]
+    fn rows_leave_room_for_the_scroll_bar_only_when_they_scroll() {
+        assert!(!scrolls(200.0, 2, 84.0, 8.0));
+        assert!(!scrolls(176.0, 2, 84.0, 8.0));
+        assert!(scrolls(200.0, 3, 84.0, 8.0));
+        assert!(!scrolls(0.0, 0, 84.0, 8.0));
     }
 }

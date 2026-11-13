@@ -46,6 +46,25 @@ pub fn reveal(path: &std::path::Path) {
 }
 
 /// The app's own icon as straight RGBA pixels, `px` square. Main thread only.
+/// Finder puts file reference URLs (`file:///.file/id=…`) on the drag and
+/// copy pasteboards: turn one into the plain `file:///path` URL. Other
+/// strings come back as they are.
+#[cfg(target_os = "macos")]
+pub fn file_path_url(url: &str) -> String {
+    use objc2_foundation::{NSString, NSURL};
+    if !url.starts_with("file:///.file/") {
+        return url.to_string();
+    }
+    #[allow(unused_unsafe)]
+    let resolved = unsafe { NSURL::URLWithString(&NSString::from_str(url)).and_then(|u| u.filePathURL()).and_then(|u| u.absoluteString()) };
+    resolved.map(|s| s.to_string()).unwrap_or_else(|| url.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn file_path_url(url: &str) -> String {
+    url.to_string()
+}
+
 #[cfg(target_os = "macos")]
 pub fn app_icon(path: &std::path::Path, px: usize) -> Option<(usize, Vec<u8>)> {
     use objc2::{AllocAnyThread, MainThreadMarker};
@@ -54,6 +73,11 @@ pub fn app_icon(path: &std::path::Path, px: usize) -> Option<(usize, Vec<u8>)> {
     use objc2_app_kit::{NSBitmapImageRep, NSCompositingOperation, NSDeviceRGBColorSpace, NSGraphicsContext};
     use objc2_foundation::{NSPoint, NSRect, NSSize};
     MainThreadMarker::new()?;
+    // an app in Downloads/Desktop/Documents: reading it makes macOS ask
+    // about the folder (the row shows its letter instead)
+    if crate::kit::fs::behind_folder_prompt(path) {
+        return None;
+    }
     let img = NSWorkspace::sharedWorkspace().iconForFile(&NSString::from_str(&path.to_string_lossy()));
     let n = px as isize;
     let rep = unsafe {

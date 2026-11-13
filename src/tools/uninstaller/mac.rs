@@ -75,25 +75,25 @@ mod imp {
         unsafe { NSPasteboard::pasteboardWithName(NSPasteboardNameDrag) }.changeCount()
     }
 
-    /// Calls `f` on every mouse drag and button release in other apps (a
-    /// global event monitor, no permission needed), so nothing has to poll
-    /// while no drag is going on. Must run on the main thread; returns false
-    /// when it couldn't be set up.
-    pub fn on_mouse_drag(f: impl Fn() + 'static) -> bool {
-        use objc2_app_kit::{NSEvent, NSEventMask};
-        if objc2::MainThreadMarker::new().is_none() {
-            return false;
+    /// A global mouse monitor; removed when dropped.
+    pub struct DragHook(objc2::rc::Retained<objc2::runtime::AnyObject>);
+
+    impl Drop for DragHook {
+        fn drop(&mut self) {
+            unsafe { objc2_app_kit::NSEvent::removeMonitor(&self.0) };
         }
+    }
+
+    /// Calls `f` on every mouse drag and button release in other apps (a
+    /// global event monitor: listen-only, no permission needed), so nothing
+    /// has to poll while no drag is going on. Must run on the main thread;
+    /// None when it couldn't be set up. Dropping the hook removes it.
+    pub fn on_mouse_drag(f: impl Fn() + 'static) -> Option<DragHook> {
+        use objc2_app_kit::{NSEvent, NSEventMask};
+        objc2::MainThreadMarker::new()?;
         let block = block2::RcBlock::new(move |_e: std::ptr::NonNull<NSEvent>| f());
         let mask = NSEventMask::LeftMouseDragged | NSEventMask::LeftMouseUp;
-        match NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &block) {
-            Some(m) => {
-                // the monitor lives as long as the app
-                std::mem::forget(m);
-                true
-            }
-            None => false,
-        }
+        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &block).map(DragHook)
     }
 
     /// Files on the drag pasteboard (what is being, or was last, dragged).
@@ -103,7 +103,7 @@ mod imp {
         if let Some(items) = pb.pasteboardItems() {
             for it in items.iter() {
                 if let Some(u) = unsafe { it.stringForType(NSPasteboardTypeFileURL) } {
-                    if let Some(p) = super::file_url_path(&u.to_string()) {
+                    if let Some(p) = super::file_url_path(&crate::kit::macos::file_path_url(&u.to_string())) {
                         out.push(p);
                     }
                 }
@@ -129,8 +129,9 @@ mod imp {
     pub fn drag_change_count() -> isize {
         0
     }
-    pub fn on_mouse_drag(_f: impl Fn() + 'static) -> bool {
-        false
+    pub struct DragHook;
+    pub fn on_mouse_drag(_f: impl Fn() + 'static) -> Option<DragHook> {
+        None
     }
     pub fn drag_files() -> Vec<PathBuf> {
         Vec::new()

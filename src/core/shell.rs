@@ -22,7 +22,7 @@ pub enum Mode {
     /// First-run setup drawn in the root window (screenshots only; the real
     /// app shows setup in its own window).
     Setup,
-    /// The Full Disk Access helper card alone (screenshots only).
+    /// The System Settings helper card alone (screenshots only).
     FdaHelp,
 }
 
@@ -64,7 +64,6 @@ pub struct App {
     visible: bool,
     had_focus: bool,
     last_hide: Instant,
-    pub gear_open: bool,
     pub app_open: bool,
     /// When the window was asked for (dev log: how long the first frame took).
     pub app_asked: Option<Instant>,
@@ -126,7 +125,7 @@ impl App {
         let first_run = !demo && !super::onboard::done_marker().exists();
         let tools_off: Vec<String> = match stored_off {
             Some(v) => v,
-            None if first_run => super::onboard::OFF_AT_FIRST.iter().map(|s| s.to_string()).collect(),
+            None if first_run => super::onboard::off_at_first(tools.iter().map(|t| t.id())),
             None => Vec::new(),
         };
         // what macOS said about Screen Recording at launch (it only applies
@@ -155,7 +154,6 @@ impl App {
             visible: true,
             had_focus: false,
             last_hide: Instant::now(),
-            gear_open: false,
             app_open: false,
             app_asked: None,
             app_focus: false,
@@ -178,6 +176,15 @@ impl App {
             }
         }
         app.apply_view(&opts.view);
+        // screenshots: CMDMEOW_STOPPED=capture,clipboard shows those tools as stopped after an error
+        if let Some(v) = std::env::var_os("CMDMEOW_STOPPED") {
+            let v = v.to_string_lossy().into_owned();
+            for t in &app.tools {
+                if v.split(',').any(|x| x.trim() == t.id()) {
+                    super::tool::stop(t.id());
+                }
+            }
+        }
         // setup is the app window's first state: nothing else opens before it
         if app.setup.is_some() && app.mode != Mode::Setup && app.screenshot.is_none() {
             app.app_open = true;
@@ -313,16 +320,27 @@ impl App {
                 return;
             }
             // first-run setup, one step each
-            "setup" | "setup-tools" | "setup-ai" | "setup-models" | "setup-perms" | "setup-crash" | "setup-ready" => {
+            "setup" | "setup-tools" | "setup-tools-all" | "setup-tools-preview" | "setup-ai" | "setup-models" | "setup-perms" | "setup-crash" | "setup-ready" => {
                 self.mode = Mode::Setup;
                 let step = ["setup", "setup-tools", "setup-ai", "setup-models", "setup-perms", "setup-crash", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
                 self.setup = Some(super::onboard::Setup::new(step));
                 use crate::kit::perms::{Perm, Status};
                 self.perm_watch.demo = Some([(Perm::Screen, Status::Allowed), (Perm::Accessibility, Status::Allowed), (Perm::FullDisk, Status::NotAsked), (Perm::SystemEvents, Status::Denied), (Perm::Microphone, Status::Allowed)].into_iter().collect());
-                for id in super::onboard::OFF_AT_FIRST {
-                    if let Some(i) = self.tool_index(id) {
-                        self.set_tool_on(i, false);
-                    }
+                // the full list, with a few more tools on (the cost line fills up)
+                let all = view == "setup-tools-all";
+                let more = [crate::tools::capture::ID, crate::tools::capture::VIDEO_ID, crate::tools::dictation::ID, crate::tools::system::ID];
+                for i in 0..self.tools.len() {
+                    let id = self.tools[i].id();
+                    // the models step only exists with Dictation on
+                    let on = super::onboard::ON_AT_FIRST.contains(&id) || (all && more.contains(&id)) || (view == "setup-models" && id == crate::tools::dictation::ID);
+                    self.set_tool_on(i, on);
+                }
+                if all || view == "setup-tools-preview" {
+                    let mut s = super::onboard::Setup::new(1);
+                    s.all_tools = all;
+                    // the pointer on "Screenshots & video"
+                    s.demo_hover = (!all).then_some(1);
+                    self.setup = Some(s);
                 }
                 return;
             }
@@ -380,7 +398,8 @@ impl App {
             match a {
                 Action::OpenPage { tool, route } => {
                     if let Some(i) = self.tool_index(&tool).filter(|&i| self.tools[i].has_page()) {
-                        self.tools[i].open_page(&route);
+                        let t = &mut self.tools[i];
+                        let _ = super::tool::guard(t.id(), || t.open_page(&route));
                         self.open_window(ctx, i);
                     }
                 }
@@ -479,7 +498,6 @@ impl App {
 
     pub fn hide(&mut self, ctx: &egui::Context) {
         self.visible = false;
-        self.gear_open = false;
         self.last_hide = Instant::now();
         ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Visible(false));
     }
@@ -489,7 +507,6 @@ impl App {
     pub fn open_window(&mut self, ctx: &egui::Context, page: usize) {
         self.page = page;
         self.settings_open = false;
-        self.gear_open = false;
         if self.screenshot.is_some() {
             return;
         }
@@ -569,10 +586,22 @@ impl App {
                 self.open_settings(ctx, route == "tools");
                 continue;
             }
+            // the app opened again while running (Finder, Spotlight, Dock):
+            // show the window, so it is reachable with the menu bar icon hidden
+            if tool == "window" {
+                if self.setup.is_some() {
+                    self.open_setup_window(ctx);
+                } else {
+                    let page = self.page;
+                    self.open_window(ctx, page);
+                }
+                continue;
+            }
             let found = (0..self.tools.len()).find(|&i| link_matches(self.tools[i].id(), self.tools[i].name(), &tool));
             match found.filter(|&i| self.tool_on(i) && self.tools[i].has_page()) {
                 Some(i) => {
-                    self.tools[i].open_page(&route);
+                    let t = &mut self.tools[i];
+                    let _ = super::tool::guard(t.id(), || t.open_page(&route));
                     self.open_window(ctx, i);
                 }
                 None => eprintln!("[url] no tool page \"{tool}\" to open"),
@@ -583,6 +612,7 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        crate::kit::url_scheme::after_launch();
         self.follow_links(ctx);
         crate::kit::update::tick();
         if crate::kit::update::take_restart() {
@@ -599,7 +629,17 @@ impl eframe::App for App {
         let mut tools_need_frames = false;
         for i in 0..self.tools.len() {
             if self.tool_on(i) {
-                tools_need_frames |= self.tools[i].tick(ctx);
+                let t = &mut self.tools[i];
+                tools_need_frames |= super::tool::guard(t.id(), || t.tick(ctx)).unwrap_or(false);
+            }
+        }
+        // a tool that stopped after an error lets go of what it holds system-wide
+        for id in super::tool::newly_broken() {
+            if let Some(t) = self.tools.iter_mut().find(|t| t.id() == id) {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| t.set_on(false)));
+            }
+            if self.detail.as_ref().is_some_and(|(d, _)| self.tools.get(*d).is_some_and(|t| t.id() == id)) {
+                self.detail = None;
             }
         }
         if (self.app_open || self.setup.is_some() || tools_need_frames) && !self.visible {
@@ -737,7 +777,7 @@ impl eframe::App for App {
             }
             Mode::FdaHelp => {
                 let now = ctx.input(|i| i.time);
-                super::onboard::help_card(ui, full, now + 0.9);
+                super::onboard::help_card(ui, full, now + 0.9, crate::kit::perms::Perm::FullDisk);
             }
             Mode::Setup => {
                 glass::backdrop(ui.painter(), full, 14.0, opaque, t);
@@ -756,7 +796,8 @@ impl eframe::App for App {
         }
         for i in 0..self.tools.len() {
             if self.tool_on(i) {
-                self.tools[i].windows(&ctx, &mut cx);
+                let t = &mut self.tools[i];
+                let _ = super::tool::guard(t.id(), || t.windows(&ctx, &mut cx));
             }
         }
         self.run_actions(&ctx, &mut cx);
@@ -780,7 +821,7 @@ impl eframe::App for App {
             self.prewarm_app(&ctx);
         }
         if self.screenshot.is_none() {
-            super::onboard::fda_helper(self, &ctx);
+            super::onboard::perm_helper(self, &ctx);
         }
         if (&self.tools_off, crate::kit::sound::on()) != (&off_before.0, off_before.1) {
             if let Some(s) = frame.storage_mut() {
@@ -1046,8 +1087,12 @@ fn install_fonts(ctx: &egui::Context) {
     ctx.all_styles_mut(|s| {
         s.visuals.panel_fill = Color32::TRANSPARENT;
         s.visuals.window_fill = glass::BG();
-        s.spacing.scroll.bar_width = 6.0;
+        // one scroll bar everywhere: slim, floating, in a gutter the content
+        // leaves free, so even hovered it never sits on a row or button
+        s.spacing.scroll.bar_width = glass::sp::SCROLL_BAR_W;
         s.spacing.scroll.floating = true;
+        s.spacing.scroll.floating_allocated_width = glass::sp::SCROLL_GUTTER;
+        s.spacing.scroll.bar_outer_margin = (glass::sp::SCROLL_GUTTER - glass::sp::SCROLL_BAR_W) / 2.0;
         s.visuals.widgets.noninteractive.fg_stroke.color = TEXT();
     });
 }

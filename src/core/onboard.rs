@@ -15,8 +15,6 @@ pub const SETUP_H: f32 = 600.0;
 const MAX_STEPS: usize = 7;
 const TOP_H: f32 = 44.0;
 const BOTTOM_H: f32 = 64.0;
-/// Tools that start off on a fresh install (the rest start on).
-pub const OFF_AT_FIRST: [&str; 2] = ["claude", "fan"];
 
 /// What a setup step shows.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -35,7 +33,8 @@ enum Kind {
 fn kinds(app: &App) -> Vec<Kind> {
     let mut v = vec![Kind::Welcome, Kind::Tools, Kind::Agents];
     // only when an enabled tool needs a download (Dictation's speech model)
-    if !models(app).is_empty() {
+    // or already has one; models fetched on first use don't count
+    if has_models_step(app) {
         v.push(Kind::Models);
     }
     v.push(Kind::Perms);
@@ -51,11 +50,17 @@ pub struct Setup {
     pub step: usize,
     /// When the current step appeared (its animations count from here).
     since: f64,
+    /// The step before this one: the cat on the step dots hops from there.
+    from: usize,
+    /// The Tools step shows every tool with a switch, not the goals.
+    pub all_tools: bool,
+    /// Screenshots: the goal card the pointer "is on" (its preview shows).
+    pub demo_hover: Option<usize>,
 }
 
 impl Setup {
     pub fn new(step: usize) -> Self {
-        Setup { step, since: f64::NEG_INFINITY }
+        Setup { step, since: f64::NEG_INFINITY, from: step, all_tools: false, demo_hover: None }
     }
 }
 
@@ -262,13 +267,14 @@ impl PermWatch {
 
     /// Something is animating or waiting: keep frames coming.
     fn busy(&self, now: f64) -> bool {
-        !self.asked.is_empty() || self.allowed_at.values().any(|t| now - t < 0.6)
+        !self.asked.is_empty() || self.allowed_at.values().any(|t| now - t < 0.9)
     }
 }
 
-/// Screen Recording was allowed after launch: capture works after a restart.
+/// Screen Recording was allowed after launch: capture works after a restart
+/// (once: a restarted copy that still doesn't have it won't get it from another).
 pub fn needs_restart(app: &App) -> bool {
-    app.perm_watch.demo.is_none() && app.perm_watch.status(Perm::Screen) == Status::Allowed && !perms::screen_at_launch() && rows(app).iter().any(|r| r.perm == Perm::Screen)
+    app.perm_watch.demo.is_none() && app.perm_watch.status(Perm::Screen) == Status::Allowed && !perms::screen_at_launch() && !perms::relaunched() && rows(app).iter().any(|r| r.perm == Perm::Screen)
 }
 
 // ---------------------------------------------------------------- drawing
@@ -285,6 +291,72 @@ fn pop(x: f32) -> f32 {
     1.0 + (c + 1.0) * (x - 1.0).powi(3) + c * (x - 1.0).powi(2)
 }
 
+/// The mascot's colour: lime on dark, deep green on light (lime on the pale
+/// light backdrop is too faint).
+fn cat_color() -> Color32 {
+    if is_light() { ACCENT() } else { BLUE() }
+}
+
+/// An ear flick starting at `at` (seconds): two quick outward tilts, in radians.
+fn twitch(t: f32, at: f32) -> f32 {
+    let u = (t - at) / 0.36;
+    if !(0.0..1.0).contains(&u) {
+        return 0.0;
+    }
+    (u * std::f32::consts::TAU).sin().abs() * 0.28 * (1.0 - 0.4 * u)
+}
+
+/// How long the cat's hop from one step dot to the next takes.
+const HOP: f32 = 0.32;
+
+/// The step dots along the top. The cat sits on the current step's dot and
+/// hops there from the step before; a dot lights up when the cat lands.
+fn step_dots(p: &egui::Painter, full: Rect, steps: usize, from: usize, step: usize, t: f32) {
+    const D: f32 = 6.0;
+    const GAP: f32 = 22.0;
+    let total = steps as f32 * D + (steps as f32 - 1.0) * GAP;
+    let x = |i: usize| full.center().x - total / 2.0 + D / 2.0 + i as f32 * (D + GAP);
+    let y = full.top() + TOP_H / 2.0 + 9.0;
+    let k = (t / HOP).clamp(0.0, 1.0);
+    let moving = from != step;
+    for i in 0..steps {
+        let lit = i < step || (i == step && (!moving || k >= 1.0)) || (i <= from && i <= step);
+        p.circle_filled(Pos2::new(x(i), y), D / 2.0, if lit { BLUE() } else { white(46) });
+    }
+    // the Welcome step has the big cat: back there, the small one hops
+    // onto its dot and fades away
+    let fade = if step == 0 { 1.0 - ((t - HOP) / 0.2).clamp(0.0, 1.0) } else { 1.0 };
+    if fade <= 0.0 || (step == 0 && !moving) {
+        return;
+    }
+    let m = k * k * (3.0 - 2.0 * k);
+    let cx = egui::lerp(x(from)..=x(step), m);
+    let jump = if moving { (k * std::f32::consts::PI).sin() * 8.0 } else { 0.0 };
+    // a squash as it lands
+    let l = ((t - HOP) / 0.2).clamp(0.0, 1.0);
+    let sq = if moving && l > 0.0 && l < 1.0 { (l * std::f32::consts::PI).sin() * 0.18 } else { 0.0 };
+    let size = 16.0;
+    let (w, h) = (size * (1.0 + sq), size * (1.0 - sq));
+    let bottom = y - D / 2.0 - 3.0 - jump;
+    let r = Rect::from_min_max(Pos2::new(cx - w / 2.0, bottom - h), Pos2::new(cx + w / 2.0, bottom));
+    crate::kit::brand::draw_mascot(p, r, cat_color().gamma_multiply(fade), (0.0, twitch(t, HOP + 0.15)));
+}
+
+/// A soft vertical band of `col`, brightest at `x` and `w` wide, inside `clip`.
+fn glow_band(p: &egui::Painter, clip: Rect, x: f32, w: f32, col: Color32) {
+    let p = p.with_clip_rect(clip.intersect(p.clip_rect()));
+    let mut m = egui::Mesh::default();
+    for (xx, c) in [(x - w / 2.0, Color32::TRANSPARENT), (x, col), (x + w / 2.0, Color32::TRANSPARENT)] {
+        m.colored_vertex(Pos2::new(xx, clip.top()), c);
+        m.colored_vertex(Pos2::new(xx, clip.bottom()), c);
+    }
+    m.add_triangle(0, 1, 2);
+    m.add_triangle(1, 3, 2);
+    m.add_triangle(2, 3, 4);
+    m.add_triangle(3, 5, 4);
+    p.add(m);
+}
+
 /// The whole setup screen in `full` (the app window, or the root in screenshots).
 /// Says whether the person finished it.
 pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
@@ -296,12 +368,18 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     let steps = kinds.len();
     let step = step.min(steps - 1);
     let kind = kinds[step];
+    // a step's animations start when it can be seen: not while the window
+    // is still hidden or covered (they would play to nobody)
+    let unseen = ctx.input(|i| i.viewport().occluded == Some(true) || i.viewport().minimized == Some(true));
     if let Some(s) = app.setup.as_mut() {
-        if s.since == f64::NEG_INFINITY {
+        if s.since == f64::NEG_INFINITY && !unseen {
             s.since = now;
         }
     }
-    let t = (now - app.setup.as_ref().map(|s| s.since).unwrap_or(now)) as f32;
+    let since = app.setup.as_ref().map(|s| s.since).unwrap_or(now);
+    let t = if since == f64::NEG_INFINITY { 0.0 } else { (now - since) as f32 };
+    // screenshots show each step settled, not mid-animation
+    let t = if app.demo { t + 5.0 } else { t };
     // setup lives in the app window: a centered column when that is wider
     let win = full;
     let full = Rect::from_center_size(win.center(), Vec2::new(win.width().min(SETUP_W + 80.0), win.height()));
@@ -310,19 +388,12 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     if ui.interact(drag, ui.scope_id().with("setup-drag"), Sense::click_and_drag()).drag_started() {
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
-    // step dots
-    let dw = |i: usize| if i == step { 22.0 } else { 6.0 };
-    let total: f32 = (0..steps).map(dw).sum::<f32>() + 6.0 * (steps as f32 - 1.0);
-    let mut x = full.center().x - total / 2.0;
-    for i in 0..steps {
-        let w = egui::lerp(6.0..=dw(i), ease(t * 3.0).max(if i == step { 0.0 } else { 1.0 }));
-        let r = Rect::from_min_size(Pos2::new(x, full.top() + TOP_H / 2.0 - 3.0), Vec2::new(w, 6.0));
-        p.rect_filled(r, 3.0, if i <= step { BLUE() } else { white(46) });
-        x += w + 6.0;
-    }
+    let from = app.setup.as_ref().map(|s| s.from).unwrap_or(step).min(steps - 1);
+    step_dots(&p, full, steps, from, step, t);
     let body = Rect::from_min_max(Pos2::new(full.left() + 40.0, full.top() + TOP_H), Pos2::new(full.right() - 40.0, full.bottom() - BOTTOM_H));
-    // the step slides in from the right
-    let slide = (1.0 - ease(t * 2.2)) * 18.0;
+    // the step slides in from the side it comes from
+    let side = if from > step { -1.0 } else { 1.0 };
+    let slide = (1.0 - ease(t * 2.2)) * 18.0 * side;
     let body = body.translate(Vec2::new(slide, 0.0));
     let mut next = false;
     let mut restart_now = false;
@@ -354,7 +425,13 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     if let Some(label) = label {
         let w = button_width(&p, label, BTN_PRIMARY).max(110.0);
         let r = Rect::from_min_size(Pos2::new(bar.right() - w, bar.center().y - 16.0), Vec2::new(w, 32.0));
-        if pill_button(ui, r, label, BTN_PRIMARY, true).clicked() {
+        // nothing to set up with no tool on
+        let can = kind != Kind::Tools || (0..app.tools.len()).any(|i| app.tool_on(i));
+        if kind == Kind::Tools {
+            let left = bar.left() + 70.0 + sp::L;
+            cost_line(app, ui, Rect::from_min_max(Pos2::new(left, bar.top()), Pos2::new(r.left() - sp::L, bar.bottom())));
+        }
+        if pill_button(ui, r, label, BTN_PRIMARY, can).clicked() && can {
             if kind == Kind::Ready {
                 finish = if needs_restart(app) { Finish::Restart } else { Finish::Panel };
             } else {
@@ -395,6 +472,7 @@ pub enum Finish {
 fn go(app: &mut App, step: usize) {
     let last = kinds(app).len() - 1;
     if let Some(s) = app.setup.as_mut() {
+        s.from = s.step;
         s.step = step.min(last);
         s.since = f64::NEG_INFINITY;
         if !app.demo {
@@ -453,11 +531,12 @@ fn brand_glyph(p: &egui::Painter, c: Pos2, size: f32, col: Color32) {
 fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let p = ui.painter().clone();
     let c = Pos2::new(body.center().x, body.top() + 150.0);
-    // the ring draws itself, then the tools land on it one by one
-    let ring = 86.0;
+    // the cat peeks out ears first, flicks them, then hops up; the ring
+    // draws itself round it and the tools land on it one by one
+    let ring = 104.0;
     crate::kit::glass::stroke_circle(&p, c, ring, Stroke::new(2.0, white(14)));
     let start = -std::f32::consts::FRAC_PI_2;
-    let k = ease(t / 1.4);
+    let k = ease((t - 1.15) / 0.9);
     if k > 0.0 {
         p.add(egui::Shape::line(arc_points(c, ring, start, start + std::f32::consts::TAU * k, 96), Stroke::new(2.0, BLUE())));
     }
@@ -465,7 +544,7 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     for (i, tool) in app.tools.iter().enumerate() {
         let a = start + i as f32 / n as f32 * std::f32::consts::TAU;
         let at = c + Vec2::new(a.cos(), a.sin()) * ring;
-        let s = pop((t - 0.2 - 0.12 * i as f32) / 0.45);
+        let s = pop((t - 1.25 - 0.07 * i as f32) / 0.4);
         if s <= 0.0 {
             continue;
         }
@@ -473,12 +552,53 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
         crate::kit::glass::stroke_circle(&p, at, 15.0 * s, Stroke::new(1.0, white(36)));
         icon(&p, tool.badge().icon, Rect::from_center_size(at, Vec2::splat(14.0 * s)), TEXT_SOFT());
     }
-    let bob = if t > 1.8 { ((t - 1.8) * 1.6).sin() * 3.0 } else { 0.0 };
-    app_mark(&p, c + Vec2::new(0.0, bob), 96.0, ease((t - 0.3) / 1.2));
-    let name = p.text(Pos2::new(c.x, c.y + 118.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT());
+    let size = 128.0;
+    // peek() is laid out for a 96 pt cat
+    let (rise, sx, sy) = peek(t);
+    let rise = rise * size / 96.0;
+    let floor = c.y + size / 2.0;
+    let (w, h) = (size * sx, size * sy);
+    let cat = Rect::from_min_max(Pos2::new(c.x - w / 2.0, floor - rise - h), Pos2::new(c.x + w / 2.0, floor - rise));
+    // below the floor the cat is hidden: that's where it peeks out from
+    let clip = Rect::from_min_max(Pos2::new(c.x - 90.0, c.y - 130.0), Pos2::new(c.x + 90.0, floor));
+    let ears = (twitch(t, 0.42) + twitch(t, 2.3), twitch(t, 0.6) + twitch(t, 1.55));
+    crate::kit::brand::draw_mascot(&p.with_clip_rect(clip.intersect(p.clip_rect())), cat, cat_color(), ears);
+    let name = p.text(Pos2::new(c.x, c.y + ring + 32.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT());
     p.text(Pos2::new(c.x, name.bottom() + sp::LINE_GAP), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(13.0), TEXT_FAINT());
-    let r = Rect::from_center_size(Pos2::new(c.x, c.y + 214.0), Vec2::new(128.0, 40.0));
+    let r = Rect::from_center_size(Pos2::new(c.x, c.y + ring + 128.0), Vec2::new(128.0, 40.0));
     pill_button(ui, r, "Set up", BTN_PRIMARY, true).clicked()
+}
+
+/// The Welcome cat at `t`: how far it is lifted from where it rests (0 =
+/// resting, negative = still below the floor) and its squash (width, height).
+fn peek(t: f32) -> (f32, f32, f32) {
+    let lerp = |a: f32, b: f32, x: f32| a + (b - a) * x.clamp(0.0, 1.0);
+    match t {
+        // hidden, then the ears come up over the floor
+        t if t < 0.45 => (lerp(-100.0, -72.0, ease((t - 0.1) / 0.35)), 1.0, 1.0),
+        // looking round
+        t if t < 0.85 => (-72.0, 1.0, 1.0),
+        // crouch
+        t if t < 0.97 => {
+            let x = ease((t - 0.85) / 0.12);
+            (lerp(-72.0, -80.0, x), 1.0 + 0.04 * x, 1.0 - 0.08 * x)
+        }
+        // jump, stretched
+        t if t < 1.2 => {
+            let x = ease((t - 0.97) / 0.23);
+            (lerp(-80.0, 14.0, x), lerp(1.04, 0.96, x), lerp(0.92, 1.05, x))
+        }
+        // fall back and land with a squash
+        t if t < 1.36 => {
+            let x = (t - 1.2) / 0.16;
+            (lerp(14.0, 0.0, x * x), 1.0, 1.0)
+        }
+        t => {
+            let s = pop((t - 1.36) / 0.3);
+            let sq = if s < 1.0 { (1.0 - s) * 0.14 } else { 0.0 };
+            (0.0, 1.0 + sq, 1.0 - sq)
+        }
+    }
 }
 
 /// Crash reports, asked once (official builds only). Returns true when the
@@ -554,75 +674,899 @@ fn sections(app: &App) -> Vec<&'static str> {
     out
 }
 
+/// A ready-made set of tools on the Tools step: picking it turns them all on.
+pub struct Goal {
+    pub name: &'static str,
+    pub tools: &'static [&'static str],
+}
+
+/// What people come for. Every tool but Fan Control is in one goal; Fan
+/// Control (it needs an admin helper) is only in the full list.
+pub const GOALS: [Goal; 6] = {
+    use crate::tools::*;
+    [
+        Goal { name: "Clean my Mac", tools: &[cleanup::ID, lens::ID, uninstaller::ID] },
+        Goal { name: "Screenshots & video", tools: &[capture::ID, capture::VIDEO_ID, capture::SHARING_ID] },
+        Goal { name: "Clipboard", tools: &[clipboard::ID] },
+        Goal { name: "Voice typing", tools: &[dictation::ID] },
+        Goal { name: "Watch my Mac", tools: &[system::ID, startup::ID, displays::ID] },
+        Goal { name: "For developers", tools: &[claude::ID, keep_awake::ID] },
+    ]
+};
+
+/// Tools on in a fresh install: "Clean my Mac" and Clipboard. One
+/// permission (Full Disk Access), no downloads, no shortcuts taken.
+pub const ON_AT_FIRST: [&str; 4] = [crate::tools::cleanup::ID, crate::tools::lens::ID, crate::tools::uninstaller::ID, crate::tools::clipboard::ID];
+
+/// The ids to save as switched off on a fresh install.
+pub fn off_at_first<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
+    ids.filter(|id| !ON_AT_FIRST.contains(id)).map(str::to_string).collect()
+}
+
+/// Indexes of a goal's tools that this build has.
+fn goal_tools(app: &App, g: &Goal) -> Vec<usize> {
+    g.tools.iter().filter_map(|id| app.tool_index(id)).collect()
+}
+
+/// What the switched-on tools will take: permissions (required first, then
+/// optional), bytes to download, and global shortcuts.
+#[derive(Debug, Default, PartialEq)]
+pub struct Cost {
+    pub must: Vec<Perm>,
+    pub may: Vec<Perm>,
+    pub download: u64,
+    pub keys: Vec<String>,
+}
+
+fn cost(app: &App) -> Cost {
+    use crate::core::tool::ModelState;
+    let rows = rows(app);
+    let must = rows.iter().filter(|r| !r.optional).map(|r| r.perm).collect();
+    let may = rows.iter().filter(|r| r.optional).map(|r| r.perm).collect();
+    let download = models(app).iter().filter(|r| !matches!(r.model.state, ModelState::Ready | ModelState::OnFirstUse)).map(|r| r.model.bytes).sum();
+    let mut keys: Vec<String> = Vec::new();
+    for i in (0..app.tools.len()).filter(|&i| app.tool_on(i)) {
+        for (_, k) in app.tools[i].setup_shortcuts() {
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+        }
+    }
+    Cost { must, may, download, keys }
+}
+
+/// 0→1 over `dur` seconds from when `id` was first drawn (again): things
+/// that just appeared drop or pop in. Screenshots show them settled.
+fn appear(ctx: &egui::Context, id: egui::Id, now: f64, dur: f32, demo: bool) -> f32 {
+    if demo {
+        return 1.0;
+    }
+    let (first, last) = ctx.data_mut(|d| d.get_temp::<(f64, f64)>(id)).unwrap_or((now, now));
+    // not drawn for a moment: it was gone, so it appears afresh
+    let first = if now - last > 0.2 { now } else { first };
+    ctx.data_mut(|d| d.insert_temp(id, (first, now)));
+    let k = ((now - first) as f32) / dur;
+    if k < 1.0 {
+        ctx.request_repaint();
+    }
+    ease(k)
+}
+
+const PANEL_W: f32 = 252.0;
+
 fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let p = ui.painter().clone();
     let on = (0..app.tools.len()).filter(|&i| app.tool_on(i)).count();
+    let left = Rect::from_min_max(body.min, Pos2::new(body.right() - PANEL_W - 28.0, body.bottom()));
     let head = body.top() + 6.0;
-    let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Tools", bold(22.0), TEXT());
-    p.text(Pos2::new(g.right() + 10.0, g.bottom() - 4.0), Align2::LEFT_BOTTOM, format!("{on}/{}", app.tools.len()), mono(13.0), TEXT_FAINT());
-    let secs = sections(app);
-    let cols = secs.len().max(1) as f32;
-    let gap = 12.0;
-    let cw = (body.width() - gap * (cols - 1.0)) / cols;
+    let g = p.text(Pos2::new(left.left(), head), Align2::LEFT_TOP, "What do you need?", bold(22.0), TEXT());
+    // the count rolls to its new number like an odometer
+    let shown = ui.ctx().animate_value_with_time(ui.scope_id().with("setup-tools-on"), on as f32, 0.28);
+    rolling_count(&p, Pos2::new(g.right() + 10.0, g.bottom() - 4.0), shown, app.tools.len());
+    let all = app.setup.as_ref().is_some_and(|s| s.all_tools);
+    let seg = Rect::from_min_size(Pos2::new(left.right() - 150.0, g.center().y - sp::CONTROL_H / 2.0), Vec2::new(150.0, sp::CONTROL_H));
+    if let Some(k) = segmented(ui, seg, ui.scope_id().with("setup-tools-mode"), &["Goals", "All tools"], all as usize) {
+        if let Some(s) = app.setup.as_mut() {
+            s.all_tools = k == 1;
+        }
+    }
     let top = g.bottom() + 20.0;
+    let area = Rect::from_min_max(Pos2::new(left.left(), top), left.max);
+    // what the pointer is on: its tools' widgets show on the right
+    let hot = if all { all_tools(app, ui, area, t) } else { goal_cards(app, ui, area, t) };
+    let demo_hover = app.setup.as_ref().and_then(|s| s.demo_hover).filter(|_| app.demo);
+    let hot = hot.or_else(|| demo_hover.map(|k| goal_tools(app, &GOALS[k])));
+    mini_panel(app, ui, Rect::from_min_max(Pos2::new(body.right() - PANEL_W, body.top() + 6.0), body.max), t, hot);
+}
+
+/// The goal cards. Returns the tools of the card under the pointer.
+fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) -> Option<Vec<usize>> {
+    let p = ui.painter().clone();
+    let gap = sp::M;
+    let cw = (area.width() - gap) / 2.0;
+    // three rows fill the step
+    let ch = ((area.height() - sp::L - gap * 2.0) / 3.0).clamp(96.0, 116.0);
+    // the cards' loops always run; screenshots catch them mid-way. The
+    // clock wraps at a multiple of every loop's period, so f32 stays exact.
+    let now = if app.demo { 2.0 } else { (ui.ctx().input(|i| i.time) % 32760.0) as f32 };
+    if !app.demo {
+        animate(ui.ctx());
+    }
     let mut flip = None;
+    let mut hot = None;
+    for (k, goal) in GOALS.iter().enumerate() {
+        let idx = goal_tools(app, goal);
+        if idx.is_empty() {
+            continue;
+        }
+        let picked = idx.iter().all(|&i| app.tool_on(i));
+        let a = ease((t - 0.05 * k as f32) / 0.4);
+        let (col, row) = ((k % 2) as f32, (k / 2) as f32);
+        let r = Rect::from_min_size(Pos2::new(area.left() + col * (cw + gap), area.top() + row * (ch + gap) + (1.0 - a) * 8.0), Vec2::new(cw, ch));
+        let id = ui.scope_id().with(("setup-goal", goal.name));
+        let resp = ui.interact(r, id, Sense::click());
+        let s = ui.ctx().animate_bool_with_time(id.with("on"), picked, 0.18);
+        let hov = ui.ctx().animate_bool(id.with("h"), resp.hovered());
+        let r = r.translate(Vec2::new(0.0, -hov));
+        let fill = lerp_color(lerp_color(CARD(), white(30), hov * 0.15), with_alpha(BLUE(), 0.10), s);
+        p.rect_filled(r, 12.0, fill.gamma_multiply(a));
+        p.rect_stroke(r, 12.0, Stroke::new(1.0, lerp_color(CARD_EDGE(), with_alpha(BLUE(), 0.55), s).gamma_multiply(a)), StrokeKind::Inside);
+        // the goal's tools, as their chips; the check and name sit below,
+        // so the space right of the chips is free for the goal's loop
+        let inner = r.shrink(14.0);
+        let jolt = ui.ctx().animate_bool_with_time(id.with("jolt"), picked, 0.32);
+        let bump = 4.0 * jolt * (1.0 - jolt) * if picked { 0.12 } else { -0.08 };
+        let ny = inner.bottom() - 8.0;
+        let chips: Vec<(Rect, &'static str)> = idx
+            .iter()
+            .enumerate()
+            .map(|(j, &i)| {
+                let c = Pos2::new(inner.left() + 15.0 + j as f32 * 36.0, inner.top() + 15.0);
+                (Rect::from_center_size(c, Vec2::splat(30.0)), app.tools[i].id())
+            })
+            .collect();
+        let last = chips.last().map_or(inner.left(), |c| c.0.right());
+        let free = Rect::from_min_max(Pos2::new(last + 14.0, inner.top() - 2.0), Pos2::new(inner.right(), ny - 12.0));
+        card_loop(&p.with_clip_rect(r), k, r, free, &chips, now);
+        for (&i, &(cr, tid)) in idx.iter().zip(&chips) {
+            let b = app.tools[i].badge();
+            let (off, sc) = chip_motion(tid, now);
+            let cr = Rect::from_center_size(cr.center() + off, cr.size() * sc * (1.0 + bump));
+            tool_chip(&p, cr, b.icon, b.color);
+        }
+        if resp.hovered() {
+            hot = Some(idx.clone());
+        }
+        // check, then name, bottom left
+        let cc = Pos2::new(inner.left() + 9.0, ny);
+        p.circle_stroke(cc, 8.5, Stroke::new(1.5, lerp_color(white(40), BLUE(), s)));
+        if s > 0.01 {
+            let z = pop(s);
+            p.circle_filled(cc, 9.0 * z, BLUE());
+            check(&p, cc, 7.0 * z, ON_ACTION);
+        }
+        // and what it will ask macOS for, bottom right
+        let mut px = inner.right();
+        let mut need: Vec<Perm> = Vec::new();
+        for &i in &idx {
+            for n in app.tools[i].needs() {
+                if !n.optional && !need.contains(&n.perm) {
+                    need.push(n.perm);
+                }
+            }
+        }
+        for perm in need.iter().rev() {
+            let ir = Rect::from_min_size(Pos2::new(px - 13.0, ny - 6.5), Vec2::splat(13.0));
+            icon(&p, perm.icon(), ir, TEXT_FAINT());
+            ui.interact(ir, id.with(("perm", perm.name())), Sense::hover()).on_hover_text(perm.name());
+            px -= 17.0;
+        }
+        let nx = inner.left() + 26.0;
+        text_fit(&p, Pos2::new(nx, ny), Align2::LEFT_CENTER, goal.name, bold(14.0), TEXT(), px - nx - 6.0);
+        if resp.clicked() {
+            flip = Some((idx, !picked));
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+    if let Some((idx, o)) = flip {
+        for i in idx {
+            app.set_tool_on(i, o);
+        }
+    }
+    hot
+}
+
+/// A value through `(phase, value)` keys, eased between neighbours; holds
+/// the last value past the last key.
+fn keys(ph: f32, k: &[(f32, f32)]) -> f32 {
+    for w in k.windows(2) {
+        let ((a, va), (b, vb)) = (w[0], w[1]);
+        if ph <= b {
+            let x = if b > a { ((ph - a) / (b - a)).clamp(0.0, 1.0) } else { 1.0 };
+            return va + (vb - va) * x * x * (3.0 - 2.0 * x);
+        }
+    }
+    k.last().map_or(0.0, |l| l.1)
+}
+
+/// `v` turned by `a` radians round the origin.
+fn turn(v: Vec2, a: f32) -> Vec2 {
+    let (s, c) = a.sin_cos();
+    Vec2::new(v.x * c - v.y * s, v.x * s + v.y * c)
+}
+
+/// How a goal card's chip moves with its loop: an offset and a scale.
+fn chip_motion(tool: &str, now: f32) -> (Vec2, Vec2) {
+    use crate::tools::*;
+    match tool {
+        // the bin dips as each piece of junk lands
+        uninstaller::ID => {
+            let ph = (now / 4.8).fract();
+            let b = [0.19f32, 0.52, 0.85].iter().map(|&a| (1.0 - (ph - a).abs() / 0.025).max(0.0)).fold(0.0, f32::max);
+            (Vec2::new(0.0, 2.0 * b), Vec2::new(1.0, 1.0 - 0.07 * b))
+        }
+        // the clipboard takes each clip in
+        clipboard::ID => {
+            let b = keys((now / 1.5).fract(), &[(0.0, 0.0), (0.25, 0.0), (0.32, 1.0), (0.45, 0.0)]);
+            (Vec2::ZERO, Vec2::splat(1.0 + 0.12 * b))
+        }
+        // the cup takes a sip as the limit resets
+        keep_awake::ID => {
+            let y = keys((now / 5.0).fract(), &[(0.0, 0.0), (0.86, 0.0), (0.90, -3.0), (0.93, 0.5), (0.96, 0.0)]);
+            (Vec2::new(0.0, y), Vec2::splat(1.0))
+        }
+        _ => (Vec2::ZERO, Vec2::splat(1.0)),
+    }
+}
+
+/// Goal card `k`'s loop, `k` in [`GOALS`] order: wordless and always
+/// running, in `free` (right of the chips) at `now` seconds.
+fn card_loop(p: &egui::Painter, k: usize, card: Rect, free: Rect, chips: &[(Rect, &str)], now: f32) {
+    use crate::tools::*;
+    if free.width() < 40.0 || free.height() < 30.0 {
+        return;
+    }
+    let chip = |id: &str| chips.iter().find(|c| c.1 == id).map(|c| c.0);
+    match GOALS[k].tools.first().copied() {
+        Some(cleanup::ID) => {
+            if let Some(bin) = chip(uninstaller::ID).or(chips.last().map(|c| c.0)) {
+                loop_clean(p, free, bin, now);
+            }
+        }
+        Some(capture::ID) => loop_capture(p, card, free, now),
+        Some(clipboard::ID) => loop_clipboard(p, free, now),
+        Some(dictation::ID) => {
+            if let Some(mic) = chip(dictation::ID) {
+                loop_voice(p, free, mic, now);
+            }
+        }
+        Some(system::ID) => loop_watch(p, free, chips.first().map_or(free.center().y, |c| c.0.center().y), now),
+        Some(claude::ID) => loop_dev(p, free, now),
+        _ => {}
+    }
+}
+
+/// Clean my Mac: junk arcs into the bin, the disk bar shrinks, then a check.
+fn loop_clean(p: &egui::Painter, f: Rect, bin: Rect, now: f32) {
+    use std::f32::consts::PI;
+    let ph = (now / 4.8).fract();
+    let w = f.width().min(64.0);
+    let bar = Rect::from_min_size(Pos2::new(f.right() - w, f.bottom() - 5.0), Vec2::new(w, 5.0));
+    p.rect_filled(bar, 2.5, white(20));
+    let v = keys(ph, &[(0.0, 0.92), (0.17, 0.92), (0.21, 0.74), (0.50, 0.74), (0.54, 0.58), (0.83, 0.58), (0.87, 0.44), (0.94, 0.44), (1.0, 0.92)]);
+    p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(w * v, 5.0)), 2.5, tint::CLEANUP());
+    let s = keys(ph, &[(0.0, 0.0), (0.86, 0.0), (0.89, 1.3), (0.92, 1.0), (0.96, 1.0), (1.0, 0.0)]);
+    if s > 0.01 {
+        let c = Pos2::new(bar.left() - 12.0, bar.center().y);
+        p.circle_filled(c, 6.0 * s, tint::CLEANUP());
+        check(p, c, 6.5 * s, ON_ACTION);
+    }
+    let cols = [tint::CLEANUP(), tint::CAPTURE(), tint::HEALTH()];
+    for (j, (at, dx, dy, spin)) in [(0.02f32, 0.0f32, 0.0f32, -1.0f32), (0.35, -12.0, 8.0, 1.2), (0.68, 4.0, -6.0, -0.9)].into_iter().enumerate() {
+        let q = (ph - at) / 0.19;
+        if !(0.0..1.0).contains(&q) {
+            continue;
+        }
+        let m = keys(q, &[(0.0, 0.0), (0.9, 1.0)]);
+        let a0 = Pos2::new(f.right() - 8.0 + dx, f.center().y - 6.0 + dy);
+        let e = bin.center();
+        let c = Pos2::new((a0.x + e.x) / 2.0, f.top() - 16.0);
+        let u = 1.0 - m;
+        let pos = Pos2::new(u * u * a0.x + 2.0 * u * m * c.x + m * m * e.x, u * u * a0.y + 2.0 * u * m * c.y + m * m * e.y);
+        let sc = if q < 0.9 { 1.0 - 0.3 * m } else { 0.7 - 0.4 * (q - 0.9) / 0.1 };
+        let al = (q / 0.12).min(1.0) * if q > 0.9 { 1.0 - (q - 0.9) / 0.1 } else { 1.0 };
+        let ang = spin * 1.2 * PI * m;
+        let at = |x: f32, y: f32| pos + turn(Vec2::new(x, y) * sc, ang);
+        let col = cols[j];
+        let fill = with_alpha(col, 0.25 * al);
+        let st = Stroke::new(1.2, with_alpha(col, al));
+        match j {
+            // a document with a folded corner
+            0 => {
+                p.add(egui::Shape::convex_polygon(vec![at(-5.0, -6.0), at(1.0, -6.0), at(5.0, -2.0), at(5.0, 6.0), at(-5.0, 6.0)], fill, st));
+                p.add(egui::Shape::line(vec![at(1.0, -6.0), at(1.0, -2.0), at(5.0, -2.0)], st));
+            }
+            // an app
+            1 => {
+                let pts = rounded_points(Rect::from_center_size(Pos2::ZERO, Vec2::splat(10.0)), 3.0).into_iter().map(|q| at(q.x, q.y)).collect();
+                p.add(egui::Shape::convex_polygon(pts, fill, st));
+            }
+            // a folder
+            _ => {
+                p.add(egui::Shape::convex_polygon(vec![at(-6.0, -5.0), at(-1.5, -5.0), at(0.0, -3.0), at(-6.0, -3.0)], fill, st));
+                p.add(egui::Shape::convex_polygon(vec![at(-6.0, -3.0), at(6.0, -3.0), at(6.0, 5.0), at(-6.0, 5.0)], fill, st));
+            }
+        }
+    }
+}
+
+/// Screenshots: a crosshair drags a selection, the rest dims, handles, a
+/// flash, and the shot shrinks to a thumbnail that slides away.
+fn loop_capture(p: &egui::Painter, card: Rect, f: Rect, now: f32) {
+    let ph = (now / 3.6).fract();
+    if ph >= 0.9 {
+        return;
+    }
+    let w = (f.width() - 6.0).min(110.0);
+    let h = (w * 0.6).min(f.height() - 10.0);
+    let a0 = Pos2::new(f.left() + 2.0, f.top() + 4.0);
+    let full = Rect::from_min_size(a0, Vec2::new(w, h));
+    let (sel, al) = if ph < 0.6 {
+        let g = ease(ph / 0.34);
+        (Rect::from_min_size(a0, Vec2::new(w * g, h * g)), 1.0)
+    } else {
+        let m = keys(ph, &[(0.6, 0.0), (0.8, 1.0)]);
+        let to = Pos2::new(f.right() - w * 0.18 - 2.0, f.bottom() - h * 0.18);
+        let mut c = full.center().lerp(to, m);
+        let n = ((ph - 0.8) / 0.1).clamp(0.0, 1.0);
+        c.x += 30.0 * ease(n);
+        (Rect::from_center_size(c, full.size() * (1.0 - 0.64 * m)), 1.0 - n)
+    };
+    let dim = keys(ph, &[(0.0, 0.0), (0.06, 0.28), (0.52, 0.28), (0.60, 0.0)]) * if is_light() { 0.45 } else { 1.0 };
+    if dim > 0.003 && sel.width() > 0.5 {
+        let shade = Color32::from_black_alpha((dim * 255.0) as u8);
+        let top = CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 };
+        let bottom = CornerRadius { nw: 0, ne: 0, sw: 12, se: 12 };
+        p.rect_filled(Rect::from_min_max(card.min, Pos2::new(card.right(), sel.top())), top, shade);
+        p.rect_filled(Rect::from_min_max(Pos2::new(card.left(), sel.bottom()), card.max), bottom, shade);
+        p.rect_filled(Rect::from_min_max(Pos2::new(card.left(), sel.top()), Pos2::new(sel.left(), sel.bottom())), 0.0, shade);
+        p.rect_filled(Rect::from_min_max(Pos2::new(sel.right(), sel.top()), Pos2::new(card.right(), sel.bottom())), 0.0, shade);
+    }
+    let col = tint::CAPTURE();
+    if ph >= 0.54 {
+        p.rect_filled(sel, 2.0, with_alpha(col, 0.18 * al));
+    }
+    if ph < 0.53 {
+        let path = vec![sel.left_top(), sel.right_top(), sel.right_bottom(), sel.left_bottom(), sel.left_top()];
+        p.extend(egui::Shape::dashed_line(&path, Stroke::new(1.0, col), 3.0, 2.0));
+    } else {
+        p.rect_stroke(sel, 2.0, Stroke::new(1.0, with_alpha(col, al)), StrokeKind::Inside);
+    }
+    let ink = if is_light() { TEXT() } else { Color32::WHITE };
+    let ca = keys(ph, &[(0.0, 1.0), (0.40, 1.0), (0.46, 0.0)]);
+    if ca > 0.0 {
+        let c = sel.right_bottom();
+        let st = Stroke::new(1.0, with_alpha(ink, ca));
+        p.line_segment([c - Vec2::new(7.5, 0.0), c + Vec2::new(7.5, 0.0)], st);
+        p.line_segment([c - Vec2::new(0.0, 7.5), c + Vec2::new(0.0, 7.5)], st);
+    }
+    let ha = keys(ph, &[(0.0, 0.0), (0.36, 0.0), (0.40, 1.0), (0.52, 1.0), (0.56, 0.0)]);
+    if ha > 0.0 {
+        for c in [sel.left_top(), sel.right_top(), sel.left_bottom(), sel.right_bottom()] {
+            p.rect_filled(Rect::from_center_size(c, Vec2::splat(4.5)), 1.0, with_alpha(ink, ha));
+        }
+    }
+    let fl = keys(ph, &[(0.0, 0.0), (0.52, 0.0), (0.54, 0.22), (0.64, 0.0)]);
+    if fl > 0.0 {
+        p.rect_filled(card, 12.0, Color32::from_white_alpha((fl * 255.0) as u8));
+    }
+}
+
+/// Clipboard: clips of different kinds fly in and stack; the oldest drops off.
+fn loop_clipboard(p: &egui::Painter, f: Rect, now: f32) {
+    let ph = (now / 6.0).fract();
+    let size = Vec2::new(56.0f32.min(f.width() * 0.5), 34.0);
+    let base = Pos2::new(f.left() + f.width() * 0.45, f.top() + 4.0 + size.y / 2.0);
+    let mut items: Vec<(f32, usize)> = (0..4).map(|i| ((ph - i as f32 * 0.25).rem_euclid(1.0), i)).collect();
+    // oldest first, so the newest lands on top
+    items.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (q, i) in items {
+        if q >= 0.83 {
+            continue;
+        }
+        let r0 = [-6.0f32, 4.0, -3.0, 5.0][i];
+        let lv = |n: f32| (Vec2::new(-6.0 * n, 6.0 * n), r0 - 2.0 * n, 1.0 - 0.03 * n);
+        let ((off, deg, sc), al) = if q < 0.08 {
+            let m = ease(q / 0.08);
+            ((Vec2::new(-110.0, 10.0) * (1.0 - m), -12.0 + (r0 + 12.0) * m, 0.6 + 0.4 * m), m)
+        } else if q < 0.25 {
+            (lv(0.0), 1.0)
+        } else if q < 0.33 {
+            (lv(ease((q - 0.25) / 0.08)), 1.0)
+        } else if q < 0.5 {
+            (lv(1.0), 1.0)
+        } else if q < 0.58 {
+            let m = ease((q - 0.5) / 0.08);
+            (lv(1.0 + m), 1.0 - 0.15 * m)
+        } else if q < 0.75 {
+            (lv(2.0), 0.85)
+        } else {
+            let m = ease((q - 0.75) / 0.08);
+            let (o, d, s) = lv(2.0);
+            ((o + Vec2::new(-18.0, 28.0) * m, d - 8.0 * m, s - 0.04 * m), 0.85 * (1.0 - m))
+        };
+        clip_card(p, base + off, size * sc, deg.to_radians(), i, al);
+    }
+}
+
+/// One clip in the clipboard loop: text, a colour, an image or a link.
+fn clip_card(p: &egui::Painter, c: Pos2, size: Vec2, ang: f32, kind: usize, al: f32) {
+    let at = |x: f32, y: f32| c + turn(Vec2::new(x, y), ang);
+    let outline: Vec<Pos2> = rounded_points(Rect::from_center_size(Pos2::ZERO, size), 7.0).into_iter().map(|q| at(q.x, q.y)).collect();
+    let shadow = outline.iter().map(|q| *q + Vec2::new(0.0, 3.0)).collect();
+    p.add(egui::Shape::convex_polygon(shadow, Color32::from_black_alpha((70.0 * al) as u8), Stroke::NONE));
+    p.add(egui::Shape::convex_polygon(outline, with_alpha(POPOVER(), al), Stroke::new(1.0, with_alpha(tint::CAPTURE(), 0.45 * al))));
+    let (l, t) = (-size.x / 2.0 + 7.0, -size.y / 2.0);
+    let line = |x0: f32, x1: f32, y: f32, col: Color32| p.line_segment([at(x0, y), at(x1, y)], Stroke::new(3.0, with_alpha(col, al)));
+    let ink = white(140);
+    let span = size.x - 14.0;
+    match kind {
+        0 => {
+            line(l, l + span * 0.9, t + 9.0, ink);
+            line(l, l + span * 0.6, t + 16.0, ink);
+            line(l, l + span * 0.75, t + 23.0, ink);
+        }
+        1 => {
+            p.circle_filled(at(l + 5.0, 0.0), 5.0 * size.y / 34.0, with_alpha(tint::CLEANUP(), al));
+            line(l + 14.0, l + span * 0.85, -2.5, ink);
+            line(l + 14.0, l + span * 0.6, 3.5, white(70));
+        }
+        2 => {
+            let (b, r) = (size.y / 2.0 - 6.0, size.x / 2.0 - 6.0);
+            p.add(egui::Shape::convex_polygon(vec![at(-r, -b), at(r, -b), at(r, b), at(-r, b)], with_alpha(tint::HEALTH(), 0.14 * al), Stroke::NONE));
+            p.add(egui::Shape::convex_polygon(vec![at(-r + 1.0, b), at(-r * 0.25, -b * 0.3), at(r * 0.45, b)], with_alpha(tint::HEALTH(), 0.75 * al), Stroke::NONE));
+            p.add(egui::Shape::convex_polygon(vec![at(r * 0.05, b), at(r * 0.5, b * 0.1), at(r - 1.0, b)], with_alpha(tint::HEALTH(), 0.5 * al), Stroke::NONE));
+            p.circle_filled(at(r - 5.0, -b + 4.0), 2.8, with_alpha(tint::CAPTURE(), al));
+        }
+        _ => {
+            let st = Stroke::new(1.5, with_alpha(tint::CAPTURE(), al));
+            p.circle_stroke(at(l + 3.5, 0.0), 3.5, st);
+            p.circle_stroke(at(l + 8.5, 0.0), 3.5, st);
+            line(l + 17.0, l + span * 0.9, 0.0, with_alpha(tint::HEALTH(), 0.85));
+        }
+    }
+}
+
+/// Voice typing: the voice wave runs from the mic and comes out as words.
+fn loop_voice(p: &egui::Painter, f: Rect, mic: Rect, now: f32) {
+    use std::f32::consts::TAU;
+    const SAID: [&str; 3] = ["Ship it today", "Call me at 5", "Sounds good!"];
+    let said = SAID[(now / 4.2) as usize % SAID.len()];
+    let q = (now / 4.2).fract() * 4.2;
+    let fnt = font(11.5);
+    let widest = SAID.iter().map(|s| p.layout_no_wrap((*s).into(), fnt.clone(), TEXT()).size().x).fold(0.0, f32::max);
+    let n = (((f.width() - 10.0 - widest) / 6.0).floor() as i32).clamp(5, 12) as usize;
+    let cy = mic.center().y;
+    // the wave is loud while words come, quiet in between
+    let loud = keys(q / 4.2, &[(0.0, 0.35), (0.06, 1.0), (0.42, 1.0), (0.55, 0.35)]);
+    for j in 0..n {
+        let x = j as f32;
+        let v = 0.5 + 0.25 * (TAU * (now / 0.9 + x * 0.17)).sin() + 0.25 * (TAU * (now / 1.3 - x * 0.29) + x).sin();
+        let h = 30.0 * (0.12 + 0.88 * v * loud);
+        let fade = (1.0 - (x - n as f32 * 0.6) / (n as f32 * 0.4 + 1.0)).clamp(0.0, 1.0);
+        p.rect_filled(Rect::from_center_size(Pos2::new(f.left() + 1.5 + 6.0 * x, cy), Vec2::new(3.0, h)), 1.5, with_alpha(tint::CAPTURE(), fade));
+    }
+    let x = f.left() + n as f32 * 6.0 + 8.0;
+    let shown = (((q - 0.35) / 0.11).floor() as i32 + 1).clamp(0, said.len() as i32) as usize;
+    let al = if q > 3.85 { 1.0 - (q - 3.85) / 0.35 } else { 1.0 };
+    let g = p.text(Pos2::new(x, cy), Align2::LEFT_CENTER, &said[..shown], fnt, with_alpha(TEXT(), al));
+    if (now / 0.8).fract() < 0.5 {
+        let cx = if shown == 0 { x } else { g.right() + 1.5 };
+        p.rect_filled(Rect::from_center_size(Pos2::new(cx, cy), Vec2::new(1.5, 13.0)), 0.5, with_alpha(tint::CAPTURE(), al));
+    }
+    // the mic glows with the voice
+    let v = 0.5 - 0.5 * (TAU * now / 0.9).cos();
+    p.rect_stroke(mic.expand(1.0 + 2.0 * v), 10.0, Stroke::new(3.0, with_alpha(tint::CAPTURE(), 0.2 * v)), StrokeKind::Outside);
+}
+
+/// Watch my Mac: an endless heartbeat trace on a grid, a slow CPU line
+/// behind it, a bright head at "now".
+fn loop_watch(p: &egui::Painter, f: Rect, cy: f32, now: f32) {
+    let mh = f.height().min(44.0);
+    let top = (cy - mh / 2.0).clamp(f.top(), f.bottom() - mh);
+    let m = Rect::from_min_size(Pos2::new(f.left(), top), Vec2::new(f.width(), mh));
+    let p = p.with_clip_rect(m.intersect(p.clip_rect()));
+    let col = tint::HEALTH();
+    let grid = Stroke::new(1.0, with_alpha(col, 0.08));
+    let mut x = m.left() + 6.0;
+    while x < m.right() {
+        p.line_segment([Pos2::new(x, m.top()), Pos2::new(x, m.bottom())], grid);
+        x += 12.0;
+    }
+    let mut y = m.top() + 5.5;
+    while y < m.bottom() {
+        p.line_segment([Pos2::new(m.left(), y), Pos2::new(m.right(), y)], grid);
+        y += 11.0;
+    }
+    let head = m.left() + m.width() * 0.88;
+    let sy = mh / 44.0;
+    let fade = |x: f32| ((x - m.left()) / (m.width() * 0.45)).clamp(0.0, 1.0);
+    // CPU, slow and soft
+    let mut prev: Option<Pos2> = None;
+    let mut x = m.left();
+    while x <= head {
+        let u = (x - m.left() + now * 22.5) / 60.0 * std::f32::consts::TAU;
+        let q = Pos2::new(x, m.top() + (31.0 + 3.0 * u.sin() + 1.5 * (u * 2.3).sin()) * sy);
+        if let Some(a) = prev {
+            p.line_segment([a, q], Stroke::new(1.5, with_alpha(tint::CLEANUP(), 0.45 * fade(x))));
+        }
+        prev = Some(q);
+        x += 3.0;
+    }
+    // heartbeat, one beat every 50 px, scrolling left
+    const BEAT: [(f32, f32); 8] = [(0.0, 22.0), (20.0, 22.0), (23.0, 18.0), (26.0, 22.0), (30.0, 22.0), (34.0, 8.0), (39.0, 36.0), (43.0, 22.0)];
+    let off = (now / 1.5).fract() * 50.0;
+    let mut pts = Vec::new();
+    let mut x0 = m.left() - 50.0 - off;
+    while x0 <= head + 50.0 {
+        pts.extend(BEAT.iter().map(|&(x, y)| Pos2::new(x0 + x, m.top() + y * sy)));
+        x0 += 50.0;
+    }
+    let mut tip = None;
+    for w in pts.windows(2) {
+        let (a, mut b) = (w[0], w[1]);
+        if a.x >= head {
+            break;
+        }
+        if b.x > head {
+            b = a + (b - a) * ((head - a.x) / (b.x - a.x));
+            tip = Some(b);
+        }
+        p.line_segment([a, b], Stroke::new(1.8, with_alpha(col, fade((a.x + b.x) / 2.0))));
+    }
+    if let Some(t) = tip {
+        p.circle_filled(t, 5.0, with_alpha(col, 0.3));
+        p.circle_filled(t, 2.5, if is_light() { col } else { Color32::WHITE });
+    }
+}
+
+/// For developers: a usage gauge climbs green → amber → red, the limit
+/// resets and the needle drops back.
+fn loop_dev(p: &egui::Painter, f: Rect, now: f32) {
+    use std::f32::consts::PI;
+    let ph = (now / 5.0).fract();
+    let v = keys(ph, &[(0.0, 0.0), (0.06, 0.0), (0.30, 0.42), (0.34, 0.38), (0.70, 0.84), (0.80, 0.84), (0.83, 0.81), (0.90, 0.0)]);
+    let r = (f.width() / 2.0 - 9.0).min(f.height() - 14.0).min(24.0);
+    let c = Pos2::new(f.center().x, f.top() + r + 8.0);
+    let ang = |x: f32| PI + x * PI;
+    let arc = |a: f32, b: f32, col: Color32, w: f32| {
+        if b > a {
+            let n = (((b - a) * 32.0).ceil() as usize).max(2);
+            p.add(egui::Shape::line(arc_points(c, r, ang(a), ang(b), n), Stroke::new(w, col)));
+        }
+    };
+    arc(0.0, 1.0, white(20), 5.0);
+    arc(0.7, 1.0, with_alpha(RED(), 0.16), 5.0);
+    arc(0.0, v.min(0.45), tint::CLEANUP(), 5.0);
+    arc(0.45, v.min(0.7), AMBER(), 5.0);
+    arc(0.7, v, RED(), 5.0);
+    for i in 0..=20 {
+        let x = i as f32 / 20.0;
+        let major = i % 5 == 0;
+        let d = Vec2::angled(ang(x));
+        let (a, b, col) = if major { (r + 4.5, r + 7.0, white(100)) } else { (r + 4.5, r + 5.8, white(45)) };
+        p.line_segment([c + d * a, c + d * b], Stroke::new(if major { 1.0 } else { 0.8 }, col));
+    }
+    let rs = keys(ph, &[(0.0, 0.0), (0.86, 0.0), (0.90, 1.0), (0.98, 1.35)]);
+    let ra = keys(ph, &[(0.0, 0.0), (0.86, 0.0), (0.90, 0.9), (0.98, 0.0)]);
+    if ra > 0.0 {
+        p.circle_stroke(c, 9.0 * (0.6 + 0.4 * rs), Stroke::new(1.4, with_alpha(tint::CLEANUP(), ra)));
+    }
+    let d = Vec2::angled(ang(v));
+    p.line_segment([c - d * 3.0, c + d * (r - 5.0)], Stroke::new(1.6, TEXT()));
+    p.circle_filled(c, 3.0, TEXT());
+    p.circle_filled(c, 1.1, BG());
+}
+
+/// Every tool with a switch, by section in two columns. Returns the tool
+/// under the pointer.
+fn all_tools(app: &mut App, ui: &mut Ui, area: Rect, t: f32) -> Option<Vec<usize>> {
+    let p = ui.painter().clone();
+    let secs = sections(app);
+    let gap = 18.0;
+    let cw = (area.width() - gap) / 2.0;
+    let mut ys = [area.top(); 2];
+    let mut flip = None;
+    let mut hot = None;
     let mut k = 0;
-    for (ci, sec) in secs.iter().enumerate() {
-        let x = body.left() + ci as f32 * (cw + gap);
-        p.text(Pos2::new(x + 2.0, top), Align2::LEFT_TOP, sec, font(11.0), TEXT_FAINT());
-        let mut y = top + 20.0;
+    for (si, sec) in secs.iter().enumerate() {
+        let c = si % 2;
+        let x = area.left() + c as f32 * (cw + gap);
+        group_header(&p, Pos2::new(x + 8.0, ys[c]), sec);
+        ys[c] += 20.0;
         for i in 0..app.tools.len() {
             if app.tools[i].section() != *sec {
                 continue;
             }
-            let a = ease((t - 0.04 * k as f32) / 0.4);
+            let a = ease((t - 0.03 * k as f32) / 0.3);
             k += 1;
-            let r = Rect::from_min_size(Pos2::new(x, y + (1.0 - a) * 8.0), Vec2::new(cw, 68.0));
+            let r = Rect::from_min_size(Pos2::new(x, ys[c]), Vec2::new(cw, 36.0));
+            ys[c] += 36.0;
             let id = ui.scope_id().with(("setup-tool", app.tools[i].id()));
             let resp = ui.interact(r, id, Sense::click());
             let o = app.tool_on(i);
-            let s = ui.ctx().animate_bool_with_time(id.with("on"), o, 0.18);
-            let hov = ui.ctx().animate_bool(id.with("h"), resp.hovered());
-            p.rect_filled(r, 10.0, lerp_color(CARD(), white(30), hov * 0.15).gamma_multiply(a));
-            p.rect_stroke(r, 10.0, Stroke::new(1.0, white(12).gamma_multiply(a)), StrokeKind::Inside);
-            let ib = Rect::from_min_size(Pos2::new(r.left() + 12.0, r.center().y - 17.0), Vec2::splat(34.0));
-            p.rect_filled(ib, 9.0, lerp_color(white(16), BLUE(), s));
+            if ui.rect_contains_pointer(r) {
+                p.rect_filled(r, 9.0, CARD());
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                hot = Some(vec![i]);
+            }
             let b = app.tools[i].badge();
-            icon(&p, b.icon, ib.shrink(8.0), lerp_color(TEXT_MUTED(), ON_ACTION, s));
-            let tx = ib.right() + 10.0;
-            // name + permission icons as one block, centered, LINE_GAP apart
-            let block = if app.tools[i].needs().is_empty() { 16.0 } else { 16.0 + sp::LINE_GAP + 12.0 };
-            let ny = r.center().y - block / 2.0;
-            text_fit(&p, Pos2::new(tx, ny), Align2::LEFT_TOP, app.tools[i].name(), bold(13.0), lerp_color(TEXT_MUTED(), TEXT(), s), r.right() - tx - 24.0);
-            // what it will ask for
-            let mut gx = tx;
+            let chip = Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(24.0));
+            tool_chip(&p, chip, b.icon, if o { b.color } else { tint::NEUTRAL() });
+            let sw = Rect::from_min_size(Pos2::new(r.right() - 38.0, r.center().y - 9.0), Vec2::new(30.0, 18.0));
+            let tx = chip.right() + 10.0;
+            let name = text_fit(&p, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, app.tools[i].name(), font(13.0), lerp_color(TEXT_DIM(), TEXT(), a * o as u8 as f32).gamma_multiply(a.max(0.3)), sw.left() - tx - 60.0);
+            let mut gx = name.right() + 8.0;
             for n in app.tools[i].needs() {
-                icon(&p, n.perm.icon(), Rect::from_min_size(Pos2::new(gx, ny + 16.0 + sp::LINE_GAP), Vec2::splat(12.0)), TEXT_MUTED());
+                let ir = Rect::from_min_size(Pos2::new(gx, r.center().y - 6.0), Vec2::splat(12.0));
+                icon(&p, n.perm.icon(), ir, if n.optional { TEXT_MUTED() } else { TEXT_FAINT() });
+                ui.interact(ir, id.with(("perm", n.perm.name())), Sense::hover()).on_hover_text(n.perm.name());
                 gx += 16.0;
             }
-            if s > 0.01 {
-                let c = Pos2::new(r.right() - 14.0, r.top() + 14.0);
-                let z = pop(s);
-                p.circle_filled(c, 8.0 * z, BLUE());
-                check(&p, c, 7.0 * z, ON_ACTION);
-            }
-            if resp.clicked() {
+            if switch(ui, sw, id.with("sw"), o, true).clicked() || resp.clicked() {
                 flip = Some((i, !o));
             }
-            if resp.hovered() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-            y += 76.0;
         }
+        ys[c] += sp::S;
     }
     if let Some((i, o)) = flip {
         app.set_tool_on(i, o);
+    }
+    hot
+}
+
+/// The menu bar panel as it will look: a tile per switched-on tool, which
+/// drops in when the tool is turned on. With `hot` tools (under the
+/// pointer), their widgets instead.
+fn mini_panel(app: &mut App, ui: &mut Ui, area: Rect, t: f32, hot: Option<Vec<usize>>) {
+    let p = ui.painter().clone();
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let a = ease((t - 0.15) / 0.4);
+    // the menu bar, our icon lit
+    let mb = Rect::from_min_size(area.min, Vec2::new(area.width(), 24.0));
+    p.rect_filled(mb, 7.0, pick(Color32::from_black_alpha(100), Color32::from_white_alpha(170)).gamma_multiply(a));
+    let cat = Rect::from_min_size(Pos2::new(mb.right() - 30.0, mb.top() + 3.0), Vec2::new(22.0, 18.0));
+    p.rect_filled(cat, 5.0, with_alpha(BLUE(), 0.16 * a));
+    brand_glyph(&p, cat.center(), 14.0, BLUE().gamma_multiply(a));
+    let mut sx = cat.left() - 12.0;
+    for name in ["battery.75percent", "wifi"] {
+        let r = Rect::from_min_size(Pos2::new(sx - 14.0, mb.center().y - 7.0), Vec2::splat(14.0));
+        symbol(&p, name, r, TEXT_DIM().gamma_multiply(a));
+        sx -= 24.0;
+    }
+    if let Some(list) = hot {
+        preview(app, ui, Rect::from_min_max(Pos2::new(area.left(), mb.bottom() + 8.0), area.max), &list);
+        return;
+    }
+    // the panel under it
+    let on: Vec<usize> = (0..app.tools.len()).filter(|&i| app.tool_on(i)).collect();
+    let pad = sp::S;
+    let gap = 6.0;
+    let th = 44.0;
+    let tw = (area.width() - pad * 2.0 - gap) / 2.0;
+    let rows = on.len().div_ceil(2);
+    let want = if rows == 0 { 120.0 } else { pad * 2.0 + rows as f32 * (th + gap) - gap };
+    let h = ctx.animate_value_with_time(ui.scope_id().with("setup-panel-h"), want, 0.25);
+    let panel = Rect::from_min_size(Pos2::new(area.left(), mb.bottom() + 8.0), Vec2::new(area.width(), h));
+    let panel = panel.translate(Vec2::new(0.0, (1.0 - a) * -10.0));
+    p.add(egui::epaint::Shadow { offset: [0, 14], blur: 36, spread: 0, color: Color32::from_black_alpha((70.0 * a) as u8) }.as_shape(panel, CornerRadius::same(12)));
+    p.rect_filled(panel, 12.0, BG().gamma_multiply(a));
+    p.rect_stroke(panel, 12.0, Stroke::new(1.0, CARD_EDGE().gamma_multiply(a)), StrokeKind::Inside);
+    if on.is_empty() {
+        brand_glyph(&p, panel.center(), 40.0, white(24).gamma_multiply(a));
+        return;
+    }
+    let clip = p.with_clip_rect(panel);
+    for (k, &i) in on.iter().enumerate() {
+        let id = ui.scope_id().with(("setup-panel-tile", app.tools[i].id()));
+        let (col, row) = ((k % 2) as f32, (k / 2) as f32);
+        let x = ctx.animate_value_with_time(id.with("x"), panel.left() + pad + col * (tw + gap), 0.25);
+        let y = ctx.animate_value_with_time(id.with("y"), row * (th + gap), 0.25);
+        let d = appear(&ctx, id.with("in"), now, 0.36, app.demo).min(a);
+        let r = Rect::from_min_size(Pos2::new(x, panel.top() + pad + y - (1.0 - d) * 12.0), Vec2::new(tw, th));
+        let r = Rect::from_center_size(r.center(), r.size() * (0.92 + 0.08 * d));
+        clip.rect_filled(r, 10.0, CARD().gamma_multiply(d));
+        clip.rect_stroke(r, 10.0, Stroke::new(1.0, CARD_EDGE().gamma_multiply(d)), StrokeKind::Inside);
+        let b = app.tools[i].badge();
+        let chip = Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(26.0));
+        tool_chip(&clip, chip, b.icon, b.color.gamma_multiply(d));
+        let tx = chip.right() + 8.0;
+        let meta = app.tools[i].sidebar_meta();
+        let room = r.right() - tx - 6.0;
+        if meta.is_empty() {
+            text_fit(&clip, Pos2::new(tx, r.center().y), Align2::LEFT_CENTER, app.tools[i].name(), font(12.0), TEXT().gamma_multiply(d), room);
+        } else {
+            two_lines(&clip, tx, r.center().y, app.tools[i].name(), font(10.5), TEXT_FAINT().gamma_multiply(d), &meta, bold(13.0), TEXT().gamma_multiply(d), room);
+        }
+    }
+}
+
+/// The real panel widgets of `list` (each at its biggest size up to Medium),
+/// scaled to fit `area`'s width, stacked from the top.
+fn preview(app: &mut App, ui: &mut Ui, area: Rect, list: &[usize]) {
+    use crate::core::panel;
+    use crate::core::tool::Size;
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let native_w = panel::inner_width();
+    let scale = (area.width() / native_w).min(1.0);
+    let mut y = area.top();
+    for &i in list {
+        let Some(spec) = app.tools[i].widgets().into_iter().next() else { continue };
+        let size = [Size::S24, Size::S14, Size::S12, Size::S11].into_iter().find(|s| spec.sizes.contains(s)).unwrap_or(spec.size);
+        let native = panel::size_px(size, native_w);
+        let h = native.y * scale;
+        if y + h > area.bottom() {
+            break;
+        }
+        let id = ui.scope_id().with(("setup-preview", app.tools[i].id()));
+        let d = appear(&ctx, id.with("in"), now, 0.25, app.demo);
+        let target = Pos2::new(area.left() + (1.0 - d) * 10.0, y);
+        let mut cx = app.cx();
+        // drawn at the panel's own size on a layer of its own, then scaled down
+        let layer = egui::Area::new(id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(Pos2::ZERO)
+            .constrain(false)
+            .interactable(false)
+            .show(&ctx, |ui| {
+                ui.multiply_opacity(d);
+                let r = Rect::from_min_size(Pos2::ZERO, native);
+                ui.set_clip_rect(r.expand(2.0));
+                panel::draw_at(app, ui, Some(i), spec.id, size, r, None, &mut cx);
+            })
+            .response
+            .layer_id;
+        ctx.set_transform_layer(layer, egui::emath::TSTransform::new(target.to_vec2(), scale));
+        y += h + sp::S;
+    }
+}
+
+/// The Tools step's bottom bar, between Back and Continue: the permissions
+/// the switched-on tools will ask for (required with their names, optional
+/// as dashed icons), the download, and the shortcuts they take.
+fn cost_line(app: &App, ui: &mut Ui, area: Rect) {
+    let p = ui.painter().clone();
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let c = cost(app);
+    enum Item {
+        Perm(Perm, bool),
+        Down(u64),
+        Keys(String),
+    }
+    let mut items: Vec<Item> = c.must.iter().map(|&q| Item::Perm(q, false)).collect();
+    items.extend(c.may.iter().map(|&q| Item::Perm(q, true)));
+    if c.download > 0 {
+        items.push(Item::Down(c.download));
+    }
+    items.extend(c.keys.iter().cloned().map(Item::Keys));
+    let h = 26.0;
+    let gap = 6.0;
+    let label = |it: &Item, named: bool| -> Option<String> {
+        match it {
+            Item::Perm(q, false) if named => Some(q.name().to_string()),
+            Item::Down(b) => Some(human_bytes(*b)),
+            _ => None,
+        }
+    };
+    let width = |it: &Item, named: bool| -> f32 {
+        match it {
+            Item::Keys(k) => p.layout_no_wrap(k.clone(), font(13.0), TEXT()).size().x + 14.0,
+            _ => {
+                let tw = label(it, named).map(|s| p.layout_no_wrap(s, font(12.0), TEXT()).size().x + 6.0).unwrap_or(0.0);
+                14.0 + tw + 16.0
+            }
+        }
+    };
+    // one row: with the permissions' names when they fit, else icons only
+    // (their names show on hover, and on the Permissions step)
+    let lay = |named: bool| -> Vec<Vec<(usize, f32)>> {
+        let mut rows: Vec<Vec<(usize, f32)>> = vec![Vec::new()];
+        let mut x = 0.0;
+        for (k, it) in items.iter().enumerate() {
+            let w = width(it, named);
+            if x > 0.0 && x + w > area.width() {
+                rows.push(Vec::new());
+                x = 0.0;
+            }
+            rows.last_mut().unwrap().push((k, w));
+            x += w + gap;
+        }
+        rows
+    };
+    let mut named = true;
+    let mut rows = lay(true);
+    if rows.len() > 1 {
+        named = false;
+        rows = lay(false);
+    }
+    let total = rows.len() as f32 * h + (rows.len() as f32 - 1.0) * gap;
+    let mut y = area.center().y - total / 2.0;
+    for row in rows {
+        let mut x = area.left();
+        for (k, w) in row {
+            let it = &items[k];
+            let key = match it {
+                Item::Perm(q, _) => q.name().to_string(),
+                Item::Down(_) => "download".to_string(),
+                Item::Keys(s) => s.clone(),
+            };
+            let id = ui.scope_id().with(("setup-cost", key.as_str()));
+            let d = appear(&ctx, id, now, 0.28, app.demo);
+            let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h));
+            let r = Rect::from_center_size(r.center(), r.size() * (0.8 + 0.2 * pop(d)));
+            match it {
+                Item::Keys(s) => {
+                    // one cap per shortcut, its keys in a row
+                    let c = Rect::from_center_size(r.center(), Vec2::new(r.width(), 22.0 * r.height() / h));
+                    p.rect_filled(c, 5.0, white(26).gamma_multiply(d));
+                    p.rect_filled(Rect::from_min_max(Pos2::new(c.left() + 1.0, c.bottom() - 1.5), Pos2::new(c.right() - 1.0, c.bottom())), CornerRadius::same(2), Color32::from_black_alpha((90.0 * d) as u8));
+                    p.text(c.center() - Vec2::new(0.0, 0.75), Align2::CENTER_CENTER, s, font(13.0), TEXT().gamma_multiply(d));
+                }
+                _ => {
+                    let optional = matches!(it, Item::Perm(_, true));
+                    if optional {
+                        dashed_rect(&p, r, 8.0, TEXT_MUTED().gamma_multiply(d));
+                    } else {
+                        p.rect_filled(r, 8.0, CARD().gamma_multiply(d));
+                        p.rect_stroke(r, 8.0, Stroke::new(1.0, CARD_EDGE().gamma_multiply(d)), StrokeKind::Inside);
+                    }
+                    let ic = match it {
+                        Item::Perm(q, _) => q.icon(),
+                        _ => Icon::Down,
+                    };
+                    let ir = Rect::from_min_size(Pos2::new(r.left() + 8.0, r.center().y - 7.0), Vec2::splat(14.0));
+                    icon(&p, ic, ir, if optional { TEXT_FAINT() } else { TEXT_DIM() }.gamma_multiply(d));
+                    if let Some(s) = label(it, named) {
+                        p.text(Pos2::new(ir.right() + 6.0, r.center().y), Align2::LEFT_CENTER, s, font(12.0), TEXT().gamma_multiply(d));
+                    }
+                    if let Item::Perm(q, _) = it {
+                        ui.interact(r, id.with("tip"), Sense::hover()).on_hover_text(q.name());
+                    }
+                }
+            }
+            x += w + gap;
+        }
+        y += h + gap;
     }
 }
 
 /// The AI agents the person uses: one main (Cleanup checks with it), and
 /// the ones AI Usage tracks. Saved in the AI Usage settings, changed later in
 /// Settings › AI Usage.
+/// "`n`/`total`" where `n` rolls between whole numbers as `shown` moves:
+/// the old number slides up out of view and the new one comes up from below.
+fn rolling_count(p: &egui::Painter, left_bottom: Pos2, shown: f32, total: usize) {
+    let f = mono(13.0);
+    let lo = shown.floor();
+    let frac = shown - lo;
+    let lo_s = format!("{}", lo as i64);
+    let hi_s = format!("{}", lo as i64 + 1);
+    let w = p.layout_no_wrap(if frac > 0.0 { hi_s.clone() } else { lo_s.clone() }, f.clone(), TEXT_FAINT()).size().x.max(p.layout_no_wrap(lo_s.clone(), f.clone(), TEXT_FAINT()).size().x);
+    let line = 16.0;
+    let cell = Rect::from_min_max(Pos2::new(left_bottom.x, left_bottom.y - line), Pos2::new(left_bottom.x + w, left_bottom.y + 1.0));
+    let clip = p.with_clip_rect(cell.intersect(p.clip_rect()));
+    clip.text(left_bottom - Vec2::new(0.0, frac * line), Align2::LEFT_BOTTOM, &lo_s, f.clone(), TEXT_FAINT());
+    if frac > 0.0 {
+        clip.text(left_bottom + Vec2::new(0.0, (1.0 - frac) * line), Align2::LEFT_BOTTOM, &hi_s, f.clone(), TEXT_FAINT());
+    }
+    p.text(Pos2::new(cell.right(), left_bottom.y), Align2::LEFT_BOTTOM, format!("/{total}"), f, TEXT_FAINT());
+}
+
 fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     use crate::kit::ai::{self, settings};
     let p = ui.painter().clone();
@@ -641,6 +1585,23 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let a = ease(t / 0.4);
     let card = Rect::from_min_size(Pos2::new(x, top + 20.0 + (1.0 - a) * 8.0), Vec2::new(w, n as f32 * sp::ROW_H));
     glass_card(&p, card, R_CARD, 0.0, false);
+    // a light sweeps across the card as the agents are looked for; each
+    // "Found" shows once it has passed
+    let (sweep0, sweep_t) = (0.15, 0.8);
+    let band_w = 140.0;
+    let travel = card.width() + band_w;
+    let u = (t - sweep0) / sweep_t;
+    if (0.0..1.0).contains(&u) {
+        glow_band(&p, card, card.left() - band_w / 2.0 + travel * u, band_w, with_alpha(BLUE(), 0.12));
+    }
+    let seen_at = |x: f32| sweep0 + sweep_t * (x - card.left() + band_w / 2.0) / travel;
+    // a ping round the main agent's dot when it changes
+    let now = ui.ctx().input(|i| i.time);
+    let ping_id = ui.scope_id().with("setup-main-ping");
+    let (was, since) = ui.ctx().data(|d| d.get_temp::<(String, f64)>(ping_id)).unwrap_or_else(|| (set.main.clone(), f64::NEG_INFINITY));
+    let since = if was != set.main { now } else { since };
+    ui.ctx().data_mut(|d| d.insert_temp(ping_id, (set.main.clone(), since)));
+    let ping = ((now - since) / 0.55) as f32;
     type Change = Box<dyn FnOnce(&mut settings::Settings)>;
     let mut change: Option<Change> = None;
     for (k, m) in ai::PROVIDERS.iter().enumerate() {
@@ -650,10 +1611,17 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
         }
         let found = app.demo || ai::make(k).data_dir().is_some_and(|d| d.exists());
         let name = p.text(Pos2::new(r.left() + sp::L, r.center().y), Align2::LEFT_CENTER, m.name, ty::title(), TEXT());
-        p.text(Pos2::new(name.right() + sp::S, r.center().y), Align2::LEFT_CENTER, if found { "Found" } else { "Not found" }, ty::label(), if found { GREEN() } else { TEXT_FAINT() });
+        let sx = name.right() + sp::S;
+        let sa = ease((t - seen_at(sx) - 0.04 * k as f32) / 0.25);
+        p.text(Pos2::new(sx - (1.0 - sa) * 6.0, r.center().y), Align2::LEFT_CENTER, if found { "Found" } else { "Not found" }, ty::label(), (if found { GREEN() } else { TEXT_FAINT() }).gamma_multiply(sa));
         let main = set.main == m.id;
         let on = set.is_on(m.id);
         let rr = Rect::from_center_size(Pos2::new(col_main, r.center().y), Vec2::splat(16.0));
+        if main && (0.0..1.0).contains(&ping) {
+            let e = ease(ping);
+            crate::kit::glass::stroke_circle(&p, rr.center(), 8.0 + 13.0 * e, Stroke::new(1.5, with_alpha(BLUE(), 0.7 * (1.0 - e))));
+            ui.ctx().request_repaint();
+        }
         if radio(ui, rr, ui.scope_id().with(("setup-main", m.id)), main, found || main).clicked() && !main && found {
             let id = m.id.to_string();
             change = Some(Box::new(move |s| {
@@ -681,9 +1649,36 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     }
 }
 
-/// (tool index, model) for every enabled tool's downloads.
-fn models(app: &App) -> Vec<(usize, crate::core::tool::SetupModel)> {
-    (0..app.tools.len()).filter(|&i| app.tool_on(i)).flat_map(|i| app.tools[i].setup_models().into_iter().map(move |m| (i, m))).collect()
+/// One model on the Download models step and the tools it's for: (tool
+/// index, what that tool uses it for). Several tools can share one file.
+struct ModelRow {
+    tools: Vec<(usize, &'static str)>,
+    model: crate::core::tool::SetupModel,
+}
+
+/// Every enabled tool's models, one row per model (shared ones merged; the
+/// tool that is downloading it, or needs it now, comes first).
+fn models(app: &App) -> Vec<ModelRow> {
+    use crate::core::tool::ModelState;
+    let mut rows: Vec<ModelRow> = Vec::new();
+    for i in (0..app.tools.len()).filter(|&i| app.tool_on(i)) {
+        for m in app.tools[i].setup_models() {
+            match rows.iter_mut().find(|r| r.model.name == m.name) {
+                Some(r) if r.model.state == ModelState::OnFirstUse && m.state != ModelState::OnFirstUse => {
+                    r.tools.insert(0, (i, m.what));
+                    r.model = m;
+                }
+                Some(r) => r.tools.push((i, m.what)),
+                None => rows.push(ModelRow { tools: vec![(i, m.what)], model: m }),
+            }
+        }
+    }
+    rows
+}
+
+/// The step is there when a model needs a download now or is already here.
+fn has_models_step(app: &App) -> bool {
+    models(app).iter().any(|r| r.model.state != crate::core::tool::ModelState::OnFirstUse)
 }
 
 fn models_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
@@ -691,59 +1686,75 @@ fn models_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let p = ui.painter().clone();
     let head = body.top() + 6.0;
     let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Download models", bold(22.0), TEXT());
-    let sub = text_wrap(&p, Pos2::new(body.left(), g.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, "They run on this Mac. The download keeps going if you continue.", ty::body(), TEXT_DIM(), body.width().min(560.0), 3);
+    let sub = text_wrap(&p, Pos2::new(body.left(), g.bottom() + sp::LINE_GAP), Align2::LEFT_TOP, "They run on this Mac. Each one says which tool uses it. The download keeps going if you continue.", ty::body(), TEXT_DIM(), body.width().min(560.0), 3);
     let list = models(app);
     let w = body.width().min(620.0);
     let mut y = sub.bottom() + sp::XL;
     let mut start: Option<(usize, &'static str)> = None;
-    for (k, (i, m)) in list.iter().enumerate() {
+    for (k, row) in list.iter().enumerate() {
+        let (m, i) = (&row.model, row.tools[0].0);
         let a = ease((t - 0.05 * k as f32) / 0.4);
-        // one line until there is something for the second (bar or status)
-        let one_line = m.state == ModelState::Missing;
-        let row_h = if one_line { 58.0 } else { 76.0 };
+        // two lines (the model, then the tools it's for), a third for the bar or an error
+        let third = matches!(m.state, ModelState::Downloading { .. } | ModelState::Unpacking | ModelState::Failed(_));
+        let row_h = if third { 86.0 } else { 66.0 };
         let r = Rect::from_min_size(Pos2::new(body.left(), y + (1.0 - a) * 8.0), Vec2::new(w, row_h));
         y += row_h + sp::S;
         glass_card(&p, r, R_CARD, 0.0, false);
-        let ib_top = if one_line { r.center().y - 15.0 } else { r.top() + 14.0 };
-        let ib = Rect::from_min_size(Pos2::new(r.left() + 14.0, ib_top), Vec2::splat(30.0));
+        let ib = Rect::from_min_size(Pos2::new(r.left() + 14.0, r.top() + 18.0), Vec2::splat(30.0));
         p.rect_filled(ib, 8.0, white(16));
-        icon(&p, app.tools[*i].badge().icon, ib.shrink(7.0), if m.state == ModelState::Ready { GREEN() } else { TEXT_SOFT() });
+        icon(&p, app.tools[i].badge().icon, ib.shrink(7.0), if m.state == ModelState::Ready { GREEN() } else { TEXT_SOFT() });
         let tx = ib.right() + 12.0;
-        let title = p.text(Pos2::new(tx, ib.center().y), Align2::LEFT_CENTER, m.what, bold(13.0), TEXT());
-        p.text(Pos2::new(title.right() + 8.0, ib.center().y), Align2::LEFT_CENTER, format!("{} · {}", m.name, human_bytes(m.bytes)), font(12.0), TEXT_FAINT());
         let right = r.right() - 14.0;
-        // second line: the progress bar, or what happened
-        let bar = Rect::from_min_max(Pos2::new(tx, r.bottom() - 22.0), Pos2::new(right, r.bottom() - 16.0));
+        let line1 = r.top() + 22.0;
+        let line2 = r.top() + 44.0;
+        let title = p.text(Pos2::new(tx, line1), Align2::LEFT_CENTER, m.name, bold(13.0), TEXT());
+        p.text(Pos2::new(title.right() + 8.0, line1), Align2::LEFT_CENTER, human_bytes(m.bytes), font(12.0), TEXT_FAINT());
+        // which tools use it, and for what
+        let uses = row.tools.iter().map(|(ti, what)| format!("{}: {}", app.tools[*ti].name(), what.to_lowercase())).collect::<Vec<_>>().join(" · ");
+        let status_w = 150.0;
+        text_fit(&p, Pos2::new(tx, line2), Align2::LEFT_CENTER, &uses, font(12.0), TEXT_DIM(), right - tx - status_w);
+        let bar = Rect::from_min_max(Pos2::new(tx, r.bottom() - 16.0), Pos2::new(right, r.bottom() - 10.0));
         let mut button: Option<&str> = None;
         match &m.state {
             ModelState::Ready => {
-                check(&p, Pos2::new(right - 12.0, ib.center().y), 12.0, GREEN());
-                p.text(Pos2::new(tx, bar.center().y), Align2::LEFT_CENTER, "Downloaded", font(12.0), GREEN());
+                check(&p, Pos2::new(right - 12.0, line1), 12.0, GREEN());
+                p.text(Pos2::new(right, line2), Align2::RIGHT_CENTER, "On this Mac", font(12.0), GREEN());
+            }
+            ModelState::OnFirstUse => {
+                p.text(Pos2::new(right, line2), Align2::RIGHT_CENTER, "Downloads on first use", font(12.0), TEXT_FAINT());
             }
             ModelState::Downloading { done, total } => {
                 let total = if *total > 0 { *total } else { m.bytes };
                 let f = if total > 0 { (*done as f32 / total as f32).clamp(0.0, 1.0) } else { 0.0 };
                 p.rect_filled(bar, 3.0, white(20));
+                // the bar fills smoothly between progress reports
+                let f = ui.ctx().animate_value_with_time(ui.scope_id().with(("setup-model", m.id)), f, 0.25);
                 p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * f, bar.height())), 3.0, BLUE());
-                p.text(Pos2::new(right, ib.center().y), Align2::RIGHT_CENTER, format!("{} of {} · {:.0}%", human_bytes(*done), human_bytes(total), f * 100.0), font(12.0), TEXT_DIM());
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                p.text(Pos2::new(right, line1), Align2::RIGHT_CENTER, format!("{} of {} · {:.0}%", human_bytes(*done), human_bytes(total), f * 100.0), font(12.0), TEXT_DIM());
+                // the cat trots along on the front of the fill
+                let now = ui.ctx().input(|i| i.time);
+                let hop = ((now * 9.0).sin().abs() * 2.5) as f32;
+                let cx = bar.left() + bar.width() * f;
+                let cat = Rect::from_min_max(Pos2::new(cx - 6.0, bar.top() - 13.0 - hop), Pos2::new(cx + 6.0, bar.top() - 1.0 - hop));
+                crate::kit::brand::draw_mascot(&p, cat, cat_color(), (0.0, 0.0));
+                crate::kit::glass::animate(ui.ctx());
             }
             ModelState::Unpacking => {
                 p.rect_filled(bar, 3.0, BLUE());
-                p.text(Pos2::new(right, ib.center().y), Align2::RIGHT_CENTER, "Unpacking", font(12.0), TEXT_DIM());
+                p.text(Pos2::new(right, line1), Align2::RIGHT_CENTER, "Unpacking", font(12.0), TEXT_DIM());
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
             }
             ModelState::Failed(e) => {
-                text_fit(&p, Pos2::new(tx, bar.center().y), Align2::LEFT_CENTER, e, font(12.0), RED(), w - 140.0);
+                text_fit(&p, Pos2::new(tx, bar.center().y), Align2::LEFT_CENTER, e, font(12.0), RED(), right - tx);
                 button = Some("Try again");
             }
             ModelState::Missing => button = Some("Download"),
         }
         if let Some(label) = button {
             let bw = button_width(&p, label, BTN_SECONDARY);
-            let b = Rect::from_min_size(Pos2::new(right - bw, ib.center().y - 13.0), Vec2::new(bw, 26.0));
+            let b = Rect::from_min_size(Pos2::new(right - bw, line1 - 13.0), Vec2::new(bw, 26.0));
             if pill_button(ui, b, label, BTN_SECONDARY, true).clicked() {
-                start = Some((*i, m.id));
+                start = Some((i, m.id));
             }
         }
     }
@@ -757,6 +1768,27 @@ fn models_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
 fn check(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
     let pts = vec![c + Vec2::new(-0.45, 0.0) * s, c + Vec2::new(-0.12, 0.33) * s, c + Vec2::new(0.45, -0.32) * s];
     p.add(egui::Shape::line(pts, Stroke::new((s * 0.22).max(1.2), col)));
+}
+
+/// [`check`] drawn up to `k` (0 → nothing, 1 → whole), short stroke first.
+fn check_drawn(p: &egui::Painter, c: Pos2, s: f32, col: Color32, k: f32) {
+    if k <= 0.0 {
+        return;
+    }
+    let pts = [c + Vec2::new(-0.45, 0.0) * s, c + Vec2::new(-0.12, 0.33) * s, c + Vec2::new(0.45, -0.32) * s];
+    let (l0, l1) = (pts[0].distance(pts[1]), pts[1].distance(pts[2]));
+    let mut d = (l0 + l1) * k.min(1.0);
+    let mut out = vec![pts[0]];
+    for (a, b, l) in [(pts[0], pts[1], l0), (pts[1], pts[2], l1)] {
+        if d >= l {
+            out.push(b);
+            d -= l;
+        } else {
+            out.push(a + (b - a) * (d / l));
+            break;
+        }
+    }
+    p.add(egui::Shape::line(out, Stroke::new((s * 0.22).max(1.2), col)));
 }
 
 fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
@@ -778,7 +1810,33 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
         let a0 = -std::f32::consts::FRAC_PI_2;
         p.add(egui::Shape::line(arc_points(c, 18.0, a0, a0 + std::f32::consts::TAU * shown, 48), Stroke::new(4.0, if full { GREEN() } else { BLUE() })));
     }
-    p.text(c, Align2::CENTER_CENTER, format!("{done}/{}", req.len()), mono(11.0), TEXT());
+    // all required ones allowed: the count turns into a check and the ring
+    // grows soft cat ears (it was full already when the step opened: no show)
+    let full_id = ui.scope_id().with("perm-full");
+    let full_at = if full {
+        let at = ui.ctx().data(|d| d.get_temp::<f64>(full_id)).unwrap_or(if t < 0.1 { now - 10.0 } else { now });
+        ui.ctx().data_mut(|d| d.insert_temp(full_id, at));
+        Some(at)
+    } else {
+        ui.ctx().data_mut(|d| d.remove::<f64>(full_id));
+        None
+    };
+    match full_at {
+        Some(at) => {
+            let since = (now - at) as f32;
+            check(&p, c, 14.0 * pop(since / 0.35).max(0.0), GREEN());
+            let z = pop((since - 0.25) / 0.4).max(0.0);
+            if z > 0.0 {
+                ring_ears(&p, c, z, GREEN());
+            }
+            if since < 0.8 {
+                ui.ctx().request_repaint();
+            }
+        }
+        None => {
+            p.text(c, Align2::CENTER_CENTER, format!("{done}/{}", req.len()), mono(11.0), TEXT());
+        }
+    }
     p.text(Pos2::new(c.x + 36.0, c.y), Align2::LEFT_CENTER, "Permissions", bold(22.0), TEXT());
     let area = Rect::from_min_max(Pos2::new(body.left(), body.top() + 56.0), body.max);
     // rows at their smallest; past that the list scrolls (it never runs
@@ -791,9 +1849,40 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area));
         child.set_clip_rect(area);
         egui::ScrollArea::vertical().id_salt("setup-perms").auto_shrink([false, false]).show(&mut child, |ui| {
-            let (r, _) = ui.allocate_exact_size(Vec2::new(area.width() - 10.0, need), Sense::hover());
+            let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), need), Sense::hover());
             perm_list(app, ui, r, &list, t, now);
         });
+    }
+}
+
+/// Two soft cat ears on top of the permissions ring (radius 18 round `c`),
+/// grown to `z` (0 → none, 1 → full; a bit over 1 overshoots). Wide bases
+/// and a rounded tip, so they read as ears, not horns.
+fn ring_ears(p: &egui::Painter, c: Pos2, z: f32, col: Color32) {
+    for side in [-1.0f32, 1.0] {
+        let pt = |deg: f32, r: f32| {
+            let a = deg.to_radians();
+            c + Vec2::new(a.cos() * side, a.sin()) * r
+        };
+        // base sunk into the ring, tip out and up
+        let (b0, b1, tip) = (pt(-150.0, 17.0), pt(-98.0, 17.0), pt(-123.0, 30.0));
+        let mid = b0 + (b1 - b0) * 0.5;
+        let tip = mid + (tip - mid) * z;
+        // the tip's corner rounded off: a curve between points `round` from it
+        let round = 8.0 * z.min(1.0);
+        let (t1, t2) = (tip + (b0 - tip).normalized() * round, tip + (b1 - tip).normalized() * round);
+        let mut pts = vec![b0];
+        pts.extend((0..=8).map(|i| {
+            let u = i as f32 / 8.0;
+            let v = 1.0 - u;
+            Pos2::new(v * v * t1.x + 2.0 * u * v * tip.x + u * u * t2.x, v * v * t1.y + 2.0 * u * v * tip.y + u * u * t2.y)
+        }));
+        pts.push(b1);
+        // same winding on both sides
+        if side > 0.0 {
+            pts.reverse();
+        }
+        p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
     }
 }
 
@@ -807,12 +1896,15 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
     let head = if list.iter().any(|r| r.optional) { 26.0 } else { 0.0 };
     let row_h = ((area.height() - head - 6.0 * n) / n).clamp(38.0, 46.0);
     let mut ask: Option<Perm> = None;
+    // the reasons line up in one column, after the longest row of tool icons
+    let max_tools = list.iter().map(|r| r.tools.len()).max().unwrap_or(0) as f32;
     for (k, r) in list.iter().enumerate() {
         if r.optional && !opt_head {
             opt_head = true;
-            y += 6.0;
-            p.text(Pos2::new(area.left() + 2.0, y), Align2::LEFT_TOP, "Optional", font(11.0), TEXT_FAINT());
-            y += 20.0;
+            // a section title like the others (26 in all: 4 above, the title, 7 below)
+            y += sp::XS;
+            p.text(Pos2::new(area.left() + 4.0, y), Align2::LEFT_TOP, "Optional", ty::section(), white(150));
+            y += 22.0;
         }
         let a = ease((t - 0.05 * k as f32) / 0.4);
         let rr = Rect::from_min_size(Pos2::new(area.left(), y - (1.0 - a) * 10.0), Vec2::new(area.width(), row_h));
@@ -820,6 +1912,11 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         let waiting = app.perm_watch.waiting(r.perm, now);
         let ok = st == Status::Allowed;
         p.rect_filled(rr, 10.0, CARD().gamma_multiply(a));
+        // just allowed: the row flashes green once and its check draws itself
+        let since = app.perm_watch.allowed_at.get(&r.perm).map(|t0| (now - t0) as f32).unwrap_or(10.0);
+        if since < 0.8 {
+            p.rect_filled(rr, 10.0, with_alpha(GREEN(), 0.2 * (1.0 - ease(since / 0.8))));
+        }
         let ib = Rect::from_min_size(Pos2::new(rr.left() + 12.0, rr.center().y - 15.0), Vec2::splat(30.0));
         let tint = match st {
             Status::Allowed => GREEN(),
@@ -830,18 +1927,21 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         icon(&p, r.perm.icon(), ib.shrink(7.0), tint);
         p.text(Pos2::new(ib.right() + 12.0, rr.center().y), Align2::LEFT_CENTER, r.perm.name(), bold(13.0), TEXT().gamma_multiply(a));
         // the tools that want it
-        let mut gx = ib.right() + 190.0;
-        for &i in &r.tools {
+        for (n, &i) in r.tools.iter().enumerate() {
+            let gx = ib.right() + 190.0 + n as f32 * 22.0;
             icon(&p, app.tools[i].badge().icon, Rect::from_min_size(Pos2::new(gx, rr.center().y - 7.0), Vec2::splat(14.0)), TEXT_MUTED());
-            gx += 22.0;
         }
         // status on the right
         let right = rr.right() - 12.0;
+        // why it's asked, after the tools' icons (the status keeps its room)
+        let why_x = ib.right() + 190.0 + max_tools * 22.0 + 10.0;
+        let why_w = right - 210.0 - why_x;
+        if why_w > 60.0 && !r.perm.why().is_empty() {
+            text_fit(&p, Pos2::new(why_x, rr.center().y), Align2::LEFT_CENTER, r.perm.why(), font(12.0), TEXT_FAINT().gamma_multiply(a), why_w);
+        }
         if ok {
-            let since = app.perm_watch.allowed_at.get(&r.perm).map(|t0| (now - t0) as f32).unwrap_or(1.0);
-            let z = pop(since / 0.45);
             let c = Pos2::new(right - 13.0, rr.center().y);
-            check(&p, c, 12.0 * z, GREEN());
+            check_drawn(&p, c, 12.0, GREEN(), ease(since / 0.35));
         } else if waiting {
             let c = Pos2::new(right - 8.0, rr.center().y);
             spinner(&p, c, 6.0, now, BLUE());
@@ -889,20 +1989,26 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
     y - area.top()
 }
 
+/// A shortcut's caps: modifiers are one char each; the key is the rest.
+fn caps(keys: &str) -> Vec<String> {
+    let mods: String = keys.chars().take_while(|c| "⌃⌥⇧⌘".contains(*c)).collect();
+    let key: String = keys.chars().skip(mods.chars().count()).collect();
+    let mut v: Vec<String> = mods.chars().map(|c| c.to_string()).collect();
+    v.push(key);
+    v
+}
+
+fn cap_w(p: &egui::Painter, c: &str) -> f32 {
+    p.layout_no_wrap(c.to_string(), font(13.0), TEXT()).size().x.max(10.0) + 12.0
+}
+
 fn keycaps(p: &egui::Painter, right: Pos2, keys: &str) {
     let mut x = right.x;
-    let caps: Vec<String> = {
-        // modifiers are one char each; the key is the rest
-        let mods: String = keys.chars().take_while(|c| "⌃⌥⇧⌘".contains(*c)).collect();
-        let key: String = keys.chars().skip(mods.chars().count()).collect();
-        let mut v: Vec<String> = mods.chars().map(|c| c.to_string()).collect();
-        v.push(key);
-        v
-    };
+    let caps = caps(keys);
     for c in caps.iter().rev() {
         let f: FontId = font(13.0);
         let g = p.layout_no_wrap(c.clone(), f, TEXT());
-        let w = g.size().x.max(10.0) + 12.0;
+        let w = cap_w(p, c);
         let r = Rect::from_min_size(Pos2::new(x - w, right.y - 11.0), Vec2::new(w, 22.0));
         p.rect_filled(r, 5.0, white(26));
         p.rect_filled(Rect::from_min_max(Pos2::new(r.left() + 1.0, r.bottom() - 1.5), Pos2::new(r.right() - 1.0, r.bottom())), CornerRadius::same(2), Color32::from_black_alpha(90));
@@ -916,6 +2022,52 @@ fn keycaps(p: &egui::Painter, right: Pos2, keys: &str) {
     }
 }
 
+/// The Ready step's cat, standing on `feet`: it pops in, crouches and
+/// bursts the chosen tools out round it, which arc away and fall.
+fn celebrate(app: &App, p: &egui::Painter, feet: Pos2, t: f32) {
+    use std::f32::consts::PI;
+    let size = 56.0;
+    let burst = 0.5;
+    let z = pop(t / 0.35).max(0.0);
+    // crouch before the burst, stretch on it, then settle
+    let sq = if t < burst { 0.12 * ease((t - 0.3) / (burst - 0.3)) } else { -0.08 * (1.0 - ease((t - burst) / 0.3)) };
+    let (w, h) = (size * z * (1.0 + sq), size * z * (1.0 - sq));
+    let cat = Rect::from_min_max(Pos2::new(feet.x - w / 2.0, feet.y - h), Pos2::new(feet.x + w / 2.0, feet.y));
+    let c = Pos2::new(feet.x, feet.y - size / 2.0);
+    // a ring pushed out by the burst
+    let u = (t - burst) / 0.45;
+    if (0.0..1.0).contains(&u) {
+        crate::kit::glass::stroke_circle(p, c, 24.0 + 52.0 * ease(u), Stroke::new(2.0, with_alpha(BLUE(), 0.6 * (1.0 - u))));
+    }
+    let perk = if t > burst { 0.35 * (1.0 - ease((t - burst) / 0.5)) } else { 0.0 };
+    if z > 0.0 {
+        crate::kit::brand::draw_mascot(p, cat, cat_color(), (perk + twitch(t, 1.6), perk));
+    }
+    // the chosen tools fly out in a fan over the top and drop
+    let on: Vec<usize> = (0..app.tools.len()).filter(|&i| app.tool_on(i)).collect();
+    let n = on.len().max(1) as f32;
+    let fly = (t - burst) / 1.0;
+    if !(0.0..1.0).contains(&fly) {
+        return;
+    }
+    for (k, &i) in on.iter().enumerate() {
+        // from straight left over the top to straight right, a little uneven
+        let a = PI + (k as f32 + 0.5) / n * PI + ((k * 7 % 5) as f32 - 2.0) * 0.06;
+        let dist = 120.0 + ((k * 37) % 5) as f32 * 18.0;
+        let out = ease((fly * 1.8).min(1.0));
+        let at = c + Vec2::new(a.cos(), a.sin()) * dist * out + Vec2::new(0.0, 140.0 * fly * fly);
+        let s = pop(fly / 0.18).max(0.0);
+        let fade = 1.0 - ((fly - 0.55) / 0.45).clamp(0.0, 1.0);
+        let lime = k % 2 == 0;
+        let r = 12.0 * s;
+        p.circle_filled(at, r, (if lime { BLUE() } else { POPOVER() }).gamma_multiply(fade));
+        if !lime {
+            crate::kit::glass::stroke_circle(p, at, r, Stroke::new(1.0, white(36).gamma_multiply(fade)));
+        }
+        icon(p, app.tools[i].badge().icon, Rect::from_center_size(at, Vec2::splat(12.0 * s)), (if lime { ON_ACTION } else { TEXT_SOFT() }).gamma_multiply(fade));
+    }
+}
+
 /// Returns true when "Restart" next to Screen Recording was clicked.
 fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let mut restart = false;
@@ -923,6 +2075,7 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let left = Rect::from_min_max(body.min, Pos2::new(body.right() - 340.0, body.bottom()));
     let mut y = body.center().y - 120.0;
     p.text(Pos2::new(left.left(), y), Align2::LEFT_TOP, "Ready", bold(22.0), TEXT());
+    celebrate(app, &p, Pos2::new(left.left() + 28.0, y - 14.0), t);
     y += 46.0;
     // open at login
     let row = Rect::from_min_size(Pos2::new(left.left(), y), Vec2::new(left.width(), 52.0));
@@ -1030,42 +2183,67 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     restart
 }
 
-// ---------------------------------------------------------------- Full Disk Access helper
+// ---------------------------------------------------------------- System Settings helper
 
 const HELP_W: f32 = 360.0;
 const HELP_H: f32 = 132.0;
+/// The permissions switched on by hand in a System Settings list.
+const HELPED: [Perm; 3] = [Perm::FullDisk, Perm::Accessibility, Perm::Screen];
 
-/// While Full Disk Access is being set up, a small card floats on top of
+/// While one of [`HELPED`] is being set up, a small card stands beside
 /// System Settings showing what to do: find the app in the list and switch
-/// it on (or drag it in from Finder when it isn't listed).
-pub fn fda_helper(app: &mut App, ctx: &egui::Context) {
+/// it on. It floats so Settings can't cover it, so it keeps off Settings
+/// itself and steps aside while macOS shows a prompt (the password sheet,
+/// "would like to record this screen") instead of hiding it.
+pub fn perm_helper(app: &mut App, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
-    let show = app.perm_watch.waiting(Perm::FullDisk, now) && (app.demo || app.perm_watch.status(Perm::FullDisk) != Status::Allowed);
-    if !show {
+    let Some(perm) = HELPED.into_iter().find(|&p| app.perm_watch.waiting(p, now) && (app.demo || app.perm_watch.status(p) != Status::Allowed)) else {
         return;
+    };
+    let size = Vec2::new(HELP_W, HELP_H);
+    let scene = crate::kit::settings_window::scene();
+    let at = match (scene.settings, scene.screen) {
+        _ if scene.prompt => None,
+        (Some(set), Some(screen)) => Some(crate::kit::settings_window::place(set, screen, size)),
+        // a demo has no Settings window to stand by
+        _ if app.demo => {
+            let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
+            Some(((screen - size) / 2.0).to_pos2())
+        }
+        // Settings isn't up yet (or is closed): nothing to point at
+        _ => None,
+    };
+    let id = egui::ViewportId::from_hash_of("cmdmeow-fda-help");
+    let Some(at) = at else {
+        // not drawn this pass: the window closes, and opens again in place
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        return;
+    };
+    // Settings was moved: follow it
+    let was = ctx.input(|i| i.raw.viewports.get(&id).and_then(|v| v.outer_rect));
+    if was.is_some_and(|r| (r.min - at).length() > 1.0) {
+        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::OuterPosition(at));
     }
-    let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
     let builder = egui::ViewportBuilder::default()
-        .with_title("Full Disk Access")
-        .with_inner_size([HELP_W, HELP_H])
-        .with_position([screen.x - HELP_W - 24.0, screen.y - HELP_H - 90.0])
+        .with_title(perm.name())
+        .with_inner_size(size)
+        .with_position(at)
         .with_decorations(false)
         .with_transparent(true)
         .with_resizable(false)
         .with_has_shadow(true)
         .with_window_level(egui::WindowLevel::AlwaysOnTop);
-    let id = egui::ViewportId::from_hash_of("cmdmeow-fda-help");
     let mut close = false;
     crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
-        close = help_card(ui, ui.max_rect(), now);
+        close = help_card(ui, ui.max_rect(), now, perm);
     });
     if close {
-        app.perm_watch.asked.remove(&Perm::FullDisk);
+        app.perm_watch.asked.remove(&perm);
     }
 }
 
 /// The helper's card. Returns true when its close button was clicked.
-pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
+pub fn help_card(ui: &mut Ui, full: Rect, now: f64, perm: Perm) -> bool {
     let p = ui.painter().clone();
     p.rect_filled(full, 12.0, BG());
     p.rect_stroke(full, 12.0, Stroke::new(1.0, white(40)), StrokeKind::Inside);
@@ -1086,7 +2264,11 @@ pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
     p.add(egui::Shape::convex_polygon(arrow, Color32::WHITE, Stroke::new(1.0, Color32::BLACK)));
     let y = row.bottom() + 14.0;
     p.text(Pos2::new(full.left() + 16.0, y), Align2::LEFT_TOP, format!("Switch on {name} in the list"), bold(13.0), TEXT());
-    p.text(Pos2::new(full.left() + 16.0, y + 20.0), Align2::LEFT_TOP, "Not there? Drag it in from the Finder window.", font(12.0), TEXT_FAINT());
+    let more = match perm {
+        Perm::FullDisk => "Not there? Drag it in from the Finder window.",
+        _ => "macOS may ask for your password next.",
+    };
+    p.text(Pos2::new(full.left() + 16.0, y + 20.0), Align2::LEFT_TOP, more, font(12.0), TEXT_FAINT());
     let x = Rect::from_min_size(Pos2::new(full.right() - 26.0, full.bottom() - 26.0), Vec2::splat(18.0));
     let r = ui.interact(x, ui.scope_id().with("fda-help-close"), Sense::click());
     icon(&p, Icon::Close, x.shrink(3.0), if r.hovered() { TEXT() } else { TEXT_MUTED() });
@@ -1094,3 +2276,74 @@ pub fn help_card(ui: &mut Ui, full: Rect, now: f64) -> bool {
     r.clicked()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn welcome_cat_rises_smoothly_and_comes_to_rest() {
+        let (rise, _, _) = peek(0.0);
+        assert!(rise <= -96.0, "hidden below the floor at first: {rise}");
+        let (rise, _, _) = peek(0.6);
+        assert!((-80.0..-60.0).contains(&rise), "only the ears show while it looks round: {rise}");
+        assert_eq!(peek(2.0), (0.0, 1.0, 1.0), "at rest, unsquashed");
+        let mut last = peek(0.0).0;
+        for i in 1..300 {
+            let r = peek(i as f32 * 0.01).0;
+            assert!((r - last).abs() < 15.0, "a jump of {} at {:.2}s", r - last, i as f32 * 0.01);
+            last = r;
+        }
+    }
+
+    #[test]
+    fn goals_cover_every_tool_but_fan_once() {
+        let env = crate::core::tool::ToolEnv { ctx: egui::Context::default(), demo: true };
+        let ids: Vec<&str> = crate::tools::all(&env).iter().map(|t| t.id()).collect();
+        let mut seen: Vec<&str> = Vec::new();
+        for g in &GOALS {
+            for id in g.tools {
+                assert!(ids.contains(id), "{} lists unknown tool {id}", g.name);
+                assert!(!seen.contains(id), "{id} is in two goals");
+                seen.push(id);
+            }
+        }
+        let left: Vec<&&str> = ids.iter().filter(|id| !seen.contains(id)).collect();
+        assert_eq!(left, vec![&crate::tools::fan::ID]);
+    }
+
+    #[test]
+    fn fresh_install_turns_on_three_to_four_tools() {
+        let env = crate::core::tool::ToolEnv { ctx: egui::Context::default(), demo: true };
+        let all = crate::tools::all(&env);
+        let off = off_at_first(all.iter().map(|t| t.id()));
+        let on: Vec<&str> = all.iter().map(|t| t.id()).filter(|id| !off.iter().any(|o| o == id)).collect();
+        assert_eq!(on, ON_AT_FIRST.to_vec());
+        // they ask macOS for one thing only, and take no shortcut
+        let mut need: Vec<Perm> = Vec::new();
+        for t in all.iter().filter(|t| on.contains(&t.id())) {
+            for n in t.needs() {
+                if !need.contains(&n.perm) {
+                    need.push(n.perm);
+                }
+            }
+            assert!(t.setup_shortcuts().is_empty(), "{} takes a shortcut", t.id());
+            assert!(t.setup_models().is_empty(), "{} downloads", t.id());
+        }
+        assert_eq!(need, vec![Perm::FullDisk]);
+    }
+
+    #[test]
+    fn keycaps_split_modifiers_from_the_key() {
+        assert_eq!(caps("⌘⇧2"), vec!["⌘", "⇧", "2"]);
+        assert_eq!(caps("⌥Space"), vec!["⌥", "Space"]);
+    }
+
+    #[test]
+    fn ear_flick_is_short_and_small() {
+        assert_eq!(twitch(0.9, 1.0), 0.0);
+        assert_eq!(twitch(1.4, 1.0), 0.0);
+        let most = (0..36).map(|i| twitch(1.0 + i as f32 * 0.01, 1.0)).fold(0.0f32, f32::max);
+        assert!(most > 0.1 && most <= 0.3, "{most}");
+    }
+}

@@ -184,6 +184,20 @@ pub struct Capture {
 }
 
 impl Capture {
+    /// The Whisper models for transcripts of recordings: the ones already on
+    /// this Mac, or the default one, fetched on the first Transcribe.
+    pub fn transcript_models(&self) -> Vec<crate::core::tool::SetupModel> {
+        use crate::core::tool::{ModelState, SetupModel};
+        use crate::kit::whisper::Model;
+        let row = |m: Model, state| SetupModel { id: m.file(), what: "Transcripts of recordings", name: m.setup_name(), bytes: m.bytes(), state };
+        let found: Vec<SetupModel> = if self.dir.is_none() { Vec::new() } else { Model::ALL.into_iter().filter(|m| m.ready()).map(|m| row(m, ModelState::Ready)).collect() };
+        if found.is_empty() {
+            vec![row(Model::default(), ModelState::OnFirstUse)]
+        } else {
+            found
+        }
+    }
+
     pub fn new(env: &ToolEnv) -> Self {
         let (tx, rx) = channel();
         let (settings, dir, store) = if env.demo {
@@ -1103,6 +1117,11 @@ impl Tool for Capture {
                 self.tab = Tab::History;
                 Some(View::Page)
             }
+            "capture-empty" => {
+                self.tab = Tab::History;
+                self.store.shots.retain(|s| s.kind == store::Kind::Recording);
+                Some(View::Page)
+            }
             "capture-folder" => {
                 self.tab = Tab::Folder;
                 Some(View::Page)
@@ -1118,9 +1137,13 @@ impl Tool for Capture {
                 ed.tool = match std::env::var("CMB_DEMO_EDITOR_TOOL").unwrap_or_default().as_str() {
                     "arrow" => editor::Tool::Arrow,
                     "blur" => editor::Tool::Blur,
-                    "crop" => editor::Tool::Crop,
                     _ => ed.tool,
                 };
+                match std::env::var("CMB_DEMO_EDITOR_TOOL").unwrap_or_default().as_str() {
+                    "area" | "crop" => ed.demo_area(),
+                    "selected" => ed.demo_selected(),
+                    _ => {}
+                }
                 self.demo_editor = Some(ed);
                 Some(View::Page)
             }
@@ -1135,6 +1158,14 @@ mod tests {
 
     fn demo() -> Capture {
         Capture::new(&ToolEnv { ctx: egui::Context::default(), demo: true })
+    }
+
+    #[test]
+    fn setup_lists_the_transcript_model_for_first_use() {
+        let m = demo().transcript_models();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].state, crate::core::tool::ModelState::OnFirstUse);
+        assert_eq!(m[0].name, "Whisper turbo");
     }
 
     #[test]

@@ -93,11 +93,41 @@ fn answer(host: &str, action: &str, f: &(impl Fn(&str) -> bool + ?Sized)) {
     }
 }
 
-/// Start listening for links. Call before the app's run loop starts, so the
-/// link that launched the app isn't missed.
+/// What opening the app again while it runs means: show its window.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const REOPEN_LINK: &str = "cmdmeow://open/window";
+
+/// Start listening for links (and for the app being opened again). Call
+/// before the app's run loop starts, so the link that launched it isn't missed.
 pub fn install() {
     #[cfg(target_os = "macos")]
     mac::install();
+}
+
+/// Once the app has finished launching (call every frame; it runs once).
+/// AppKit puts its own "opened again" handler in place while it launches,
+/// over the one [`install`] set, so it's set again here.
+pub fn after_launch() {
+    #[cfg(target_os = "macos")]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(mac::set_reopen);
+    }
+}
+
+/// Another copy of this build is already running (`open -n`, a second
+/// download): ask it to show its window. True when this copy should quit.
+pub fn hand_over() -> bool {
+    #[cfg(target_os = "macos")]
+    return mac::hand_over();
+    #[cfg(not(target_os = "macos"))]
+    false
+}
+
+/// The distributed notification one copy sends the running one.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn reopen_note() -> String {
+    format!("{}.reopen", super::remove::bundle_id())
 }
 
 #[cfg(target_os = "macos")]
@@ -106,11 +136,17 @@ mod mac {
     use objc2::runtime::AnyObject;
     use objc2::{class, define_class, msg_send, sel, AnyThread};
     use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
+    use std::sync::atomic::{AtomicPtr, Ordering};
 
     /// 'GURL': the Apple event class and id of "open this URL".
     const GURL: u32 = u32::from_be_bytes(*b"GURL");
     /// '----': the event's direct parameter, the URL itself.
     const DIRECT: u32 = u32::from_be_bytes(*b"----");
+    /// 'aevt' / 'rapp': the app was opened again while running (Finder,
+    /// Spotlight, Dock). A menu bar app has no window to show for it, and its
+    /// icon may be hidden (notch, full menu bar), so this opens the window.
+    const CORE: u32 = u32::from_be_bytes(*b"aevt");
+    const REOPEN: u32 = u32::from_be_bytes(*b"rapp");
 
     define_class!(
         #[unsafe(super(NSObject))]
@@ -130,17 +166,72 @@ mod mac {
                     super::open(&u.to_string());
                 }
             }
+
+            #[unsafe(method(handleReopen:withReply:))]
+            fn reopen(&self, _event: &AnyObject, _reply: &AnyObject) {
+                super::open(super::REOPEN_LINK);
+            }
+
+            /// Another copy of the app asked this one to show itself.
+            #[unsafe(method(handleReopenNote:))]
+            fn reopen_note(&self, _note: &AnyObject) {
+                super::open(super::REOPEN_LINK);
+            }
         }
     );
 
+    /// The handler, kept for the life of the app (the event manager and the
+    /// notification centre don't retain it).
+    static HANDLER: AtomicPtr<UrlHandler> = AtomicPtr::new(std::ptr::null_mut());
+
+    fn handler() -> Option<&'static UrlHandler> {
+        // SAFETY: set once in `install` and never released
+        unsafe { HANDLER.load(Ordering::Acquire).as_ref() }
+    }
+
     pub fn install() {
-        let handler: Retained<UrlHandler> = unsafe { msg_send![super(UrlHandler::alloc().set_ivars(())), init] };
+        let made: Retained<UrlHandler> = unsafe { msg_send![super(UrlHandler::alloc().set_ivars(())), init] };
+        HANDLER.store(Retained::into_raw(made), Ordering::Release);
+        let Some(h) = handler() else { return };
         unsafe {
             let mgr: Retained<AnyObject> = msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
-            let _: () = msg_send![&*mgr, setEventHandler: &*handler, andSelector: sel!(handleGetURL:withReply:), forEventClass: GURL, andEventID: GURL];
+            let _: () = msg_send![&*mgr, setEventHandler: h, andSelector: sel!(handleGetURL:withReply:), forEventClass: GURL, andEventID: GURL];
+            // delivered even while the app is in the background
+            const DELIVER_IMMEDIATELY: usize = 4;
+            let name = NSString::from_str(&super::reopen_note());
+            let center: Retained<AnyObject> = msg_send![class!(NSDistributedNotificationCenter), defaultCenter];
+            let _: () = msg_send![&*center, addObserver: h, selector: sel!(handleReopenNote:), name: &*name, object: Option::<&AnyObject>::None, suspensionBehavior: DELIVER_IMMEDIATELY];
         }
-        // the event manager doesn't keep it; it lives as long as the app
-        std::mem::forget(handler);
+        set_reopen();
+    }
+
+    /// Answer "opened again" ourselves (see [`super::after_launch`]).
+    pub fn set_reopen() {
+        let Some(h) = handler() else { return };
+        unsafe {
+            let mgr: Retained<AnyObject> = msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
+            let _: () = msg_send![&*mgr, setEventHandler: h, andSelector: sel!(handleReopen:withReply:), forEventClass: CORE, andEventID: REOPEN];
+        }
+    }
+
+    pub fn hand_over() -> bool {
+        use objc2_app_kit::NSRunningApplication;
+        use objc2_foundation::NSBundle;
+        let Some(id) = NSBundle::mainBundle().bundleIdentifier() else { return false };
+        let me = std::process::id() as i32;
+        let running = NSRunningApplication::runningApplicationsWithBundleIdentifier(&id);
+        // two copies starting together each see the other: only the later
+        // one (higher pid) hands over, so one always stays
+        if !running.iter().any(|a| (0..me).contains(&a.processIdentifier())) {
+            return false;
+        }
+        let name = NSString::from_str(&super::reopen_note());
+        unsafe {
+            let center: Retained<AnyObject> = msg_send![class!(NSDistributedNotificationCenter), defaultCenter];
+            let _: () = msg_send![&*center, postNotificationName: &*name, object: Option::<&AnyObject>::None, userInfo: Option::<&AnyObject>::None, deliverImmediately: true];
+        }
+        eprintln!("[url] already running: asked it to show its window");
+        true
     }
 }
 
@@ -149,6 +240,12 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    #[test]
+    fn reopen_note_is_per_build() {
+        let n = reopen_note();
+        assert!(n.starts_with(crate::kit::remove::bundle_id()) && n.ends_with(".reopen"));
+    }
 
     #[test]
     fn parses_host_and_action() {

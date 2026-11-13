@@ -1,45 +1,111 @@
-//! Claude Code as a `Provider`: plan and limits come from the Claude CLI
-//! (`claude auth status`, `claude -p /usage`, which spends no tokens), local
-//! activity comes from counting usage fields in ~/.claude/projects logs.
+//! Claude Code as a `Provider`. Plan limits come from Claude's account,
+//! signed in with Claude Code's own token (read from the Keychain, macOS
+//! asks once), and from the Claude CLI (`claude auth status`,
+//! `claude -p /usage`, which spends no tokens) when that doesn't work.
+//! Local activity comes from counting usage fields in Claude Code's logs.
 
 use crate::kit::sync::LockExt;
+use super::account::{self, ApiError, ClaudeCreds, KeychainRead};
 use super::{balanced, find, recent_jsonl, Billing, Contrib, Limit, LocalTokens, LogCache, ParseCtx, Provider, Shared, UsageEntry, UsageInfo};
-use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd, projects_dir, scan_projects, Project};
-use chrono::{DateTime, Datelike, Local, TimeZone};
+use crate::kit::claude_code::{self as cc, claude_bin, claude_cmd};
+use chrono::{DateTime, Datelike, Local};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 pub const NAME: &str = "Claude";
 
 #[derive(Default)]
 pub struct ClaudeCode {
     cache: LogCache,
-    /// When the CLI last ran (it also tells the plan, so it still runs now
-    /// and then while the status line keeps the limits fresh).
-    cli_at: Option<std::time::Instant>,
+    /// Claude Code's sign-in, kept while it works.
+    creds: Option<ClaudeCreds>,
+    /// When the sign-in was last looked for (the Keychain is asked at most
+    /// every few minutes).
+    creds_at: Option<Instant>,
 }
 
-/// A status-line capture newer than this is live enough to skip the CLI.
-const LIVE_SECS: i64 = 15 * 60;
+/// How often to look for Claude Code's sign-in again when there was none
+/// (or it had run out: Claude Code renews it when it next runs).
+const CREDS_RETRY: Duration = Duration::from_secs(10 * 60);
 
-/// Put the limits of a fresh status-line capture into `s`. False when the
-/// hook is off or Claude Code hasn't replied lately.
-pub fn apply_statusline(s: &Shared) -> bool {
-    if super::settings::get().claude_source != "statusline" {
-        return false;
+impl ClaudeCode {
+    /// Claude Code's sign-in: the one in hand while it's fresh, else read
+    /// again from its credentials file or the Keychain.
+    fn creds(&mut self) -> Option<ClaudeCreds> {
+        let now = chrono::Utc::now().timestamp();
+        if let Some(c) = self.creds.as_ref().filter(|c| c.fresh(now)) {
+            return Some(c.clone());
+        }
+        self.creds = None;
+        if self.creds_at.is_some_and(|t| t.elapsed() < CREDS_RETRY) {
+            return None;
+        }
+        self.creds_at = Some(Instant::now());
+        let c = account::claude_creds_file().filter(|c| c.fresh(now)).or_else(read_keychain).filter(|c| c.fresh(now))?;
+        self.creds = Some(c.clone());
+        Some(c)
     }
-    let Some((at, limits)) = super::statusline::latest() else { return false };
-    if chrono::Utc::now().timestamp() - at > LIVE_SECS {
-        return false;
+
+    /// Limits from Claude's account. False when there's no usable sign-in
+    /// or the call failed, so the CLI runs instead.
+    fn fetch_api(&mut self, s: &Shared) -> bool {
+        let Some(c) = self.creds() else { return false };
+        match account::claude_usage(&c.token) {
+            Ok(limits) => {
+                cc::set_signed_in(Some(true));
+                let mut g = s.lock_ok();
+                g.installed = true;
+                g.logged_in = true;
+                g.signed_out = false;
+                if !c.plan.is_empty() {
+                    g.plan = c.plan;
+                }
+                if !c.tier.is_empty() {
+                    g.tier = c.tier;
+                }
+                g.billing = Billing::Subscription;
+                g.limits = limits;
+                g.error = None;
+                g.stale = false;
+                g.source = "API";
+                g.fetched = Some(Local::now());
+                true
+            }
+            Err(e) => {
+                eprintln!("[ai] claude usage: {e:?}");
+                if e == ApiError::Auth {
+                    // refused: read the sign-in again next time
+                    self.creds = None;
+                    self.creds_at = None;
+                }
+                false
+            }
+        }
     }
-    let mut g = s.lock_ok();
-    g.limits = limits;
-    g.source = "Live";
-    g.stale = false;
-    g.error = None;
-    g.installed = true;
-    g.fetched = chrono::Local.timestamp_opt(at, 0).single();
-    true
+}
+
+/// Claude Code's sign-in from the Keychain. macOS asks the person the first
+/// time, so that happens only while a window is open (someone is there to
+/// answer), and a Deny is remembered until they allow it in Settings.
+fn read_keychain() -> Option<ClaudeCreds> {
+    let state = super::settings::get().claude_keychain;
+    if state == "denied" || (state.is_empty() && !crate::kit::activity::visible()) {
+        return None;
+    }
+    match account::read_claude_keychain() {
+        KeychainRead::Found(b) => {
+            if state != "ok" {
+                super::settings::update(true, |s| s.claude_keychain = "ok".into());
+            }
+            account::parse_claude_creds(&b)
+        }
+        KeychainRead::Denied => {
+            super::settings::update(true, |s| s.claude_keychain = "denied".into());
+            None
+        }
+        KeychainRead::Missing | KeychainRead::Failed => None,
+    }
 }
 
 impl Provider for ClaudeCode {
@@ -50,22 +116,17 @@ impl Provider for ClaudeCode {
         cc::tool_on()
     }
     fn fetch_account(&mut self, s: &Shared) {
-        let cli_recent = self.cli_at.is_some_and(|t| t.elapsed().as_secs() < 3600);
-        if cli_recent && apply_statusline(s) {
-            return;
+        if !self.fetch_api(s) {
+            fetch_cli(s);
         }
-        fetch_cli(s);
-        self.cli_at = Some(std::time::Instant::now());
-        apply_statusline(s);
     }
     fn local_tokens(&mut self) -> LocalTokens {
         // project folders hold the session logs one level down
         // <project>/<session>.jsonl, and subagents' own logs in
-        // <project>/<session>/subagents/, which count toward the limits too
-        self.cache.update(recent_jsonl(&projects_dir(), 3), usage_entry)
-    }
-    fn projects(&mut self) -> Vec<Project> {
-        scan_projects()
+        // <project>/<session>/subagents/, which count toward the limits too;
+        // a reply copied into two folders counts once (`LogCache::entries`)
+        let files = cc::log_dirs().iter().flat_map(|d| recent_jsonl(d, 3)).collect();
+        self.cache.update(files, usage_entry)
     }
     fn data_dir(&self) -> Option<PathBuf> {
         dirs::home_dir().map(|h| h.join(".claude"))
@@ -303,6 +364,21 @@ pub fn demo_info() -> UsageInfo {
         l.resets_at = Some(now + left);
         l.resets = super::codex::reset_text(now + left);
     }
+    // CMDMEOW_DEMO_LONG=1: the longest texts the widgets meet, for checking
+    // nothing gets cut ("Resets tomorrow 23:40", "Out tomorrow 23:40")
+    if std::env::var_os("CMDMEOW_DEMO_LONG").is_some() {
+        let late = (Local::now() + chrono::Duration::days(1)).date_naive().and_hms_opt(23, 40, 0).and_then(|t| t.and_local_timezone(Local).single()).map(|t| t.timestamp()).unwrap_or(now);
+        if let Some(s) = limits.first_mut() {
+            (s.pct, s.window_secs, s.resets_at, s.resets) = (2.0, late - now + 3600, Some(late), super::codex::reset_text(late));
+        }
+        // week: ahead of pace, runs out tomorrow 23:40, resets two days later
+        let end = late + 2 * 86_400;
+        let start = end - 7 * 86_400;
+        let pct = (100.0 * (now - start) as f64 / (late - start) as f64) as f32;
+        for l in limits.iter_mut().skip(1) {
+            (l.pct, l.resets_at, l.resets) = (pct.min(99.0), Some(end), super::codex::reset_text(end));
+        }
+    }
     UsageInfo {
         provider: NAME,
         loading: false,
@@ -316,10 +392,9 @@ pub fn demo_info() -> UsageInfo {
         error: None,
         fetched: Some(Local::now()),
         local: demo_local(),
-        projects: demo_projects(),
         data_bytes: 5_400_000_000,
         billing: Billing::Subscription,
-        source: "Live",
+        source: "API",
         ..Default::default()
     }
 }
@@ -328,16 +403,6 @@ fn demo_local() -> LocalTokens {
     let home = dirs::home_dir().unwrap_or_default();
     let p = |rel: &str| home.join(rel).display().to_string();
     super::demo_local(&[("claude-opus-4-6", 6), ("claude-sonnet-4-6", 3), ("claude-haiku-4-5", 1)], &[&p("Projects/cmdmeow"), &p("Projects/site"), &p("work/api-gateway"), &p("notes")], 3.0)
-}
-
-/// Sample Claude Code projects for screenshots.
-fn demo_projects() -> Vec<Project> {
-    let home = dirs::home_dir().unwrap_or_default();
-    let ago = |h: u64| Some(std::time::SystemTime::now() - std::time::Duration::from_secs(h * 3600));
-    [("Projects/cmdmeow", true, 0, 1_200_000_000), ("Projects/site", true, 3, 640_000_000), ("notes", true, 50, 88_000_000), ("Projects/old-experiment", false, 900, 412_000_000)]
-        .into_iter()
-        .map(|(rel, exists, hours, bytes)| Project { folder: home.join(".claude/projects").join(rel.replace('/', "-")), cwd: Some(home.join(rel)), cwd_exists: exists, last_used: ago(hours), bytes })
-        .collect()
 }
 
 #[cfg(test)]

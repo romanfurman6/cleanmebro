@@ -932,10 +932,13 @@ mod imp {
             if let Target::Area { rect, .. } = &cfg.target {
                 conf.setSourceRect(CGRect { origin: CGPoint { x: rect[0], y: rect[1] }, size: CGSize { width: rect[2], height: rect[3] } });
             }
-            conf.setCapturesAudio(cfg.system_audio);
-            conf.setSampleRate(mixer::RATE as isize);
-            conf.setChannelCount(2);
-            conf.setExcludesCurrentProcessAudio(true);
+            // audio capture came with macOS 13: older systems record video only
+            if responds(any(&*conf), sel!(setCapturesAudio:)) {
+                conf.setCapturesAudio(cfg.system_audio);
+                conf.setSampleRate(mixer::RATE as isize);
+                conf.setChannelCount(2);
+                conf.setExcludesCurrentProcessAudio(true);
+            }
             let mic = cfg.mic.is_some() && responds(any(&*conf), sel!(setCaptureMicrophone:));
             if mic {
                 conf.setCaptureMicrophone(true);

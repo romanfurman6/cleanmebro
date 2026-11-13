@@ -55,7 +55,7 @@ impl Tool for System {
         "Mac Health"
     }
     fn about(&self) -> &'static str {
-        "Disk, memory, CPU, battery, network, devices"
+        "Live disk, memory, CPU, battery, network and connected devices"
     }
     fn busy(&self) -> bool {
         self.ai.phase() == crate::kit::aicheck::Phase::Running
@@ -66,6 +66,9 @@ impl Tool for System {
     fn needs(&self) -> Vec<crate::kit::perms::Need> {
         use crate::kit::perms::{Need, Perm};
         vec![Need::may(Perm::FullDisk), Need::may(Perm::Bluetooth), Need::may(Perm::Notifications)]
+    }
+    fn set_on(&mut self, on: bool) {
+        monitor::set_paused(!on);
     }
 
     fn section(&self) -> &'static str {

@@ -107,6 +107,8 @@ pub struct Check {
     pub(crate) icons: HashMap<PathBuf, Option<egui::TextureHandle>>,
     /// The scan the last automatic check ran for.
     auto_for: Option<String>,
+    /// Everything the automatic checks have seen ([`Check::auto_new`]).
+    auto_seen: Option<std::collections::HashSet<String>>,
     pub demo: bool,
     /// The recommendations popover is open.
     pub(crate) open: bool,
@@ -114,6 +116,9 @@ pub struct Check {
     pub(crate) answer: std::collections::HashSet<String>,
     /// Labels of the ask's actions, by id (the popover's second button).
     pub(crate) actions: Vec<(&'static str, &'static str)>,
+    /// The tool shows the answers and tips on its own page (Cleanup: the
+    /// answer on each card); the chip then only says it checked.
+    pub inline: bool,
 }
 
 impl Check {
@@ -125,10 +130,12 @@ impl Check {
             hovered: None,
             icons: HashMap::new(),
             auto_for: None,
+            auto_seen: None,
             demo,
             open: false,
             answer: Default::default(),
             actions: Vec::new(),
+            inline: false,
         }
     }
 
@@ -202,6 +209,30 @@ impl Check {
         }
     }
 
+    /// Start when the list holds something no automatic check has seen yet
+    /// (the first time, or a new item), never because items went away (the
+    /// person turned one off or removed it). For live lists with no scan.
+    pub fn auto_new(&mut self, ctx: &egui::Context, ids: impl IntoIterator<Item = String>, ask: impl FnOnce() -> Ask) {
+        if self.demo || !self.note_new(ids) {
+            return;
+        }
+        let s = settings();
+        if s.is_on(self.tool) && crate::kit::agent::main().ready() {
+            self.start(ctx, ask());
+        }
+    }
+
+    /// Remember `ids`; true when one wasn't seen before (or nothing was).
+    fn note_new(&mut self, ids: impl IntoIterator<Item = String>) -> bool {
+        let first = self.auto_seen.is_none();
+        let seen = self.auto_seen.get_or_insert_with(Default::default);
+        let mut new = false;
+        for id in ids {
+            new |= seen.insert(id);
+        }
+        first || new
+    }
+
     pub fn stop(&mut self) {
         if let Some(c) = self.cancel.take() {
             c.store(true, Ordering::SeqCst);
@@ -226,10 +257,17 @@ impl Check {
         self.inner.lock_ok().recs.retain(|x| x != r);
     }
 
-    /// The user decided on `key` some other way (its own Allow / Keep):
-    /// its answer goes.
-    pub fn answered(&mut self, key: &str) {
-        self.inner.lock_ok().recs.retain(|x| !(x.key == key && self.answer.contains(key)));
+    /// The agent's answer for a key that waited on the user, if any.
+    pub fn answer_for(&self, key: &str) -> Option<Rec> {
+        if !self.answer.contains(key) {
+            return None;
+        }
+        self.recs().into_iter().find(|r| r.key == key)
+    }
+
+    /// Recommendations that aren't answers.
+    pub fn tips(&self) -> Vec<Rec> {
+        self.recs().into_iter().filter(|r| !self.is_answer(r)).collect()
     }
 
     /// Whether `r` answers a key that waited on the user.
@@ -566,6 +604,33 @@ mod tests {
         assert_eq!((t.calls, t.tokens), (2, 240));
         assert!((t.cost - 0.25).abs() < 1e-9);
     }
+    #[test]
+    fn auto_new_runs_for_new_items_only() {
+        let mut c = Check::new("startup", false);
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(c.note_new(ids(&["a", "b"])));
+        assert!(!c.note_new(ids(&["a", "b"])));
+        // turned off or removed: no new check
+        assert!(!c.note_new(ids(&["a"])));
+        // and on again: seen before, still none
+        assert!(!c.note_new(ids(&["a", "b"])));
+        // something new starts at login
+        assert!(c.note_new(ids(&["a", "b", "c"])));
+        // the very first look counts even when empty
+        assert!(Check::new("startup", false).note_new(ids(&[])));
+    }
+
+    #[test]
+    fn answers_and_tips_split() {
+        let mut c = Check::new("cleanup", true);
+        c.set_demo("", vec![Check::demo_rec("select", "Clean", "a", "", "why a", "A"), Check::demo_rec("keep", "Keep", "b", "", "why b", "B")]);
+        c.answer = ["a".to_string()].into_iter().collect();
+        assert_eq!(c.answer_for("a").map(|r| r.why), Some("why a".into()));
+        // a tip isn't an answer, even for its own key
+        assert!(c.answer_for("b").is_none());
+        assert_eq!(c.tips().iter().map(|r| r.key.as_str()).collect::<Vec<_>>(), vec!["b"]);
+    }
+
     #[test]
     fn answers_come_first_and_dont_use_up_the_limit() {
         let mut a = ask();

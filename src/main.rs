@@ -6,7 +6,7 @@
 //! storage (default), memory, battery, cpu, network, devices, claude-detail,
 //! cleanup, cleanup-no-claude, results, lens, lens-live, claude, claude-missing,
 //! health, customize, settings-tools, fan, fan-detail, fan-air, fan-air-detail,
-//! fan-curve, fan-fixed, fan-install, setup, setup-tools, setup-ai, setup-perms,
+//! fan-curve, fan-fixed, fan-install, setup, setup-tools, setup-tools-all, setup-tools-preview, setup-ai, setup-perms,
 //! setup-crash, setup-ready, settings-general,
 //! or widget-<tool>/<widget>@<size> for one widget alone (widget-system/devices@4:4).
 //! `--fan-report` prints every fan and temperature sensor this Mac reports.
@@ -97,6 +97,11 @@ fn main() -> eframe::Result {
     }
     if screenshot.is_none() && !std::env::args().any(|a| a == "--view") {
         view = "panel".into();
+    }
+    // one copy per build: a second launch (`open -n`) shows the running
+    // one's window and quits (a relaunch waits for the old copy instead)
+    if screenshot.is_none() && !kit::perms::relaunched() && kit::url_scheme::hand_over() {
+        return Ok(());
     }
     let opts = core::shell::Options { screenshot, view };
     // the shell sizes the window for the chosen view on its first frame

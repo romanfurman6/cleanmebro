@@ -133,12 +133,6 @@ pub struct Recommendation {
     pub go: Action,
 }
 
-/// An entry a tool adds to the panel's gear menu.
-pub struct MenuItem {
-    pub id: &'static str,
-    pub label: String,
-}
-
 /// Requests from a tool to the shell.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
@@ -288,10 +282,6 @@ pub trait Tool {
     fn tray_title(&self) -> Option<String> {
         None
     }
-    fn menu_items(&self) -> Vec<MenuItem> {
-        Vec::new()
-    }
-    fn menu_action(&mut self, _item: &str, _cx: &mut Cx) {}
 
     // ---- background
     /// Called on every frame, and also while every shell window is hidden
@@ -314,9 +304,76 @@ pub trait Tool {
     }
 }
 
+// ---------------------------------------------------------------- failures
+
+/// Tools that panicked this run, in order, and how many of them the shell
+/// has already turned off.
+static BROKEN: std::sync::Mutex<(Vec<ToolId>, usize)> = std::sync::Mutex::new((Vec::new(), 0));
+
+fn broken_list() -> std::sync::MutexGuard<'static, (Vec<ToolId>, usize)> {
+    BROKEN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whether tool `id` panicked this run (it stays stopped until a restart).
+pub fn is_broken(id: ToolId) -> bool {
+    broken_list().0.contains(&id)
+}
+
+/// Run a piece of tool `id`'s code on the shell's thread. A panic inside
+/// stops that tool for the rest of the run (None here, a "Stopped" tile in
+/// its places) instead of taking the whole app down; the panic is still
+/// logged and reported like any other. A stopped tool's code isn't run again.
+pub fn guard<R>(id: ToolId, f: impl FnOnce() -> R) -> Option<R> {
+    if is_broken(id) {
+        return None;
+    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(r) => Some(r),
+        Err(_) => {
+            eprintln!("[tool] {id} stopped after a panic");
+            stop(id);
+            None
+        }
+    }
+}
+
+/// Mark tool `id` stopped, as a panic would.
+pub fn stop(id: ToolId) {
+    let mut b = broken_list();
+    if !b.0.contains(&id) {
+        b.0.push(id);
+    }
+}
+
+/// Tools that broke since the last call, for the shell to switch off
+/// (global shortcuts and the like released).
+pub fn newly_broken() -> Vec<ToolId> {
+    let mut b = broken_list();
+    let new = b.0[b.1..].to_vec();
+    b.1 = b.0.len();
+    new
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panicking_tool_stops_alone() {
+        let quiet = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        assert_eq!(super::guard("test-ok", || 7), Some(7));
+        let r: Option<()> = super::guard("test-boom", || panic!("boom"));
+        std::panic::set_hook(quiet);
+        assert!(r.is_none());
+        assert!(super::is_broken("test-boom") && !super::is_broken("test-ok"));
+        // never run again
+        let mut ran = false;
+        assert!(super::guard("test-boom", || ran = true).is_none());
+        assert!(!ran);
+        assert!(super::newly_broken().contains(&"test-boom"));
+        assert!(!super::newly_broken().contains(&"test-boom"));
+    }
 
     #[test]
     fn sizes_round_trip() {
@@ -349,7 +406,7 @@ mod tests {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetupModel {
     pub id: &'static str,
-    /// What it is for ("Speech model").
+    /// What the tool uses it for ("Speech to text").
     pub what: &'static str,
     /// Which one ("Parakeet v3").
     pub name: &'static str,
@@ -366,4 +423,6 @@ pub enum ModelState {
     Unpacking,
     Ready,
     Failed(String),
+    /// Not needed yet: the tool downloads it the first time it's used.
+    OnFirstUse,
 }

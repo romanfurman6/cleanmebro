@@ -13,6 +13,8 @@ on every push to `main` that touches `site/`.
   `node tests/site/smoke.mjs` runs the page in Chromium (needs Playwright and ffmpeg).
 - `play/`: old player links (`play/?v=…`) forward to `view/`.
 - `icon.png` is copied from `docs/images/icon.png` at deploy time (PNGs are gitignored).
+- `og.png` is the 1200×630 link preview card, rendered from the home page by `node scripts/og-image.mjs` (needs Playwright). Run it again after the hero panel or the headline changes.
+- Motion: the app window walks through its tools once and stops on Cleanup; the 14→1 scene plays once and has a replay button; live numbers pause off screen. The tool count (14) follows `src/tools/mod.rs` `all()`.
 
 Preview locally: `cp docs/images/icon.png site/ && python3 -m http.server -d site 8080`.
 

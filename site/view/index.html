@@ -5,17 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Shared · Cmd+Meow</title>
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#111318">
+<meta name="theme-color" content="#070D07" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#EAF2DF" media="(prefers-color-scheme: light)">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="base.css">
-<link rel="stylesheet" href="view.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="base.css?v=2">
+<link rel="stylesheet" href="view.css?v=2">
 </head>
 <body class="pl-body">
 
 <header class="pl-top">
   <a class="brand" href="../">
     <svg class="mark" viewBox="0 0 100 100" aria-hidden="true">
-      <g fill="#F3EFE6"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
+      <g fill="currentColor"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
       <path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="#E8A33D" stroke-width="6.5" stroke-linecap="round"/>
     </svg>
     <span>Cmd+Meow</span>
@@ -37,7 +41,7 @@
     <video id="v" playsinline preload="metadata"></video>
 
     <button class="pl-center" id="big" type="button" aria-label="Play">
-      <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M9 5.5v17l14-8.5z" fill="#fff"/></svg>
+      <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M9 5.5v17l14-8.5z" fill="currentColor"/></svg>
     </button>
     <div class="pl-spin" id="spin" hidden aria-hidden="true"></div>
     <div class="pl-flash" id="flash" aria-hidden="true"></div>
@@ -161,8 +165,10 @@
         <button class="tbb" type="button" data-size="2" aria-label="Thick"><span class="dot" style="--d:11px"></span></button>
       </div>
       <span class="tb-sep"></span>
+      <span class="tb-pair">
       <button class="tbb" type="button" id="ie-undo" title="Undo (⌘Z)" aria-label="Undo"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M6 4.5 3 7.5l3 3M3 7.5h7.5a4 4 0 0 1 0 8H8"/></svg></button>
       <button class="tbb" type="button" id="ie-redo" title="Redo (⇧⌘Z)" aria-label="Redo"><svg class="ic" width="18" height="18" viewBox="0 0 18 18"><path d="M12 4.5l3 3-3 3M15 7.5H7.5a4 4 0 0 0 0 8H10"/></svg></button>
+      </span>
       <span class="pl-sp"></span>
       <button class="btn sm" type="button" id="ie-copy">Copy</button>
       <button class="btn sm p" type="button" id="ie-save">Save PNG</button>
@@ -173,7 +179,7 @@
 
   <!-- No link or a bad link -->
   <section class="pl-empty" id="empty" hidden>
-    <svg class="ic" width="40" height="40" viewBox="0 0 16 16" aria-hidden="true" style="color:var(--blue)"><path d="M1.5 3.5h13v9h-13zM6.5 6v4l3.5-2z"/></svg>
+    <svg class="ic" width="40" height="40" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h13v9h-13zM6.5 6v4l3.5-2z"/></svg>
     <h1 id="empty-h">Open a shot or a recording</h1>
     <p class="sub" id="empty-p">Paste a Cmd+Meow link, or open a file from this computer.</p>
     <form id="form" class="pl-form">
@@ -189,6 +195,11 @@
     <span class="kc">Space</span> play · <span class="kc">←</span><span class="kc">→</span> 5 s · <span class="kc">J</span><span class="kc">L</span> 10 s · <span class="kc">↑</span><span class="kc">↓</span> volume · <span class="kc">M</span> mute · <span class="kc">F</span> full screen · <span class="kc">,</span><span class="kc">.</span> frame
   </p>
 </main>
+
+<footer class="pl-foot"><a href="https://cmdmeow.com/"><svg class="mark" viewBox="0 0 100 100" aria-hidden="true">
+      <g fill="currentColor"><path d="M14 36C16 22 22 10 27 8C31 7 36 15 41 22H30Z"/><path d="M86 36C84 22 78 10 73 8C69 7 64 15 59 22H70Z"/><rect x="12" y="20" width="76" height="72" rx="17"/></g>
+      <path d="M42 44V72M58 44V72M36 50H64M36 66H64M42 44A6 6 0 1 0 36 50M58 44A6 6 0 1 1 64 50M36 66A6 6 0 1 0 42 72M64 66A6 6 0 1 1 58 72" fill="none" stroke="#E8A33D" stroke-width="6.5" stroke-linecap="round"/>
+    </svg><span>Shared with <b>Cmd+Meow</b> · free Mac app</span></a></footer>
 
 <script type="module" src="view.mjs"></script>
 </body>

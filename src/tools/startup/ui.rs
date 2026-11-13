@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 const ROW_H: f32 = sp::ROW2_H;
 const ROW_GAP: f32 = sp::ROW_GAP;
-const HEAD_H: f32 = 34.0;
+const HEAD_H: f32 = sp::SECTION_H;
 /// The suggestion / Undo card above the list.
 const TOP_CARD_H: f32 = 64.0;
 /// Icons are loaded a few per frame so a long list doesn't stall.
@@ -48,7 +48,8 @@ fn letter_color(name: &str) -> Color32 {
 fn app_icon(s: &mut Startup, ctx: &egui::Context, p: &egui::Painter, r: Rect, path: Option<&Path>, name: &str, dim: bool, budget: &mut usize) {
     let a = if dim { 0.5 } else { 1.0 };
     if let Some(path) = path {
-        if !s.icons.contains_key(path) && *budget > 0 && !s.demo {
+        // an app in Downloads etc. isn't read (nor cached) before Full Disk Access
+        if !s.icons.contains_key(path) && *budget > 0 && !s.demo && !crate::kit::fs::behind_folder_prompt(path) {
             *budget -= 1;
             let tex = macos::app_icon(path, 64).map(|(n, rgba)| ctx.load_texture(format!("startup-icon:{}", path.display()), egui::ColorImage::from_rgba_unmultiplied([n, n], &rgba), egui::TextureOptions::LINEAR));
             s.icons.insert(path.to_path_buf(), tex);
@@ -186,7 +187,9 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let body = Rect::from_min_max(Pos2::new(r.left() + 24.0, r.top() + PAGE_HEADER_H + 1.0), Pos2::new(r.right() - 24.0, r.bottom()));
     if loaded {
         if ai_n > 0 {
-            s.ai.auto(&ctx, &format!("{}:{}", jobs.len(), apps.len()), || startup_ask(&jobs, &apps));
+            // again only when something new starts at login, not after a turn off or remove
+            let on = jobs.iter().filter(|j| j.on).map(|j| j.label.clone()).chain(apps.iter().filter(|a| a.on).map(|a| format!("app:{}", a.name)));
+            s.ai.auto_new(&ctx, on, || startup_ask(&jobs, &apps));
         }
         match aicheck::ui::chip(&mut s.ai, ui, chip_at, ai_data) {
             Some(Event::Start) => {
@@ -318,7 +321,7 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         }));
     }
 
-    let top_h = if busy.is_some() || undo.is_some() || (!suggested.is_empty() && matches!(s.filter, Filter::All | Filter::Suggested)) { TOP_CARD_H + sp::L } else { 0.0 };
+    let top_h = if busy.is_some() || undo.is_some() || (!suggested.is_empty() && matches!(s.filter, Filter::All | Filter::Suggested)) { TOP_CARD_H } else { 0.0 };
     let list_h: f32 = rows.iter().map(|r| match r {
         Row::Head(..) => HEAD_H,
         Row::Note(_) => 40.0,
@@ -341,9 +344,8 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let mut retry = false;
     let mut set_notify: Option<bool> = None;
     let mut budget = ICONS_PER_FRAME;
-    let w = area.width() - 12.0;
     ScrollArea::vertical().id_salt("su-list").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (a, _) = ui.allocate_exact_size(Vec2::new(w, top_h + list_h), Sense::hover());
+        let (a, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), top_h + list_h), Sense::hover());
         let p = ui.painter().clone();
         let mut y = a.top();
 
@@ -385,8 +387,8 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         for row in &rows {
             match row {
                 Row::Head(t, l) => {
-                    section_header(&p, Pos2::new(a.left() + 4.0, y + 22.0), Align2::LEFT_CENTER, t);
-                    let at = Pos2::new(a.right() - 4.0, y + 22.0);
+                    let cy = section_title(&p, a.left() + 4.0, y, t);
+                    let at = Pos2::new(a.right() - 4.0, cy);
                     match l {
                         HeadLink::Settings => {
                             if link(ui, at, Align2::RIGHT_CENTER, "Open in System Settings", 12.0).clicked() {

@@ -83,7 +83,7 @@ pub fn window_ui(app: &mut App, outer: &mut Ui, full: Rect, draw_lights: bool, c
         }
         let t = &app.tools[i];
         let busy = t.busy();
-        let (label, badge, meta, id) = (t.name(), t.badge(), if busy { String::new() } else { t.sidebar_meta() }, t.id());
+        let (label, badge, meta, id) = (t.name(), t.badge(), if busy { String::new() } else { no_zero(t.sidebar_meta()) }, t.id());
         let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, SIDEBAR_ROW_H));
         if sidebar_item(ui, r, ui.scope_id().with(("nav", id)), badge.icon, badge.color, label, &meta, app.page == i && !app.settings_open, false).clicked() {
             app.page = i;
@@ -148,12 +148,57 @@ pub fn window_ui(app: &mut App, outer: &mut Ui, full: Rect, draw_lights: bool, c
         None => content,
     };
     let tool = &mut app.tools[app.page];
-    let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt(("page", tool.id())));
+    let tid = tool.id();
+    let mut child = ui.new_child(UiBuilder::new().max_rect(content).id_salt(("page", tid)));
     if lock.is_some() {
         child.disable();
         child.multiply_opacity(0.5);
     }
-    tool.page_ui(&mut child, content, cx);
+    if super::tool::guard(tid, || tool.page_ui(&mut child, content, cx)).is_none() {
+        stopped_page(app, ui, content, cx);
+    }
+}
+
+/// The page of a tool that stopped after an error: its glyph, its name and
+/// "Stopped", and a button that restarts the app.
+fn stopped_page(app: &App, ui: &mut Ui, content: Rect, cx: &mut Cx) {
+    let p = ui.painter().clone();
+    let t = &app.tools[app.page];
+    let title = format!("{} stopped", t.name());
+    let what = format!("{} ran into an error, so Cmd+Meow turned it off to keep your other tools running. Restart Cmd+Meow to bring it back.", t.name());
+    let text_w = (content.width() - 2.0 * sp::PAGE_EDGE).min(380.0);
+    let mut job = egui::text::LayoutJob::default();
+    job.append(&what, 0.0, egui::TextFormat { font_id: ty::body(), color: TEXT_DIM(), line_height: Some(20.0), ..Default::default() });
+    job.wrap.max_width = text_w;
+    job.halign = egui::Align::Center;
+    let desc = p.layout_job(job);
+
+    // badge, title, description, button: one centred column
+    let badge = 64.0;
+    let btn_h = sp::HEADER_CONTROL_H;
+    let title_h = p.layout_no_wrap(title.clone(), ty::lead(), TEXT()).size().y;
+    let total = badge + sp::XL + title_h + sp::M + desc.size().y + sp::XL + btn_h;
+    let x = content.center().x;
+    let mut y = content.center().y - total / 2.0;
+
+    let bc = Pos2::new(x, y + badge / 2.0);
+    p.circle_filled(bc, badge / 2.0, with_alpha(AMBER(), 0.14));
+    icon(&p, t.badge().icon, Rect::from_center_size(bc, Vec2::splat(28.0)), AMBER());
+    y += badge + sp::XL;
+
+    p.text(Pos2::new(x, y), Align2::CENTER_TOP, &title, ty::lead(), TEXT());
+    y += title_h + sp::M;
+
+    p.galley(Pos2::new(x, y), desc.clone(), TEXT_DIM());
+    y += desc.size().y + sp::XL;
+
+    let label = "Restart Cmd+Meow";
+    let bw = button_width(&p, label, BTN_PRIMARY);
+    let r = Rect::from_min_size(Pos2::new(x - bw / 2.0, y), Vec2::new(bw, btn_h));
+    if pill_button(ui, r, label, BTN_PRIMARY, true).clicked() {
+        crate::kit::perms::relaunch();
+        cx.quit();
+    }
 }
 
 /// Sidebar order of the tool sections; unknown sections go last.
@@ -193,5 +238,27 @@ fn traffic_lights(ui: &mut Ui, p: &egui::Painter, full: Rect) {
                 _ => {}
             }
         }
+    }
+}
+
+/// A count of nothing says nothing: "0" (or "0 B") isn't shown in the sidebar.
+fn no_zero(meta: String) -> String {
+    let first = meta.split_whitespace().next().unwrap_or("");
+    if !first.is_empty() && first.chars().all(|c| c == '0' || c == '.' || c == ',') && meta.split_whitespace().count() <= 2 {
+        String::new()
+    } else {
+        meta
+    }
+}
+
+#[cfg(test)]
+mod meta_tests {
+    #[test]
+    fn zero_counts_are_hidden() {
+        assert_eq!(super::no_zero("0".into()), "");
+        assert_eq!(super::no_zero("0 B".into()), "");
+        assert_eq!(super::no_zero("11".into()), "11");
+        assert_eq!(super::no_zero("Set up".into()), "Set up");
+        assert_eq!(super::no_zero("10.5 GB".into()), "10.5 GB");
     }
 }

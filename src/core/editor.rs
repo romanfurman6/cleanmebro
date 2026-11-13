@@ -45,7 +45,8 @@ const fn sizes_width() -> f32 {
 const fn preview_width() -> f32 {
     m::PANEL_WIDTH + 2.0 * PREVIEW_PAD
 }
-const LIST_ROW_H: f32 = 30.0;
+/// A row of the widget list, and the step to the next (rows 32 tall, 4 apart).
+const LIST_ROW_H: f32 = 32.0 + sp::XS;
 const END_SLOT_H: f32 = 40.0;
 /// Under the panel preview: the selected widget's sizes.
 const SIZE_BAR_H: f32 = 64.0;
@@ -177,7 +178,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     child.set_clip_rect(list_r);
     ScrollArea::vertical().id_salt("gallery-list").auto_shrink([false, false]).show(&mut child, |ui| {
         let w = ui.available_width();
-        let h: f32 = groups.iter().map(|(_, its)| 26.0 + its.len() as f32 * LIST_ROW_H).sum::<f32>() + sp::S;
+        let h: f32 = groups.iter().map(|(_, its)| sp::SECTION_H + its.len() as f32 * LIST_ROW_H).sum::<f32>() + sp::S;
         let (origin, _) = ui.allocate_exact_size(Vec2::new(w, h.max(60.0)), Sense::hover());
         let p = ui.painter().clone();
         if groups.is_empty() {
@@ -185,10 +186,10 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
         }
         let mut y = origin.top();
         for (name, items) in &groups {
-            section_header(&p, Pos2::new(origin.left() + 4.0, y + 12.0), Align2::LEFT_TOP, name);
-            y += 26.0;
+            section_title(&p, origin.left() + 4.0, y, name);
+            y += sp::SECTION_H;
             for it in items {
-                let rr = Rect::from_min_size(Pos2::new(origin.left(), y), Vec2::new(w, LIST_ROW_H - 2.0));
+                let rr = Rect::from_min_size(Pos2::new(origin.left(), y), Vec2::new(w, LIST_ROW_H - sp::XS));
                 y += LIST_ROW_H;
                 let resp = ui.interact(rr, ui.scope_id().with(("gl", &it.title, &it.key)), Sense::click());
                 let sel = it.key.is_some() && it.key == app.gallery_pick;
@@ -261,7 +262,7 @@ fn widgets_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     let scroll_r = Rect::from_min_max(area.min, Pos2::new(area.right() + panel::PAD - 2.0, area.bottom()));
     let mut child = ui.new_child(UiBuilder::new().max_rect(scroll_r).layout(egui::Layout::top_down(egui::Align::Min)));
     // a slim bar, so even hovered it stays clear of the widgets
-    child.spacing_mut().scroll.bar_width = 6.0;
+    child.spacing_mut().scroll.floating_allocated_width = 0.0;
     child.set_clip_rect(area.expand2(Vec2::new(panel::PAD, 10.0)));
     ScrollArea::vertical().id_salt("preview").auto_shrink([false, false]).show(&mut child, |ui| {
         // room above the first row for its "−" badges
@@ -334,7 +335,7 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
     let w = panel::inner_width();
     let mut y = r.top() + sp::L;
     text_fit(&p, Pos2::new(x, y), Align2::LEFT_TOP, spec.title, ty::title(), TEXT(), w);
-    y += 16.0 + sp::M;
+    y += 16.0 + sp::L;
     let cur = app.widgets.iter().find(|e| e.key == key && e.on).map(|e| spec.fit(e.size));
     // rows: Small and Wide share one; the rest get their own
     let mut rows: Vec<Vec<Size>> = vec![];
@@ -343,8 +344,13 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
         rows.push(small);
     }
     rows.extend(spec.sizes.iter().copied().filter(|z| z.cols() > 2).map(|z| vec![z]));
-    let label_h = 14.0 + sp::XS;
-    let total: f32 = rows.iter().map(|row| label_h + row.iter().map(|z| panel::size_px(*z, w).y).fold(0.0, f32::max) + sp::L).sum();
+    // each size: its label, S, the widget; sizes side by side 16 apart when
+    // the column has the room (else the panel's own 8), rows 24 apart
+    let label_h = line_h(&p, &ty::caption()) + sp::S;
+    let row_w = |row: &Vec<Size>| row.iter().map(|z| panel::size_px(*z, w).x).sum::<f32>();
+    let widest = rows.iter().filter(|r| r.len() > 1).map(|r| row_w(r) + (r.len() - 1) as f32 * sp::L).fold(0.0, f32::max);
+    let gap_x = if widest <= r.width() - 2.0 * sp::L - sp::SCROLL_GUTTER { sp::L } else { panel::GAP };
+    let total: f32 = rows.iter().map(|row| label_h + row.iter().map(|z| panel::size_px(*z, w).y).fold(0.0, f32::max) + sp::XL).sum();
     let area = Rect::from_min_max(Pos2::new(r.left(), y), r.max);
     let mut child = ui.new_child(UiBuilder::new().id_salt("gallery-sizes").max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(area);
@@ -352,7 +358,7 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
     let mut out = None;
     let dragging = app.drag.is_some();
     ScrollArea::vertical().id_salt(("gallery-sizes", key)).auto_shrink([false, false]).show(&mut child, |ui| {
-        let (origin, _) = ui.allocate_exact_size(Vec2::new(area.width(), total + sp::S), Sense::hover());
+        let (origin, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), total + sp::S), Sense::hover());
         let p = ui.painter().clone();
         let mut y = origin.top();
         for row in &rows {
@@ -381,10 +387,10 @@ fn variants(app: &mut App, ui: &mut Ui, r: Rect, key: &str) -> Option<Size> {
                 } else if resp.on_hover_text(if here { "In the panel at this size" } else { "Click to add at this size, or drag into the panel" }).clicked() {
                     out = Some(*z);
                 }
-                cx += sz.x + panel::GAP;
+                cx += sz.x + gap_x;
                 row_h = row_h.max(sz.y);
             }
-            y += label_h + row_h + sp::L;
+            y += label_h + row_h + sp::XL;
         }
     });
     out
@@ -573,7 +579,7 @@ fn scroll_body(ui: &mut Ui, body: Rect, salt: &str, f: impl FnOnce(&mut Ui, Rect
     child.set_clip_rect(body);
     ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show(&mut child, |ui| {
         let top = ui.cursor().min;
-        let r = Rect::from_min_size(top, body.size());
+        let r = Rect::from_min_size(top, Vec2::new(ui.available_width(), body.height()));
         let bottom = f(ui, r);
         ui.allocate_rect(Rect::from_min_max(top, Pos2::new(r.right(), bottom.max(top.y))), Sense::hover());
     });
@@ -583,41 +589,51 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     scroll_body(ui, body, "settings-tools", |ui, body| tools_list(app, ui, body));
 }
 
+/// Settings › Tools: one row per tool with its name over a line on what it
+/// does (wrapped, never cut) and an on/off switch.
 fn tools_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     let p = ui.painter().clone();
-    let w = 560.0f32.min(body.width() - 48.0);
+    let w = 600.0f32.min(body.width() - 2.0 * sp::XL);
     let x = body.center().x - w / 2.0;
-    let y = body.top() + 24.0;
+    let y = body.top() + sp::XL;
     let rows = app.tools.len();
-    let row_h = 44.0;
-    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, rows as f32 * row_h + 8.0));
+    let chip_w = 24.0;
+    let sw_size = Vec2::new(30.0, 18.0);
+    let text_x = x + sp::L + chip_w + sp::M;
+    let tw = (x + w - sp::M - sw_size.x - sp::COL_GAP - text_x).max(40.0);
+    let (name_f, about_f) = (ty::title(), ty::label());
+    let name_h = line_h(&p, &name_f);
+    let one_line = line_h(&p, &about_f);
+    // lay out each description first: a row grows by the lines it wraps onto
+    let abouts: Vec<_> = app.tools.iter().map(|t| p.layout(t.about().to_owned(), about_f.clone(), TEXT_DIM(), tw)).collect();
+    let heights: Vec<f32> = abouts.iter().map(|g| sp::ROW2_H + (g.size().y - one_line).max(0.0)).collect();
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, heights.iter().sum()));
     glass_card(&p, card, R_CARD, 0.0, false);
     let mut flip: Option<(usize, bool)> = None;
-    for k in 0..rows {
-        let rr = Rect::from_min_size(Pos2::new(card.left() + 12.0, card.top() + 4.0 + k as f32 * row_h), Vec2::new(w - 24.0, row_h));
+    let mut top = card.top();
+    for (k, about) in abouts.into_iter().enumerate() {
+        let r = Rect::from_min_size(Pos2::new(card.left(), top), Vec2::new(w, heights[k]));
+        top = r.bottom();
         if k > 0 {
-            hairline(&p, Pos2::new(rr.left() + 38.0, rr.top()), Pos2::new(rr.right(), rr.top()));
+            hairline(&p, Pos2::new(r.left() + sp::L, r.top()), Pos2::new(r.right() - sp::L, r.top()));
         }
-        let chip = Rect::from_min_size(Pos2::new(rr.left(), rr.center().y - 13.0), Vec2::splat(26.0));
-        let sw = Rect::from_min_size(Pos2::new(rr.right() - 30.0, rr.center().y - 9.0), Vec2::new(30.0, 18.0));
-        let tw = sw.left() - chip.right() - 24.0;
         let t = &app.tools[k];
-        {
-            let b = t.badge();
-            tool_chip(&p, chip, b.icon, b.color);
-            text_fit(&p, Pos2::new(chip.right() + 12.0, rr.center().y), Align2::LEFT_CENTER, t.name(), font(13.0), TEXT(), tw);
-            ui.interact(rr, ui.scope_id().with(("tool-about", t.id())), egui::Sense::hover()).on_hover_text(t.about());
-            let on = app.tool_on(k);
-            let id = ui.scope_id().with(("tool-on", t.id()));
-            if switch(ui, sw, id, on, true).on_hover_text(if on { "Turn off" } else { "Turn on" }).clicked() {
-                flip = Some((k, !on));
-            }
+        let b = t.badge();
+        let chip = Rect::from_min_size(Pos2::new(r.left() + sp::L, r.center().y - chip_w / 2.0), Vec2::splat(chip_w));
+        tool_chip(&p, chip, b.icon, b.color);
+        let block_top = r.center().y - (name_h + sp::LINE_GAP + about.size().y) / 2.0;
+        p.text(Pos2::new(text_x, block_top), Align2::LEFT_TOP, t.name(), name_f.clone(), TEXT());
+        p.galley(Pos2::new(text_x, block_top + name_h + sp::LINE_GAP), about, TEXT_DIM());
+        let sw = Rect::from_min_size(Pos2::new(r.right() - sp::M - sw_size.x, r.center().y - sw_size.y / 2.0), sw_size);
+        let on = app.tool_on(k);
+        if switch(ui, sw, ui.scope_id().with(("tool-on", t.id())), on, true).on_hover_text(if on { "Turn off" } else { "Turn on" }).clicked() {
+            flip = Some((k, !on));
         }
     }
     if let Some((i, on)) = flip {
         app.set_tool_on(i, on);
     }
-    card.bottom() + 24.0
+    card.bottom() + sp::XL
 }
 
 /// Settings › AI Check: the agent, which tools offer a check, checking after
@@ -787,9 +803,50 @@ fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     if pill_button(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(bw, 30.0)), label, BTN_SECONDARY, true).clicked() {
         app.open_setup();
     }
+    // the panel has no menu of its own: Quit lives here
+    let quit = "Quit Cmd+Meow";
+    let qw = button_width(&p, quit, BTN_SECONDARY);
+    if pill_button(ui, Rect::from_min_size(Pos2::new(x + bw + sp::S, y), Vec2::new(qw, 30.0)), quit, BTN_SECONDARY, true).clicked() && !app.demo {
+        let ctx = ui.ctx().clone();
+        app.quit(&ctx);
+    }
+    remove_button(app, ui, Pos2::new(x + bw + sp::S + qw + sp::S, y));
     p.text(Pos2::new(x + w, y + 15.0), Align2::RIGHT_CENTER, version_label(), font(11.0), TEXT_FAINT());
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
     y + 30.0 + 24.0
+}
+
+/// "Remove Cmd+Meow": a second click within a few seconds removes the app
+/// and everything it keeps (see [`crate::kit::remove`]), then quits.
+fn remove_button(app: &mut App, ui: &mut Ui, at: Pos2) {
+    use crate::kit::remove::{self, Run};
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let armed_id = ui.scope_id().with("remove-armed");
+    let armed = ctx.data(|d| d.get_temp::<f64>(armed_id)).is_some_and(|t| now - t < 4.0);
+    let run = if app.demo { Run::Idle } else { remove::run_state() };
+    let label = match (&run, armed) {
+        (Run::Working, _) => "Removing…",
+        (_, true) => "Click again to remove",
+        _ => "Remove Cmd+Meow",
+    };
+    let p = ui.painter().clone();
+    let bw = button_width(&p, label, BTN_DANGER);
+    let r = Rect::from_min_size(at, Vec2::new(bw, 30.0));
+    if pill_button(ui, r, label, BTN_DANGER, run != Run::Working).clicked() && !app.demo {
+        if armed {
+            ctx.data_mut(|d| d.remove::<f64>(armed_id));
+            remove::start(ctx.clone());
+        } else {
+            ctx.data_mut(|d| d.insert_temp(armed_id, now));
+        }
+    }
+    if armed {
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+    if let Run::Failed(e) = &run {
+        text_fit(&p, Pos2::new(r.right() + 10.0, r.center().y), Align2::LEFT_CENTER, e, font(12.0), AMBER(), 260.0);
+    }
 }
 
 #[cfg(test)]
