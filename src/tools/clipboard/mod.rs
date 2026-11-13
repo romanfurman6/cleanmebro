@@ -393,7 +393,7 @@ impl Tool for Clipboard {
         "Create"
     }
     fn about(&self) -> &'static str {
-        "History of everything you copy"
+        "Searchable history of everything you copy"
     }
     fn set_on(&mut self, on: bool) {
         if on {

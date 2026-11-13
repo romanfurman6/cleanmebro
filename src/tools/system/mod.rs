@@ -55,7 +55,7 @@ impl Tool for System {
         "Mac Health"
     }
     fn about(&self) -> &'static str {
-        "Disk, memory, CPU, battery, network, devices"
+        "Live disk, memory, CPU, battery, network and connected devices"
     }
     fn busy(&self) -> bool {
         self.ai.phase() == crate::kit::aicheck::Phase::Running

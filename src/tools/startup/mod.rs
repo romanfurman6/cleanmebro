@@ -801,7 +801,7 @@ impl Tool for Startup {
         "Clean"
     }
     fn about(&self) -> &'static str {
-        "See what starts with your Mac and turn off what you don't need"
+        "Login items and background apps that start with your Mac, and a switch for each"
     }
     fn busy(&self) -> bool {
         self.ai.phase() == crate::kit::aicheck::Phase::Running
