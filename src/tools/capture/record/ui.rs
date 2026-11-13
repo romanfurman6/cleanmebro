@@ -372,8 +372,9 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
         let dot = Pos2::new(start.left() + 30.0, start.center().y);
         p.circle_filled(dot, 14.0, Color32::WHITE);
         p.circle_filled(dot, 6.0, Color32::from_rgb(0xE5, 0x38, 0x2E));
-        p.text(Pos2::new(dot.x + 26.0, start.center().y - 8.0), Align2::LEFT_CENTER, "Start recording", bold(15.0), Color32::WHITE);
-        p.text(Pos2::new(dot.x + 26.0, start.center().y + 10.0), Align2::LEFT_CENTER, "Saves an mp4 to your Capture folder", font(11.0), Color32::from_rgb(0xE4, 0xDE, 0xFA));
+        let (ly1, ly2) = two_lines_y(&p, start.center().y, &bold(15.0), &font(11.0));
+        p.text(Pos2::new(dot.x + 26.0, ly1), Align2::LEFT_CENTER, "Start recording", bold(15.0), Color32::WHITE);
+        p.text(Pos2::new(dot.x + 26.0, ly2), Align2::LEFT_CENTER, "Saves an mp4 to your Capture folder", font(11.0), Color32::from_rgb(0xE4, 0xDE, 0xFA));
         let kr = Rect::from_center_size(Pos2::new(start.right() - 26.0, start.center().y), Vec2::new(24.0, 22.0));
         p.rect_filled(kr, 6.0, white(46));
         p.text(kr.center(), Align2::CENTER_CENTER, "↵", bold(12.0), Color32::WHITE);
@@ -399,8 +400,9 @@ fn picker(c: &mut Capture, ctx: &egui::Context, cx: &mut Cx) {
                 p.line_segment([Pos2::new(rr.left() + 12.0, rr.top()), Pos2::new(rr.right() - 12.0, rr.top())], Stroke::new(1.0, white(15)));
             }
             icons::draw(p, ico, Rect::from_center_size(Pos2::new(rr.left() + 22.0, rr.center().y), Vec2::splat(18.0)), TEXT_SOFT());
-            p.text(Pos2::new(rr.left() + 44.0, rr.center().y - 10.0), Align2::LEFT_CENTER, label, font(13.0), TEXT());
-            let dr = text_fit(p, Pos2::new(rr.left() + 44.0, rr.center().y + 10.0), Align2::LEFT_CENTER, &dev, font(11.0), TEXT_DIM(), rr.width() - 170.0);
+            let (ly1, ly2) = two_lines_y(&p, rr.center().y, &font(13.0), &font(11.0));
+            p.text(Pos2::new(rr.left() + 44.0, ly1), Align2::LEFT_CENTER, label, font(13.0), TEXT());
+            let dr = text_fit(p, Pos2::new(rr.left() + 44.0, ly2), Align2::LEFT_CENTER, &dev, font(11.0), TEXT_DIM(), rr.width() - 170.0);
             if let Some(m) = media {
                 chevron(p, Pos2::new(dr.right() + 9.0, dr.center().y), TEXT_DIM());
                 let hit = dr.with_max_x(dr.right() + 16.0).expand2(Vec2::new(5.0, 2.0));

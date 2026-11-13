@@ -606,10 +606,11 @@ fn review(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
             let ir = Rect::from_center_size(Pos2::new(row.left() + 44.0, row.center().y), Vec2::splat(28.0));
             app_icon(u, &ctx, &p, ir, t.app.as_deref(), &t.name, &mut budget);
             let sz = p.text(Pos2::new(row.right() - 12.0, row.center().y), Align2::RIGHT_CENTER, human_bytes(target_bytes(t)), font(13.0), TEXT());
-            text_fit(&p, Pos2::new(ir.right() + 10.0, row.center().y - 8.0), Align2::LEFT_CENTER, &t.name, bold(13.0), TEXT(), sz.left() - ir.right() - 20.0);
+            let (ly1, ly2) = two_lines_y(&p, row.center().y, &bold(13.0), &font(11.0));
+            text_fit(&p, Pos2::new(ir.right() + 10.0, ly1), Align2::LEFT_CENTER, &t.name, bold(13.0), TEXT(), sz.left() - ir.right() - 20.0);
             let open_now = t.app.is_some() && running.contains(&t.name);
             let line = if open_now { format!("Open now · {}", target_line(t)) } else { target_line(t) };
-            text_fit(&p, Pos2::new(ir.right() + 10.0, row.center().y + 9.0), Align2::LEFT_CENTER, &line, font(11.0), if open_now { AMBER() } else { TEXT_FAINT() }, sz.left() - ir.right() - 20.0);
+            text_fit(&p, Pos2::new(ir.right() + 10.0, ly2), Align2::LEFT_CENTER, &line, font(11.0), if open_now { AMBER() } else { TEXT_FAINT() }, sz.left() - ir.right() - 20.0);
             if resp.clicked() {
                 toggle_open = Some(k);
             }
@@ -904,10 +905,10 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, chip_at: Pos2) {
     child.set_clip_rect(rows_r);
     let now = u.now();
     ScrollArea::vertical().id_salt("un-orphans").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(rows_r.width(), orphans.len() as f32 * 40.0), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(rows_r.width(), orphans.len() as f32 * sp::ROW2_H), Sense::hover());
         let p = ui.painter().clone();
         for (k, o) in orphans.iter().enumerate() {
-            let r = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * 40.0), Vec2::new(area.width(), 40.0));
+            let r = Rect::from_min_size(Pos2::new(area.left(), area.top() + k as f32 * sp::ROW2_H), Vec2::new(area.width(), sp::ROW2_H));
             // only rows in view: each one joins its paths for the tooltip
             if !ui.is_rect_visible(r) {
                 continue;
@@ -936,8 +937,9 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, chip_at: Pos2) {
             let wr = text_fit(&p, Pos2::new(c_where, r.center().y), Align2::LEFT_CENTER, &place, font(12.0), TEXT_DIM(), c_when - 100.0 - c_where);
             let paths = o.items.iter().map(|i| i.path.display().to_string()).collect::<Vec<_>>().join("\n");
             ui.interact(wr, ui.scope_id().with(("un-otip", &o.id)), Sense::hover()).on_hover_text(paths);
-            text_fit(&p, Pos2::new(c_name, r.center().y - 8.0), Align2::LEFT_CENTER, &o.name, bold(13.0), TEXT(), c_where - c_name - 16.0);
-            text_fit(&p, Pos2::new(c_name, r.center().y + 9.0), Align2::LEFT_CENTER, &o.id, font(11.0), TEXT_FAINT(), c_where - c_name - 16.0);
+            let (ly1, ly2) = two_lines_y(&p, r.center().y, &bold(13.0), &font(11.0));
+            text_fit(&p, Pos2::new(c_name, ly1), Align2::LEFT_CENTER, &o.name, bold(13.0), TEXT(), c_where - c_name - 16.0);
+            text_fit(&p, Pos2::new(c_name, ly2), Align2::LEFT_CENTER, &o.id, font(11.0), TEXT_FAINT(), c_where - c_name - 16.0);
         }
     });
 }
@@ -1115,9 +1117,10 @@ fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
                 icon(&p, if failed > 0 { Icon::Info } else { Icon::Check }, Rect::from_center_size(c, Vec2::splat(18.0)), GREEN());
                 let uw = if can_retry { button_width(&p, "Try again", BTN_PRIMARY) } else { 64.0 };
                 let ur = Rect::from_min_size(Pos2::new(r.right() - 14.0 - uw, r.center().y - 14.0), Vec2::new(uw, 28.0));
-                text_fit(&p, Pos2::new(c.x + 30.0, r.center().y - 8.0), Align2::LEFT_CENTER, &msg, bold(13.0), TEXT(), ur.left() - c.x - 40.0);
+                let (ly1, ly2) = two_lines_y(&p, r.center().y, &bold(13.0), &font(11.0));
+                text_fit(&p, Pos2::new(c.x + 30.0, ly1), Align2::LEFT_CENTER, &msg, bold(13.0), TEXT(), ur.left() - c.x - 40.0);
                 let sub = detail.unwrap_or_else(|| "Undo puts everything back".into());
-                text_fit(&p, Pos2::new(c.x + 30.0, r.center().y + 10.0), Align2::LEFT_CENTER, &sub, font(11.0), if failed > 0 { AMBER() } else { TEXT_DIM() }, ur.left() - c.x - 40.0);
+                text_fit(&p, Pos2::new(c.x + 30.0, ly2), Align2::LEFT_CENTER, &sub, font(11.0), if failed > 0 { AMBER() } else { TEXT_DIM() }, ur.left() - c.x - 40.0);
                 if can_retry {
                     if pill_button(ui, ur, "Try again", BTN_PRIMARY, true).clicked() {
                         retry(u);
@@ -1144,8 +1147,9 @@ fn drop_zone(u: &mut Uninstaller, ctx: &egui::Context) {
         let first = names.first().cloned().unwrap_or_else(|| "the app".into());
         tool_chip(&p, Rect::from_min_size(Pos2::new(r.left() + 16.0, r.center().y - 20.0), Vec2::splat(40.0)), Icon::AppRemove, TINT());
         let x = r.left() + 70.0;
-        text_fit(&p, Pos2::new(x, r.center().y - 9.0), Align2::LEFT_CENTER, if over { "Release to review" } else { "Drop here to uninstall" }, bold(13.0), if over { GREEN() } else { TEXT() }, r.right() - x - 14.0);
-        text_fit(&p, Pos2::new(x, r.center().y + 11.0), Align2::LEFT_CENTER, &format!("{first} and its files, after you confirm"), font(12.0), TEXT_DIM(), r.right() - x - 14.0);
+        let (ly1, ly2) = two_lines_y(&p, r.center().y, &bold(13.0), &font(12.0));
+        text_fit(&p, Pos2::new(x, ly1), Align2::LEFT_CENTER, if over { "Release to review" } else { "Drop here to uninstall" }, bold(13.0), if over { GREEN() } else { TEXT() }, r.right() - x - 14.0);
+        text_fit(&p, Pos2::new(x, ly2), Align2::LEFT_CENTER, &format!("{first} and its files, after you confirm"), font(12.0), TEXT_DIM(), r.right() - x - 14.0);
         ictx.request_repaint_after(Duration::from_millis(100));
     });
 }

@@ -253,18 +253,24 @@ fn stat_card(p: &egui::Painter, r: Rect, title: &str, value: &str, line: &str) {
 fn limit_card(p: &egui::Painter, cr: Rect, l: &ai::Limit) {
     glass_card(p, cr, R_CARD, 0.0, false);
     let inner = cr.shrink(sp::L);
-    text_fit(p, inner.left_top(), Align2::LEFT_TOP, &backend::short_label(&l.label), ty::title(), TEXT(), inner.width() * 0.6);
-    text_fit(p, inner.right_top(), Align2::RIGHT_TOP, &parts::reset_when(l), ty::label(), TEXT_DIM(), inner.width() * 0.4);
+    split_line(p, inner.left_top(), inner.right_top(), egui::Align::Min, &backend::short_label(&l.label), ty::title(), TEXT(), &parts::reset_when(l), ty::label(), TEXT_DIM());
     let rr = 34.0;
     let c = Pos2::new(inner.left() + rr + 5.0, inner.bottom() - rr - 5.0);
     parts::pace_ring(p, c, rr, 9.0, l);
     p.text(c, Align2::CENTER_CENTER, format!("{:.0}%", l.pct), ty::lead(), TEXT());
     let tx = c.x + rr + sp::L;
     let w = inner.right() - tx;
-    if let Some((s, col)) = parts::pace_label(l) {
-        text_fit(p, Pos2::new(tx, c.y - 2.0), Align2::LEFT_BOTTOM, s, ty::title(), col, w);
+    // pace over the forecast, the block centred on the ring; the forecast
+    // wraps ("Out tomorrow" / "23:40") rather than being cut
+    let fc = parts::forecast(l);
+    let fg = p.layout(fc.clone(), ty::label(), TEXT_DIM(), w);
+    let pace = parts::pace_label(l);
+    let ph = if pace.is_some() { line_h(p, &ty::title()) + sp::XS } else { 0.0 };
+    let top = c.y - (ph + fg.size().y) / 2.0;
+    if let Some((s, col)) = pace {
+        text_fit(p, Pos2::new(tx, top), Align2::LEFT_TOP, s, ty::title(), col, w);
     }
-    text_fit(p, Pos2::new(tx, c.y + 2.0), Align2::LEFT_TOP, &parts::forecast(l), ty::label(), TEXT_DIM(), w);
+    text_wrap(p, Pos2::new(tx, top + ph), Align2::LEFT_TOP, &fc, ty::label(), TEXT_DIM(), w, 3);
 }
 
 /// A subscription: the 30 days at API prices against the plan's price.
@@ -493,7 +499,11 @@ fn provider_card(ui: &mut Ui, cr: Rect, info: &UsageInfo, menu: bool, show_usd: 
         backend::select(ai::index_of(ai::meta(info.provider).id), false);
     }
     let i = cr.shrink(sp::L);
-    let tr = text_fit(&p, i.left_top(), Align2::LEFT_TOP, &info.plan_title(), ty::title(), TEXT(), i.width() * 0.5);
+    let (f, fc) = parts::fresh(info);
+    let fr = p.text(i.right_top(), Align2::RIGHT_TOP, &f, ty::label(), fc);
+    // the time keeps its width; the plan name gives way (and a chip's room)
+    let chips_w = if menu { 90.0 } else { 0.0 } + if info.incident.is_some() { 80.0 } else { 0.0 };
+    let tr = text_fit(&p, i.left_top(), Align2::LEFT_TOP, &info.plan_title(), ty::title(), TEXT(), (fr.left() - sp::M - i.left() - chips_w).max(i.width() * 0.3));
     let mut x = tr.right() + sp::S;
     if menu {
         // this one's limit is the number next to the icon in the menu bar
@@ -504,8 +514,6 @@ fn provider_card(ui: &mut Ui, cr: Rect, info: &UsageInfo, menu: bool, show_usd: 
     if let Some(c) = parts::incident_chip(&p, Pos2::new(x, tr.center().y), Align2::LEFT_CENTER, info) {
         let _ = c;
     }
-    let (f, fc) = parts::fresh(info);
-    text_fit(&p, i.right_top(), Align2::RIGHT_TOP, &f, ty::label(), fc, i.width() * 0.3);
     let mut y = i.top() + 16.0 + sp::M;
     if let Some(e) = info.unavailable() {
         let s = if e == Availability::SignedOut { "Signed out" } else { "Not installed" };

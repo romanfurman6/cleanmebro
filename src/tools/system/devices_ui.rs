@@ -153,10 +153,18 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, r: Rect, wid: egui::Id, sel
             for (k, d) in devs.iter().take(n).enumerate() {
                 let cx = x0 + cw * (k as f32 + 0.5);
                 let t = Tone::of(d);
-                // ring, then the device's name, then its charge
-                ring_cell(p, Pos2::new(cx, r.top() + 26.0), 16.0, d, 13.0);
-                text_fit(p, Pos2::new(cx, r.bottom() - 21.0), Align2::CENTER_BOTTOM, &d.name, font(11.0), t.c(TEXT_DIM()), cw - 6.0);
-                text_fit(p, Pos2::new(cx, r.bottom() - 7.0), Align2::CENTER_BOTTOM, &pct_text(d.battery()), bold(11.0), t.text(d.battery()), cw - 4.0);
+                // the charge inside its ring, the whole name under it (two
+                // lines when it needs them: "Magic / Trackpad")
+                let c = Pos2::new(cx, r.top() + tile::PAD + 16.0);
+                let b = d.battery();
+                tile::ring(p, c, 16.0, 4.0, frac(b), t.ring(b));
+                if d.charging && d.live() {
+                    let at = c + Vec2::new(16.0 * 0.72, -16.0 * 0.72);
+                    p.circle_filled(at, 16.0 * 0.32, BG());
+                    bolt(p, at, 16.0 * 0.42, GREEN());
+                }
+                p.text(c, Align2::CENTER_CENTER, b.map(|b| b.to_string()).unwrap_or_else(|| "–".into()), bold(11.0), t.text(b));
+                text_wrap(p, Pos2::new(cx, c.y + 16.0 + sp::S), Align2::CENTER_TOP, &d.name, font(11.0), t.c(TEXT_DIM()), cw - sp::XS, 2);
             }
         }
         Size::S24 => {
@@ -200,8 +208,11 @@ fn device_line_sub(p: &egui::Painter, lr: Rect, d: &Device, sub: &str) {
     }
     let tx = lr.left() + 26.0;
     let tw = bx1 - bw - tx - if bw > 0.0 { 10.0 } else { 0.0 };
-    text_fit(p, Pos2::new(tx, cy - 1.0), Align2::LEFT_BOTTOM, &d.name, font(12.0), t.c(TEXT()), tw);
-    text_fit(p, Pos2::new(tx, cy + 1.0), Align2::LEFT_TOP, sub, font(11.0), TEXT_FAINT(), tw);
+    if sub.is_empty() {
+        text_fit(p, Pos2::new(tx, cy), Align2::LEFT_CENTER, &d.name, font(12.0), t.c(TEXT()), tw);
+    } else {
+        two_lines(p, tx, cy, &d.name, font(12.0), t.c(TEXT()), sub, font(11.0), TEXT_FAINT(), tw);
+    }
 }
 
 /// 4:4: earbuds get a card with a ring per part, other devices a line each.

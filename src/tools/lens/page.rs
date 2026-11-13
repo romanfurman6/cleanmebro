@@ -569,8 +569,10 @@ fn live_bubble(p: &egui::Painter, c: Pos2, rad: f32, name: &str, bytes: u64, bas
     crate::kit::glass::stroke_circle(p, c, rad, Stroke::new(1.0, with_alpha(base, if busy { 0.35 } else { 0.6 })));
     let txt = if busy { TEXT_SOFT() } else { TEXT() };
     if rad >= 30.0 {
-        text_fit(p, c - Vec2::new(0.0, 1.0), Align2::CENTER_BOTTOM, name, bold(if rad >= 46.0 { 12.0 } else { 11.0 }), txt, rad * 1.6);
-        text_fit(p, c + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, &human_bytes(bytes), font(if rad >= 46.0 { 11.0 } else { 10.0 }), TEXT_SOFT(), rad * 1.6);
+        let (f1, f2) = (bold(if rad >= 46.0 { 12.0 } else { 11.0 }), font(if rad >= 46.0 { 11.0 } else { 10.0 }));
+        let (y1, y2) = two_lines_y(p, c.y, &f1, &f2);
+        text_fit(p, Pos2::new(c.x, y1), Align2::CENTER_CENTER, name, f1, txt, rad * 1.6);
+        text_fit(p, Pos2::new(c.x, y2), Align2::CENTER_CENTER, &human_bytes(bytes), f2, TEXT_SOFT(), rad * 1.6);
     }
     if busy && rad >= 16.0 {
         let y = if rad >= 30.0 { c.y - 26.0 } else { c.y };
@@ -742,11 +744,12 @@ fn bubbles(app: &mut App, ui: &mut Ui, pa: Rect, node: &Node, here: &str, free: 
                 let isz = (rad * 0.42).min(56.0);
                 icon(&bp, if is_folder(kd) { Icon::Folder } else { Icon::Doc }, Rect::from_center_size(c - Vec2::new(0.0, isz * 0.45), Vec2::splat(isz)), with_alpha(ACCENT(), alpha));
                 text_fit(&bp, c + Vec2::new(0.0, isz * 0.15), Align2::CENTER_TOP, &kd.name, bold(12.0), txt, rad * 1.6);
-                text_fit(&bp, c + Vec2::new(0.0, isz * 0.15 + 16.0), Align2::CENTER_TOP, &human_bytes(kd.bytes), font(11.0), with_alpha(TEXT_SOFT(), alpha), rad * 1.6);
+                text_fit(&bp, c + Vec2::new(0.0, isz * 0.15 + line_h(&bp, &bold(12.0)) + sp::LINE_GAP), Align2::CENTER_TOP, &human_bytes(kd.bytes), font(11.0), with_alpha(TEXT_SOFT(), alpha), rad * 1.6);
             }
             (Some(kd), _) if rad >= 30.0 => {
-                text_fit(&bp, c - Vec2::new(0.0, 1.0), Align2::CENTER_BOTTOM, &kd.name, bold(11.0), txt, rad * 1.7);
-                text_fit(&bp, c + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, &human_bytes(kd.bytes), font(11.0), with_alpha(TEXT_SOFT(), alpha), rad * 1.7);
+                let (y1, y2) = two_lines_y(&bp, c.y, &bold(11.0), &font(11.0));
+                text_fit(&bp, Pos2::new(c.x, y1), Align2::CENTER_CENTER, &kd.name, bold(11.0), txt, rad * 1.7);
+                text_fit(&bp, Pos2::new(c.x, y2), Align2::CENTER_CENTER, &human_bytes(kd.bytes), font(11.0), with_alpha(TEXT_SOFT(), alpha), rad * 1.7);
             }
             (Some(kd), _) if rad >= 16.0 => {
                 let isz = (rad * 0.8).min(24.0);

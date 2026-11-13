@@ -246,20 +246,22 @@ fn hero(p: &Painter, r: Rect, e: &Engine, st: State, now: i64, t: f64, big: bool
     let (title, reason, detail) = hero_text(e, st, now);
     let x = sr.right() + if big { 28.0 } else { 14.0 };
     let w = r.right() - x - 12.0;
-    let (ts, ls) = if big { (34.0, 15.0) } else { (22.0, 12.0) };
-    let block = ts + 6.0 + ls + 6.0 + 16.0;
+    let (tf, lf) = if big { (bold(34.0), font(15.0)) } else { (bold(22.0), font(12.0)) };
+    // the third line: how long it has been up (window) or the detail (panel);
+    // winding down puts the "Keep awake" button there
+    let wind = matches!(st, State::WindDown { .. });
+    let third = if big { e.awake_since.map(|s| format!("since {} · {}", time_of_day(s), span_text(now - s))).unwrap_or_default() } else { detail };
+    let (h1, h2, h3) = (line_h(p, &tf), line_h(p, &lf), if wind { if big { 28.0 } else { 24.0 } } else if third.is_empty() { 0.0 } else { line_h(p, &font(12.0)) });
+    let block = h1 + sp::LINE_GAP + h2 + if h3 > 0.0 { sp::M + h3 } else { 0.0 };
     let mut y = r.center().y - block / 2.0;
-    text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &title, bold(ts), TEXT(), w);
-    y += ts + 6.0;
-    text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &reason, font(ls), lk.soft, w);
-    y += ls + 8.0;
-    if matches!(st, State::WindDown { .. }) {
-        let br = Rect::from_min_size(Pos2::new(x, y - 2.0), Vec2::new(96.0, 24.0));
-        return Some(br);
+    text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &title, tf, TEXT(), w);
+    y += h1 + sp::LINE_GAP;
+    text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &reason, lf, lk.soft, w);
+    y += h2 + sp::M;
+    if wind {
+        return Some(Rect::from_min_size(Pos2::new(x, y), Vec2::new(96.0, 24.0)));
     }
-    if !big {
-        text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &detail, font(12.0), TEXT_DIM(), w);
-    }
+    text_fit(p, Pos2::new(x, y), Align2::LEFT_TOP, &third, font(12.0), TEXT_DIM(), w);
     None
 }
 
@@ -433,16 +435,9 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     // hero with the big switch
     let hr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 194.0));
     if let Some(br) = hero(&p, hr, &e, st, now, t, true) {
-        let br = Rect::from_min_size(br.min + Vec2::new(0.0, 4.0), Vec2::new(110.0, 28.0));
+        let br = Rect::from_min_size(br.min, Vec2::new(110.0, 28.0));
         if pill_button(ui, br, "Keep awake", BTN_SECONDARY, true).clicked() {
             e.set_manual(true, now);
-        }
-    } else {
-        // how long it has been up
-        if let Some(since) = e.awake_since {
-            let x = hr.left() + 28.0 + 150.0 + 28.0;
-            let y = hr.center().y + (34.0 + 6.0 + 15.0 + 6.0 + 16.0) / 2.0 - 16.0;
-            p.text(Pos2::new(x, y), Align2::LEFT_TOP, format!("since {} · {}", time_of_day(since), span_text(now - since)), font(12.0), TEXT_DIM());
         }
     }
     let manual = e.manual_since.is_some();
@@ -505,7 +500,7 @@ fn week(p: &Painter, r: Rect, days: &[(i64, i64, i64)]) {
     let card = Rect::from_min_max(r.min + Vec2::new(0.0, 26.0), r.max);
     section_card(p, card);
     let ci = card.shrink2(Vec2::new(16.0, 14.0));
-    let chart = Rect::from_min_max(ci.min + Vec2::new(0.0, 16.0), ci.max - Vec2::new(0.0, 18.0));
+    let chart = Rect::from_min_max(ci.min + Vec2::new(0.0, 16.0 + sp::S), ci.max - Vec2::new(0.0, 18.0 + sp::XS));
     let max = days.iter().map(|d| d.1 + d.2).max().unwrap_or(0).max(3600) as f32;
     let n = days.len().max(1) as f32;
     let bw = ((chart.width() - (n - 1.0) * 12.0) / n).min(72.0);
@@ -517,10 +512,10 @@ fn week(p: &Painter, r: Rect, days: &[(i64, i64, i64)]) {
         if c + h > 0 {
             p.rect_filled(Rect::from_min_max(Pos2::new(x, chart.bottom() - ch - hh), Pos2::new(x + bw, chart.bottom() - ch)), 4.0, HAND);
             p.rect_filled(Rect::from_min_max(Pos2::new(x, chart.bottom() - ch), Pos2::new(x + bw, chart.bottom())), 4.0, CLAUDE_ORANGE());
-            text_fit(p, Pos2::new(x + bw / 2.0, chart.bottom() - ch - hh - 3.0), Align2::CENTER_BOTTOM, &span_text(c + h), font(11.0), TEXT_DIM(), bw + 10.0);
+            text_fit(p, Pos2::new(x + bw / 2.0, chart.bottom() - ch - hh - sp::S), Align2::CENTER_BOTTOM, &span_text(c + h), font(11.0), TEXT_DIM(), bw + 10.0);
         }
         let day = chrono::DateTime::from_timestamp(*d0, 0).map(|d| d.with_timezone(&chrono::Local).format("%a").to_string()).unwrap_or_default();
-        p.text(Pos2::new(x + bw / 2.0, chart.bottom() + 4.0), Align2::CENTER_TOP, if i + 1 == days.len() { "Today".to_string() } else { day }, font(11.0), TEXT_FAINT());
+        p.text(Pos2::new(x + bw / 2.0, chart.bottom() + sp::S), Align2::CENTER_TOP, if i + 1 == days.len() { "Today".to_string() } else { day }, font(11.0), TEXT_FAINT());
     }
 }
 

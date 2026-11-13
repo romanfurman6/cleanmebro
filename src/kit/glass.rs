@@ -174,6 +174,13 @@ pub mod sp {
     pub const PAGE_EDGE: f32 = 24.0;
     /// A legend row.
     pub const LEGEND_H: f32 = 22.0;
+    /// Between a title and the detail line under it ("Ollama" over
+    /// "com.ollama.ollama"); see [`super::two_lines`].
+    pub const LINE_GAP: f32 = 6.0;
+    /// A list row with two lines of text (name over detail).
+    pub const ROW2_H: f32 = 52.0;
+    /// Between columns of a row (name, schedule, state, buttons).
+    pub const COL_GAP: f32 = 16.0;
 }
 
 /// The type ramp: seven styles, used everywhere instead of ad-hoc sizes.
@@ -673,8 +680,12 @@ pub fn section_header(p: &Painter, pos: Pos2, align: Align2, label: &str) -> Rec
 pub fn sheet_header(ui: &mut Ui, rect: Rect, glyph: Icon, color: Color32, title: &str, sub: &str) -> bool {
     let p = ui.painter().clone();
     tool_chip(&p, Rect::from_min_size(rect.min + Vec2::new(16.0, 14.0), Vec2::splat(30.0)), glyph, color);
-    text_fit(&p, rect.min + Vec2::new(56.0, 12.0), Align2::LEFT_TOP, title, bold(15.0), TEXT(), rect.width() - 110.0);
-    text_fit(&p, rect.min + Vec2::new(56.0, 31.0), Align2::LEFT_TOP, sub, font(12.0), TEXT_DIM(), rect.width() - 110.0);
+    let cy = rect.top() + 29.0;
+    if sub.is_empty() {
+        text_fit(&p, Pos2::new(rect.left() + 56.0, cy), Align2::LEFT_CENTER, title, bold(15.0), TEXT(), rect.width() - 110.0);
+    } else {
+        two_lines(&p, rect.left() + 56.0, cy, title, bold(15.0), TEXT(), sub, font(12.0), TEXT_DIM(), rect.width() - 110.0);
+    }
     hairline(&p, Pos2::new(rect.left(), rect.top() + 57.0), Pos2::new(rect.right(), rect.top() + 57.0));
     let cr = Rect::from_center_size(Pos2::new(rect.right() - 27.0, rect.top() + 29.0), Vec2::splat(26.0));
     round_button(ui, cr, Icon::Close, "Close").clicked()
@@ -796,8 +807,85 @@ pub fn legend_row(p: &Painter, r: Rect, color: Color32, label: &str, value: &str
     text_fit(p, Pos2::new(r.left() + 31.0, r.center().y), Align2::LEFT_CENTER, label, font(13.0), TEXT(), (vr.left() - r.left() - 40.0).max(40.0));
 }
 
+/// The height of one line of `font`.
+pub fn line_h(p: &Painter, font: &FontId) -> f32 {
+    p.fonts_mut(|f| f.row_height(font))
+}
+
+/// A title with a detail line under it, the pair centred on `cy` with
+/// [`sp::LINE_GAP`] between them; both cut to `max_w`. Returns both rects.
+#[track_caller]
+pub fn two_lines(p: &Painter, x: f32, cy: f32, title: &str, title_font: FontId, title_col: Color32, detail: &str, detail_font: FontId, detail_col: Color32, max_w: f32) -> (Rect, Rect) {
+    let (t, d) = two_lines_y(p, cy, &title_font, &detail_font);
+    let tr = text_fit(p, Pos2::new(x, t), Align2::LEFT_CENTER, title, title_font, title_col, max_w);
+    let dr = text_fit(p, Pos2::new(x, d), Align2::LEFT_CENTER, detail, detail_font, detail_col, max_w);
+    (tr, dr)
+}
+
+/// Lines stacked [`sp::LINE_GAP`] apart, the block centred on `cy`, each
+/// starting at `x` and cut to `max_w` ("Memory" / "17%" / "normal").
+/// Empty lines are skipped. Returns the rect of each line drawn.
+#[track_caller]
+pub fn stack_lines(p: &Painter, x: f32, cy: f32, lines: &[(&str, FontId, Color32)], max_w: f32) -> Vec<Rect> {
+    let lines: Vec<&(&str, FontId, Color32)> = lines.iter().filter(|l| !l.0.is_empty()).collect();
+    let hs: Vec<f32> = lines.iter().map(|l| line_h(p, &l.1)).collect();
+    let total = hs.iter().sum::<f32>() + sp::LINE_GAP * (hs.len().max(1) - 1) as f32;
+    let mut y = cy - total / 2.0;
+    let mut out = Vec::new();
+    for (l, h) in lines.iter().zip(hs) {
+        out.push(text_fit(p, Pos2::new(x, y + h / 2.0), Align2::LEFT_CENTER, l.0, l.1.clone(), l.2, max_w));
+        y += h + sp::LINE_GAP;
+    }
+    out
+}
+
+/// The centre lines of [`two_lines`]: (title y, detail y), for rows that
+/// draw chips or values on the same lines.
+pub fn two_lines_y(p: &Painter, cy: f32, title_font: &FontId, detail_font: &FontId) -> (f32, f32) {
+    let (h1, h2) = (line_h(p, title_font), line_h(p, detail_font));
+    let top = cy - (h1 + sp::LINE_GAP + h2) / 2.0;
+    (top + h1 / 2.0, top + h1 + sp::LINE_GAP + h2 / 2.0)
+}
+
+/// A name on the left and a value on the right of one line (`left` and
+/// `right` are its two ends, `align` picks top / centre / bottom). The value
+/// the app writes (a time, a count) keeps its full width; the name gets
+/// what is left and is cut if it must. Returns (name, value) rects.
+#[track_caller]
+pub fn split_line(p: &Painter, left: Pos2, right: Pos2, v: egui::Align, name: &str, name_font: FontId, name_col: Color32, value: &str, value_font: FontId, value_col: Color32) -> (Rect, Rect) {
+    let vr = p.text(right, Align2([egui::Align::Max, v]), value, value_font, value_col);
+    let gap = if value.is_empty() { 0.0 } else { sp::M };
+    let nr = text_fit(p, left, Align2([egui::Align::Min, v]), name, name_font, name_col, vr.left() - gap - left.x);
+    (nr, vr)
+}
+
+/// Text that wraps onto up to `max_rows` lines at word breaks instead of
+/// being cut (status lines like "Out tomorrow 23:40" in a narrow card).
+#[track_caller]
+pub fn text_wrap(p: &Painter, pos: Pos2, align: Align2, text: &str, font: FontId, color: Color32, max_w: f32, max_rows: usize) -> Rect {
+    let caller = std::panic::Location::caller();
+    let mut job = egui::text::LayoutJob::simple(text.to_owned(), font, color, max_w.max(1.0));
+    job.wrap.max_rows = max_rows;
+    job.wrap.overflow_character = Some('…');
+    if align.x() == egui::Align::Center {
+        // each line centred on pos.x
+        job.halign = egui::Align::Center;
+    }
+    let g = p.layout_job(job);
+    if g.elided {
+        fit_log(caller, text, max_w);
+    }
+    let r = align.anchor_size(pos, g.size());
+    let at = if align.x() == egui::Align::Center { Pos2::new(pos.x, r.top()) } else { r.min };
+    let out = g.rect.translate(at.to_vec2());
+    p.galley(at, g, color);
+    out
+}
+
 /// Text that is cut with an ellipsis to fit `max_w`.
+#[track_caller]
 pub fn text_fit(painter: &Painter, pos: Pos2, align: Align2, text: &str, font: FontId, color: Color32, max_w: f32) -> Rect {
+    let caller = std::panic::Location::caller();
     // No glyph is narrower than about a quarter of the font size, so more
     // characters than this can never fit: don't lay out a whole long clip.
     let cap = ((max_w.max(0.0) / (font.size * 0.25).max(1.0)) as usize).saturating_add(2);
@@ -821,10 +909,23 @@ pub fn text_fit(painter: &Painter, pos: Pos2, align: Align2, text: &str, font: F
             }
         }
         g = cut(lo);
+        fit_log(caller, text, max_w);
     }
     let rect = align.anchor_size(pos, g.size());
     painter.galley(rect.min, g, color);
     rect
+}
+
+/// `CMDMEOW_FIT_LOG=1`: print each text `text_fit` had to cut, once per
+/// place and text, to find labels that don't fit (screenshot runs).
+fn fit_log(at: &std::panic::Location, text: &str, max_w: f32) {
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Option<Mutex<std::collections::HashSet<String>>>> = OnceLock::new();
+    let Some(seen) = SEEN.get_or_init(|| std::env::var_os("CMDMEOW_FIT_LOG").map(|_| Mutex::new(Default::default()))) else { return };
+    let key = format!("{}:{} {text:?} (max {max_w:.0})", at.file(), at.line());
+    if seen.lock().is_ok_and(|mut s| s.insert(key.clone())) {
+        eprintln!("[fit] {key}");
+    }
 }
 
 /// At most `max_chars` characters of `s` (a prefix, no copy).

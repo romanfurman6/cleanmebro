@@ -433,7 +433,11 @@ impl App {
                 let w = m::PANEL_WIDTH + if self.sheet_open() { m::DETAIL_WIDTH + 12.0 } else { 0.0 };
                 Vec2::new(w, self.panel_height().min(self.max_panel_height(ctx)))
             }
-            Mode::Window => Vec2::new(m::APP_WIDTH, m::APP_HEIGHT),
+            // screenshots: CMDMEOW_SHOT_W=<pt> (or "min") checks narrow windows
+            Mode::Window => match std::env::var("CMDMEOW_SHOT_W").ok().filter(|_| self.screenshot.is_some()) {
+                Some(w) => Vec2::new(if w == "min" { Self::min_app_width() } else { w.parse().unwrap_or(m::APP_WIDTH).max(Self::min_app_width()) }, m::APP_HEIGHT),
+                None => Vec2::new(m::APP_WIDTH, m::APP_HEIGHT),
+            },
             Mode::Setup => Vec2::new(super::onboard::SETUP_W, super::onboard::SETUP_H),
             Mode::FdaHelp => Vec2::new(360.0, 132.0),
         }
@@ -804,13 +808,18 @@ impl App {
         ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close);
     }
 
+    /// The narrowest the app window goes (Settings › Widgets sets it).
+    fn min_app_width() -> f32 {
+        crate::kit::glass::SIDEBAR_W + super::editor::MIN_WIDTH
+    }
+
     /// The full app in its own native window (traffic lights, resizable).
     fn app_builder() -> egui::ViewportBuilder {
         egui::ViewportBuilder::default()
             .with_title("Cmd+Meow")
             .with_inner_size([m::APP_WIDTH, m::APP_HEIGHT])
             // Settings › Widgets sets the narrowest the window can go
-            .with_min_inner_size([crate::kit::glass::SIDEBAR_W + super::editor::MIN_WIDTH, 640.0])
+            .with_min_inner_size([Self::min_app_width(), 640.0])
             .with_transparent(true)
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
