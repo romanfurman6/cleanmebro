@@ -737,7 +737,7 @@ impl Tool for Dictation {
         "Create"
     }
     fn about(&self) -> &'static str {
-        "Speak and the words are typed where the cursor is"
+        "Speak, and the text is typed where the cursor is"
     }
     fn sidebar_meta(&self) -> String {
         if self.listening() { "Listening".into() } else { self.shortcut_label() }
