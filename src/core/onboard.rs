@@ -844,6 +844,8 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
     let head = if list.iter().any(|r| r.optional) { 26.0 } else { 0.0 };
     let row_h = ((area.height() - head - 6.0 * n) / n).clamp(38.0, 46.0);
     let mut ask: Option<Perm> = None;
+    // the reasons line up in one column, after the longest row of tool icons
+    let max_tools = list.iter().map(|r| r.tools.len()).max().unwrap_or(0) as f32;
     for (k, r) in list.iter().enumerate() {
         if r.optional && !opt_head {
             opt_head = true;
@@ -867,15 +869,14 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         icon(&p, r.perm.icon(), ib.shrink(7.0), tint);
         p.text(Pos2::new(ib.right() + 12.0, rr.center().y), Align2::LEFT_CENTER, r.perm.name(), bold(13.0), TEXT().gamma_multiply(a));
         // the tools that want it
-        let mut gx = ib.right() + 190.0;
-        for &i in &r.tools {
+        for (n, &i) in r.tools.iter().enumerate() {
+            let gx = ib.right() + 190.0 + n as f32 * 22.0;
             icon(&p, app.tools[i].badge().icon, Rect::from_min_size(Pos2::new(gx, rr.center().y - 7.0), Vec2::splat(14.0)), TEXT_MUTED());
-            gx += 22.0;
         }
         // status on the right
         let right = rr.right() - 12.0;
         // why it's asked, after the tools' icons (the status keeps its room)
-        let why_x = gx + 10.0;
+        let why_x = ib.right() + 190.0 + max_tools * 22.0 + 10.0;
         let why_w = right - 210.0 - why_x;
         if why_w > 60.0 && !r.perm.why().is_empty() {
             text_fit(&p, Pos2::new(why_x, rr.center().y), Align2::LEFT_CENTER, r.perm.why(), font(12.0), TEXT_FAINT().gamma_multiply(a), why_w);

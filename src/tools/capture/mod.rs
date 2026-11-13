@@ -184,6 +184,20 @@ pub struct Capture {
 }
 
 impl Capture {
+    /// The Whisper models for transcripts of recordings: the ones already on
+    /// this Mac, or the default one, fetched on the first Transcribe.
+    pub fn transcript_models(&self) -> Vec<crate::core::tool::SetupModel> {
+        use crate::core::tool::{ModelState, SetupModel};
+        use crate::kit::whisper::Model;
+        let row = |m: Model, state| SetupModel { id: m.file(), what: "Transcripts of recordings", name: m.setup_name(), bytes: m.bytes(), state };
+        let found: Vec<SetupModel> = if self.dir.is_none() { Vec::new() } else { Model::ALL.into_iter().filter(|m| m.ready()).map(|m| row(m, ModelState::Ready)).collect() };
+        if found.is_empty() {
+            vec![row(Model::default(), ModelState::OnFirstUse)]
+        } else {
+            found
+        }
+    }
+
     pub fn new(env: &ToolEnv) -> Self {
         let (tx, rx) = channel();
         let (settings, dir, store) = if env.demo {
@@ -951,20 +965,6 @@ impl Tool for Capture {
         vec![Need::must(Perm::Screen), Need::may(Perm::Microphone), Need::may(Perm::Camera)]
     }
 
-    /// The Whisper models for transcripts of recordings: the ones already on
-    /// this Mac, or the default one, fetched on the first Transcribe.
-    fn setup_models(&self) -> Vec<crate::core::tool::SetupModel> {
-        use crate::core::tool::{ModelState, SetupModel};
-        use crate::kit::whisper::Model;
-        let row = |m: Model, state| SetupModel { id: m.file(), what: "Transcripts of recordings", name: m.setup_name(), bytes: m.bytes(), state };
-        let found: Vec<SetupModel> = if self.dir.is_none() { Vec::new() } else { Model::ALL.into_iter().filter(|m| m.ready()).map(|m| row(m, ModelState::Ready)).collect() };
-        if found.is_empty() {
-            vec![row(Model::default(), ModelState::OnFirstUse)]
-        } else {
-            found
-        }
-    }
-
     fn setup_shortcuts(&self) -> Vec<(&'static str, String)> {
         [(Command::Area, "Capture area"), (Command::Record, "Record screen")].into_iter().filter_map(|(c, l)| self.settings.shortcut(c).map(|s| (l, s.display()))).collect()
     }
@@ -1149,6 +1149,14 @@ mod tests {
 
     fn demo() -> Capture {
         Capture::new(&ToolEnv { ctx: egui::Context::default(), demo: true })
+    }
+
+    #[test]
+    fn setup_lists_the_transcript_model_for_first_use() {
+        let m = demo().transcript_models();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].state, crate::core::tool::ModelState::OnFirstUse);
+        assert_eq!(m[0].name, "Whisper turbo");
     }
 
     #[test]
