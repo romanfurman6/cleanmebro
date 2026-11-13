@@ -92,11 +92,15 @@ impl Pin {
 pub struct EditorWin {
     pub ed: Editor,
     opened: bool,
+    /// The file the Share button is uploading.
+    pub share: Option<std::path::PathBuf>,
+    /// The editor's revision when its link was last made or copied.
+    shared_at: Option<usize>,
 }
 
 impl EditorWin {
     pub fn new(ed: Editor) -> EditorWin {
-        EditorWin { ed, opened: false }
+        EditorWin { ed, opened: false, share: None, shared_at: None }
     }
 }
 
@@ -521,6 +525,7 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
         .with_has_shadow(true)
         .with_active(true);
     let mut closed = false;
+    ew.ed.share_progress = ew.share.as_ref().and_then(|p| c.uploads.progress(p));
     crate::kit::viewport::show(ctx, ViewportId::from_hash_of("capture-editor"), builder, |ui, _| {
         let vctx = ui.ctx().clone();
         if first {
@@ -557,16 +562,30 @@ fn editor_window(c: &mut Capture, ctx: &egui::Context, screen: Vec2) {
                 ew.ed.flash("Pinned on screen");
             }
             Request::Share => {
+                if ew.share.is_some() {
+                    continue;
+                }
                 // the history copy (with the marks) goes up; the editor stays
                 let img = ew.ed.rendered();
                 let path = match c.commit_rendered(&mut ew.ed, &img) {
                     Some(id) => Some(c.store.path(id)),
                     None => c.save_image(None, &img),
                 };
-                if let Some(path) = path {
-                    c.copy_link(path);
-                    ew.ed.flash("Uploading for a link…");
+                let Some(path) = path else { continue };
+                let rev = ew.ed.revision();
+                // a link that still shows these marks: just copy it
+                let fresh = ew.shared_at == Some(rev) || (ew.shared_at.is_none() && !ew.ed.edited);
+                match super::share::link_for(&path).filter(|_| fresh) {
+                    Some(link) => {
+                        c.copy_known_link(&link);
+                        ew.ed.flash("Link copied");
+                    }
+                    None => match c.try_share(path.clone()) {
+                        Ok(()) => ew.share = Some(path),
+                        Err(e) => ew.ed.flash(e),
+                    },
                 }
+                ew.shared_at = Some(rev);
             }
             Request::CopyText(t) => c.copy_text(&t),
             Request::Close => closed = true,
