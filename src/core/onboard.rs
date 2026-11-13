@@ -1002,8 +1002,8 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
         let a0 = -std::f32::consts::FRAC_PI_2;
         p.add(egui::Shape::line(arc_points(c, 18.0, a0, a0 + std::f32::consts::TAU * shown, 48), Stroke::new(4.0, if full { GREEN() } else { BLUE() })));
     }
-    // all required ones allowed: the count turns into a check and a ripple
-    // runs out of the ring once (it was full already when the step opened: no show)
+    // all required ones allowed: the count turns into a check and the ring
+    // grows soft cat ears (it was full already when the step opened: no show)
     let full_id = ui.scope_id().with("perm-full");
     let full_at = if full {
         let at = ui.ctx().data(|d| d.get_temp::<f64>(full_id)).unwrap_or(if t < 0.1 { now - 10.0 } else { now });
@@ -1017,10 +1017,9 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
         Some(at) => {
             let since = (now - at) as f32;
             check(&p, c, 14.0 * pop(since / 0.35).max(0.0), GREEN());
-            let k = (since - 0.15) / 0.6;
-            if (0.0..1.0).contains(&k) {
-                let e = ease(k);
-                crate::kit::glass::stroke_circle(&p, c, 20.0 + 10.0 * e, Stroke::new(2.0, with_alpha(GREEN(), 0.5 * (1.0 - e))));
+            let z = pop((since - 0.25) / 0.4).max(0.0);
+            if z > 0.0 {
+                ring_ears(&p, c, z, GREEN());
             }
             if since < 0.8 {
                 ui.ctx().request_repaint();
@@ -1045,6 +1044,37 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
             let (r, _) = ui.allocate_exact_size(Vec2::new(area.width() - 10.0, need), Sense::hover());
             perm_list(app, ui, r, &list, t, now);
         });
+    }
+}
+
+/// Two soft cat ears on top of the permissions ring (radius 18 round `c`),
+/// grown to `z` (0 → none, 1 → full; a bit over 1 overshoots). Wide bases
+/// and a rounded tip, so they read as ears, not horns.
+fn ring_ears(p: &egui::Painter, c: Pos2, z: f32, col: Color32) {
+    for side in [-1.0f32, 1.0] {
+        let pt = |deg: f32, r: f32| {
+            let a = deg.to_radians();
+            c + Vec2::new(a.cos() * side, a.sin()) * r
+        };
+        // base sunk into the ring, tip out and up
+        let (b0, b1, tip) = (pt(-150.0, 17.0), pt(-98.0, 17.0), pt(-123.0, 30.0));
+        let mid = b0 + (b1 - b0) * 0.5;
+        let tip = mid + (tip - mid) * z;
+        // the tip's corner rounded off: a curve between points `round` from it
+        let round = 8.0 * z.min(1.0);
+        let (t1, t2) = (tip + (b0 - tip).normalized() * round, tip + (b1 - tip).normalized() * round);
+        let mut pts = vec![b0];
+        pts.extend((0..=8).map(|i| {
+            let u = i as f32 / 8.0;
+            let v = 1.0 - u;
+            Pos2::new(v * v * t1.x + 2.0 * u * v * tip.x + u * u * t2.x, v * v * t1.y + 2.0 * u * v * tip.y + u * u * t2.y)
+        }));
+        pts.push(b1);
+        // same winding on both sides
+        if side > 0.0 {
+            pts.reverse();
+        }
+        p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
     }
 }
 
