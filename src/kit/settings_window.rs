@@ -42,8 +42,10 @@ const PROMPT_OWNERS: [&str; 8] = [
 const DOCK_LAYER: i32 = 20;
 
 /// Read the scene from `list` (front to back). `settings_pid` is System
-/// Settings' process, `me` ours (our windows never count).
-pub fn read(list: &[Win], settings_pid: Option<i32>, me: i32) -> Scene {
+/// Settings' process, `me` ours (our windows never count), `apps` the
+/// processes of ordinary Dock apps: their windows (the Finder window Full
+/// Disk Access points to) are never prompts.
+pub fn read(list: &[Win], settings_pid: Option<i32>, me: i32, apps: &[i32]) -> Scene {
     let others: Vec<(usize, &Win)> = list.iter().enumerate().filter(|(_, w)| w.pid != me && w.frame.width() >= 40.0 && w.frame.height() >= 40.0).collect();
     let main = settings_pid.and_then(|pid| others.iter().filter(|(_, w)| w.pid == pid && w.layer == 0).max_by(|a, b| area(a.1.frame).total_cmp(&area(b.1.frame))).copied());
     let settings = main.map(|(_, w)| w.frame);
@@ -51,7 +53,7 @@ pub fn read(list: &[Win], settings_pid: Option<i32>, me: i32) -> Scene {
     // a dialog in front of Settings: smaller, its middle on Settings (a sheet
     // of Settings itself counts too, e.g. "Quit & Reopen")
     let on_top = main.is_some_and(|(at, s)| {
-        others.iter().any(|&(i, w)| i < at && (0..DOCK_LAYER).contains(&w.layer) && w.frame.width() < s.frame.width() && w.frame.height() < s.frame.height() && s.frame.contains(w.frame.center()))
+        others.iter().any(|&(i, w)| i < at && (w.pid == s.pid || !apps.contains(&w.pid)) && (0..DOCK_LAYER).contains(&w.layer) && w.frame.width() < s.frame.width() && w.frame.height() < s.frame.height() && s.frame.contains(w.frame.center()))
     });
     Scene { settings, screen: None, prompt: named || on_top }
 }
@@ -110,7 +112,7 @@ mod imp {
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSRunningApplication, NSScreen};
+    use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSScreen, NSWorkspace};
     use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
     use std::ffi::c_void;
 
@@ -155,6 +157,11 @@ mod imp {
         apps.iter().find(|a| !a.isTerminated()).map(|a| a.processIdentifier())
     }
 
+    /// Processes of ordinary apps (the ones with a Dock icon).
+    fn app_pids() -> Vec<i32> {
+        NSWorkspace::sharedWorkspace().runningApplications().iter().filter(|a| a.activationPolicy() == NSApplicationActivationPolicy::Regular).map(|a| a.processIdentifier()).collect()
+    }
+
     /// The visible frame of the display holding `p`, top-left origin.
     fn screen_at(p: Pos2) -> Option<Rect> {
         let mtm = MainThreadMarker::new()?;
@@ -166,7 +173,7 @@ mod imp {
     }
 
     pub fn scene() -> Scene {
-        let mut s = super::read(&windows(), settings_pid(), std::process::id() as i32);
+        let mut s = super::read(&windows(), settings_pid(), std::process::id() as i32, &app_pids());
         s.screen = s.settings.and_then(|r| screen_at(r.center()));
         s
     }
@@ -197,7 +204,7 @@ mod tests {
     #[test]
     fn finds_the_settings_window_and_no_prompt() {
         let list = vec![win(0, "Window Server", 25, 0.0, 0.0, 1512.0, 24.0), win(ME, "CmdMeow Dev", 3, 600.0, 400.0, 360.0, 132.0), settings(), win(9, "Finder", 0, 0.0, 0.0, 800.0, 600.0)];
-        let s = read(&list, Some(SET), ME);
+        let s = read(&list, Some(SET), ME, &[]);
         assert_eq!(s.settings, Some(settings().frame));
         assert!(!s.prompt);
     }
@@ -206,34 +213,43 @@ mod tests {
     fn a_password_sheet_over_settings_is_a_prompt() {
         // the photo: macOS's "Privacy & Security" password sheet on Settings
         let list = vec![win(ME, "CmdMeow Dev", 3, 450.0, 820.0, 360.0, 132.0), win(77, "SomeAuthAgent", 0, 480.0, 330.0, 345.0, 430.0), settings()];
-        assert!(read(&list, Some(SET), ME).prompt);
+        assert!(read(&list, Some(SET), ME, &[]).prompt);
     }
 
     #[test]
     fn known_prompt_processes_count_anywhere() {
         let list = vec![win(77, "universalAccessAuthWarn", 8, 1000.0, 100.0, 260.0, 300.0), settings()];
-        assert!(read(&list, Some(SET), ME).prompt);
-        assert!(read(&list, None, ME).prompt);
+        assert!(read(&list, Some(SET), ME, &[]).prompt);
+        assert!(read(&list, None, ME, &[]).prompt);
     }
 
     #[test]
     fn our_own_windows_and_windows_behind_settings_dont_count() {
         let list = vec![win(ME, "CmdMeow Dev", 3, 400.0, 300.0, 360.0, 132.0), settings(), win(9, "Notes", 0, 300.0, 300.0, 200.0, 200.0)];
-        assert!(!read(&list, Some(SET), ME).prompt);
+        assert!(!read(&list, Some(SET), ME, &[]).prompt);
     }
 
     #[test]
     fn a_big_app_window_in_front_is_not_a_prompt() {
         let list = vec![win(9, "Safari", 0, 100.0, 100.0, 1200.0, 800.0), settings()];
-        assert!(!read(&list, Some(SET), ME).prompt);
+        assert!(!read(&list, Some(SET), ME, &[]).prompt);
     }
 
     #[test]
     fn a_sheet_of_settings_itself_is_a_prompt() {
         let list = vec![win(SET, "Системні параметри", 0, 400.0, 300.0, 300.0, 180.0), settings()];
-        let s = read(&list, Some(SET), ME);
+        let s = read(&list, Some(SET), ME, &[]);
         assert_eq!(s.settings, Some(settings().frame));
         assert!(s.prompt);
+    }
+
+    #[test]
+    fn a_finder_window_over_settings_is_not_a_prompt() {
+        // Full Disk Access opens Finder to drag the app in from: the card must stay
+        let list = vec![win(9, "Finder", 0, 300.0, 250.0, 600.0, 400.0), settings()];
+        assert!(!read(&list, Some(SET), ME, &[9, SET]).prompt);
+        // the same window from a background agent is a prompt
+        assert!(read(&list, Some(SET), ME, &[SET]).prompt);
     }
 
     const CARD: Vec2 = Vec2::new(360.0, 132.0);
