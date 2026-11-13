@@ -197,6 +197,7 @@ pub fn all_installed_ids() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kit::bundles::Info;
 
     fn bundle(root: &Path, rel: &str, id: &str, extra: &str) -> PathBuf {
         let app = root.join(rel);
