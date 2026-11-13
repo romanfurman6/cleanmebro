@@ -373,8 +373,11 @@ impl Store {
         };
         let index = dir.join(INDEX);
         let read: Option<Vec<Entry>> = v.read(&index).and_then(|b| serde_json::from_slice(&b).ok());
-        // an index this key can't open: blobs are kept (not judged as strays)
-        let known = read.is_some() || !index.exists();
+        if read.is_none() && index.exists() {
+            // sealed with a key that's gone (or damaged): set it aside with
+            // its blobs instead of writing over it, in case the key comes back
+            set_aside(&dir);
+        }
         let mut entries = read.unwrap_or_default();
         let old = dir.join(OLD_INDEX);
         if old.exists() {
@@ -388,10 +391,14 @@ impl Store {
         owner_only(&dir);
         owner_only(&dir.join("blobs"));
         let st = Store { dir, entries, saves: true, vault: Some(v), rev: 0 };
-        if known {
-            st.drop_strays();
-        }
+        st.drop_strays();
         st
+    }
+
+    /// Whether the history is kept on disk (false: the Keychain gave no key,
+    /// so this run's history lives in memory only).
+    pub fn saves(&self) -> bool {
+        self.saves
     }
 
     /// In memory only (tests that don't touch the disk).
@@ -642,6 +649,17 @@ fn seal_old(dir: &Path, v: &Vault, entries: &[Entry]) -> bool {
     ok && serde_json::to_vec(&kept).is_ok_and(|json| v.write(&dir.join(INDEX), &json))
 }
 
+/// Move an index this key can't open, and its blobs, to `lost-<time>/`.
+fn set_aside(dir: &Path) {
+    let to = dir.join(format!("lost-{}", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+    if std::fs::create_dir_all(&to).is_err() {
+        return;
+    }
+    let _ = std::fs::rename(dir.join(INDEX), to.join(INDEX));
+    let _ = std::fs::rename(dir.join("blobs"), to.join("blobs"));
+    eprintln!("[clipboard] history sealed with another key moved to {}", to.display());
+}
+
 /// Only the owner may list or enter the folder.
 fn owner_only(dir: &Path) {
     let _ = std::fs::create_dir_all(dir);
@@ -778,9 +796,9 @@ mod tests {
             let b = std::fs::read(&p).unwrap();
             assert!(vault::is_sealed(&b) && !b.windows(4).any(|w| w == b"bold" || w == b"\x89PNG"), "{}", p.display());
         }
-        // another key reads nothing, and leaves the files alone
-        assert!(Store::open(dir.clone(), Some(Arc::new(Vault::random()))).entries.is_empty());
-        assert!(Store::open(dir.clone(), None).entries.is_empty());
+        // no key: nothing read, nothing touched
+        let none = Store::open(dir.clone(), None);
+        assert!(none.entries.is_empty() && !none.saves());
         let back = Store::open(dir.clone(), Some(key.clone()));
         assert_eq!(back.entries.len(), 2);
         assert_eq!(back.get(img).map(|e| (e.kind, e.w, e.h)), Some((Kind::Image, 4, 3)));
@@ -812,6 +830,41 @@ mod tests {
         assert!(s.add(&text(&"a".repeat(MAX_TEXT + 1)), 1, LIM).is_none());
         assert!(s.entries.is_empty());
         assert!(s.add(&text(&"a".repeat(MAX_TEXT)), 2, LIM).is_some());
+    }
+
+    #[test]
+    fn plain_history_is_sealed_and_other_keys_set_aside() {
+        let dir = std::env::temp_dir().join(format!("cmb-clip-migrate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut png = Vec::new();
+        image::RgbaImage::new(2, 2).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        // a history from before encryption: plain index.json + plain blobs
+        let mut old = Store::memory(dir.clone());
+        let img = old.add(&Clip { png: Some(png.clone()), ..Default::default() }, 1, LIM).unwrap();
+        old.add(&text("plain words"), 2, LIM).unwrap();
+        std::fs::create_dir_all(dir.join("blobs")).unwrap();
+        std::fs::write(dir.join(OLD_INDEX), serde_json::to_vec(&old.entries).unwrap()).unwrap();
+        std::fs::write(old.image_path(img), &png).unwrap();
+
+        let key = Arc::new(Vault::random());
+        let s = Store::open(dir.clone(), Some(key.clone()));
+        assert_eq!(s.entries.len(), 2);
+        assert!(!dir.join(OLD_INDEX).exists());
+        for p in [dir.join(INDEX), s.image_path(img)] {
+            let b = std::fs::read(&p).unwrap();
+            assert!(vault::is_sealed(&b) && !b.windows(5).any(|w| w == b"plain"), "{}", p.display());
+        }
+        assert_eq!(s.png(img), Some(png.clone()));
+
+        // another key can't read it: it's moved aside, not written over
+        let other = Store::open(dir.clone(), Some(Arc::new(Vault::random())));
+        assert!(other.entries.is_empty() && other.saves());
+        let lost: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().filter(|f| f.file_name().to_string_lossy().starts_with("lost-")).collect();
+        assert_eq!(lost.len(), 1);
+        let kept = lost[0].path();
+        assert!(key.read(&kept.join(INDEX)).is_some());
+        assert_eq!(key.read(&kept.join("blobs").join(format!("{img}.png"))), Some(png));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
