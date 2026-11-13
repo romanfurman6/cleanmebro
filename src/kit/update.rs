@@ -125,8 +125,15 @@ pub fn tick() {
     });
 }
 
-fn agent() -> ureq::Agent {
-    ureq::Agent::new_with_config(ureq::Agent::config_builder().timeout_connect(Some(Duration::from_secs(20))).timeout_recv_response(Some(Duration::from_secs(30))).http_status_as_error(false).build())
+/// `body`: how long the whole body may take, so a stalled connection ends
+/// in a failure (and the banner's Download) instead of a frozen bar.
+fn agent(body: Duration) -> ureq::Agent {
+    ureq::Agent::new_with_config(ureq::Agent::config_builder().timeout_connect(Some(Duration::from_secs(20))).timeout_recv_response(Some(Duration::from_secs(30))).timeout_recv_body(Some(body)).http_status_as_error(false).build())
+}
+
+/// `file://` URLs are for local tests only (`CMDMEOW_UPDATE_URL` set).
+fn local_ok() -> bool {
+    cfg!(test) || std::env::var_os("CMDMEOW_UPDATE_URL").is_some()
 }
 
 fn fetch_manifest(url: &str) -> Result<Manifest, String> {
@@ -134,7 +141,7 @@ fn fetch_manifest(url: &str) -> Result<Manifest, String> {
         let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         return serde_json::from_str(&text).map_err(|e| e.to_string());
     }
-    let resp = agent().get(url).header("User-Agent", "Cmd+Meow").call().map_err(|e| e.to_string())?;
+    let resp = agent(Duration::from_secs(30)).get(url).header("User-Agent", "Cmd+Meow").call().map_err(|e| e.to_string())?;
     let status = resp.status().as_u16();
     if status != 200 {
         return Err(format!("manifest answered {status}"));
@@ -180,7 +187,9 @@ pub fn install() {
         let mut s = SHARED.lock_ok();
         s.busy = false;
         match r {
-            Ok(()) => s.state = State::Restarting,
+            Ok(true) => s.state = State::Restarting,
+            // in place, but no relaunch: the next launch is the new version
+            Ok(false) => s.state = State::Idle,
             Err(e) => {
                 eprintln!("[update] {} failed: {e}", m.version);
                 s.state = State::Failed(m.version.clone(), e);
@@ -195,7 +204,8 @@ fn current_bundle() -> Option<PathBuf> {
     exe.ancestors().find(|a| a.extension().is_some_and(|e| e == "app")).map(Path::to_path_buf)
 }
 
-fn run_install(m: &Manifest) -> Result<(), String> {
+/// Ok(true): in place and relaunching; Ok(false): in place, relaunch failed.
+fn run_install(m: &Manifest) -> Result<bool, String> {
     let bundle = current_bundle().ok_or("not running from an app bundle")?;
     if bundle.to_string_lossy().contains("/AppTranslocation/") {
         return Err("move Cmd+Meow to Applications first".into());
@@ -218,7 +228,16 @@ fn run_install(m: &Manifest) -> Result<(), String> {
         let _ = std::fs::remove_dir_all(&staging);
     }
     r?;
-    relaunch(&bundle, &staging, &dir.join(old_name(&bundle)))
+    let old = dir.join(old_name(&bundle));
+    match relaunch(&bundle, &staging, &old) {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            eprintln!("[update] installed, but {e}");
+            let _ = std::fs::remove_dir_all(&staging);
+            let _ = std::fs::remove_dir_all(&old);
+            Ok(false)
+        }
+    }
 }
 
 fn path_str(p: &Path) -> Result<&str, String> {
@@ -243,19 +262,23 @@ fn download(m: &Manifest, to: &Path) -> Result<(), String> {
         }
         Ok(())
     };
-    if let Some(path) = m.url.strip_prefix("file://") {
+    if let Some(path) = m.url.strip_prefix("file://").filter(|_| local_ok()) {
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
         on_chunk(&bytes, bytes.len() as u64)?;
     } else {
         if !m.url.starts_with("https://") {
             return Err("update URL isn't https".into());
         }
-        let resp = agent().get(&m.url).header("User-Agent", "Cmd+Meow").call().map_err(|e| format!("couldn't reach the download: {e}"))?;
+        let resp = agent(Duration::from_secs(20 * 60)).get(&m.url).header("User-Agent", "Cmd+Meow").call().map_err(|e| format!("couldn't reach the download: {e}"))?;
         let status = resp.status().as_u16();
         if status != 200 {
             return Err(format!("the download answered {status}"));
         }
-        let len = resp.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(m.size);
+        let header_len = resp.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
+        let len = header_len.unwrap_or(m.size);
+        // never more than promised (plus slack), so a bad server can't fill the disk
+        let cap = m.size.max(header_len.unwrap_or(0)).max(1 << 20) + (1 << 20);
+        let mut got = 0u64;
         let mut body = resp.into_body();
         let mut reader = body.as_reader();
         let mut buf = vec![0u8; 1 << 16];
@@ -263,6 +286,10 @@ fn download(m: &Manifest, to: &Path) -> Result<(), String> {
             let n = reader.read(&mut buf).map_err(|e| format!("the download broke off: {e}"))?;
             if n == 0 {
                 break;
+            }
+            got += n as u64;
+            if got > cap {
+                return Err("the download is bigger than promised".into());
             }
             on_chunk(&buf[..n], len)?;
         }
