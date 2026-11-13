@@ -343,6 +343,7 @@ impl Uninstaller {
             None
         };
         w.hooked.store(w.hook.is_some(), std::sync::atomic::Ordering::Relaxed);
+        eprintln!("[uninstaller] drop zone {}", if !want { "off" } else if w.hook.is_some() { "on, mouse monitor set" } else { "on, no mouse monitor (polling)" });
         w.wake();
     }
 
@@ -887,6 +888,7 @@ fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) -> Option
                     if down {
                         let apps: Vec<PathBuf> = mac::drag_files().into_iter().filter(|p| p.extension().is_some_and(|e| e == "app") && app_roots.iter().any(|r| p.starts_with(r))).collect();
                         if !apps.is_empty() {
+                            eprintln!("[uninstaller] app dragged: {}", apps.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
                             g.drag = Drag { apps, until: None };
                             ctx.request_repaint();
                         }
