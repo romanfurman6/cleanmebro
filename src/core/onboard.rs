@@ -1375,25 +1375,49 @@ const HELP_H: f32 = 132.0;
 /// The permissions switched on by hand in a System Settings list.
 const HELPED: [Perm; 3] = [Perm::FullDisk, Perm::Accessibility, Perm::Screen];
 
-/// While one of [`HELPED`] is being set up, a small card floats on top in
-/// the middle of the screen showing what to do: find the app in the list
-/// and switch it on.
+/// While one of [`HELPED`] is being set up, a small card stands beside
+/// System Settings showing what to do: find the app in the list and switch
+/// it on. It floats so Settings can't cover it, so it keeps off Settings
+/// itself and steps aside while macOS shows a prompt (the password sheet,
+/// "would like to record this screen") instead of hiding it.
 pub fn perm_helper(app: &mut App, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
     let Some(perm) = HELPED.into_iter().find(|&p| app.perm_watch.waiting(p, now) && (app.demo || app.perm_watch.status(p) != Status::Allowed)) else {
         return;
     };
-    let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
+    let size = Vec2::new(HELP_W, HELP_H);
+    let scene = crate::kit::settings_window::scene();
+    let at = match (scene.settings, scene.screen) {
+        _ if scene.prompt => None,
+        (Some(set), Some(screen)) => Some(crate::kit::settings_window::place(set, screen, size)),
+        // a demo has no Settings window to stand by
+        _ if app.demo => {
+            let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
+            Some(((screen - size) / 2.0).to_pos2())
+        }
+        // Settings isn't up yet (or is closed): nothing to point at
+        _ => None,
+    };
+    let id = egui::ViewportId::from_hash_of("cmdmeow-fda-help");
+    let Some(at) = at else {
+        // not drawn this pass: the window closes, and opens again in place
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        return;
+    };
+    // Settings was moved: follow it
+    let was = ctx.input(|i| i.raw.viewports.get(&id).and_then(|v| v.outer_rect));
+    if was.is_some_and(|r| (r.min - at).length() > 1.0) {
+        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::OuterPosition(at));
+    }
     let builder = egui::ViewportBuilder::default()
         .with_title(perm.name())
-        .with_inner_size([HELP_W, HELP_H])
-        .with_position([(screen.x - HELP_W) / 2.0, (screen.y - HELP_H) / 2.0])
+        .with_inner_size(size)
+        .with_position(at)
         .with_decorations(false)
         .with_transparent(true)
         .with_resizable(false)
         .with_has_shadow(true)
         .with_window_level(egui::WindowLevel::AlwaysOnTop);
-    let id = egui::ViewportId::from_hash_of("cmdmeow-fda-help");
     let mut close = false;
     crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
         close = help_card(ui, ui.max_rect(), now, perm);
@@ -1427,7 +1451,7 @@ pub fn help_card(ui: &mut Ui, full: Rect, now: f64, perm: Perm) -> bool {
     p.text(Pos2::new(full.left() + 16.0, y), Align2::LEFT_TOP, format!("Switch on {name} in the list"), bold(13.0), TEXT());
     let more = match perm {
         Perm::FullDisk => "Not there? Drag it in from the Finder window.",
-        _ => "If macOS asks first, pick Open System Settings.",
+        _ => "macOS may ask for your password next.",
     };
     p.text(Pos2::new(full.left() + 16.0, y + 20.0), Align2::LEFT_TOP, more, font(12.0), TEXT_FAINT());
     let x = Rect::from_min_size(Pos2::new(full.right() - 26.0, full.bottom() - 26.0), Vec2::splat(18.0));
