@@ -313,10 +313,12 @@ pub fn backdrop(painter: &Painter, rect: Rect, radius: f32, opaque: bool, _t: f6
     // a fan of rings from the centre out to the rounded outline
     let outline = densify(&rounded_points(rect, radius), 24.0);
     let c = rect.center();
-    let rings = 14;
-    let mut mesh = egui::epaint::Mesh::default();
-    mesh.colored_vertex(c, color_at(c));
+    let rings: usize = 14;
     let n = outline.len() as u32;
+    let mut mesh = egui::epaint::Mesh::default();
+    mesh.reserve_vertices(1 + rings * n as usize);
+    mesh.reserve_triangles(n as usize * (2 * rings - 1));
+    mesh.colored_vertex(c, color_at(c));
     for k in 1..=rings {
         let f = k as f32 / rings as f32;
         for q in &outline {
@@ -549,6 +551,66 @@ pub const ANIM_FRAME: std::time::Duration = std::time::Duration::from_millis(15)
 #[track_caller]
 pub fn animate(ctx: &egui::Context) {
     ctx.request_repaint_after(ANIM_FRAME);
+}
+
+/// Beat for loops that only decorate (fan blades, the setup cards): 30 fps,
+/// on a fixed clock so frames land evenly on 60 and 120 Hz displays. A
+/// frame redraws the whole window, so at 60 fps one turning fan kept an
+/// open panel at ~24% CPU on an M1.
+const AMBIENT_FPS: f64 = 30.0;
+/// Decorative loops rest after this long without mouse, keys or focus
+/// changes in the app's windows, and carry on with the next move: a panel left
+/// open costs next to nothing.
+const AMBIENT_REST: f64 = 10.0;
+
+#[derive(Clone, Copy)]
+struct Ambient {
+    clock: f64,
+    seen: f64,
+    input: f64,
+}
+
+/// Advance the decorative clock (once per pass; one clock for all windows,
+/// so a blade drawn in two keeps one angle) and say whether loops run.
+fn ambient_state(ctx: &egui::Context) -> (f64, bool) {
+    let (now, moved) = ctx.input(|i| (i.time, i.pointer.delta() != Vec2::ZERO || !i.events.is_empty()));
+    let id = egui::Id::NULL.with("ambient-clock");
+    ctx.data_mut(|d| {
+        let a = d.get_temp_mut_or_insert_with(id, || Ambient { clock: 0.0, seen: now, input: now });
+        if moved {
+            a.input = now;
+        }
+        let live = now - a.input < AMBIENT_REST;
+        if live && now > a.seen {
+            // a long gap (window was hidden) doesn't jump the loops ahead
+            a.clock += (now - a.seen).min(0.1);
+        }
+        a.seen = now;
+        (a.clock, live)
+    })
+}
+
+/// Seconds on the decorative clock: it stops while the loops rest,
+/// so they hold still instead of jumping when something else redraws.
+pub fn ambient_clock(ctx: &egui::Context) -> f64 {
+    ambient_state(ctx).0
+}
+
+/// Ask for the next frame of a decorative loop (see [`AMBIENT_FPS`]); only
+/// while it's on screen and the app saw input lately.
+#[track_caller]
+pub fn ambient(ctx: &egui::Context) {
+    if ambient_state(ctx).1 {
+        let now = ctx.input(|i| i.time);
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(next_beat(now, AMBIENT_FPS)));
+    }
+}
+
+/// Seconds from `now` to the next tick of a `fps` clock (never under 4 ms).
+fn next_beat(now: f64, fps: f64) -> f64 {
+    let period = 1.0 / fps;
+    let left = period - now.rem_euclid(period);
+    if left < 0.004 { left + period } else { left }
 }
 
 /// A spinning arc used while something is working; call [`animate`] to keep
@@ -1549,6 +1611,58 @@ pub fn human_duration(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decorative_beat_lands_on_a_fixed_clock() {
+        let p = 1.0 / 30.0;
+        assert!((next_beat(0.0, 30.0) - p).abs() < 1e-9);
+        assert!((next_beat(0.01, 30.0) - (p - 0.01)).abs() < 1e-9);
+        // too close to the tick: skip to the one after
+        assert!((next_beat(p - 0.001, 30.0) - (p + 0.001)).abs() < 1e-9);
+    }
+
+    /// One pass at `time`, with or without a pointer move; returns the
+    /// decorative clock and whether a frame was asked for.
+    fn ambient_pass(ctx: &egui::Context, time: f64, moved: bool) -> (f64, bool) {
+        let mut input = egui::RawInput { time: Some(time), ..Default::default() };
+        if moved {
+            input.events.push(egui::Event::PointerMoved(Pos2::new(time as f32, 5.0)));
+        }
+        let mut clock = 0.0;
+        let mut out = ctx.run_ui(input, |ui| {
+            clock = ambient_clock(ui.ctx());
+            ambient(ui.ctx());
+        });
+        out.textures_delta.clear();
+        let asked = out.viewport_output.get(&egui::ViewportId::ROOT).is_some_and(|v| v.repaint_delay < std::time::Duration::from_secs(1));
+        (clock, asked)
+    }
+
+    #[test]
+    fn decorative_loops_rest_without_input_and_wake_on_a_move() {
+        let ctx = egui::Context::default();
+        let (c0, asked) = ambient_pass(&ctx, 1.0, true);
+        assert!(asked);
+        let (c1, asked) = ambient_pass(&ctx, 1.05, false);
+        assert!(asked && (c1 - c0 - 0.05).abs() < 1e-9);
+        // frames every half second (the panel's heartbeat), no input
+        let mut t = 1.05;
+        let mut last = c1;
+        while t < 1.0 + AMBIENT_REST + 2.0 {
+            t += 0.5;
+            let (c, asked) = ambient_pass(&ctx, t, false);
+            last = c;
+            if t - 1.0 >= AMBIENT_REST {
+                assert!(!asked, "still animating at {t}");
+            }
+        }
+        // resting: the clock holds still
+        let (held, _) = ambient_pass(&ctx, t + 0.5, false);
+        assert_eq!(held, last);
+        // a move wakes the loops without jumping them ahead
+        let (woke, asked) = ambient_pass(&ctx, t + 3.0, true);
+        assert!(asked && woke - held <= 0.1 + 1e-9);
+    }
 
     /// Runs `f` with a painter inside a real egui frame.
     fn with_painter(f: impl FnOnce(&Painter)) {

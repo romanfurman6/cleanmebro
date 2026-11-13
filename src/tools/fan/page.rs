@@ -15,7 +15,6 @@ const ROW1_H: f32 = 222.0;
 
 pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<Cmd> {
     let p = ui.painter().clone();
-    let t = ui.ctx().input(|i| i.time);
     let mut sub = Vec::new();
     if !s.chip.is_empty() {
         sub.push(s.chip.clone());
@@ -53,7 +52,7 @@ pub fn page(s: &Snapshot, l: &Live, ui: &mut Ui, r: Rect, _cx: &mut Cx) -> Vec<C
             dial(&p, c, 58.0, 7.0, f.frac(), tint::FAN());
             p.circle_filled(c, 44.0, BG());
             crate::kit::glass::stroke_circle(&p, c, 44.0, Stroke::new(1.0, white(15)));
-            blades(&p, c, 40.0, spin(&format!("fan-{i}"), t, f.rpm), BLADE(), RAISED());
+            blades(&p, c, 40.0, spin(&format!("fan-{i}"), crate::kit::glass::ambient_clock(ui.ctx()), f.rpm), BLADE(), RAISED());
             let g = p.layout_no_wrap(rpm_text(f.rpm), bold(28.0), TEXT());
             let u = p.layout_no_wrap("rpm".into(), font(13.0), TEXT_DIM());
             let tw = g.size().x + 4.0 + u.size().x;

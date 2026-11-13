@@ -81,7 +81,17 @@ pub fn saved_step() -> usize {
 
 /// Setup was finished (closing the window no longer counts).
 pub fn is_done() -> bool {
-    done_marker().exists()
+    // asked every frame (menu bar title): once setup is done it stays done,
+    // so stop looking at the disk
+    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if DONE.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
+    let done = done_marker().exists();
+    if done {
+        DONE.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    done
 }
 
 pub fn mark_done() {
@@ -786,11 +796,12 @@ fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) -> Option<Vec<usiz
     let cw = (area.width() - gap) / 2.0;
     // three rows fill the step
     let ch = ((area.height() - sp::L - gap * 2.0) / 3.0).clamp(96.0, 116.0);
-    // the cards' loops always run; screenshots catch them mid-way. The
+    // the cards' loops run at the decorative pace and rest when the pointer
+    // does (60 fps here cost ~18% CPU); screenshots catch them mid-way. The
     // clock wraps at a multiple of every loop's period, so f32 stays exact.
-    let now = if app.demo { 2.0 } else { (ui.ctx().input(|i| i.time) % 32760.0) as f32 };
+    let now = if app.demo { 2.0 } else { (crate::kit::glass::ambient_clock(ui.ctx()) % 32760.0) as f32 };
     if !app.demo {
-        animate(ui.ctx());
+        crate::kit::glass::ambient(ui.ctx());
     }
     let mut flip = None;
     let mut hot = None;
