@@ -32,7 +32,7 @@ impl Group {
         match self {
             Group::AiTools => "AI Tools",
             Group::AppCaches => "App Caches",
-            Group::Developer => "Developer Tools",
+            Group::Developer => "Developer",
             Group::Projects => "Projects",
             Group::Installers => "Installers",
             Group::Logs => "Logs",
