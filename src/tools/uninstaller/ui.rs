@@ -58,7 +58,8 @@ fn letter_color(name: &str) -> Color32 {
 /// The app's own icon (macOS), else a colored square with its first letter.
 fn app_icon(u: &mut Uninstaller, ctx: &egui::Context, p: &egui::Painter, r: Rect, path: Option<&Path>, name: &str, budget: &mut usize) {
     if let Some(path) = path {
-        if !u.icons.contains_key(path) && *budget > 0 && !u.demo {
+        // an app in Downloads etc. isn't read (nor cached) before Full Disk Access
+        if !u.icons.contains_key(path) && *budget > 0 && !u.demo && !crate::kit::fs::behind_folder_prompt(path) {
             *budget -= 1;
             let tex = mac::app_icon(path, 64).map(|(n, rgba)| ctx.load_texture(format!("app-icon:{}", path.display()), egui::ColorImage::from_rgba_unmultiplied([n, n], &rgba), egui::TextureOptions::LINEAR));
             u.icons.insert(path.to_path_buf(), tex);
