@@ -13,7 +13,7 @@ use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Ui, UiBuilder, Vec2};
 use std::path::{Path, PathBuf};
 
 const ROW_H: f32 = sp::ROW2_H;
-const ROW_GAP: f32 = sp::XS;
+const ROW_GAP: f32 = sp::ROW_GAP;
 const HEAD_H: f32 = sp::SECTION_H;
 /// The suggestion / Undo card above the list.
 const TOP_CARD_H: f32 = 64.0;
