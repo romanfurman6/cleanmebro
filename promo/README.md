@@ -13,3 +13,8 @@ npm run render:9x16   # out/cmdmeow-promo-9x16.mp4
 - `src/Promo16x9.tsx`, `src/Promo9x16.tsx` – the two formats (9:16 = title on top, zoomed Mac screen card).
 - `public/music.mp3` (-14 LUFS), `public/desk.jpg`, `src/fonts.css` (Inter, embedded).
 - Set `REMOTION_CHROME=/path/to/chrome-headless-shell` to use a local browser; otherwise Remotion downloads its own.
+
+## Credits
+
+- Font: Inter by The Inter Project Authors, SIL Open Font License 1.1, see `FONTS-LICENSE.txt`.
+- Background: `public/desk.jpg`, the same image as `site/desk.jpg`.
