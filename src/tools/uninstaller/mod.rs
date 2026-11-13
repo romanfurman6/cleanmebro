@@ -272,6 +272,8 @@ pub struct Uninstaller {
     /// The drop zone keeps showing the result until then.
     pub done_until: Option<Instant>,
     on: bool,
+    /// AI Check beside the leftovers.
+    pub ai: crate::kit::aicheck::Check,
 }
 
 /// Which surface started a removal.
@@ -308,6 +310,7 @@ impl Uninstaller {
             want_page: false,
             done_until: None,
             on: true,
+            ai: crate::kit::aicheck::Check::new(ID),
         };
         if env.demo {
             ui::demo::fill(&mut u, "uninstaller");

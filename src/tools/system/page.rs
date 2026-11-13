@@ -7,6 +7,7 @@
 //! Each card shows real readings only: no chart is drawn for data the
 //! monitor does not keep a history of.
 
+use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::sync::LockExt;
 use super::monitor::{self, Level, Snapshot};
 use super::sheets::Action as SheetAction;
@@ -28,7 +29,7 @@ fn level_color(l: Level) -> Color32 {
     }
 }
 
-pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect, cx: &mut Cx) {
+pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendation], ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let s = mon.lock_ok().clone();
     let p = ui.painter().clone();
     let settings_id = ui.scope_id().with("health-settings");
@@ -64,8 +65,36 @@ pub fn page(mon: &monitor::Shared, recs: &[Recommendation], ui: &mut Ui, r: Rect
         }
     }
 
-    let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
-    let inner = body.shrink2(Vec2::new(sp::PAGE_EDGE, 0.0));
+    let mut body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
+    let mut inner = body.shrink2(Vec2::new(sp::PAGE_EDGE, 0.0));
+
+    // AI Check: a column on the right of the overview
+    if !show_settings && s.ready && aicheck::ui::shown(ai, true) {
+        let col_area = Rect::from_min_max(Pos2::new(inner.left(), inner.top() + sp::L), Pos2::new(inner.right(), inner.bottom() - sp::L));
+        let (content, col) = aicheck::ui::split(col_area);
+        inner.max.x = content.right();
+        body.max.x = content.right() + sp::PAGE_EDGE;
+        let n = s.procs.iter().filter(|p| p.cpu >= 20.0).count();
+        let offer = if n > 0 { format!("{n} busy app{}", if n == 1 { "" } else { "s" }) } else { "Your Mac right now".to_string() };
+        match aicheck::ui::column(ai, ui, col, &offer) {
+            Some(Event::Start) => ai.start(ui.ctx(), health_ask(&s)),
+            Some(Event::Act(rec)) => {
+                match rec.action.as_str() {
+                    "quit" => {
+                        if let Some(pid) = rec.key.strip_prefix("pid:").and_then(|x| x.parse::<u32>().ok()) {
+                            super::procs::quit(pid);
+                        }
+                    }
+                    _ => {
+                        let _ = std::process::Command::new("open").args(["-a", "Activity Monitor"]).spawn();
+                    }
+                }
+                ai.done(&rec);
+            }
+            Some(Event::OpenSettings) => cx.push(crate::core::tool::Action::OpenSettings { tools: false }),
+            None => {}
+        }
+    }
     let mut action = SheetAction::None;
 
     let mut dev_action = None;
@@ -378,4 +407,39 @@ fn network_card(ui: &mut Ui, p: &egui::Painter, r: Rect, s: &Snapshot) -> Option
         x = br.right() + sp::S;
     }
     out
+}
+
+/// What AI Check gets: the busiest processes and how the Mac is doing.
+fn health_ask(s: &monitor::Snapshot) -> aicheck::Ask {
+    let items = s
+        .procs
+        .iter()
+        .map(|p| aicheck::Item {
+            key: format!("pid:{}", p.pid),
+            line: format!("{} (pid {}) · {:.0}% CPU{}", p.name, p.pid, p.cpu, if p.mine { "" } else { " · system process, can't be quit" }),
+            icon: None,
+            name: p.name.clone(),
+        })
+        .collect();
+    let gb = |b: u64| human_bytes(b);
+    let mut facts = vec![
+        format!("Mac: {} {}", s.model, s.chip),
+        format!("Up {}", human_duration(s.uptime_secs)),
+        format!("CPU load {:.0}% (user {:.0}%, system {:.0}%)", s.cpu_load * 100.0, s.cpu_user * 100.0, s.cpu_system * 100.0),
+        format!("Memory: pressure {:.0}%, {} total, {} compressed, swap {} of {}", s.mem_pressure * 100.0, gb(s.mem_total), gb(s.mem_compressed), gb(s.swap_used), gb(s.swap_total)),
+        format!("Thermal state: {}", ["nominal", "fair", "serious", "critical"][s.thermal.min(3) as usize]),
+        format!("Disk: {} free of {}", gb(s.disk_free), gb(s.disk_total)),
+    ];
+    if s.battery.present {
+        facts.push(format!("Battery {}%{}, {} cycles", s.battery.percent, if s.battery.charging { " charging" } else { "" }, s.battery.cycles));
+    }
+    aicheck::Ask {
+        task: "This is Mac Health: how this Mac is doing right now and its busiest processes. Point out what is slowing it down, heating it or draining the battery, and what to do about it. Only suggest quitting a process the user runs.".into(),
+        actions: vec![
+            ("quit", "quit that process (like Activity Monitor's Quit)", "Quit"),
+            ("activity", "open Activity Monitor to look at it", "Open Activity Monitor"),
+        ],
+        items,
+        facts,
+    }
 }

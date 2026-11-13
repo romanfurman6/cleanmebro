@@ -224,13 +224,15 @@ pub struct Startup {
     apps_requested: bool,
     /// System Events access, read at most once a second while the page shows.
     pub events: (crate::kit::perms::Status, Option<std::time::Instant>),
+    /// AI Check beside the list.
+    pub ai: crate::kit::aicheck::Check,
 }
 
 impl Startup {
     pub fn new(env: &ToolEnv) -> Self {
         let user_library = crate::kit::fs::home().join("Library");
         let st: Shared = Arc::new(Mutex::new(State::default()));
-        let me = Startup { st: st.clone(), ctx: env.ctx.clone(), demo: env.demo, user_library: user_library.clone(), filter: Filter::All, search: String::new(), apps_requested: false, icons: Default::default(), events: (crate::kit::perms::Status::NotAsked, None) };
+        let me = Startup { st: st.clone(), ctx: env.ctx.clone(), demo: env.demo, user_library: user_library.clone(), filter: Filter::All, search: String::new(), apps_requested: false, icons: Default::default(), events: (crate::kit::perms::Status::NotAsked, None), ai: crate::kit::aicheck::Check::new(ID) };
         if env.demo {
             demo(&mut st.lock_ok(), false);
             return me;

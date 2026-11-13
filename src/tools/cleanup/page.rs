@@ -6,6 +6,7 @@ use super::engine::{self as cleanup, Group, Item, Phase, Verdict, Who};
 use super::agent::{self, Agent};
 use super::Cleanup as App;
 use crate::core::tool::{Action, Cx};
+use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::claude_code::{self as cc, Availability};
 use crate::kit::glass::{self, *};
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
@@ -19,7 +20,7 @@ pub fn page(app: &mut App, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     match phase {
         Phase::Intro => intro(app, ui, r, cx),
         Phase::Scanning | Phase::Judging | Phase::Cleaning => working(app, ui, r, phase),
-        Phase::Results => results(app, ui, r),
+        Phase::Results => results(app, ui, r, cx),
         Phase::Done => done(app, ui, r),
     }
 }
@@ -351,7 +352,7 @@ fn working(app: &mut App, ui: &mut Ui, r: Rect, phase: Phase) {
 
 // ---------------------------------------------------------------- results
 
-fn results(app: &mut App, ui: &mut Ui, r: Rect) {
+fn results(app: &mut App, ui: &mut Ui, r: Rect, tcx: &mut Cx) {
     let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let (total, pending, ai_used, ai_error, selected) = {
@@ -369,6 +370,7 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
     if pill_button(ui, sr, "Scan again", BTN_SECONDARY, true).clicked() {
         // back to the start screen, where the scan can be set up and started
         cleanup::stop_scan(&app.clean);
+        app.ai.reset();
         return;
     }
     let hidden = app.clean.lock_ok().hidden_kept;
@@ -396,7 +398,33 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect) {
         return;
     }
 
-    let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - PAGE_FOOTER_H - sp::L));
+    let mut body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, r.top() + PAGE_HEADER_H + 1.0 + sp::L), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - PAGE_FOOTER_H - sp::L));
+
+    // AI Check: a column on the right
+    if aicheck::ui::shown(&app.ai, true) {
+        let (content, col) = aicheck::ui::split(body);
+        body.max.x = content.right();
+        let scan = format!("{total}");
+        let shared = app.clean.clone();
+        app.ai.auto(&ctx, &scan, || check_ask(&shared));
+        let n = app.clean.lock_ok().items.iter().filter(|i| i.verdict != Verdict::Keep).count();
+        let offer = format!("{n} item{} to look at", if n == 1 { "" } else { "s" });
+        match aicheck::ui::column(&mut app.ai, ui, col, &offer) {
+            Some(Event::Start) => {
+                let ask = check_ask(&app.clean);
+                app.ai.start(&ctx, ask);
+            }
+            Some(Event::Act(rec)) => {
+                let i = app.clean.lock_ok().items.iter().position(|it| it.path.display().to_string() == rec.key);
+                if let Some(i) = i {
+                    answer_items(app, &[i], if rec.action == "keep" { Verdict::Keep } else { Verdict::Safe });
+                }
+                app.ai.done(&rec);
+            }
+            Some(Event::OpenSettings) => tcx.push(Action::OpenSettings { tools: false }),
+            None => {}
+        }
+    }
 
     // the groups as tabs: All, then each group that found something
     let mut tabs: Vec<(Option<Group>, String, u64, usize, Color32)> = vec![];
@@ -913,4 +941,40 @@ pub fn demo_done() -> cleanup::State {
     st.trashed_bytes = sel.iter().filter(|i| !i.permanent && !i.rebuilds()).map(|i| i.bytes).sum();
     st.log = sel.iter().map(|i| format!("Moved to Trash: {}", i.path.display())).collect();
     st
+}
+
+/// What AI Check gets: the biggest things found, with what the rules or the
+/// path check said about each.
+fn check_ask(clean: &cleanup::Shared) -> aicheck::Ask {
+    let g = clean.lock_ok();
+    let mut idx: Vec<usize> = (0..g.items.len()).filter(|&i| g.items[i].verdict != Verdict::Keep).collect();
+    idx.sort_by_key(|&i| std::cmp::Reverse(g.items[i].bytes));
+    let items = idx
+        .into_iter()
+        .take(40)
+        .map(|i| {
+            let it = &g.items[i];
+            let now = match it.verdict {
+                Verdict::Safe => "marked safe",
+                Verdict::Ask => "needs the user's OK",
+                Verdict::Keep => "kept",
+            };
+            let why = if it.reason.is_empty() { String::new() } else { format!(" ({})", it.reason) };
+            aicheck::Item {
+                key: it.path.display().to_string(),
+                line: format!("{} · {} · {} · {} · untouched {} days · {}{}{}", it.group.title(), it.title, short_path(&it.path), human_bytes(it.bytes), it.age_days.round(), now, why, if it.selected { " · ticked for cleaning" } else { "" }),
+                icon: None,
+                name: it.title.clone(),
+            }
+        })
+        .collect();
+    aicheck::Ask {
+        task: "This is Cleanup's results: caches, logs and leftovers found on this Mac. Point out the few biggest wins that are clearly safe to remove, and anything ticked for cleaning that the user would likely miss (documents, settings, data that cannot be downloaded again).".into(),
+        actions: vec![
+            ("select", "tick it for cleaning (the user still presses Clean and confirms)", "Select"),
+            ("keep", "untick it and remember it as kept", "Keep"),
+        ],
+        items,
+        facts: Vec::new(),
+    }
 }

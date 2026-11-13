@@ -9,6 +9,7 @@ use super::leftovers::{Item, Kind};
 use super::remove::Target;
 use super::{mac, Drop, Filter, Origin, Phase, Review, Sort, Tab, Uninstaller, ID, TINT, UNDO_FOR, UNUSED_DAYS};
 use crate::core::tool::Cx;
+use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::glass::*;
 use crate::kit::tile;
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId};
@@ -207,7 +208,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     match u.tab {
         Tab::Apps => apps_tab(u, ui, body),
-        Tab::Leftovers => leftovers_tab(u, ui, body),
+        Tab::Leftovers => leftovers_tab(u, ui, body, cx),
     }
 
     // a drop on the window
@@ -783,15 +784,48 @@ fn short_path(s: &str) -> String {
 
 // ---------------------------------------------------------------- Leftovers
 
-fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
+fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, cx: &mut Cx) {
     let p = ui.painter().clone();
-    let x0 = body.left() + 24.0;
-    let x1 = body.right() - 24.0;
-    let mut y = body.top() + 16.0;
     let (orphans, phase) = {
         let g = u.st.lock_ok();
         (g.orphans.clone(), g.phase)
     };
+    // AI Check on the right
+    let mut x1 = body.right() - 24.0;
+    if aicheck::ui::shown(&u.ai, !orphans.is_empty()) {
+        let inner = Rect::from_min_max(Pos2::new(body.left() + 24.0, body.top() + 16.0), Pos2::new(x1, body.bottom() - 20.0));
+        let (content, col) = aicheck::ui::split(inner);
+        x1 = content.right();
+        let offer = format!("{} to look at", plural_n(orphans.len(), "removed app"));
+        if !orphans.is_empty() {
+            let scan = format!("{}:{}", orphans.len(), orphans.iter().map(|o| o.bytes()).sum::<u64>());
+            let now = u.now();
+            u.ai.auto(ui.ctx(), &scan, || leftovers_ask(now, &orphans));
+        }
+        match aicheck::ui::column(&mut u.ai, ui, col, &offer) {
+            Some(Event::Start) => {
+                let ask = leftovers_ask(u.now(), &orphans);
+                u.ai.start(ui.ctx(), ask);
+            }
+            Some(Event::Act(r)) => {
+                if let Some(o) = orphans.iter().find(|o| o.id == r.key) {
+                    if r.action == "remove" {
+                        u.review = Some(Review { targets: vec![o.target()], open: [0].into() });
+                    } else {
+                        let mut g = u.st.lock_ok();
+                        for x in g.orphans.iter_mut() {
+                            x.selected = x.id == o.id;
+                        }
+                    }
+                }
+                u.ai.done(&r);
+            }
+            Some(Event::OpenSettings) => cx.push(crate::core::tool::Action::OpenSettings { tools: false }),
+            None => {}
+        }
+    }
+    let x0 = body.left() + 24.0;
+    let mut y = body.top() + 16.0;
     let sel: Vec<&super::Orphan> = orphans.iter().filter(|o| o.selected).collect();
     let total: u64 = orphans.iter().map(|o| o.bytes()).sum();
     let sel_bytes: u64 = sel.iter().map(|o| o.bytes()).sum();
@@ -905,6 +939,35 @@ fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
             text_fit(&p, Pos2::new(c_name, r.center().y + 9.0), Align2::LEFT_CENTER, &o.id, font(11.0), TEXT_FAINT(), c_where - c_name - 16.0);
         }
     });
+}
+
+fn plural_n(n: usize, what: &str) -> String {
+    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
+
+/// What AI Check gets: one line per removed app's leftovers.
+fn leftovers_ask(now: i64, orphans: &[super::Orphan]) -> aicheck::Ask {
+    let items = orphans
+        .iter()
+        .map(|o| {
+            let paths: Vec<String> = o.items.iter().take(6).map(|i| format!("{} ({})", short_path(&i.path.display().to_string()), human_bytes(i.bytes))).collect();
+            aicheck::Item {
+                key: o.id.clone(),
+                line: format!("{} ({}) · {} total · last touched {} · {}", o.name, o.id, human_bytes(o.bytes()), ago(now, o.touched), paths.join("; ")),
+                icon: None,
+                name: o.name.clone(),
+            }
+        })
+        .collect();
+    aicheck::Ask {
+        task: "This is the Uninstaller's Leftovers list: data left behind by apps that are no longer installed. Point out what is worth removing (big, old, clearly orphaned) and anything that needs a look first, such as documents, recordings or data another installed app may share.".into(),
+        actions: vec![
+            ("remove", "move that app's leftovers to the Trash (the user confirms in a review sheet first)", "Remove"),
+            ("review", "select it in the list so the user can look at its files first", "Review"),
+        ],
+        items,
+        facts: Vec::new(),
+    }
 }
 
 // ---------------------------------------------------------------- panel widget

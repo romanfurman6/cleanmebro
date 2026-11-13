@@ -1,6 +1,7 @@
 //! Disk Map screens: choose what to map (with live progress while it runs)
 //! → bubbles you can zoom into folder by folder, with a list to pick from → review and move to Trash.
 
+use crate::kit::aicheck::{self, ui::Event};
 use crate::kit::sync::LockExt;
 use super::scan::{self, Node};
 use super::Lens as App;
@@ -1326,7 +1327,36 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
         return Act::None;
     }
 
-    let body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, hr.bottom() + 16.0), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - 16.0));
+    let mut body = Rect::from_min_max(Pos2::new(r.left() + sp::PAGE_EDGE, hr.bottom() + 16.0), Pos2::new(r.right() - sp::PAGE_EDGE, r.bottom() - 16.0));
+    // AI Check: a column on the right, once the map is final
+    let mut ai_act: Option<(MenuAct, PathBuf, u64)> = None;
+    let mut ai_go: Option<PathBuf> = None;
+    if !busy && aicheck::ui::shown(&app.ai, true) {
+        let (content, col) = aicheck::ui::split(body);
+        body.max.x = content.right();
+        let scan = format!("{}:{}", root.path.display(), root.bytes);
+        app.ai.auto(&ctx, &scan, || map_ask(root));
+        let n = big_folders(root).len();
+        let offer = format!("{n} big folder{} to look at", if n == 1 { "" } else { "s" });
+        match aicheck::ui::column(&mut app.ai, ui, col, &offer) {
+            Some(Event::Start) => {
+                let ask = map_ask(root);
+                app.ai.start(&ctx, ask);
+            }
+            Some(Event::Act(rec)) => {
+                let path = PathBuf::from(&rec.key);
+                let bytes = scan::find(root, &path).map(|n| n.bytes).unwrap_or(0);
+                match rec.action.as_str() {
+                    "open" => ai_go = Some(path),
+                    "reveal" => ai_act = Some((MenuAct::Reveal, path, bytes)),
+                    _ => ai_act = Some((MenuAct::Trash, path, bytes)),
+                }
+                app.ai.done(&rec);
+            }
+            Some(Event::OpenSettings) => app.ai_settings = true,
+            None => {}
+        }
+    }
     let picked_total: u64 = app.lens_selected.iter().map(|x| x.1).sum();
     let list_w = (body.width() * 0.36).clamp(260.0, LIST_W);
     let lr = Rect::from_min_max(body.min, Pos2::new(body.left() + list_w, body.bottom()));
@@ -1337,6 +1367,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
     let mut hover_item: Option<(PathBuf, u64)> = None;
     let mut menu_act: Option<(MenuAct, PathBuf, u64)> = None;
     let mut toggle: Option<(PathBuf, u64)> = None;
+    if let Some(a) = ai_act {
+        menu_act = Some(a);
+    }
+    if let Some(p) = ai_go {
+        go_to = Some((p, None));
+    }
 
     // ---- the list: this folder, everything in it, the disk. While a
     // folder on the map is under the pointer, the list shows what's in it.
@@ -1472,10 +1508,12 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
     if app.lens_morph.as_ref().is_none_or(|m| m.1 != node.path) {
         app.lens_morph = Some((None, node.path.clone(), now));
     }
+    // a hovered AI Check row lights its folder on the map
+    let lit_path = hover_path.clone().or_else(|| app.ai.hovered.as_ref().map(PathBuf::from));
     let out = match app.lens_view {
-        1 => rings(app, ui, pa, root, node, &here, free, hover_path.as_deref(), can_up),
+        1 => rings(app, ui, pa, root, node, &here, free, lit_path.as_deref(), can_up),
         2 => files(app, ui, pa, node),
-        _ => bubbles(app, ui, pa, node, &here, free, hover_path.as_deref()),
+        _ => bubbles(app, ui, pa, node, &here, free, lit_path.as_deref()),
     };
     if out.other {
         app.lens_other = true;
@@ -1873,5 +1911,57 @@ mod tests {
         assert_eq!(app.lens_selected.len(), 1);
         pick(&mut app, (PathBuf::from("/r/a"), 5));
         assert!(app.lens_selected.is_empty());
+    }
+}
+
+/// Folders worth a look: big ones up to four levels down.
+fn big_folders(root: &Node) -> Vec<&Node> {
+    fn walk<'a>(n: &'a Node, depth: usize, min: u64, out: &mut Vec<&'a Node>) {
+        for k in &n.children {
+            if k.bytes >= min && !k.children.is_empty() {
+                out.push(k);
+                if depth < 4 {
+                    walk(k, depth + 1, min, out);
+                }
+            }
+        }
+    }
+    let min = (root.bytes / 100).max(1_000_000_000);
+    let mut out = vec![];
+    walk(root, 1, min, &mut out);
+    out.sort_by_key(|n| std::cmp::Reverse(n.bytes));
+    out.truncate(40);
+    out
+}
+
+/// What AI Check gets: the big folders on the map with their biggest parts.
+fn map_ask(root: &Node) -> aicheck::Ask {
+    let items = big_folders(root)
+        .into_iter()
+        .map(|n| {
+            let mut kids: Vec<&Node> = n.children.iter().collect();
+            kids.sort_by_key(|k| std::cmp::Reverse(k.bytes));
+            let top: Vec<String> = kids.iter().take(4).map(|k| format!("{} {}", k.name, human_bytes(k.bytes))).collect();
+            aicheck::Item {
+                key: n.path.display().to_string(),
+                line: format!("{} · {} · {} items · biggest inside: {}", n.path.display(), human_bytes(n.bytes), n.items, top.join(", ")),
+                icon: None,
+                name: n.name.clone(),
+            }
+        })
+        .collect();
+    let mut facts = vec![format!("Mapped: {} ({})", root.path.display(), human_bytes(root.bytes))];
+    if let Some((free, total)) = disk_space(&root.path) {
+        facts.push(format!("Disk: {} free of {}", human_bytes(free), human_bytes(total)));
+    }
+    aicheck::Ask {
+        task: "This is Disk Map: the biggest folders on this Mac. Point out the few biggest wins: what is safe to remove or can be made smaller (caches, old simulators, VM and container disks, downloads, duplicates), and say how. Skip system folders and the user's own documents unless clearly stale.".into(),
+        actions: vec![
+            ("trash", "put it in the remove list (the user reviews and confirms before anything moves to the Trash)", "Remove"),
+            ("open", "open that folder on the map to look inside", "Open"),
+            ("reveal", "show it in Finder", "Show in Finder"),
+        ],
+        items,
+        facts,
     }
 }

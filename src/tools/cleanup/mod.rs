@@ -4,7 +4,7 @@
 //! Page routes: "" (as left), "claude" (open on the Claude group).
 
 use crate::kit::sync::LockExt;
-pub mod agent;
+pub use crate::kit::agent;
 pub mod engine;
 mod inuse;
 mod journal;
@@ -35,6 +35,7 @@ pub struct Cleanup {
     pub(crate) clean_log: bool,
     /// Screenshots: show Cleanup as if Claude were in this state.
     pub(crate) demo_claude: Option<crate::kit::claude_code::Availability>,
+    pub(crate) ai: crate::kit::aicheck::Check,
 }
 
 impl Cleanup {
@@ -49,6 +50,7 @@ impl Cleanup {
             clean_confirm: false,
             clean_log: false,
             demo_claude: None,
+            ai: crate::kit::aicheck::Check::new(ID),
         }
     }
 }
@@ -204,6 +206,24 @@ impl Tool for Cleanup {
             }
             "results" => {
                 *self.clean.lock_ok() = page::demo_results();
+                let rec = |key: &str, action: &str, label: &str, title: &str, value: &str, why: &str, name: &str| crate::kit::aicheck::Rec {
+                    key: key.into(),
+                    action: action.into(),
+                    label: label.into(),
+                    title: title.into(),
+                    value: value.into(),
+                    why: why.into(),
+                    icon: None,
+                    name: name.into(),
+                };
+                self.ai.set_demo(
+                    "3 quick wins, one to keep",
+                    vec![
+                        rec("a", "select", "Select", "Remove Claude VM image", "9.00 GB", "Agent sandbox image; Claude downloads it again when needed", "Claude"),
+                        rec("b", "select", "Select", "Empty Trash", "1.10 GB", "Nothing in it newer than 30 days", "Trash"),
+                        rec("c", "keep", "Keep", "Keep Xcode archives", "3.40 GB", "Signed builds of shipped apps; can't be rebuilt", "Xcode"),
+                    ],
+                );
                 Some(View::Page)
             }
             "cleanup-scanning" => {

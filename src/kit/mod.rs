@@ -3,7 +3,9 @@
 //! Nothing here knows about any tool.
 
 pub mod activity;
+pub mod agent;
 pub mod ai;
+pub mod aicheck;
 pub mod brand;
 pub mod charge;
 pub mod claude_code;

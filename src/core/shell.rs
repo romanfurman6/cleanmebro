@@ -317,13 +317,14 @@ impl App {
                 self.mode = Mode::FdaHelp;
                 return;
             }
-            "customize" | "settings-tools" | "settings-general" | "settings-ai" => {
+            "customize" | "settings-tools" | "settings-general" | "settings-ai" | "settings-ai-check" => {
                 self.mode = Mode::Window;
                 self.settings_open = true;
                 self.settings_tab = match view {
                     "customize" => 0,
                     "settings-tools" => 1,
                     "settings-ai" => 3,
+                    "settings-ai-check" => 4,
                     _ => 2,
                 };
                 return;

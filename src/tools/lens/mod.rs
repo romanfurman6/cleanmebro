@@ -58,6 +58,9 @@ pub struct Lens {
     pub(crate) lens_trashed: Vec<PathBuf>,
     /// The sheet of everything in the folder is open ("Other").
     pub(crate) lens_other: bool,
+    pub(crate) ai: crate::kit::aicheck::Check,
+    /// AI Check asked for Settings (handled where `Cx` is at hand).
+    pub(crate) ai_settings: bool,
     /// The list row the keyboard is on.
     pub(crate) lens_cursor: Option<usize>,
     /// Bytes moved to the Trash from the map since the app started.
@@ -120,6 +123,8 @@ impl Lens {
             lens_pick: Default::default(),
             lens_trashed: vec![],
             lens_other: false,
+            ai: crate::kit::aicheck::Check::new(ID),
+            ai_settings: false,
             lens_cursor: None,
             lens_freed: 0,
             lens_confirm: false,
@@ -156,6 +161,9 @@ impl Tool for Lens {
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         page::page(self, ui, rect, cx);
+        if std::mem::take(&mut self.ai_settings) {
+            cx.push(crate::core::tool::Action::OpenSettings { tools: false });
+        }
     }
     fn menu_items(&self) -> Vec<MenuItem> {
         vec![MenuItem { id: "open", label: "Disk Map".into() }]
