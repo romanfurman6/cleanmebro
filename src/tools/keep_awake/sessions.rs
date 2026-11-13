@@ -51,8 +51,9 @@ impl Session {
     }
 }
 
-/// An AI agent whose work can keep the Mac awake.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An AI agent whose work can keep the Mac awake. Saved by its id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Source {
     Claude,
     Codex,

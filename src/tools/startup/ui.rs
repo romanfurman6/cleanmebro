@@ -187,7 +187,9 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let body = Rect::from_min_max(Pos2::new(r.left() + 24.0, r.top() + PAGE_HEADER_H + 1.0), Pos2::new(r.right() - 24.0, r.bottom()));
     if loaded {
         if ai_n > 0 {
-            s.ai.auto(&ctx, &format!("{}:{}", jobs.len(), apps.len()), || startup_ask(&jobs, &apps));
+            // again only when something new starts at login, not after a turn off or remove
+            let on = jobs.iter().filter(|j| j.on).map(|j| j.label.clone()).chain(apps.iter().filter(|a| a.on).map(|a| format!("app:{}", a.name)));
+            s.ai.auto_new(&ctx, on, || startup_ask(&jobs, &apps));
         }
         match aicheck::ui::chip(&mut s.ai, ui, chip_at, ai_data) {
             Some(Event::Start) => {

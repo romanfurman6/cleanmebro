@@ -107,6 +107,8 @@ pub struct Check {
     pub(crate) icons: HashMap<PathBuf, Option<egui::TextureHandle>>,
     /// The scan the last automatic check ran for.
     auto_for: Option<String>,
+    /// Everything the automatic checks have seen ([`Check::auto_new`]).
+    auto_seen: Option<std::collections::HashSet<String>>,
     pub demo: bool,
     /// The recommendations popover is open.
     pub(crate) open: bool,
@@ -128,6 +130,7 @@ impl Check {
             hovered: None,
             icons: HashMap::new(),
             auto_for: None,
+            auto_seen: None,
             demo,
             open: false,
             answer: Default::default(),
@@ -204,6 +207,30 @@ impl Check {
         if s.is_on(self.tool) && crate::kit::agent::main().ready() {
             self.start(ctx, ask());
         }
+    }
+
+    /// Start when the list holds something no automatic check has seen yet
+    /// (the first time, or a new item), never because items went away (the
+    /// person turned one off or removed it). For live lists with no scan.
+    pub fn auto_new(&mut self, ctx: &egui::Context, ids: impl IntoIterator<Item = String>, ask: impl FnOnce() -> Ask) {
+        if self.demo || !self.note_new(ids) {
+            return;
+        }
+        let s = settings();
+        if s.is_on(self.tool) && crate::kit::agent::main().ready() {
+            self.start(ctx, ask());
+        }
+    }
+
+    /// Remember `ids`; true when one wasn't seen before (or nothing was).
+    fn note_new(&mut self, ids: impl IntoIterator<Item = String>) -> bool {
+        let first = self.auto_seen.is_none();
+        let seen = self.auto_seen.get_or_insert_with(Default::default);
+        let mut new = false;
+        for id in ids {
+            new |= seen.insert(id);
+        }
+        first || new
     }
 
     pub fn stop(&mut self) {
@@ -577,6 +604,22 @@ mod tests {
         assert_eq!((t.calls, t.tokens), (2, 240));
         assert!((t.cost - 0.25).abs() < 1e-9);
     }
+    #[test]
+    fn auto_new_runs_for_new_items_only() {
+        let mut c = Check::new("startup", false);
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(c.note_new(ids(&["a", "b"])));
+        assert!(!c.note_new(ids(&["a", "b"])));
+        // turned off or removed: no new check
+        assert!(!c.note_new(ids(&["a"])));
+        // and on again: seen before, still none
+        assert!(!c.note_new(ids(&["a", "b"])));
+        // something new starts at login
+        assert!(c.note_new(ids(&["a", "b", "c"])));
+        // the very first look counts even when empty
+        assert!(Check::new("startup", false).note_new(ids(&[])));
+    }
+
     #[test]
     fn answers_and_tips_split() {
         let mut c = Check::new("cleanup", true);

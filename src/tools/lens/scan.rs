@@ -65,6 +65,9 @@ pub struct Scan {
     pub quiet: AtomicBool,
     /// The map in `result` was stopped before it was finished.
     pub partial: AtomicBool,
+    /// Counts maps made from scratch or read back from disk (not updates
+    /// or removals): AI Check checks once per map.
+    pub maps: AtomicU64,
 }
 
 pub type Shared = Arc<Scan>;
@@ -164,6 +167,7 @@ fn full(shared: &Shared, root: &Path, ctx: &egui::Context) {
     *shared.when.lock_ok() = Some(now);
     *shared.event.lock_ok() = event;
     *shared.result.lock_ok() = Some(node);
+    shared.maps.fetch_add(1, Ordering::SeqCst);
     *shared.live.lock_ok() = None;
     shared.running.store(false, Ordering::SeqCst);
     ctx.request_repaint();
@@ -367,6 +371,7 @@ pub fn load(shared: &Shared, ctx: &egui::Context) -> bool {
             let mut r = s.result.lock_ok();
             if r.is_none() && !s.running.load(Ordering::SeqCst) {
                 *r = Some(saved.root);
+                s.maps.fetch_add(1, Ordering::SeqCst);
                 *s.when.lock_ok() = Some(saved.when);
                 *s.event.lock_ok() = saved.event;
             }

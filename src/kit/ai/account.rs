@@ -158,7 +158,17 @@ pub fn claude_limits(v: &Value, now: i64) -> Vec<Limit> {
         let pct = w["utilization"].as_f64().or_else(|| w["used_percentage"].as_f64())? as f32;
         limit(label, pct, *secs, when(&w["resets_at"]), now)
     })
-    .collect()
+    .collect::<Vec<_>>()
+}
+
+/// Claude's limits for the page: with no 5-hour window running (nothing
+/// sent in the last five hours) the reply has no `five_hour` at all, which
+/// means the session is unused, so it shows as 0% rather than missing.
+fn with_session(mut limits: Vec<Limit>) -> Vec<Limit> {
+    if !limits.is_empty() && !limits.iter().any(|l| l.label == "Current session") {
+        limits.insert(0, Limit { label: "Current session".into(), pct: 0.0, resets: String::new(), resets_at: None, window_secs: 5 * 3600 });
+    }
+    limits
 }
 
 /// Claude's limits for this sign-in.
@@ -170,7 +180,11 @@ pub fn claude_usage(token: &str) -> Result<Vec<Limit>, ApiError> {
         .header("Accept", "application/json")
         .header("User-Agent", UA)
         .call();
-    let limits = claude_limits(&reply(r)?, now());
+    let v = reply(r)?;
+    // which windows the reply carries (no personal data), for the dev log
+    let keys: Vec<&str> = v.as_object().map(|o| o.iter().filter(|(_, x)| !x.is_null()).map(|(k, _)| k.as_str()).collect()).unwrap_or_default();
+    eprintln!("[ai] claude usage windows: {keys:?}");
+    let limits = with_session(claude_limits(&v, now()));
     if limits.is_empty() {
         return Err(ApiError::Other("no limits in the reply".into()));
     }
@@ -446,6 +460,10 @@ mod tests {
         let v: Value = serde_json::from_str(r#"{"five_hour":{"used_percentage":50,"resets_at":1000600}}"#).unwrap();
         assert_eq!(claude_limits(&v, now)[0].resets_at, Some(1_000_600));
         assert!(claude_limits(&json!({"error":"x"}), now).is_empty());
+        // no 5-hour window running: the session shows as unused
+        let l = with_session(claude_limits(&json!({"five_hour":null,"seven_day":{"utilization":30,"resets_at":null}}), now));
+        assert_eq!(l.iter().map(|l| (l.label.as_str(), l.pct)).collect::<Vec<_>>(), vec![("Current session", 0.0), ("Current week (all models)", 30.0)]);
+        assert!(with_session(Vec::new()).is_empty());
     }
 
     #[test]
