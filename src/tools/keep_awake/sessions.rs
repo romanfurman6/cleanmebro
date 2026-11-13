@@ -220,7 +220,8 @@ impl Scanner {
         if let Some(mt) = mtime(&db) {
             let key = (mt, mtime(&root.join("opencode.db-wal")).unwrap_or(0));
             if self.db.as_ref().map(|d| d.0) != Some(key) {
-                self.db = Some((key, read_opencode_db(&db, now)));
+                // a failed read (locked, no sqlite3) is tried again next scan
+                self.db = read_opencode_db(&db, now).map(|m| (key, m));
             }
             msgs.extend(self.db.as_ref().map(|d| d.1.clone()).unwrap_or_default());
         }
@@ -345,11 +346,12 @@ impl Msg {
 }
 
 /// The last day's messages in OpenCode's database, through `sqlite3`.
-fn read_opencode_db(db: &Path, now: i64) -> Vec<Msg> {
+/// None when it couldn't be read.
+fn read_opencode_db(db: &Path, now: i64) -> Option<Vec<Msg>> {
     let since_ms = (now - RECENT_SECS) * 1000;
     let sql = format!("SELECT * FROM message WHERE time_created >= {since_ms}");
-    let Ok(out) = std::process::Command::new("/usr/bin/sqlite3").args(["-readonly", "-json"]).arg(db).arg(sql).output() else { return Vec::new() };
-    opencode_rows(&out.stdout)
+    let out = std::process::Command::new("/usr/bin/sqlite3").args(["-readonly", "-json"]).arg(db).arg(sql).output().ok()?;
+    out.status.success().then(|| opencode_rows(&out.stdout))
 }
 
 /// Messages from `sqlite3 -json` rows: `[{"session_id": …, "data": "<JSON>"}, …]`.
