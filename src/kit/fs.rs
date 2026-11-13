@@ -16,9 +16,29 @@ pub fn home() -> PathBuf {
 /// Access isn't granted. Background checks (a startup job's program, its
 /// signature) skip such paths, so no folder question comes before setup.
 pub fn behind_folder_prompt(p: &Path) -> bool {
-    let h = home();
-    let private = ["Desktop", "Documents", "Downloads", "Library/Mobile Documents"].iter().any(|x| p.starts_with(h.join(x))) || p.starts_with("/Volumes");
-    private && crate::kit::perms::Perm::FullDisk.status() != crate::kit::perms::Status::Allowed
+    is_guarded(&home(), p) && crate::kit::perms::Perm::FullDisk.status() != crate::kit::perms::Status::Allowed
+}
+
+/// Is `p` in a folder macOS asks about (whatever is granted)?
+fn is_guarded(home: &Path, p: &Path) -> bool {
+    ["Desktop", "Documents", "Downloads", "Library/Mobile Documents"].iter().any(|x| p.starts_with(home.join(x))) || p.starts_with("/Volumes")
+}
+
+#[cfg(test)]
+mod guarded_tests {
+    use super::is_guarded;
+    use std::path::Path;
+
+    #[test]
+    fn guarded_folders() {
+        let h = Path::new("/Users/me");
+        for p in ["/Users/me/Downloads", "/Users/me/Downloads/x.app", "/Users/me/Desktop/a", "/Users/me/Documents/p", "/Users/me/Library/Mobile Documents/com~apple~CloudDocs", "/Volumes/USB/x"] {
+            assert!(is_guarded(h, Path::new(p)), "{p}");
+        }
+        for p in ["/Applications/Zed.app", "/Users/me/Library/Caches", "/Users/me/DownloadsOld", "/Users/me/.claude/projects"] {
+            assert!(!is_guarded(h, Path::new(p)), "{p}");
+        }
+    }
 }
 
 /// How deep `dir_size` walks; deeper content is not counted.
