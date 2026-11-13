@@ -242,8 +242,9 @@ pub fn size_chips(ui: &mut Ui, rect: Rect, id: Id, offered: &[Size], cur: Size) 
 fn update_banner(ui: &mut Ui, r: Rect) {
     use crate::kit::update::{self, State};
     let p = ui.painter().clone();
-    glass_card(&p, r, R_CARD, 0.0, false);
-    let icon_r = Rect::from_center_size(Pos2::new(r.left() + sp::L + 10.0, r.center().y), Vec2::splat(20.0));
+    // the same card as the widgets above, text on their text column
+    crate::kit::tile::paint_card(&p, r, 0.0, false);
+    let icon_r = Rect::from_min_size(Pos2::new(r.left() + crate::kit::tile::PAD, r.center().y - 9.0), Vec2::splat(18.0));
     let x = icon_r.right() + sp::S;
     let btn_h = sp::CONTROL_H;
     let right = r.right() - sp::M;
@@ -255,7 +256,7 @@ fn update_banner(ui: &mut Ui, r: Rect) {
         State::Failed(..) => ("Update failed".into(), RED()),
         State::Idle => return,
     };
-    icon(&p, Icon::Down, icon_r, accent);
+    icon(&p, if matches!(state, State::Failed(..)) { Icon::Info } else { Icon::Down }, icon_r, accent);
     let mut text_right = right;
     match &state {
         State::Available(_) => {
@@ -282,11 +283,13 @@ fn update_banner(ui: &mut Ui, r: Rect) {
             }
             let label = "Download";
             let bw = button_width(&p, label, BTN_SECONDARY);
-            let b = Rect::from_min_size(Pos2::new(close.left() - sp::XS - bw, close.top()), Vec2::new(bw, btn_h));
+            let b = Rect::from_min_size(Pos2::new(close.left() - sp::S - bw, close.top()), Vec2::new(bw, btn_h));
             if pill_button(ui, b, label, BTN_SECONDARY, true).on_hover_text(why).clicked() {
                 update::open_releases();
             }
             text_right = b.left() - sp::S;
+            // why it failed, on the row itself
+            ui.interact(Rect::from_min_max(r.min, Pos2::new(text_right, r.bottom())), ui.scope_id().with("update-why"), Sense::hover()).on_hover_text(why);
         }
         _ => {}
     }
