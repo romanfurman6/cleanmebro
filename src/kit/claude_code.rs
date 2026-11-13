@@ -201,10 +201,10 @@ pub fn scan_projects() -> Vec<Project> {
         // (a session's logged cwd may be a subfolder; trust it when it exists)
         if let Some(real) = resolve_encoded(&enc) {
             cwd = Some(real);
-        } else if cwd.as_ref().is_none_or(|c| !c.exists()) {
+        } else if cwd.as_ref().is_none_or(|c| !exists_quiet(c)) {
             cwd = Some(PathBuf::from(enc.replace('-', "/")));
         }
-        let cwd_exists = cwd.as_ref().map(|c| c.exists()).unwrap_or(false);
+        let cwd_exists = cwd.as_ref().map(|c| exists_quiet(c)).unwrap_or(false);
         let bytes = crate::kit::fs::dir_size(&folder);
         out.push(Project { folder, cwd, cwd_exists, last_used: last, bytes });
     }
@@ -217,10 +217,19 @@ pub fn encode(path: &str) -> String {
     path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
+/// Does `p` exist? A path in Downloads/Desktop/Documents (without Full
+/// Disk Access) counts as there: looking would make macOS ask the user about
+/// the folder, and a project must never be called gone because we didn't look.
+fn exists_quiet(p: &Path) -> bool {
+    crate::kit::fs::behind_folder_prompt(p) || p.exists()
+}
+
 /// Walk the disk to find the folder whose encoded path equals `enc`.
 fn resolve_encoded(enc: &str) -> Option<PathBuf> {
     fn go(dir: &Path, rest: &str, depth: usize) -> Option<PathBuf> {
-        if depth > 14 {
+        // never list a folder macOS guards with a question (the first launch
+        // asked about Downloads because of a project there)
+        if depth > 14 || crate::kit::fs::behind_folder_prompt(dir) {
             return None;
         }
         for e in std::fs::read_dir(dir).ok()?.flatten() {
