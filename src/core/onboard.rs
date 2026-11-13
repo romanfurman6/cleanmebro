@@ -52,11 +52,13 @@ pub struct Setup {
     pub step: usize,
     /// When the current step appeared (its animations count from here).
     since: f64,
+    /// The step before this one: the cat on the step dots hops from there.
+    from: usize,
 }
 
 impl Setup {
     pub fn new(step: usize) -> Self {
-        Setup { step, since: f64::NEG_INFINITY }
+        Setup { step, since: f64::NEG_INFINITY, from: step }
     }
 }
 
@@ -263,7 +265,7 @@ impl PermWatch {
 
     /// Something is animating or waiting: keep frames coming.
     fn busy(&self, now: f64) -> bool {
-        !self.asked.is_empty() || self.allowed_at.values().any(|t| now - t < 0.6)
+        !self.asked.is_empty() || self.allowed_at.values().any(|t| now - t < 0.9)
     }
 }
 
@@ -287,6 +289,72 @@ fn pop(x: f32) -> f32 {
     1.0 + (c + 1.0) * (x - 1.0).powi(3) + c * (x - 1.0).powi(2)
 }
 
+/// The mascot's colour: lime on dark, deep green on light (lime on the pale
+/// light backdrop is too faint).
+fn cat_color() -> Color32 {
+    if is_light() { ACCENT() } else { BLUE() }
+}
+
+/// An ear flick starting at `at` (seconds): two quick outward tilts, in radians.
+fn twitch(t: f32, at: f32) -> f32 {
+    let u = (t - at) / 0.36;
+    if !(0.0..1.0).contains(&u) {
+        return 0.0;
+    }
+    (u * std::f32::consts::TAU).sin().abs() * 0.28 * (1.0 - 0.4 * u)
+}
+
+/// How long the cat's hop from one step dot to the next takes.
+const HOP: f32 = 0.32;
+
+/// The step dots along the top. The cat sits on the current step's dot and
+/// hops there from the step before; a dot lights up when the cat lands.
+fn step_dots(p: &egui::Painter, full: Rect, steps: usize, from: usize, step: usize, t: f32) {
+    const D: f32 = 6.0;
+    const GAP: f32 = 22.0;
+    let total = steps as f32 * D + (steps as f32 - 1.0) * GAP;
+    let x = |i: usize| full.center().x - total / 2.0 + D / 2.0 + i as f32 * (D + GAP);
+    let y = full.top() + TOP_H / 2.0 + 9.0;
+    let k = (t / HOP).clamp(0.0, 1.0);
+    let moving = from != step;
+    for i in 0..steps {
+        let lit = i < step || (i == step && (!moving || k >= 1.0)) || (i <= from && i <= step);
+        p.circle_filled(Pos2::new(x(i), y), D / 2.0, if lit { BLUE() } else { white(46) });
+    }
+    // the Welcome step has the big cat: back there, the small one hops
+    // onto its dot and fades away
+    let fade = if step == 0 { 1.0 - ((t - HOP) / 0.2).clamp(0.0, 1.0) } else { 1.0 };
+    if fade <= 0.0 || (step == 0 && !moving) {
+        return;
+    }
+    let m = k * k * (3.0 - 2.0 * k);
+    let cx = egui::lerp(x(from)..=x(step), m);
+    let jump = if moving { (k * std::f32::consts::PI).sin() * 8.0 } else { 0.0 };
+    // a squash as it lands
+    let l = ((t - HOP) / 0.2).clamp(0.0, 1.0);
+    let sq = if moving && l > 0.0 && l < 1.0 { (l * std::f32::consts::PI).sin() * 0.18 } else { 0.0 };
+    let size = 16.0;
+    let (w, h) = (size * (1.0 + sq), size * (1.0 - sq));
+    let bottom = y - D / 2.0 - 3.0 - jump;
+    let r = Rect::from_min_max(Pos2::new(cx - w / 2.0, bottom - h), Pos2::new(cx + w / 2.0, bottom));
+    crate::kit::brand::draw_mascot(p, r, cat_color().gamma_multiply(fade), (0.0, twitch(t, HOP + 0.15)));
+}
+
+/// A soft vertical band of `col`, brightest at `x` and `w` wide, inside `clip`.
+fn glow_band(p: &egui::Painter, clip: Rect, x: f32, w: f32, col: Color32) {
+    let p = p.with_clip_rect(clip.intersect(p.clip_rect()));
+    let mut m = egui::Mesh::default();
+    for (xx, c) in [(x - w / 2.0, Color32::TRANSPARENT), (x, col), (x + w / 2.0, Color32::TRANSPARENT)] {
+        m.colored_vertex(Pos2::new(xx, clip.top()), c);
+        m.colored_vertex(Pos2::new(xx, clip.bottom()), c);
+    }
+    m.add_triangle(0, 1, 2);
+    m.add_triangle(1, 3, 2);
+    m.add_triangle(2, 3, 4);
+    m.add_triangle(3, 5, 4);
+    p.add(m);
+}
+
 /// The whole setup screen in `full` (the app window, or the root in screenshots).
 /// Says whether the person finished it.
 pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
@@ -298,12 +366,18 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     let steps = kinds.len();
     let step = step.min(steps - 1);
     let kind = kinds[step];
+    // a step's animations start when it can be seen: not while the window
+    // is still hidden or covered (they would play to nobody)
+    let unseen = ctx.input(|i| i.viewport().occluded == Some(true) || i.viewport().minimized == Some(true));
     if let Some(s) = app.setup.as_mut() {
-        if s.since == f64::NEG_INFINITY {
+        if s.since == f64::NEG_INFINITY && !unseen {
             s.since = now;
         }
     }
-    let t = (now - app.setup.as_ref().map(|s| s.since).unwrap_or(now)) as f32;
+    let since = app.setup.as_ref().map(|s| s.since).unwrap_or(now);
+    let t = if since == f64::NEG_INFINITY { 0.0 } else { (now - since) as f32 };
+    // screenshots show each step settled, not mid-animation
+    let t = if app.demo { t + 5.0 } else { t };
     // setup lives in the app window: a centered column when that is wider
     let win = full;
     let full = Rect::from_center_size(win.center(), Vec2::new(win.width().min(SETUP_W + 80.0), win.height()));
@@ -312,19 +386,12 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     if ui.interact(drag, ui.scope_id().with("setup-drag"), Sense::click_and_drag()).drag_started() {
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
-    // step dots
-    let dw = |i: usize| if i == step { 22.0 } else { 6.0 };
-    let total: f32 = (0..steps).map(dw).sum::<f32>() + 6.0 * (steps as f32 - 1.0);
-    let mut x = full.center().x - total / 2.0;
-    for i in 0..steps {
-        let w = egui::lerp(6.0..=dw(i), ease(t * 3.0).max(if i == step { 0.0 } else { 1.0 }));
-        let r = Rect::from_min_size(Pos2::new(x, full.top() + TOP_H / 2.0 - 3.0), Vec2::new(w, 6.0));
-        p.rect_filled(r, 3.0, if i <= step { BLUE() } else { white(46) });
-        x += w + 6.0;
-    }
+    let from = app.setup.as_ref().map(|s| s.from).unwrap_or(step).min(steps - 1);
+    step_dots(&p, full, steps, from, step, t);
     let body = Rect::from_min_max(Pos2::new(full.left() + 40.0, full.top() + TOP_H), Pos2::new(full.right() - 40.0, full.bottom() - BOTTOM_H));
-    // the step slides in from the right
-    let slide = (1.0 - ease(t * 2.2)) * 18.0;
+    // the step slides in from the side it comes from
+    let side = if from > step { -1.0 } else { 1.0 };
+    let slide = (1.0 - ease(t * 2.2)) * 18.0 * side;
     let body = body.translate(Vec2::new(slide, 0.0));
     let mut next = false;
     let mut restart_now = false;
@@ -397,6 +464,7 @@ pub enum Finish {
 fn go(app: &mut App, step: usize) {
     let last = kinds(app).len() - 1;
     if let Some(s) = app.setup.as_mut() {
+        s.from = s.step;
         s.step = step.min(last);
         s.since = f64::NEG_INFINITY;
         if !app.demo {
@@ -455,11 +523,12 @@ fn brand_glyph(p: &egui::Painter, c: Pos2, size: f32, col: Color32) {
 fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let p = ui.painter().clone();
     let c = Pos2::new(body.center().x, body.top() + 150.0);
-    // the ring draws itself, then the tools land on it one by one
+    // the cat peeks out ears first, flicks them, then hops up; the ring
+    // draws itself round it and the tools land on it one by one
     let ring = 104.0;
     crate::kit::glass::stroke_circle(&p, c, ring, Stroke::new(2.0, white(14)));
     let start = -std::f32::consts::FRAC_PI_2;
-    let k = ease(t / 1.4);
+    let k = ease((t - 1.15) / 0.9);
     if k > 0.0 {
         p.add(egui::Shape::line(arc_points(c, ring, start, start + std::f32::consts::TAU * k, 96), Stroke::new(2.0, BLUE())));
     }
@@ -467,7 +536,7 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     for (i, tool) in app.tools.iter().enumerate() {
         let a = start + i as f32 / n as f32 * std::f32::consts::TAU;
         let at = c + Vec2::new(a.cos(), a.sin()) * ring;
-        let s = pop((t - 0.2 - 0.12 * i as f32) / 0.45);
+        let s = pop((t - 1.25 - 0.07 * i as f32) / 0.4);
         if s <= 0.0 {
             continue;
         }
@@ -475,12 +544,53 @@ fn welcome(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
         crate::kit::glass::stroke_circle(&p, at, 15.0 * s, Stroke::new(1.0, white(36)));
         icon(&p, tool.badge().icon, Rect::from_center_size(at, Vec2::splat(14.0 * s)), TEXT_SOFT());
     }
-    let bob = if t > 1.8 { ((t - 1.8) * 1.6).sin() * 3.0 } else { 0.0 };
-    app_mark(&p, c + Vec2::new(0.0, bob), 128.0, ease((t - 0.3) / 1.2));
+    let size = 128.0;
+    // peek() is laid out for a 96 pt cat
+    let (rise, sx, sy) = peek(t);
+    let rise = rise * size / 96.0;
+    let floor = c.y + size / 2.0;
+    let (w, h) = (size * sx, size * sy);
+    let cat = Rect::from_min_max(Pos2::new(c.x - w / 2.0, floor - rise - h), Pos2::new(c.x + w / 2.0, floor - rise));
+    // below the floor the cat is hidden: that's where it peeks out from
+    let clip = Rect::from_min_max(Pos2::new(c.x - 90.0, c.y - 130.0), Pos2::new(c.x + 90.0, floor));
+    let ears = (twitch(t, 0.42) + twitch(t, 2.3), twitch(t, 0.6) + twitch(t, 1.55));
+    crate::kit::brand::draw_mascot(&p.with_clip_rect(clip.intersect(p.clip_rect())), cat, cat_color(), ears);
     let name = p.text(Pos2::new(c.x, c.y + ring + 32.0), Align2::CENTER_TOP, "Cmd+Meow", bold(28.0), TEXT());
     p.text(Pos2::new(c.x, name.bottom() + sp::LINE_GAP), Align2::CENTER_TOP, format!("{} tools. One menu bar.", app.tools.len()), font(13.0), TEXT_FAINT());
     let r = Rect::from_center_size(Pos2::new(c.x, c.y + ring + 128.0), Vec2::new(128.0, 40.0));
     pill_button(ui, r, "Set up", BTN_PRIMARY, true).clicked()
+}
+
+/// The Welcome cat at `t`: how far it is lifted from where it rests (0 =
+/// resting, negative = still below the floor) and its squash (width, height).
+fn peek(t: f32) -> (f32, f32, f32) {
+    let lerp = |a: f32, b: f32, x: f32| a + (b - a) * x.clamp(0.0, 1.0);
+    match t {
+        // hidden, then the ears come up over the floor
+        t if t < 0.45 => (lerp(-100.0, -72.0, ease((t - 0.1) / 0.35)), 1.0, 1.0),
+        // looking round
+        t if t < 0.85 => (-72.0, 1.0, 1.0),
+        // crouch
+        t if t < 0.97 => {
+            let x = ease((t - 0.85) / 0.12);
+            (lerp(-72.0, -80.0, x), 1.0 + 0.04 * x, 1.0 - 0.08 * x)
+        }
+        // jump, stretched
+        t if t < 1.2 => {
+            let x = ease((t - 0.97) / 0.23);
+            (lerp(-80.0, 14.0, x), lerp(1.04, 0.96, x), lerp(0.92, 1.05, x))
+        }
+        // fall back and land with a squash
+        t if t < 1.36 => {
+            let x = (t - 1.2) / 0.16;
+            (lerp(14.0, 0.0, x * x), 1.0, 1.0)
+        }
+        t => {
+            let s = pop((t - 1.36) / 0.3);
+            let sq = if s < 1.0 { (1.0 - s) * 0.14 } else { 0.0 };
+            (0.0, 1.0 + sq, 1.0 - sq)
+        }
+    }
 }
 
 /// Crash reports, asked once (official builds only). Returns true when the
@@ -561,7 +671,9 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let on = (0..app.tools.len()).filter(|&i| app.tool_on(i)).count();
     let head = body.top() + 6.0;
     let g = p.text(Pos2::new(body.left(), head), Align2::LEFT_TOP, "Tools", bold(22.0), TEXT());
-    p.text(Pos2::new(g.right() + 10.0, g.bottom() - 4.0), Align2::LEFT_BOTTOM, format!("{on}/{}", app.tools.len()), mono(13.0), TEXT_FAINT());
+    // the count rolls to its new number like an odometer
+    let shown = ui.ctx().animate_value_with_time(ui.scope_id().with("setup-tools-on"), on as f32, 0.28);
+    rolling_count(&p, Pos2::new(g.right() + 10.0, g.bottom() - 4.0), shown, app.tools.len());
     let secs = sections(app);
     let cols = secs.len().max(1) as f32;
     let gap = 12.0;
@@ -587,11 +699,14 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
             let hov = ui.ctx().animate_bool(id.with("h"), resp.hovered());
             p.rect_filled(r, 10.0, lerp_color(CARD(), white(30), hov * 0.15).gamma_multiply(a));
             p.rect_stroke(r, 10.0, Stroke::new(1.0, white(12).gamma_multiply(a)), StrokeKind::Inside);
-            let ib = Rect::from_min_size(Pos2::new(r.left() + 12.0, r.center().y - 17.0), Vec2::splat(34.0));
-            p.rect_filled(ib, 9.0, lerp_color(white(16), BLUE(), s));
+            // the tile jumps up when switched on and dips when switched off
+            let jolt = ui.ctx().animate_bool_with_time(id.with("jolt"), o, 0.32);
+            let bump = 4.0 * jolt * (1.0 - jolt) * if o { 0.16 } else { -0.1 };
+            let ib = Rect::from_center_size(Pos2::new(r.left() + 29.0, r.center().y), Vec2::splat(34.0 * (1.0 + bump)));
+            p.rect_filled(ib, 9.0 * (1.0 + bump), lerp_color(white(16), BLUE(), s));
             let b = app.tools[i].badge();
-            icon(&p, b.icon, ib.shrink(8.0), lerp_color(TEXT_MUTED(), ON_ACTION, s));
-            let tx = ib.right() + 10.0;
+            icon(&p, b.icon, ib.shrink(8.0 * (1.0 + bump)), lerp_color(TEXT_MUTED(), ON_ACTION, s));
+            let tx = r.left() + 56.0;
             // name + permission icons as one block, centered, LINE_GAP apart
             let block = if app.tools[i].needs().is_empty() { 16.0 } else { 16.0 + sp::LINE_GAP + 12.0 };
             let ny = r.center().y - block / 2.0;
@@ -625,6 +740,25 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
 /// The AI agents the person uses: one main (Cleanup checks with it), and
 /// the ones AI Usage tracks. Saved in the AI Usage settings, changed later in
 /// Settings › AI Usage.
+/// "`n`/`total`" where `n` rolls between whole numbers as `shown` moves:
+/// the old number slides up out of view and the new one comes up from below.
+fn rolling_count(p: &egui::Painter, left_bottom: Pos2, shown: f32, total: usize) {
+    let f = mono(13.0);
+    let lo = shown.floor();
+    let frac = shown - lo;
+    let lo_s = format!("{}", lo as i64);
+    let hi_s = format!("{}", lo as i64 + 1);
+    let w = p.layout_no_wrap(if frac > 0.0 { hi_s.clone() } else { lo_s.clone() }, f.clone(), TEXT_FAINT()).size().x.max(p.layout_no_wrap(lo_s.clone(), f.clone(), TEXT_FAINT()).size().x);
+    let line = 16.0;
+    let cell = Rect::from_min_max(Pos2::new(left_bottom.x, left_bottom.y - line), Pos2::new(left_bottom.x + w, left_bottom.y + 1.0));
+    let clip = p.with_clip_rect(cell.intersect(p.clip_rect()));
+    clip.text(left_bottom - Vec2::new(0.0, frac * line), Align2::LEFT_BOTTOM, &lo_s, f.clone(), TEXT_FAINT());
+    if frac > 0.0 {
+        clip.text(left_bottom + Vec2::new(0.0, (1.0 - frac) * line), Align2::LEFT_BOTTOM, &hi_s, f.clone(), TEXT_FAINT());
+    }
+    p.text(Pos2::new(cell.right(), left_bottom.y), Align2::LEFT_BOTTOM, format!("/{total}"), f, TEXT_FAINT());
+}
+
 fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     use crate::kit::ai::{self, settings};
     let p = ui.painter().clone();
@@ -643,6 +777,23 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     let a = ease(t / 0.4);
     let card = Rect::from_min_size(Pos2::new(x, top + 20.0 + (1.0 - a) * 8.0), Vec2::new(w, n as f32 * sp::ROW_H));
     glass_card(&p, card, R_CARD, 0.0, false);
+    // a light sweeps across the card as the agents are looked for; each
+    // "Found" shows once it has passed
+    let (sweep0, sweep_t) = (0.15, 0.8);
+    let band_w = 140.0;
+    let travel = card.width() + band_w;
+    let u = (t - sweep0) / sweep_t;
+    if (0.0..1.0).contains(&u) {
+        glow_band(&p, card, card.left() - band_w / 2.0 + travel * u, band_w, with_alpha(BLUE(), 0.12));
+    }
+    let seen_at = |x: f32| sweep0 + sweep_t * (x - card.left() + band_w / 2.0) / travel;
+    // a ping round the main agent's dot when it changes
+    let now = ui.ctx().input(|i| i.time);
+    let ping_id = ui.scope_id().with("setup-main-ping");
+    let (was, since) = ui.ctx().data(|d| d.get_temp::<(String, f64)>(ping_id)).unwrap_or_else(|| (set.main.clone(), f64::NEG_INFINITY));
+    let since = if was != set.main { now } else { since };
+    ui.ctx().data_mut(|d| d.insert_temp(ping_id, (set.main.clone(), since)));
+    let ping = ((now - since) / 0.55) as f32;
     type Change = Box<dyn FnOnce(&mut settings::Settings)>;
     let mut change: Option<Change> = None;
     for (k, m) in ai::PROVIDERS.iter().enumerate() {
@@ -652,10 +803,17 @@ fn agents(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
         }
         let found = app.demo || ai::make(k).data_dir().is_some_and(|d| d.exists());
         let name = p.text(Pos2::new(r.left() + sp::L, r.center().y), Align2::LEFT_CENTER, m.name, ty::title(), TEXT());
-        p.text(Pos2::new(name.right() + sp::S, r.center().y), Align2::LEFT_CENTER, if found { "Found" } else { "Not found" }, ty::label(), if found { GREEN() } else { TEXT_FAINT() });
+        let sx = name.right() + sp::S;
+        let sa = ease((t - seen_at(sx) - 0.04 * k as f32) / 0.25);
+        p.text(Pos2::new(sx - (1.0 - sa) * 6.0, r.center().y), Align2::LEFT_CENTER, if found { "Found" } else { "Not found" }, ty::label(), (if found { GREEN() } else { TEXT_FAINT() }).gamma_multiply(sa));
         let main = set.main == m.id;
         let on = set.is_on(m.id);
         let rr = Rect::from_center_size(Pos2::new(col_main, r.center().y), Vec2::splat(16.0));
+        if main && (0.0..1.0).contains(&ping) {
+            let e = ease(ping);
+            crate::kit::glass::stroke_circle(&p, rr.center(), 8.0 + 13.0 * e, Stroke::new(1.5, with_alpha(BLUE(), 0.7 * (1.0 - e))));
+            ui.ctx().request_repaint();
+        }
         if radio(ui, rr, ui.scope_id().with(("setup-main", m.id)), main, found || main).clicked() && !main && found {
             let id = m.id.to_string();
             change = Some(Box::new(move |s| {
@@ -761,9 +919,17 @@ fn models_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
                 let total = if *total > 0 { *total } else { m.bytes };
                 let f = if total > 0 { (*done as f32 / total as f32).clamp(0.0, 1.0) } else { 0.0 };
                 p.rect_filled(bar, 3.0, white(20));
+                // the bar fills smoothly between progress reports
+                let f = ui.ctx().animate_value_with_time(ui.scope_id().with(("setup-model", m.id)), f, 0.25);
                 p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * f, bar.height())), 3.0, BLUE());
                 p.text(Pos2::new(right, line1), Align2::RIGHT_CENTER, format!("{} of {} · {:.0}%", human_bytes(*done), human_bytes(total), f * 100.0), font(12.0), TEXT_DIM());
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                // the cat trots along on the front of the fill
+                let now = ui.ctx().input(|i| i.time);
+                let hop = ((now * 9.0).sin().abs() * 2.5) as f32;
+                let cx = bar.left() + bar.width() * f;
+                let cat = Rect::from_min_max(Pos2::new(cx - 6.0, bar.top() - 13.0 - hop), Pos2::new(cx + 6.0, bar.top() - 1.0 - hop));
+                crate::kit::brand::draw_mascot(&p, cat, cat_color(), (0.0, 0.0));
+                crate::kit::glass::animate(ui.ctx());
             }
             ModelState::Unpacking => {
                 p.rect_filled(bar, 3.0, BLUE());
@@ -796,6 +962,27 @@ fn check(p: &egui::Painter, c: Pos2, s: f32, col: Color32) {
     p.add(egui::Shape::line(pts, Stroke::new((s * 0.22).max(1.2), col)));
 }
 
+/// [`check`] drawn up to `k` (0 → nothing, 1 → whole), short stroke first.
+fn check_drawn(p: &egui::Painter, c: Pos2, s: f32, col: Color32, k: f32) {
+    if k <= 0.0 {
+        return;
+    }
+    let pts = [c + Vec2::new(-0.45, 0.0) * s, c + Vec2::new(-0.12, 0.33) * s, c + Vec2::new(0.45, -0.32) * s];
+    let (l0, l1) = (pts[0].distance(pts[1]), pts[1].distance(pts[2]));
+    let mut d = (l0 + l1) * k.min(1.0);
+    let mut out = vec![pts[0]];
+    for (a, b, l) in [(pts[0], pts[1], l0), (pts[1], pts[2], l1)] {
+        if d >= l {
+            out.push(b);
+            d -= l;
+        } else {
+            out.push(a + (b - a) * (d / l));
+            break;
+        }
+    }
+    p.add(egui::Shape::line(out, Stroke::new((s * 0.22).max(1.2), col)));
+}
+
 fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
     let p = ui.painter().clone();
     let list = rows(app);
@@ -815,7 +1002,33 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
         let a0 = -std::f32::consts::FRAC_PI_2;
         p.add(egui::Shape::line(arc_points(c, 18.0, a0, a0 + std::f32::consts::TAU * shown, 48), Stroke::new(4.0, if full { GREEN() } else { BLUE() })));
     }
-    p.text(c, Align2::CENTER_CENTER, format!("{done}/{}", req.len()), mono(11.0), TEXT());
+    // all required ones allowed: the count turns into a check and the ring
+    // grows soft cat ears (it was full already when the step opened: no show)
+    let full_id = ui.scope_id().with("perm-full");
+    let full_at = if full {
+        let at = ui.ctx().data(|d| d.get_temp::<f64>(full_id)).unwrap_or(if t < 0.1 { now - 10.0 } else { now });
+        ui.ctx().data_mut(|d| d.insert_temp(full_id, at));
+        Some(at)
+    } else {
+        ui.ctx().data_mut(|d| d.remove::<f64>(full_id));
+        None
+    };
+    match full_at {
+        Some(at) => {
+            let since = (now - at) as f32;
+            check(&p, c, 14.0 * pop(since / 0.35).max(0.0), GREEN());
+            let z = pop((since - 0.25) / 0.4).max(0.0);
+            if z > 0.0 {
+                ring_ears(&p, c, z, GREEN());
+            }
+            if since < 0.8 {
+                ui.ctx().request_repaint();
+            }
+        }
+        None => {
+            p.text(c, Align2::CENTER_CENTER, format!("{done}/{}", req.len()), mono(11.0), TEXT());
+        }
+    }
     p.text(Pos2::new(c.x + 36.0, c.y), Align2::LEFT_CENTER, "Permissions", bold(22.0), TEXT());
     let area = Rect::from_min_max(Pos2::new(body.left(), body.top() + 56.0), body.max);
     // rows at their smallest; past that the list scrolls (it never runs
@@ -831,6 +1044,37 @@ fn permissions_step(app: &mut App, ui: &mut Ui, body: Rect, t: f32, now: f64) {
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), need), Sense::hover());
             perm_list(app, ui, r, &list, t, now);
         });
+    }
+}
+
+/// Two soft cat ears on top of the permissions ring (radius 18 round `c`),
+/// grown to `z` (0 → none, 1 → full; a bit over 1 overshoots). Wide bases
+/// and a rounded tip, so they read as ears, not horns.
+fn ring_ears(p: &egui::Painter, c: Pos2, z: f32, col: Color32) {
+    for side in [-1.0f32, 1.0] {
+        let pt = |deg: f32, r: f32| {
+            let a = deg.to_radians();
+            c + Vec2::new(a.cos() * side, a.sin()) * r
+        };
+        // base sunk into the ring, tip out and up
+        let (b0, b1, tip) = (pt(-150.0, 17.0), pt(-98.0, 17.0), pt(-123.0, 30.0));
+        let mid = b0 + (b1 - b0) * 0.5;
+        let tip = mid + (tip - mid) * z;
+        // the tip's corner rounded off: a curve between points `round` from it
+        let round = 8.0 * z.min(1.0);
+        let (t1, t2) = (tip + (b0 - tip).normalized() * round, tip + (b1 - tip).normalized() * round);
+        let mut pts = vec![b0];
+        pts.extend((0..=8).map(|i| {
+            let u = i as f32 / 8.0;
+            let v = 1.0 - u;
+            Pos2::new(v * v * t1.x + 2.0 * u * v * tip.x + u * u * t2.x, v * v * t1.y + 2.0 * u * v * tip.y + u * u * t2.y)
+        }));
+        pts.push(b1);
+        // same winding on both sides
+        if side > 0.0 {
+            pts.reverse();
+        }
+        p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
     }
 }
 
@@ -860,6 +1104,11 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
         let waiting = app.perm_watch.waiting(r.perm, now);
         let ok = st == Status::Allowed;
         p.rect_filled(rr, 10.0, CARD().gamma_multiply(a));
+        // just allowed: the row flashes green once and its check draws itself
+        let since = app.perm_watch.allowed_at.get(&r.perm).map(|t0| (now - t0) as f32).unwrap_or(10.0);
+        if since < 0.8 {
+            p.rect_filled(rr, 10.0, with_alpha(GREEN(), 0.2 * (1.0 - ease(since / 0.8))));
+        }
         let ib = Rect::from_min_size(Pos2::new(rr.left() + 12.0, rr.center().y - 15.0), Vec2::splat(30.0));
         let tint = match st {
             Status::Allowed => GREEN(),
@@ -883,10 +1132,8 @@ pub fn perm_list(app: &mut App, ui: &mut Ui, area: Rect, list: &[Row], t: f32, n
             text_fit(&p, Pos2::new(why_x, rr.center().y), Align2::LEFT_CENTER, r.perm.why(), font(12.0), TEXT_FAINT().gamma_multiply(a), why_w);
         }
         if ok {
-            let since = app.perm_watch.allowed_at.get(&r.perm).map(|t0| (now - t0) as f32).unwrap_or(1.0);
-            let z = pop(since / 0.45);
             let c = Pos2::new(right - 13.0, rr.center().y);
-            check(&p, c, 12.0 * z, GREEN());
+            check_drawn(&p, c, 12.0, GREEN(), ease(since / 0.35));
         } else if waiting {
             let c = Pos2::new(right - 8.0, rr.center().y);
             spinner(&p, c, 6.0, now, BLUE());
@@ -961,6 +1208,52 @@ fn keycaps(p: &egui::Painter, right: Pos2, keys: &str) {
     }
 }
 
+/// The Ready step's cat, standing on `feet`: it pops in, crouches and
+/// bursts the chosen tools out round it, which arc away and fall.
+fn celebrate(app: &App, p: &egui::Painter, feet: Pos2, t: f32) {
+    use std::f32::consts::PI;
+    let size = 56.0;
+    let burst = 0.5;
+    let z = pop(t / 0.35).max(0.0);
+    // crouch before the burst, stretch on it, then settle
+    let sq = if t < burst { 0.12 * ease((t - 0.3) / (burst - 0.3)) } else { -0.08 * (1.0 - ease((t - burst) / 0.3)) };
+    let (w, h) = (size * z * (1.0 + sq), size * z * (1.0 - sq));
+    let cat = Rect::from_min_max(Pos2::new(feet.x - w / 2.0, feet.y - h), Pos2::new(feet.x + w / 2.0, feet.y));
+    let c = Pos2::new(feet.x, feet.y - size / 2.0);
+    // a ring pushed out by the burst
+    let u = (t - burst) / 0.45;
+    if (0.0..1.0).contains(&u) {
+        crate::kit::glass::stroke_circle(p, c, 24.0 + 52.0 * ease(u), Stroke::new(2.0, with_alpha(BLUE(), 0.6 * (1.0 - u))));
+    }
+    let perk = if t > burst { 0.35 * (1.0 - ease((t - burst) / 0.5)) } else { 0.0 };
+    if z > 0.0 {
+        crate::kit::brand::draw_mascot(p, cat, cat_color(), (perk + twitch(t, 1.6), perk));
+    }
+    // the chosen tools fly out in a fan over the top and drop
+    let on: Vec<usize> = (0..app.tools.len()).filter(|&i| app.tool_on(i)).collect();
+    let n = on.len().max(1) as f32;
+    let fly = (t - burst) / 1.0;
+    if !(0.0..1.0).contains(&fly) {
+        return;
+    }
+    for (k, &i) in on.iter().enumerate() {
+        // from straight left over the top to straight right, a little uneven
+        let a = PI + (k as f32 + 0.5) / n * PI + ((k * 7 % 5) as f32 - 2.0) * 0.06;
+        let dist = 120.0 + ((k * 37) % 5) as f32 * 18.0;
+        let out = ease((fly * 1.8).min(1.0));
+        let at = c + Vec2::new(a.cos(), a.sin()) * dist * out + Vec2::new(0.0, 140.0 * fly * fly);
+        let s = pop(fly / 0.18).max(0.0);
+        let fade = 1.0 - ((fly - 0.55) / 0.45).clamp(0.0, 1.0);
+        let lime = k % 2 == 0;
+        let r = 12.0 * s;
+        p.circle_filled(at, r, (if lime { BLUE() } else { POPOVER() }).gamma_multiply(fade));
+        if !lime {
+            crate::kit::glass::stroke_circle(p, at, r, Stroke::new(1.0, white(36).gamma_multiply(fade)));
+        }
+        icon(p, app.tools[i].badge().icon, Rect::from_center_size(at, Vec2::splat(12.0 * s)), (if lime { ON_ACTION } else { TEXT_SOFT() }).gamma_multiply(fade));
+    }
+}
+
 /// Returns true when "Restart" next to Screen Recording was clicked.
 fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let mut restart = false;
@@ -968,6 +1261,7 @@ fn ready(app: &mut App, ui: &mut Ui, body: Rect, t: f32) -> bool {
     let left = Rect::from_min_max(body.min, Pos2::new(body.right() - 340.0, body.bottom()));
     let mut y = body.center().y - 120.0;
     p.text(Pos2::new(left.left(), y), Align2::LEFT_TOP, "Ready", bold(22.0), TEXT());
+    celebrate(app, &p, Pos2::new(left.left() + 28.0, y - 14.0), t);
     y += 46.0;
     // open at login
     let row = Rect::from_min_size(Pos2::new(left.left(), y), Vec2::new(left.width(), 52.0));
@@ -1082,25 +1376,49 @@ const HELP_H: f32 = 132.0;
 /// The permissions switched on by hand in a System Settings list.
 const HELPED: [Perm; 3] = [Perm::FullDisk, Perm::Accessibility, Perm::Screen];
 
-/// While one of [`HELPED`] is being set up, a small card floats on top in
-/// the middle of the screen showing what to do: find the app in the list
-/// and switch it on.
+/// While one of [`HELPED`] is being set up, a small card stands beside
+/// System Settings showing what to do: find the app in the list and switch
+/// it on. It floats so Settings can't cover it, so it keeps off Settings
+/// itself and steps aside while macOS shows a prompt (the password sheet,
+/// "would like to record this screen") instead of hiding it.
 pub fn perm_helper(app: &mut App, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
     let Some(perm) = HELPED.into_iter().find(|&p| app.perm_watch.waiting(p, now) && (app.demo || app.perm_watch.status(p) != Status::Allowed)) else {
         return;
     };
-    let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
+    let size = Vec2::new(HELP_W, HELP_H);
+    let scene = crate::kit::settings_window::scene();
+    let at = match (scene.settings, scene.screen) {
+        _ if scene.prompt => None,
+        (Some(set), Some(screen)) => Some(crate::kit::settings_window::place(set, screen, size)),
+        // a demo has no Settings window to stand by
+        _ if app.demo => {
+            let screen = ctx.input(|i| i.viewport().monitor_size).unwrap_or(Vec2::new(1512.0, 982.0));
+            Some(((screen - size) / 2.0).to_pos2())
+        }
+        // Settings isn't up yet (or is closed): nothing to point at
+        _ => None,
+    };
+    let id = egui::ViewportId::from_hash_of("cmdmeow-fda-help");
+    let Some(at) = at else {
+        // not drawn this pass: the window closes, and opens again in place
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        return;
+    };
+    // Settings was moved: follow it
+    let was = ctx.input(|i| i.raw.viewports.get(&id).and_then(|v| v.outer_rect));
+    if was.is_some_and(|r| (r.min - at).length() > 1.0) {
+        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::OuterPosition(at));
+    }
     let builder = egui::ViewportBuilder::default()
         .with_title(perm.name())
-        .with_inner_size([HELP_W, HELP_H])
-        .with_position([(screen.x - HELP_W) / 2.0, (screen.y - HELP_H) / 2.0])
+        .with_inner_size(size)
+        .with_position(at)
         .with_decorations(false)
         .with_transparent(true)
         .with_resizable(false)
         .with_has_shadow(true)
         .with_window_level(egui::WindowLevel::AlwaysOnTop);
-    let id = egui::ViewportId::from_hash_of("cmdmeow-fda-help");
     let mut close = false;
     crate::kit::viewport::show(ctx, id, builder, |ui, _class| {
         close = help_card(ui, ui.max_rect(), now, perm);
@@ -1134,7 +1452,7 @@ pub fn help_card(ui: &mut Ui, full: Rect, now: f64, perm: Perm) -> bool {
     p.text(Pos2::new(full.left() + 16.0, y), Align2::LEFT_TOP, format!("Switch on {name} in the list"), bold(13.0), TEXT());
     let more = match perm {
         Perm::FullDisk => "Not there? Drag it in from the Finder window.",
-        _ => "If macOS asks first, pick Open System Settings.",
+        _ => "macOS may ask for your password next.",
     };
     p.text(Pos2::new(full.left() + 16.0, y + 20.0), Align2::LEFT_TOP, more, font(12.0), TEXT_FAINT());
     let x = Rect::from_min_size(Pos2::new(full.right() - 26.0, full.bottom() - 26.0), Vec2::splat(18.0));
@@ -1144,3 +1462,31 @@ pub fn help_card(ui: &mut Ui, full: Rect, now: f64, perm: Perm) -> bool {
     r.clicked()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn welcome_cat_rises_smoothly_and_comes_to_rest() {
+        let (rise, _, _) = peek(0.0);
+        assert!(rise <= -96.0, "hidden below the floor at first: {rise}");
+        let (rise, _, _) = peek(0.6);
+        assert!((-80.0..-60.0).contains(&rise), "only the ears show while it looks round: {rise}");
+        assert_eq!(peek(2.0), (0.0, 1.0, 1.0), "at rest, unsquashed");
+        let mut last = peek(0.0).0;
+        for i in 1..300 {
+            let r = peek(i as f32 * 0.01).0;
+            assert!((r - last).abs() < 15.0, "a jump of {} at {:.2}s", r - last, i as f32 * 0.01);
+            last = r;
+        }
+    }
+
+    #[test]
+    fn ear_flick_is_short_and_small() {
+        assert_eq!(twitch(0.9, 1.0), 0.0);
+        assert_eq!(twitch(1.4, 1.0), 0.0);
+        let most = (0..36).map(|i| twitch(1.0 + i as f32 * 0.01, 1.0)).fold(0.0f32, f32::max);
+        assert!(most > 0.1 && most <= 0.3, "{most}");
+    }
+}

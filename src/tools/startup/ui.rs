@@ -48,7 +48,8 @@ fn letter_color(name: &str) -> Color32 {
 fn app_icon(s: &mut Startup, ctx: &egui::Context, p: &egui::Painter, r: Rect, path: Option<&Path>, name: &str, dim: bool, budget: &mut usize) {
     let a = if dim { 0.5 } else { 1.0 };
     if let Some(path) = path {
-        if !s.icons.contains_key(path) && *budget > 0 && !s.demo {
+        // an app in Downloads etc. isn't read (nor cached) before Full Disk Access
+        if !s.icons.contains_key(path) && *budget > 0 && !s.demo && !crate::kit::fs::behind_folder_prompt(path) {
             *budget -= 1;
             let tex = macos::app_icon(path, 64).map(|(n, rgba)| ctx.load_texture(format!("startup-icon:{}", path.display()), egui::ColorImage::from_rgba_unmultiplied([n, n], &rgba), egui::TextureOptions::LINEAR));
             s.icons.insert(path.to_path_buf(), tex);

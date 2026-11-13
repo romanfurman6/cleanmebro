@@ -589,41 +589,51 @@ fn tools_tab(app: &mut App, ui: &mut Ui, body: Rect) {
     scroll_body(ui, body, "settings-tools", |ui, body| tools_list(app, ui, body));
 }
 
+/// Settings › Tools: one row per tool with its name over a line on what it
+/// does (wrapped, never cut) and an on/off switch.
 fn tools_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     let p = ui.painter().clone();
-    let w = 560.0f32.min(body.width() - 48.0);
+    let w = 600.0f32.min(body.width() - 2.0 * sp::XL);
     let x = body.center().x - w / 2.0;
-    let y = body.top() + 24.0;
+    let y = body.top() + sp::XL;
     let rows = app.tools.len();
-    let row_h = 44.0;
-    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, rows as f32 * row_h + 8.0));
+    let chip_w = 24.0;
+    let sw_size = Vec2::new(30.0, 18.0);
+    let text_x = x + sp::L + chip_w + sp::M;
+    let tw = (x + w - sp::M - sw_size.x - sp::COL_GAP - text_x).max(40.0);
+    let (name_f, about_f) = (ty::title(), ty::label());
+    let name_h = line_h(&p, &name_f);
+    let one_line = line_h(&p, &about_f);
+    // lay out each description first: a row grows by the lines it wraps onto
+    let abouts: Vec<_> = app.tools.iter().map(|t| p.layout(t.about().to_owned(), about_f.clone(), TEXT_DIM(), tw)).collect();
+    let heights: Vec<f32> = abouts.iter().map(|g| sp::ROW2_H + (g.size().y - one_line).max(0.0)).collect();
+    let card = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, heights.iter().sum()));
     glass_card(&p, card, R_CARD, 0.0, false);
     let mut flip: Option<(usize, bool)> = None;
-    for k in 0..rows {
-        let rr = Rect::from_min_size(Pos2::new(card.left() + 12.0, card.top() + 4.0 + k as f32 * row_h), Vec2::new(w - 24.0, row_h));
+    let mut top = card.top();
+    for (k, about) in abouts.into_iter().enumerate() {
+        let r = Rect::from_min_size(Pos2::new(card.left(), top), Vec2::new(w, heights[k]));
+        top = r.bottom();
         if k > 0 {
-            hairline(&p, Pos2::new(rr.left() + 38.0, rr.top()), Pos2::new(rr.right(), rr.top()));
+            hairline(&p, Pos2::new(r.left() + sp::L, r.top()), Pos2::new(r.right() - sp::L, r.top()));
         }
-        let chip = Rect::from_min_size(Pos2::new(rr.left(), rr.center().y - 13.0), Vec2::splat(26.0));
-        let sw = Rect::from_min_size(Pos2::new(rr.right() - 30.0, rr.center().y - 9.0), Vec2::new(30.0, 18.0));
-        let tw = sw.left() - chip.right() - 24.0;
         let t = &app.tools[k];
-        {
-            let b = t.badge();
-            tool_chip(&p, chip, b.icon, b.color);
-            text_fit(&p, Pos2::new(chip.right() + 12.0, rr.center().y), Align2::LEFT_CENTER, t.name(), font(13.0), TEXT(), tw);
-            ui.interact(rr, ui.scope_id().with(("tool-about", t.id())), egui::Sense::hover()).on_hover_text(t.about());
-            let on = app.tool_on(k);
-            let id = ui.scope_id().with(("tool-on", t.id()));
-            if switch(ui, sw, id, on, true).on_hover_text(if on { "Turn off" } else { "Turn on" }).clicked() {
-                flip = Some((k, !on));
-            }
+        let b = t.badge();
+        let chip = Rect::from_min_size(Pos2::new(r.left() + sp::L, r.center().y - chip_w / 2.0), Vec2::splat(chip_w));
+        tool_chip(&p, chip, b.icon, b.color);
+        let block_top = r.center().y - (name_h + sp::LINE_GAP + about.size().y) / 2.0;
+        p.text(Pos2::new(text_x, block_top), Align2::LEFT_TOP, t.name(), name_f.clone(), TEXT());
+        p.galley(Pos2::new(text_x, block_top + name_h + sp::LINE_GAP), about, TEXT_DIM());
+        let sw = Rect::from_min_size(Pos2::new(r.right() - sp::M - sw_size.x, r.center().y - sw_size.y / 2.0), sw_size);
+        let on = app.tool_on(k);
+        if switch(ui, sw, ui.scope_id().with(("tool-on", t.id())), on, true).on_hover_text(if on { "Turn off" } else { "Turn on" }).clicked() {
+            flip = Some((k, !on));
         }
     }
     if let Some((i, on)) = flip {
         app.set_tool_on(i, on);
     }
-    card.bottom() + 24.0
+    card.bottom() + sp::XL
 }
 
 /// Settings › AI Check: the agent, which tools offer a check, checking after
@@ -792,6 +802,13 @@ fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     let bw = button_width(&p, label, BTN_SECONDARY);
     if pill_button(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(bw, 30.0)), label, BTN_SECONDARY, true).clicked() {
         app.open_setup();
+    }
+    // the panel has no menu of its own: Quit lives here
+    let quit = "Quit Cmd+Meow";
+    let qw = button_width(&p, quit, BTN_SECONDARY);
+    if pill_button(ui, Rect::from_min_size(Pos2::new(x + bw + sp::S, y), Vec2::new(qw, 30.0)), quit, BTN_SECONDARY, true).clicked() && !app.demo {
+        let ctx = ui.ctx().clone();
+        app.quit(&ctx);
     }
     p.text(Pos2::new(x + w, y + 15.0), Align2::RIGHT_CENTER, version_label(), font(11.0), TEXT_FAINT());
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
