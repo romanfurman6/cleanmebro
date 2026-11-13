@@ -791,3 +791,18 @@ fn general_list(app: &mut App, ui: &mut Ui, body: Rect) -> f32 {
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(1000));
     y + 30.0 + 24.0
 }
+
+#[cfg(test)]
+mod tab_tests {
+    use super::*;
+
+    #[test]
+    fn every_settings_tab_shows_once_general_first_widgets_last() {
+        let mut ids = TAB_ORDER.to_vec();
+        ids.sort();
+        assert_eq!(ids, (0..TAB_NAMES.len()).collect::<Vec<_>>());
+        assert_eq!(TAB_NAMES[TAB_ORDER[0]], "General");
+        assert_eq!(TAB_ORDER[0], TAB_GENERAL);
+        assert_eq!(TAB_NAMES[*TAB_ORDER.last().unwrap()], "Widgets");
+    }
+}

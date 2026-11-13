@@ -72,19 +72,18 @@ fn intro(app: &mut App, ui: &mut Ui, r: Rect, _cx: &mut Cx) {
     let last = if app.demo && !app.demo_fresh { Some(super::engine::LastScan { when: chrono::Utc::now().timestamp() - 2 * 86400, groups: vec![14_200_000_000, 9_800_000_000, 21_600_000_000, 6_100_000_000, 2_200_000_000, 1_300_000_000, 3_400_000_000] }) } else { super::engine::last_scan() };
     let hist = if app.demo_fresh { Vec::new() } else { super::engine::history() };
     let fresh = last.is_none() && hist.is_empty();
-    let mut right = di.right() + 4.0;
-    if !fresh {
+    let right = if fresh {
+        di.right()
+    } else {
         let scan_w = button_width(&p, "Scan", BTN_PRIMARY).max(96.0);
         let scan_r = Rect::from_min_size(Pos2::new(di.right() + 4.0 - scan_w, cy - 17.0), Vec2::new(scan_w, 34.0));
         if pill_button(ui, scan_r, "Scan", BTN_PRIMARY, true).clicked() {
             cleanup::start_scan(app.clean.clone(), ctx.clone(), ai_agent(app));
         }
-        right = scan_r.left() - sp::L;
-        p.line_segment([Pos2::new(right, cy - 14.0), Pos2::new(right, cy + 14.0)], Stroke::new(1.0, CARD_EDGE()));
-        right -= sp::L;
-    } else {
-        right = di.right();
-    }
+        let div = scan_r.left() - sp::L;
+        p.line_segment([Pos2::new(div, cy - 14.0), Pos2::new(div, cy + 14.0)], Stroke::new(1.0, CARD_EDGE()));
+        div - sp::L
+    };
     icon(&p, Icon::Disk, Rect::from_center_size(Pos2::new(di.left() + 9.0, cy), Vec2::splat(18.0)), TEXT_SOFT());
     let name = p.text(Pos2::new(di.left() + 18.0 + sp::M, cy), Align2::LEFT_CENTER, "Macintosh HD", ty::title(), TEXT());
     let free_s = if total > 0 { format!("{} free of {}", human_bytes(free), human_bytes(total)) } else { String::new() };

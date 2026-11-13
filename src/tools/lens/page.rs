@@ -322,14 +322,23 @@ fn begin_at(app: &mut App, ctx: &egui::Context, root: PathBuf) {
     }
     show_root(app, root.clone());
     // folders (not disks or Home) are offered again in the switcher
-    let volume = root == Path::new("/") || root.parent() == Some(Path::new("/Volumes"));
-    if !volume && root != home() {
-        app.lens_recent.retain(|r| r != &root);
-        app.lens_recent.insert(0, root.clone());
-        app.lens_recent.truncate(5);
+    if remember_folder(&mut app.lens_recent, &root, &home()) {
         super::save_prefs(app);
     }
     scan::start(app.lens.clone(), root, ctx.clone());
+}
+
+/// Put a mapped folder first in `recent` (no repeats, at most 5). Disks,
+/// volumes and Home are in the switcher already: false, nothing changes.
+fn remember_folder(recent: &mut Vec<PathBuf>, root: &Path, home: &Path) -> bool {
+    let volume = root == Path::new("/") || root.parent() == Some(Path::new("/Volumes"));
+    if volume || root == home {
+        return false;
+    }
+    recent.retain(|r| r != root);
+    recent.insert(0, root.to_path_buf());
+    recent.truncate(5);
+    true
 }
 
 /// A small ▾ that says a control opens a menu.
@@ -1359,21 +1368,35 @@ fn results(app: &mut App, ui: &mut Ui, r: Rect, root: &Node, peek: Option<(usize
         x += 10.0;
     }
     let n_crumbs = crumbs.len();
-    // the first crumb is the switcher itself
-    for (k, (label, path)) in crumbs.iter().enumerate().skip(1) {
+    // the first crumb is the switcher itself. When the path doesn't fit, the
+    // folders in between give way ("…") so the one you're in always shows
+    let limit = seg_r.left() - 16.0;
+    let crumb_w = |k: usize| p.layout_no_wrap(crumbs[k].0.clone(), if k + 1 == n_crumbs { bold(13.0) } else { font(13.0) }, TEXT()).size().x + 16.0 + 12.0;
+    let mut first = 1;
+    while first + 1 < n_crumbs && x + (first..n_crumbs).map(crumb_w).sum::<f32>() + if first > 1 { 22.0 } else { 0.0 } > limit {
+        first += 1;
+    }
+    if first > 1 {
+        p.text(Pos2::new(x + 8.0, hr.center().y), Align2::CENTER_CENTER, "…", font(13.0), TEXT_MUTED());
+        x += 16.0;
+        p.text(Pos2::new(x + 4.0, hr.center().y), Align2::CENTER_CENTER, "›", font(13.0), TEXT_MUTED());
+        x += 10.0;
+    }
+    for (k, (label, path)) in crumbs.iter().enumerate().skip(first) {
         let last = k + 1 == n_crumbs;
-        let g = p.layout_no_wrap(label.clone(), if last { bold(13.0) } else { font(13.0) }, TEXT());
-        let br = Rect::from_min_size(Pos2::new(x, hr.center().y - 12.0), Vec2::new(g.size().x + 16.0, 24.0));
-        if br.right() > seg_r.left() - 16.0 {
+        let f = if last { bold(13.0) } else { font(13.0) };
+        let tw = (p.layout_no_wrap(label.clone(), f.clone(), TEXT()).size().x).min(limit - x - 16.0);
+        if tw < 24.0 {
             break;
         }
+        let br = Rect::from_min_size(Pos2::new(x, hr.center().y - 12.0), Vec2::new(tw + 16.0, 24.0));
         let resp = ui.interact(br, ui.scope_id().with(("crumb", k)), Sense::click());
         if last {
             p.rect_filled(br, 6.0, white(20));
         } else if resp.hovered() {
             p.rect_filled(br, 6.0, white(10));
         }
-        p.galley(Pos2::new(br.left() + 8.0, br.center().y - g.size().y / 2.0), g, if last { TEXT() } else { TEXT_DIM() });
+        text_fit(&p, Pos2::new(br.left() + 8.0, br.center().y), Align2::LEFT_CENTER, label, f, if last { TEXT() } else { TEXT_DIM() }, tw);
         if resp.clicked() && !last {
             go_to = Some((path.clone(), None));
         }
@@ -2060,6 +2083,21 @@ mod tests {
         assert!(!is_app_data(&h.join("Library/Application Support")));
         assert!(!is_app_data(&h.join("Downloads/x.dmg")));
         assert!(!is_app_data(&h.join("Library/Caches/foo")));
+    }
+
+    #[test]
+    fn mapped_folders_are_remembered_newest_first() {
+        let home = Path::new("/Users/me");
+        let mut r = vec![];
+        assert!(!remember_folder(&mut r, Path::new("/"), home));
+        assert!(!remember_folder(&mut r, Path::new("/Volumes/Backup"), home));
+        assert!(!remember_folder(&mut r, home, home));
+        for n in 1..=6 {
+            assert!(remember_folder(&mut r, &home.join(format!("p{n}")), home));
+        }
+        assert!(remember_folder(&mut r, &home.join("p3"), home));
+        let names: Vec<_> = r.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["p3", "p6", "p5", "p4", "p2"]);
     }
 
     #[test]
