@@ -190,7 +190,7 @@ pub struct Shared {
 
 /// Everything shared, newest first: the local file and where it went.
 pub fn all() -> Vec<(PathBuf, Shared)> {
-    let mut v: Vec<(PathBuf, Shared)> = load_store().into_iter().map(|(p, s)| (PathBuf::from(p), s)).collect();
+    let mut v: Vec<(PathBuf, Shared)> = load_store().into_iter().map(|(p, s)| (PathBuf::from(p), Shared { link: on_page(&s.link), ..s })).collect();
     v.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| b.0.cmp(&a.0)));
     v
 }
@@ -213,7 +213,7 @@ fn load_store() -> HashMap<String, Shared> {
 
 /// The last link of `path`, if it was shared.
 pub fn link_for(path: &Path) -> Option<String> {
-    load_store().get(&path.display().to_string()).map(|s| s.link.clone())
+    load_store().get(&path.display().to_string()).map(|s| on_page(&s.link))
 }
 
 fn remember(path: &Path, s: Shared) {
@@ -253,7 +253,21 @@ fn new_key(folder: &str, path: &Path) -> String {
 }
 
 /// The share page on the website: shows the file and lets people edit a copy.
-pub const PAGE: &str = "https://cmdmeow.furman.cat";
+pub const PAGE: &str = "https://cmdmeow.com";
+/// Where the site lived before: links made then are moved to `PAGE`.
+const OLD_PAGES: [&str; 1] = ["https://cmdmeow.furman.cat"];
+/// Sites allowed to read the bucket (CORS), so Edit works on all of them.
+pub const ORIGINS: [&str; 3] = [PAGE, "https://www.cmdmeow.com", "https://cmdmeow.furman.cat"];
+
+/// `link` on today's share page (links saved before the move point at the old one).
+fn on_page(link: &str) -> String {
+    for old in OLD_PAGES {
+        if let Some(rest) = link.strip_prefix(old) {
+            return format!("{PAGE}{rest}");
+        }
+    }
+    link.to_string()
+}
 
 /// The link people get: the share page for the file at `file_url`.
 pub fn page_link(file_url: &str, title: &str) -> String {
@@ -277,6 +291,12 @@ fn title_of(path: &Path) -> String {
     path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
+/// `allow_page` off the UI thread: for links copied again, so buckets set
+/// up before a site move get the new origins too.
+pub fn allow_page_later(b: s3::Bucket) {
+    let _ = std::thread::Builder::new().name("share-cors".into()).spawn(move || allow_page(&b));
+}
+
 /// Once per bucket and run: let the share page read the bucket (CORS), so
 /// Edit works there. A failure only costs editing, so it is just logged.
 fn allow_page(b: &s3::Bucket) {
@@ -285,9 +305,9 @@ fn allow_page(b: &s3::Bucket) {
     if DONE.lock().map(|d| d.contains(&id)).unwrap_or(true) {
         return;
     }
-    match s3::ensure_cors(b, PAGE) {
+    match s3::ensure_cors(b, &ORIGINS) {
         Ok(changed) => {
-            eprintln!("[share] CORS for {PAGE} on {id}: {}", if changed { "added" } else { "already there" });
+            eprintln!("[share] CORS for {} on {id}: {}", ORIGINS.join(", "), if changed { "added" } else { "already there" });
             if let Ok(mut d) = DONE.lock() {
                 d.push(id);
             }
@@ -395,10 +415,17 @@ mod tests {
     #[test]
     fn links_open_the_share_page() {
         let l = page_link("https://clips.fsn1.your-objectstorage.com/recordings/ab12.mp4", "Recording 1");
-        assert_eq!(l, "https://cmdmeow.furman.cat/view/?u=https%3A%2F%2Fclips.fsn1.your-objectstorage.com%2Frecordings%2Fab12.mp4&t=Recording%201");
+        assert_eq!(l, "https://cmdmeow.com/view/?u=https%3A%2F%2Fclips.fsn1.your-objectstorage.com%2Frecordings%2Fab12.mp4&t=Recording%201");
         // presigned links keep their query intact inside u=
         let p = page_link("https://b.x/k.mp4?X-Amz-Signature=a&X-Amz-Date=b", "");
         assert!(p.ends_with("u=https%3A%2F%2Fb.x%2Fk.mp4%3FX-Amz-Signature%3Da%26X-Amz-Date%3Db"), "{p}");
         assert_eq!(title_of(Path::new("/x/Shot 2026-11-12 at 10.00.png")), "Shot 2026-11-12 at 10.00");
+    }
+
+    #[test]
+    fn old_site_links_move_to_the_new_site() {
+        assert_eq!(on_page("https://cmdmeow.furman.cat/view/?u=x&t=y"), "https://cmdmeow.com/view/?u=x&t=y");
+        assert_eq!(on_page("https://cmdmeow.com/view/?u=x"), "https://cmdmeow.com/view/?u=x");
+        assert!(ORIGINS.contains(&PAGE));
     }
 }

@@ -436,6 +436,9 @@ impl Capture {
             Some(link) => {
                 self.copy_text(&link);
                 self.hud("Link copied");
+                if self.settings.share.set_up(share::VIDEO_ACCOUNT) {
+                    share::allow_page_later(self.settings.share.bucket(share::VIDEO_ACCOUNT));
+                }
             }
             None => self.share(path),
         }
