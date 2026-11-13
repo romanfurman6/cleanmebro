@@ -1979,6 +1979,7 @@ mod tests {
         e.area_act(AreaAct::Crop, &ctx);
         assert_eq!(e.doc.crop, Some(Rect::from_min_max(Pos2::new(50.0, 20.0), Pos2::new(150.0, 80.0))));
         assert_eq!(e.rendered().dimensions(), (100, 60));
+        assert_eq!(e.view().size(), Vec2::new(100.0, 60.0), "the title shows the cropped size");
         e.undo();
         assert_eq!(e.doc.crop, None);
     }
