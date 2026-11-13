@@ -23,9 +23,11 @@ await page.evaluate((icon) => {
   const css = document.createElement('style');
   css.textContent = `
     html, body { width: 1200px; height: 630px; overflow: hidden; }
-    .desk { height: 630px; } .desk::after { display: none; } .mbar { display: none; }
+    .desk { height: 630px; } .mbar { display: none; }
+    /* Soft blur under the text: darkest at the left edge, fades out before the panel, no hard edges */
+    .desk::after { inset: 0 auto 0 0; width: 860px; z-index: 1; background: linear-gradient(90deg, rgba(4,9,4,.72) 0%, rgba(4,9,4,.55) 50%, rgba(4,9,4,0) 100%); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); -webkit-mask-image: linear-gradient(90deg, #000 50%, transparent 100%); mask-image: linear-gradient(90deg, #000 50%, transparent 100%); }
     .stage { height: 630px; max-width: none; }
-    .hero { left: 40px; max-width: 600px; padding: 36px 40px 40px; border-radius: 28px; background: rgba(6,12,6,.5); backdrop-filter: blur(22px) saturate(1.2); -webkit-backdrop-filter: blur(22px) saturate(1.2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 24px 60px rgba(0,0,0,.35); }
+    .hero { left: 64px; max-width: 540px; text-shadow: 0 2px 24px rgba(0,0,0,.45); }
     .hero h1 { font-size: 62px; line-height: 66px; }
     .hero .sub { margin-top: 22px; font-size: 26px; line-height: 34px; }
     .og-id { display: flex; align-items: center; gap: 14px; margin-bottom: 30px; font: 500 30px/1 var(--sans); letter-spacing: -.01em; text-shadow: 0 2px 18px rgba(0,0,0,.5); }
