@@ -146,9 +146,7 @@ pub fn mascot_rgba(px: u32) -> [Vec<u8>; 3] {
             pm.fill_path(&p, &ink, FillRule::Winding, t, None);
         }
         if cut {
-            let mut clear = Paint::default();
-            clear.blend_mode = BlendMode::Clear;
-            clear.anti_alias = true;
+            let clear = Paint { blend_mode: BlendMode::Clear, anti_alias: true, ..Paint::default() };
             let stroke = Stroke { width: 59.0, line_cap: LineCap::Butt, ..Stroke::default() };
             if let Some(p) = command() {
                 pm.stroke_path(&p, &clear, &stroke, t, None);
@@ -182,10 +180,17 @@ fn mascot_textures(ctx: &egui::Context) -> [egui::TextureHandle; 3] {
 
 /// The mascot (the mark, ears that move) filling `rect`, tinted `col`.
 /// `ears` tilt the left and right ear outward by that many radians (negative
-/// folds them in). A squashed `rect` squashes the whole cat.
+/// folds them in). A squashed `rect` squashes the whole cat. A see-through
+/// `col` draws the plain mark, ears still.
 pub fn draw_mascot(p: &egui::Painter, rect: egui::Rect, col: egui::Color32, ears: (f32, f32)) {
-    let [body, ear_l, ear_r] = mascot_textures(p.ctx());
     let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0));
+    // see-through: the layers' overlap would show brighter, so draw the
+    // mark in one piece (ears still)
+    if col.a() < 255 {
+        p.image(glyph(p.ctx()).id(), rect, uv, col);
+        return;
+    }
+    let [body, ear_l, ear_r] = mascot_textures(p.ctx());
     // the layers are drawn with the mark's own small offset (see glyph_rgba)
     let at = |(x, y): (f32, f32)| rect.min + egui::Vec2::new((x + 0.5) / 1024.0 * rect.width(), (y - 6.0) / 1024.0 * rect.height());
     for (tex, pivot, turn) in [(&ear_l, EAR_PIVOT[0], -ears.0), (&ear_r, EAR_PIVOT[1], ears.1)] {
