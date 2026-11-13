@@ -1,12 +1,14 @@
 //! The editor: one capture with a toolbar of drawing tools (arrow, box,
-//! label, highlighter, blur, eraser, numbered steps, crop), Copy text (drag a
-//! box, the text is copied), color picker and ruler, undo/redo, and Pin /
-//! Copy / Save. It draws into any rect, so it serves both its own window and
+//! label, highlighter, blur, eraser, numbered steps), color picker and ruler,
+//! undo/redo, and Pin / Copy / Save. Select is one mode for shapes and areas:
+//! click a shape to edit it (a bar with its options shows on it, also right
+//! after it's drawn), or drag an empty spot for an area and act on it (Crop,
+//! Copy text, Blur, Erase, Copy). It draws into any rect, so it serves both its own window and
 //! the `--view capture-editor` screenshot.
 
 use super::icons::{self, Ico};
 use super::mac::{self, TextLine};
-use super::render::{self, Doc, Frame, Mark, Ratio, Rgba8};
+use super::render::{self, Doc, Frame, Heads, Mark, Ratio, Rgba8};
 use super::settings::{BlurStyle, Cover};
 use crate::kit::glass::*;
 use egui::{Align2, Color32, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -26,15 +28,13 @@ pub enum Tool {
     Blur,
     Eraser,
     Steps,
-    Crop,
-    CopyText,
     Picker,
     Ruler,
     Frame,
 }
 
 impl Tool {
-    const DRAW: [Tool; 12] = [Tool::Select, Tool::Arrow, Tool::Rect, Tool::Ellipse, Tool::Pen, Tool::Text, Tool::Highlight, Tool::Blur, Tool::Eraser, Tool::Steps, Tool::Crop, Tool::CopyText];
+    const DRAW: [Tool; 10] = [Tool::Select, Tool::Arrow, Tool::Rect, Tool::Ellipse, Tool::Pen, Tool::Text, Tool::Highlight, Tool::Blur, Tool::Eraser, Tool::Steps];
     const MEASURE: [Tool; 2] = [Tool::Picker, Tool::Ruler];
     const LOOK: [Tool; 1] = [Tool::Frame];
 
@@ -50,8 +50,6 @@ impl Tool {
             Tool::Blur => Ico::Blur,
             Tool::Eraser => Ico::Eraser,
             Tool::Steps => Ico::Steps,
-            Tool::Crop => Ico::Crop,
-            Tool::CopyText => Ico::ScanText,
             Tool::Picker => Ico::Eyedropper,
             Tool::Ruler => Ico::Ruler,
             Tool::Frame => Ico::Frame,
@@ -61,7 +59,7 @@ impl Tool {
     /// Tooltip with the one-key shortcut.
     fn tip(self) -> &'static str {
         match self {
-            Tool::Select => "Select and move (V)",
+            Tool::Select => "Select, or drag an area to crop or copy text (V)",
             Tool::Arrow => "Arrow (A)",
             Tool::Rect => "Box (R)",
             Tool::Ellipse => "Circle (L)",
@@ -71,8 +69,6 @@ impl Tool {
             Tool::Blur => "Blur (B)",
             Tool::Eraser => "Eraser: removes text (E)",
             Tool::Steps => "Numbered steps (N)",
-            Tool::Crop => "Crop (C)",
-            Tool::CopyText => "Copy text: drag a box (O)",
             Tool::Picker => "Pick a color (I)",
             Tool::Ruler => "Ruler (M)",
             Tool::Frame => "Frame (F)",
@@ -91,8 +87,6 @@ impl Tool {
             Tool::Blur => Key::B,
             Tool::Eraser => Key::E,
             Tool::Steps => Key::N,
-            Tool::Crop => Key::C,
-            Tool::CopyText => Key::O,
             Tool::Picker => Key::I,
             Tool::Ruler => Key::M,
             Tool::Frame => Key::F,
@@ -101,7 +95,7 @@ impl Tool {
 
     /// Tools that drag out a box or a line.
     fn drags(self) -> bool {
-        matches!(self, Tool::Arrow | Tool::Rect | Tool::Ellipse | Tool::Highlight | Tool::Blur | Tool::Eraser | Tool::Crop | Tool::CopyText)
+        matches!(self, Tool::Arrow | Tool::Rect | Tool::Ellipse | Tool::Highlight | Tool::Blur | Tool::Eraser)
     }
 }
 
@@ -188,11 +182,13 @@ pub const COLORS: [(&str, Rgba8); 6] = [
     ("White", [255, 255, 255, 255]),
     ("Black", [28, 28, 31, 255]),
 ];
-/// Stroke widths (pt) for thin / medium / thick.
-const STROKES: [f32; 3] = [2.0, 4.0, 7.0];
+/// Stroke widths (pt): thin, medium, thick, extra thick.
+const STROKES: [f32; 4] = [2.0, 4.0, 7.0, 11.0];
 /// Label text size (pt) per stroke size.
-const TEXT_PT: [f32; 3] = [13.0, 17.0, 24.0];
-const STEP_PT: [f32; 3] = [20.0, 26.0, 34.0];
+const TEXT_PT: [f32; 4] = [13.0, 17.0, 24.0, 32.0];
+const STEP_PT: [f32; 4] = [20.0, 26.0, 34.0, 44.0];
+/// The width bars drawn on the size buttons (pt).
+const SIZE_BARS: [f32; 4] = [2.0, 4.0, 6.0, 9.0];
 
 /// What the editor asks the tool to do (it owns the clipboard, files and pins).
 #[derive(Clone, Debug, PartialEq)]
@@ -204,7 +200,49 @@ pub enum Request {
     Share,
     Close,
     CopyText(String),
+    /// Copy this part of the picture; the editor stays open.
+    CopyPart(RgbaImage),
 }
+
+/// What the bar on a selected area does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AreaAct {
+    Crop,
+    CopyText,
+    Blur,
+    Erase,
+    Copy,
+}
+
+impl AreaAct {
+    const ALL: [AreaAct; 5] = [AreaAct::Crop, AreaAct::CopyText, AreaAct::Blur, AreaAct::Erase, AreaAct::Copy];
+
+    fn label(self) -> (Ico, &'static str, &'static str) {
+        match self {
+            AreaAct::Crop => (Ico::Crop, "Crop", "↵"),
+            AreaAct::CopyText => (Ico::ScanText, "Copy text", "O"),
+            AreaAct::Blur => (Ico::Blur, "Blur", "B"),
+            AreaAct::Erase => (Ico::Eraser, "Erase", "⌫"),
+            AreaAct::Copy => (Ico::Copy, "Copy", "⌘C"),
+        }
+    }
+}
+
+/// One part of a floating bar.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Piece {
+    Colors,
+    Sizes,
+    Heads,
+    BlurStyle,
+    Delete,
+    Act(AreaAct),
+    Sep,
+}
+
+const BAR_H: f32 = 36.0;
+const SWATCH_W: f32 = 26.0;
+const SEG_W: f32 = 30.0;
 
 enum Ocr {
     /// Copy text from this box (image px).
@@ -226,6 +264,8 @@ pub struct Editor {
     stroke: usize,
     pub blur: BlurStyle,
     pub cover: Cover,
+    /// Heads for new arrows; the last one picked.
+    pub heads: Heads,
     pub keep_breaks: bool,
     /// Image pixels per point (2 on Retina captures).
     px_per_pt: f32,
@@ -245,8 +285,12 @@ pub struct Editor {
     ocr_tx: Sender<(Ocr, Vec<TextLine>)>,
     ocr_rx: Receiver<(Ocr, Vec<TextLine>)>,
     ocr_busy: bool,
-    /// A crop area picked with the Crop tool, applied on Enter.
-    crop_pending: Option<Rect>,
+    /// An area picked with Select (image px); its bar crops, copies text, blurs…
+    area: Option<Rect>,
+    /// An area handle being dragged, and the area before.
+    area_resize: Option<(usize, Rect)>,
+    /// This drag (in a drawing tool) moves or resizes the selected shape.
+    grab: bool,
     status: Option<(String, Instant)>,
     /// How far the Share upload is (0..1), while it runs.
     pub share_progress: Option<f32>,
@@ -266,11 +310,12 @@ impl Editor {
             doc: Doc { ppp: px_per_pt.max(1.0), ..Doc::default() },
             undo: Vec::new(),
             redo: Vec::new(),
-            tool: Tool::Crop,
+            tool: Tool::Select,
             color: 0,
             stroke: 1,
             blur,
             cover,
+            heads: Heads::End,
             keep_breaks,
             px_per_pt: px_per_pt.max(1.0),
             drag: None,
@@ -286,7 +331,9 @@ impl Editor {
             ocr_tx,
             ocr_rx,
             ocr_busy: false,
-            crop_pending: None,
+            area: None,
+            area_resize: None,
+            grab: false,
             status: None,
             share_progress: None,
             requests: Vec::new(),
@@ -323,10 +370,23 @@ impl Editor {
             Mark::Rect { r: Rect::from_min_max(p(204.0, 212.0), p(536.0, 272.0)), color: red, width: 4.0 * s },
             Mark::Step { at: p(186.0, 168.0), n: 1, color: red, size: 26.0 * s },
             Mark::Step { at: p(186.0, 242.0), n: 2, color: red, size: 26.0 * s },
-            Mark::Arrow { a: p(620.0, 380.0), b: p(342.0, 322.0), color: red, width: 4.0 * s },
+            Mark::Arrow { a: p(620.0, 380.0), b: p(342.0, 322.0), color: red, width: 4.0 * s, heads: Heads::End },
             Mark::Text { at: p(560.0, 386.0), text: "then press Save".into(), color: red, size: 17.0 * s },
         ];
         self.tool = Tool::Blur;
+    }
+
+    /// The screenshot view with an area picked (its bar showing).
+    pub fn demo_area(&mut self) {
+        let s = self.base.width() as f32 / 794.0;
+        self.tool = Tool::Select;
+        self.area = Some(Rect::from_min_max(Pos2::new(196.0 * s, 160.0 * s), Pos2::new(546.0 * s, 280.0 * s)));
+    }
+
+    /// The screenshot view with the arrow just drawn (its bar showing).
+    pub fn demo_selected(&mut self) {
+        self.tool = Tool::Arrow;
+        self.selected = self.doc.marks.iter().position(|m| matches!(m, Mark::Arrow { .. }));
     }
 
     fn push_undo(&mut self) {
@@ -338,9 +398,11 @@ impl Editor {
         self.edited = true;
     }
 
+    /// Add a mark and select it, so its bar shows at once.
     fn add(&mut self, m: Mark) {
         self.push_undo();
         self.doc.marks.push(m);
+        self.selected = Some(self.doc.marks.len() - 1);
     }
 
     fn undo(&mut self) {
@@ -362,8 +424,11 @@ impl Editor {
     /// A drag in progress points into the old document: drop it.
     fn drop_gestures(&mut self) {
         self.resizing = None;
+        self.moving = None;
         self.pen = None;
         self.drag = None;
+        self.area_resize = None;
+        self.grab = false;
     }
 
     fn color(&self) -> Rgba8 {
@@ -374,12 +439,12 @@ impl Editor {
         STROKES[self.stroke] * self.px_per_pt
     }
 
-    /// The part of the image on screen: the crop, unless cropping right now.
+    /// The part of the image on screen: the crop.
     fn view(&self) -> Rect {
         let full = Rect::from_min_size(Pos2::ZERO, Vec2::new(self.base.width() as f32, self.base.height() as f32));
         match self.doc.crop {
-            Some(c) if self.tool != Tool::Crop => c.intersect(full),
-            _ => full,
+            Some(c) => c.intersect(full),
+            None => full,
         }
     }
 
@@ -541,8 +606,6 @@ impl Editor {
             Tool::Blur => "Blur",
             Tool::Eraser => "Eraser",
             Tool::Steps => "Steps",
-            Tool::Crop => "Crop",
-            Tool::CopyText => "Copy text",
             Tool::Picker => "Pick a color",
             Tool::Ruler => "Ruler",
             Tool::Frame => "Frame",
@@ -554,40 +617,10 @@ impl Editor {
                 String::new()
             }
             Tool::Arrow | Tool::Rect | Tool::Ellipse | Tool::Pen | Tool::Highlight | Tool::Steps | Tool::Text => {
-                for (k, (cname, c)) in COLORS.iter().enumerate() {
-                    let r = Rect::from_center_size(Pos2::new(x + 9.0, y), Vec2::splat(18.0));
-                    let resp = ui.interact(r.expand(3.0), ui.scope_id().with(("color", k)), Sense::click()).on_hover_text(*cname);
-                    if self.color == k {
-                        crate::kit::glass::stroke_circle(&p, r.center(), 11.5, Stroke::new(2.0, BLUE()));
-                    }
-                    p.circle_filled(r.center(), 9.0, Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
-                    crate::kit::glass::stroke_circle(&p, r.center(), 9.0, Stroke::new(1.0, if self.color == k { Color32::WHITE } else { white(64) }));
-                    if resp.clicked() {
-                        self.color = k;
-                        self.recolor_selected();
-                    }
-                    x += 26.0;
+                let ctx = ui.ctx().clone();
+                for pc in tool_pieces(self.tool) {
+                    x += self.piece(ui, *pc, x, y, false, &ctx) + 4.0;
                 }
-                p.line_segment([Pos2::new(x + 4.0, y - 9.0), Pos2::new(x + 4.0, y + 9.0)], Stroke::new(1.0, white(26)));
-                x += 14.0;
-                let sized = matches!(self.tool, Tool::Text | Tool::Steps);
-                x = p.text(Pos2::new(x, y), Align2::LEFT_CENTER, if sized { "Size" } else { "Width" }, font(12.0), TEXT_DIM()).right() + 8.0;
-                let plate = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(3.0 * 30.0 + 4.0, 26.0));
-                p.rect_filled(plate, R_BUTTON, white(13));
-                for k in 0..3 {
-                    let r = Rect::from_min_size(Pos2::new(plate.left() + 2.0 + 30.0 * k as f32, plate.top() + 2.0), Vec2::new(30.0, 22.0));
-                    let tip = if sized { ["Small", "Medium", "Large"][k] } else { ["Thin", "Medium", "Thick"][k] };
-                    let resp = ui.interact(r, ui.scope_id().with(("stroke", k)), Sense::click()).on_hover_text(tip);
-                    if self.stroke == k {
-                        p.rect_filled(r, 6.0, pick(Color32::from_white_alpha(40), Color32::WHITE));
-                    }
-                    let t = [2.0, 4.0, 6.0][k];
-                    p.rect_filled(Rect::from_center_size(r.center(), Vec2::new(14.0, t)), t / 2.0, if self.stroke == k { TEXT() } else { TEXT_SOFT() });
-                    if resp.clicked() {
-                        self.stroke = k;
-                    }
-                }
-                x = plate.right() + 16.0;
                 String::new()
             }
             Tool::Blur | Tool::Eraser => {
@@ -612,14 +645,9 @@ impl Editor {
                 x = r.right() + 16.0;
                 if self.tool == Tool::Eraser { "Fills with the color around the text.".into() } else { String::new() }
             }
-            Tool::Crop => match self.crop_pending {
-                Some(c) => format!("{:.0} × {:.0} · Enter to crop · Esc to cancel", c.width().round(), c.height().round()),
-                None => "Drag an area · Enter to crop".into(),
-            },
-            Tool::CopyText => "Drag over text, it's copied".into(),
             Tool::Picker => "Click to copy a color's hex code".into(),
             Tool::Ruler => "Hover to measure, drag for a box, click to copy".into(),
-            Tool::Select => "Click a mark to select, drag to move, ⌫ deletes".into(),
+            Tool::Select => String::new(),
         };
         if !hint.is_empty() {
             text_fit(&p, Pos2::new(x, y), Align2::LEFT_CENTER, &hint, font(12.0), TEXT_FAINT(), (strip.right() - BAR_PAD - x).max(40.0));
@@ -714,32 +742,284 @@ impl Editor {
         self.selected = None;
         self.drag = None;
         self.pen = None;
-        self.crop_pending = None;
+        self.area = None;
+        self.area_resize = None;
+        self.grab = false;
         // picking Frame shows it at once, with the last style
         if t == Tool::Frame && self.doc.frame.is_none() {
             self.set_frame(Some(self.frame_style));
         }
     }
 
-    /// Crop to the picked area (Enter).
-    fn apply_crop(&mut self) {
-        let Some(r) = self.crop_pending.take() else { return };
-        self.push_undo();
-        self.doc.crop = Some(r);
-        self.tool = Tool::Select;
-        self.flash("Cropped. Undo to bring it back.");
+    /// Act on the picked area: crop to it, copy its text or pixels, or cover it.
+    fn area_act(&mut self, a: AreaAct, ctx: &egui::Context) {
+        let Some(r) = self.area.take() else { return };
+        self.area_resize = None;
+        match a {
+            AreaAct::Crop => {
+                self.push_undo();
+                self.doc.crop = Some(r);
+                self.selected = None;
+            }
+            AreaAct::CopyText => self.run_ocr(Ocr::Copy(r), r, ctx),
+            AreaAct::Blur | AreaAct::Erase => self.cover_area(a == AreaAct::Blur, r, ctx),
+            AreaAct::Copy => {
+                let mut d = self.doc.clone();
+                d.crop = Some(r);
+                d.frame = None;
+                self.requests.push(Request::CopyPart(render::render(&self.base, &d)));
+                self.flash("Copied");
+            }
+        }
+    }
+
+    /// Blur or erase `r`; with Only text, once recognition says where the text is.
+    fn cover_area(&mut self, blur: bool, r: Rect, ctx: &egui::Context) {
+        let m = if blur { Mark::Blur { r, style: self.blur, boxes: vec![] } } else { Mark::Erase { r, boxes: vec![] } };
+        if self.cover == Cover::Text {
+            self.run_ocr(Ocr::Mark(m), r, ctx);
+        } else {
+            self.add(m);
+        }
+    }
+
+    /// Change the selected mark (one undo step), if `f` changes it.
+    fn edit_selected(&mut self, f: impl FnOnce(&mut Mark)) {
+        let Some(i) = self.selected.filter(|i| *i < self.doc.marks.len()) else { return };
+        let mut m = self.doc.marks[i].clone();
+        f(&mut m);
+        if m != self.doc.marks[i] {
+            self.push_undo();
+            self.doc.marks[i] = m;
+        }
+    }
+
+    fn delete_selected(&mut self) {
+        if let Some(i) = self.selected.take().filter(|i| *i < self.doc.marks.len()) {
+            self.push_undo();
+            self.doc.marks.remove(i);
+        }
     }
 
     fn recolor_selected(&mut self) {
-        let Some(i) = self.selected else { return };
         let c = self.color();
-        let mut m = self.doc.marks[i].clone();
-        match &mut m {
+        self.edit_selected(|m| match m {
             Mark::Arrow { color, .. } | Mark::Rect { color, .. } | Mark::Ellipse { color, .. } | Mark::Pen { color, .. } | Mark::Text { color, .. } | Mark::Highlight { color, .. } | Mark::Step { color, .. } => *color = c,
-            _ => return,
+            _ => {}
+        });
+    }
+
+    fn resize_selected(&mut self) {
+        let (k, ppp) = (self.stroke, self.px_per_pt);
+        self.edit_selected(|m| match m {
+            Mark::Arrow { width, .. } | Mark::Rect { width, .. } | Mark::Ellipse { width, .. } | Mark::Pen { width, .. } => *width = STROKES[k] * ppp,
+            Mark::Text { size, .. } => *size = TEXT_PT[k] * ppp,
+            Mark::Step { size, .. } => *size = STEP_PT[k] * ppp,
+            _ => {}
+        });
+    }
+
+    /// The size step (0..4) nearest to a mark's width or text size.
+    fn size_of(&self, m: &Mark) -> Option<usize> {
+        let (v, steps): (f32, &[f32; 4]) = match m {
+            Mark::Arrow { width, .. } | Mark::Rect { width, .. } | Mark::Ellipse { width, .. } | Mark::Pen { width, .. } => (*width, &STROKES),
+            Mark::Text { size, .. } => (*size, &TEXT_PT),
+            Mark::Step { size, .. } => (*size, &STEP_PT),
+            _ => return None,
+        };
+        let v = v / self.px_per_pt;
+        (0..4).min_by(|a, b| (steps[*a] - v).abs().total_cmp(&(steps[*b] - v).abs()))
+    }
+
+    // ------------------------------------------------------------ floating bars
+
+    fn piece_w(&self, p: &egui::Painter, pc: Piece) -> f32 {
+        match pc {
+            Piece::Colors => COLORS.len() as f32 * SWATCH_W,
+            Piece::Sizes => 4.0 * SEG_W + 4.0,
+            Piece::Heads => 3.0 * SEG_W + 4.0,
+            Piece::BlurStyle => 200.0,
+            Piece::Delete => 28.0,
+            Piece::Sep => 9.0,
+            Piece::Act(a) => {
+                let (_, label, key) = a.label();
+                let tw = |t: &str, f| p.layout_no_wrap(t.to_string(), f, TEXT()).size().x;
+                8.0 + 16.0 + 6.0 + tw(label, font(12.0)) + 6.0 + tw(key, font(11.0)) + 8.0
+            }
         }
-        self.push_undo();
-        self.doc.marks[i] = m;
+    }
+
+    /// Draw one piece with its left edge at `x`, centred on `y`; returns its
+    /// width. `on_mark`: it edits the selected mark (and the defaults), else
+    /// only the defaults for the next mark.
+    fn piece(&mut self, ui: &mut Ui, pc: Piece, x: f32, y: f32, on_mark: bool, ctx: &egui::Context) -> f32 {
+        let w = self.piece_w(ui.painter(), pc);
+        let p = ui.painter().clone();
+        let id = ui.scope_id().with((on_mark, "piece"));
+        let mark = if on_mark { self.selected.and_then(|i| self.doc.marks.get(i)).cloned() } else { None };
+        match pc {
+            Piece::Colors => {
+                let cur = match &mark {
+                    Some(Mark::Arrow { color, .. } | Mark::Rect { color, .. } | Mark::Ellipse { color, .. } | Mark::Pen { color, .. } | Mark::Text { color, .. } | Mark::Highlight { color, .. } | Mark::Step { color, .. }) => COLORS.iter().position(|(_, c)| c == color),
+                    _ => Some(self.color),
+                };
+                for (k, (cname, c)) in COLORS.iter().enumerate() {
+                    let r = Rect::from_center_size(Pos2::new(x + SWATCH_W * k as f32 + SWATCH_W / 2.0, y), Vec2::splat(18.0));
+                    let resp = ui.interact(r.expand(3.0), id.with(("color", k)), Sense::click()).on_hover_text(*cname);
+                    let on = cur == Some(k);
+                    if on {
+                        crate::kit::glass::stroke_circle(&p, r.center(), 11.5, Stroke::new(2.0, BLUE()));
+                    }
+                    p.circle_filled(r.center(), 9.0, Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
+                    crate::kit::glass::stroke_circle(&p, r.center(), 9.0, Stroke::new(1.0, if on { Color32::WHITE } else { white(64) }));
+                    if resp.clicked() {
+                        self.color = k;
+                        if on_mark {
+                            self.recolor_selected();
+                        }
+                    }
+                }
+            }
+            Piece::Sizes => {
+                let sized = match &mark {
+                    Some(m) => matches!(m, Mark::Text { .. } | Mark::Step { .. }),
+                    None => matches!(self.tool, Tool::Text | Tool::Steps),
+                };
+                let cur = mark.as_ref().and_then(|m| self.size_of(m)).unwrap_or(self.stroke);
+                let plate = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(w, 26.0));
+                p.rect_filled(plate, R_BUTTON, white(13));
+                for k in 0..4 {
+                    let r = Rect::from_min_size(Pos2::new(plate.left() + 2.0 + SEG_W * k as f32, plate.top() + 2.0), Vec2::new(SEG_W, 22.0));
+                    let tip = if sized { ["Small", "Medium", "Large", "Extra large"][k] } else { ["Thin", "Medium", "Thick", "Extra thick"][k] };
+                    let resp = ui.interact(r, id.with(("size", k)), Sense::click()).on_hover_text(tip);
+                    if cur == k {
+                        p.rect_filled(r, 6.0, pick(Color32::from_white_alpha(40), Color32::WHITE));
+                    }
+                    let t = SIZE_BARS[k];
+                    p.rect_filled(Rect::from_center_size(r.center(), Vec2::new(14.0, t)), t / 2.0, if cur == k { TEXT() } else { TEXT_SOFT() });
+                    if resp.clicked() {
+                        self.stroke = k;
+                        if on_mark {
+                            self.resize_selected();
+                        }
+                    }
+                }
+            }
+            Piece::Heads => {
+                let cur = match &mark {
+                    Some(Mark::Arrow { heads, .. }) => *heads,
+                    _ => self.heads,
+                };
+                let plate = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(w, 26.0));
+                p.rect_filled(plate, R_BUTTON, white(13));
+                for (k, h) in Heads::ALL.iter().enumerate() {
+                    let r = Rect::from_min_size(Pos2::new(plate.left() + 2.0 + SEG_W * k as f32, plate.top() + 2.0), Vec2::new(SEG_W, 22.0));
+                    let tip = ["One head", "Both ends", "Line"][k];
+                    let resp = ui.interact(r, id.with(("heads", k)), Sense::click()).on_hover_text(tip);
+                    let on = cur == *h;
+                    if on {
+                        p.rect_filled(r, 6.0, pick(Color32::from_white_alpha(40), Color32::WHITE));
+                    }
+                    let col = if on || resp.hovered() { TEXT() } else { TEXT_SOFT() };
+                    let st = Stroke::new(1.6, col);
+                    let (l, rr) = (r.center() - Vec2::new(8.0, 0.0), r.center() + Vec2::new(8.0, 0.0));
+                    p.line_segment([l, rr], st);
+                    if *h != Heads::None {
+                        p.line_segment([rr, rr + Vec2::new(-4.0, -4.0)], st);
+                        p.line_segment([rr, rr + Vec2::new(-4.0, 4.0)], st);
+                    }
+                    if *h == Heads::Both {
+                        p.line_segment([l, l + Vec2::new(4.0, -4.0)], st);
+                        p.line_segment([l, l + Vec2::new(4.0, 4.0)], st);
+                    }
+                    if resp.clicked() {
+                        self.heads = *h;
+                        if on_mark {
+                            let h = *h;
+                            self.edit_selected(|m| {
+                                if let Mark::Arrow { heads, .. } = m {
+                                    *heads = h;
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            Piece::BlurStyle => {
+                let cur = match &mark {
+                    Some(Mark::Blur { style, .. }) => *style,
+                    _ => self.blur,
+                };
+                let at = [BlurStyle::Pixelate, BlurStyle::Blur, BlurStyle::Solid].iter().position(|b| *b == cur).unwrap_or(0);
+                let r = Rect::from_min_size(Pos2::new(x, y - 13.0), Vec2::new(w, 26.0));
+                if let Some(i) = segmented(ui, r, id.with("style"), &["Pixelate", "Blur", "Solid"], at) {
+                    let b = [BlurStyle::Pixelate, BlurStyle::Blur, BlurStyle::Solid][i];
+                    self.blur = b;
+                    if on_mark {
+                        self.edit_selected(|m| {
+                            if let Mark::Blur { style, .. } = m {
+                                *style = b;
+                            }
+                        });
+                    }
+                }
+            }
+            Piece::Delete => {
+                let r = Rect::from_min_size(Pos2::new(x, y - 14.0), Vec2::new(w, 28.0));
+                if plain_icon(ui, r, Ico::Trash, "Delete (⌫)", true).clicked() {
+                    self.delete_selected();
+                }
+            }
+            Piece::Sep => {
+                p.line_segment([Pos2::new(x + w / 2.0, y - 9.0), Pos2::new(x + w / 2.0, y + 9.0)], Stroke::new(1.0, white(26)));
+            }
+            Piece::Act(a) => {
+                let (ic, label, key) = a.label();
+                let r = Rect::from_min_size(Pos2::new(x, y - 14.0), Vec2::new(w, 28.0));
+                let resp = ui.interact(r, id.with(("act", label)), Sense::click());
+                let primary = a == AreaAct::Crop;
+                let (fill, ink, faint) = if primary {
+                    (BLUE(), on_color(BLUE()), with_alpha(on_color(BLUE()), 0.6))
+                } else {
+                    (if resp.hovered() { white(26) } else { Color32::TRANSPARENT }, TEXT(), TEXT_FAINT())
+                };
+                p.rect_filled(r, R_SMALL, fill);
+                icons::draw(&p, ic, Rect::from_center_size(Pos2::new(r.left() + 16.0, y), Vec2::splat(16.0)), ink);
+                let lr = p.text(Pos2::new(r.left() + 30.0, y), Align2::LEFT_CENTER, label, font(12.0), ink);
+                p.text(Pos2::new(lr.right() + 6.0, y), Align2::LEFT_CENTER, key, font(11.0), faint);
+                if resp.clicked() {
+                    self.area_act(a, ctx);
+                }
+            }
+        }
+        w
+    }
+
+    /// A floating bar of `pieces` next to `anchor` (screen), kept inside `bounds`.
+    fn float_bar(&mut self, ui: &mut Ui, pieces: &[Piece], anchor: Rect, bounds: Rect, on_mark: bool) {
+        let p = ui.painter().clone();
+        let ws: Vec<f32> = pieces.iter().map(|pc| self.piece_w(&p, *pc)).collect();
+        let w = ws.iter().sum::<f32>() + 4.0 * (ws.len().max(1) - 1) as f32 + 2.0 * sp::S;
+        // under the anchor, else over it, else inside at the bottom
+        let mut top = anchor.bottom() + sp::M;
+        if top + BAR_H > bounds.bottom() - sp::S {
+            top = anchor.top() - sp::M - BAR_H;
+        }
+        let top = top.clamp(bounds.top() + sp::S, (bounds.bottom() - sp::S - BAR_H).max(bounds.top() + sp::S));
+        let left = (anchor.center().x - w / 2.0).clamp(bounds.left() + sp::S, (bounds.right() - sp::S - w).max(bounds.left() + sp::S));
+        let r = Rect::from_min_size(Pos2::new(left, top), Vec2::new(w, BAR_H));
+        let sh = egui::epaint::Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(90) };
+        p.add(sh.as_shape(r, 12.0));
+        p.rect_filled(r, 12.0, POPOVER());
+        p.rect_stroke(r, 12.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
+        // the canvas under the bar takes no clicks
+        ui.interact(r, ui.scope_id().with(("bar", on_mark)), Sense::click_and_drag());
+        let ctx = ui.ctx().clone();
+        let mut x = r.left() + sp::S;
+        for (pc, pw) in pieces.iter().zip(ws) {
+            self.piece(ui, *pc, x, r.center().y, on_mark, &ctx);
+            x += pw + 4.0;
+        }
     }
 
     // ------------------------------------------------------------ canvas
@@ -761,8 +1041,7 @@ impl Editor {
         let view = self.view();
         let pad = 24.0;
         let avail = area.shrink(pad);
-        // the frame shows around the picture, except while cropping
-        let frame = self.doc.frame.filter(|_| self.tool != Tool::Crop);
+        let frame = self.doc.frame;
         let geom = frame.map(|f| render::frame_geom(view.width(), view.height(), &f, self.px_per_pt));
         let outer = geom.map(|g| g.size).unwrap_or(view.size());
         // fit, but never larger than true size (px_per_pt image pixels per point)
@@ -812,29 +1091,25 @@ impl Editor {
             let m = Mark::Pen { pts: pts.clone(), color: self.color(), width: self.width_px() };
             draw_mark(&mp, &m, &to_screen, scale);
         }
-        if self.tool == Tool::Crop && self.drag.is_none() {
-            if let Some(c) = self.crop_pending {
-                let cr = Rect::from_min_max(to_screen(c.min), to_screen(c.max));
-                shade_outside(&p, shown, cr);
-                let corners = [cr.left_top(), cr.right_top(), cr.right_bottom(), cr.left_bottom(), cr.left_top()];
-                p.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.5, Color32::WHITE), 6.0, 4.0));
-                tag(&p, cr.right_bottom() + Vec2::new(6.0, 6.0), &format!("{:.0} × {:.0}", c.width().round(), c.height().round()));
-                let hint = "Enter to crop · Esc to cancel";
-                let g = p.layout_no_wrap(hint.to_string(), font(12.0), TEXT());
-                let mut at = Pos2::new(cr.center().x - g.size().x / 2.0 - 12.0, cr.top() - g.size().y - 22.0);
-                if at.y < area.top() + 4.0 {
-                    at.y = cr.bottom() + 10.0;
+        // the area being dragged out or picked
+        let live = match (self.tool, self.drag) {
+            (Tool::Select, Some((a, b))) => Some(Rect::from_two_pos(a, b)),
+            (Tool::Select, None) => self.area,
+            _ => None,
+        };
+        if let Some(c) = live {
+            let cr = Rect::from_min_max(to_screen(c.min), to_screen(c.max));
+            shade_outside(&p, shown, cr);
+            let corners = [cr.left_top(), cr.right_top(), cr.right_bottom(), cr.left_bottom(), cr.left_top()];
+            p.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.5, Color32::WHITE), 6.0, 4.0));
+            if self.drag.is_none() {
+                for h in render::box_handles(c) {
+                    let hr = Rect::from_center_size(to_screen(h), Vec2::splat(8.0));
+                    p.rect_filled(hr, 2.0, Color32::WHITE);
+                    p.rect_stroke(hr, 2.0, Stroke::new(1.0, Color32::from_black_alpha(90)), StrokeKind::Outside);
                 }
-                at.x = at.x.clamp(area.left() + 4.0, area.right() - g.size().x - 28.0);
-                let hr = Rect::from_min_size(at, g.size() + Vec2::new(24.0, 12.0));
-                p.rect_filled(hr, hr.height() / 2.0, POPOVER());
-                p.rect_stroke(hr, hr.height() / 2.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
-                p.galley(hr.center() - g.size() / 2.0, g, TEXT());
-            } else if let Some(c) = self.doc.crop {
-                let cr = Rect::from_min_max(to_screen(c.min), to_screen(c.max));
-                shade_outside(&p, shown, cr);
-                p.rect_stroke(cr, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
             }
+            tag(&p, cr.right_bottom() + Vec2::new(6.0, 6.0), &format!("{:.0} × {:.0}", c.width().round(), c.height().round()));
         }
 
         let resp = ui.interact(area, ui.scope_id().with("canvas"), Sense::click_and_drag());
@@ -844,8 +1119,24 @@ impl Editor {
             Pos2::new(q.x.clamp(view.min.x, view.max.x), q.y.clamp(view.min.y, view.max.y))
         };
 
+        // a drag that starts on the selected shape in a drawing tool moves or
+        // resizes it, as in Select; anywhere else it draws a new one
+        let draws = self.tool.drags() || self.tool == Tool::Pen;
+        if draws && resp.drag_started() {
+            self.grab = resp.interact_pointer_pos().map(at_img).is_some_and(|q| self.on_selected(q, scale));
+        }
+        if draws && resp.clicked() {
+            if let Some(q) = resp.interact_pointer_pos().map(at_img) {
+                let slack = 6.0 / scale;
+                self.selected = self.doc.marks.iter().rposition(|m| m.hit(q, slack));
+            }
+        }
+        if draws && !self.grab && hover.is_some_and(|h| self.on_selected(at_img(h), scale)) {
+            ctx.set_cursor_icon(egui::CursorIcon::Move);
+        }
+        let grab = self.grab;
         // dragging out shapes
-        if self.tool.drags() {
+        if self.tool.drags() && !grab {
             if resp.drag_started() {
                 // only on the picture, not on the frame around it
                 if let Some(s) = resp.interact_pointer_pos().filter(|s| shown.contains(*s)) {
@@ -859,19 +1150,21 @@ impl Editor {
                 }
             }
             if let Some((a, b)) = self.drag {
-                self.draw_drag_preview(&p, a, b, &to_screen, scale, shown);
+                self.draw_drag_preview(&p, a, b, &to_screen, scale);
             }
             if resp.drag_stopped() {
                 if let Some((a, b)) = self.drag.take() {
                     self.finish_drag(a, b, ui.ctx());
                 }
             }
-            if hover.is_some() {
+            if hover.is_some_and(|h| !self.on_selected(at_img(h), scale)) {
                 ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
             }
         }
+        let alt = ctx.input(|i| i.modifiers.alt);
         match self.tool {
-            Tool::Select => self.select_tool(&resp, &at_img, ui.ctx(), scale),
+            Tool::Select => self.select_tool(&resp, &at_img, ui.ctx(), scale, alt),
+            _ if grab => self.select_tool(&resp, &at_img, ui.ctx(), scale, false),
             Tool::Pen => {
                 if resp.drag_started() {
                     if let Some(s) = resp.interact_pointer_pos().filter(|s| shown.contains(*s)) {
@@ -985,23 +1278,33 @@ impl Editor {
                 self.text = Some((at, s));
             }
         }
+        if resp.drag_stopped() {
+            self.grab = false;
+        }
+        // the bar on the selected shape, or on the picked area
+        let busy = self.drag.is_some() || self.moving.is_some() || self.resizing.is_some() || self.area_resize.is_some() || self.pen.is_some() || self.text.is_some();
+        if !busy {
+            if let Some(m) = self.selected.and_then(|i| self.doc.marks.get(i)).cloned() {
+                let b = m.bounds();
+                let anchor = Rect::from_min_max(to_screen(b.min), to_screen(b.max)).expand(6.0);
+                self.float_bar(ui, mark_pieces(&m), anchor, area, true);
+            } else if let (Tool::Select, Some(c)) = (self.tool, self.area) {
+                let anchor = Rect::from_min_max(to_screen(c.min), to_screen(c.max)).expand(6.0);
+                let acts: Vec<Piece> = AreaAct::ALL.iter().map(|a| Piece::Act(*a)).collect();
+                self.float_bar(ui, &acts, anchor, area, false);
+            }
+        }
         if self.ocr_busy {
             spinner(&p, Pos2::new(shown.right() - 16.0, shown.top() + 16.0), 7.0, ctx.input(|i| i.time), Color32::WHITE);
             crate::kit::glass::animate(&ctx);
         }
     }
 
-    fn draw_drag_preview(&self, p: &egui::Painter, a: Pos2, b: Pos2, to_screen: &dyn Fn(Pos2) -> Pos2, scale: f32, shown: Rect) {
+    fn draw_drag_preview(&self, p: &egui::Painter, a: Pos2, b: Pos2, to_screen: &dyn Fn(Pos2) -> Pos2, scale: f32) {
         let r = Rect::from_two_pos(a, b);
         let sr = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
         match self.tool {
-            Tool::Crop => {
-                shade_outside(p, shown, sr);
-                p.rect_stroke(sr, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
-                let (w, h) = (r.width().round(), r.height().round());
-                tag(p, sr.right_bottom() + Vec2::new(6.0, 6.0), &format!("{w:.0} × {h:.0}"));
-            }
-            Tool::Blur | Tool::Eraser | Tool::CopyText => {
+            Tool::Blur | Tool::Eraser => {
                 p.rect_filled(sr, 3.0, with_alpha(BLUE(), 0.16));
                 p.extend(egui::Shape::dashed_line(&[sr.left_top(), sr.right_top(), sr.right_bottom(), sr.left_bottom(), sr.left_top()], Stroke::new(1.5, ACCENT()), 5.0, 3.0));
             }
@@ -1017,7 +1320,7 @@ impl Editor {
         let r = Rect::from_two_pos(a, b);
         let c = self.color();
         Some(match self.tool {
-            Tool::Arrow => Mark::Arrow { a, b, color: c, width: self.width_px() },
+            Tool::Arrow => Mark::Arrow { a, b, color: c, width: self.width_px(), heads: self.heads },
             Tool::Rect => Mark::Rect { r, color: c, width: self.width_px() },
             Tool::Ellipse => Mark::Ellipse { r, color: c, width: self.width_px() },
             Tool::Highlight => Mark::Highlight { r, color: c },
@@ -1037,17 +1340,7 @@ impl Editor {
                     self.add(m);
                 }
             }
-            // picked, not applied: Enter crops, Esc or another drag replaces it
-            Tool::Crop => self.crop_pending = Some(r),
-            Tool::Blur | Tool::Eraser => {
-                let m = if self.tool == Tool::Blur { Mark::Blur { r, style: self.blur, boxes: vec![] } } else { Mark::Erase { r, boxes: vec![] } };
-                if self.cover == Cover::Text {
-                    self.run_ocr(Ocr::Mark(m), r, ctx);
-                } else {
-                    self.add(m);
-                }
-            }
-            Tool::CopyText => self.run_ocr(Ocr::Copy(r), r, ctx),
+            Tool::Blur | Tool::Eraser => self.cover_area(self.tool == Tool::Blur, r, ctx),
             _ => {}
         }
     }
@@ -1115,11 +1408,26 @@ impl Editor {
         Some((i, k))
     }
 
-    fn select_tool(&mut self, resp: &egui::Response, at_img: &dyn Fn(Pos2) -> Pos2, ctx: &egui::Context, scale: f32) {
+    /// `q` (image px) is on the selected mark or one of its handles.
+    fn on_selected(&self, q: Pos2, scale: f32) -> bool {
+        let Some(m) = self.selected.and_then(|i| self.doc.marks.get(i)) else { return false };
+        self.handle_at(q, scale).is_some() || m.hit(q, 6.0 / scale)
+    }
+
+    /// The picked area's handle under `q` (image px), if any.
+    fn area_handle_at(&self, q: Pos2, scale: f32) -> Option<usize> {
+        render::box_handles(self.area?).iter().position(|h| (*h - q).length() * scale <= 7.0)
+    }
+
+    /// Select: click a mark to select it, drag it to move, drag a handle to
+    /// resize; drag an empty spot (or ⌥-drag anywhere) to pick an area.
+    fn select_tool(&mut self, resp: &egui::Response, at_img: &dyn Fn(Pos2) -> Pos2, ctx: &egui::Context, scale: f32, alt: bool) {
         let slack = 6.0 / scale;
+        let picking = self.tool == Tool::Select;
         // handles first: they sit on or outside the mark's edge
         if let Some(h) = resp.hover_pos() {
-            if let Some((i, k)) = self.resizing.as_ref().map(|r| (r.0, r.1)).or_else(|| self.handle_at(at_img(h), scale)) {
+            let q = at_img(h);
+            if let Some((i, k)) = self.resizing.as_ref().map(|r| (r.0, r.1)).or_else(|| self.handle_at(q, scale)) {
                 let corner = self.doc.marks.get(i).is_some_and(|m| matches!(m, Mark::Arrow { .. }));
                 ctx.set_cursor_icon(match (corner, k) {
                     (true, _) => egui::CursorIcon::Crosshair,
@@ -1128,11 +1436,26 @@ impl Editor {
                     (_, 1 | 5) => egui::CursorIcon::ResizeVertical,
                     _ => egui::CursorIcon::ResizeHorizontal,
                 });
+            } else if let Some(k) = self.area_resize.map(|a| a.0).or_else(|| self.area_handle_at(q, scale).filter(|_| picking)) {
+                ctx.set_cursor_icon(match k {
+                    0 | 4 => egui::CursorIcon::ResizeNwSe,
+                    2 | 6 => egui::CursorIcon::ResizeNeSw,
+                    1 | 5 => egui::CursorIcon::ResizeVertical,
+                    _ => egui::CursorIcon::ResizeHorizontal,
+                });
+            } else if self.moving.is_some() || (!alt && self.doc.marks.iter().any(|m| m.hit(q, slack))) {
+                ctx.set_cursor_icon(egui::CursorIcon::Move);
+            } else if picking {
+                ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
             }
         }
         if resp.drag_started() {
-            if let Some((i, k)) = resp.interact_pointer_pos().and_then(|s| self.handle_at(at_img(s), scale)) {
-                self.resizing = Some((i, k, self.doc.marks[i].clone()));
+            if let Some(q) = resp.interact_pointer_pos().map(at_img) {
+                if let Some((i, k)) = self.handle_at(q, scale) {
+                    self.resizing = Some((i, k, self.doc.marks[i].clone()));
+                } else if let (true, Some(k), Some(a)) = (picking, self.area_handle_at(q, scale), self.area) {
+                    self.area_resize = Some((k, a));
+                }
             }
         }
         if let Some((i, k, orig)) = self.resizing.clone() {
@@ -1155,14 +1478,42 @@ impl Editor {
             }
             return;
         }
+        if let Some((k, orig)) = self.area_resize {
+            if let (true, Some(s)) = (resp.dragged() || resp.drag_stopped(), resp.interact_pointer_pos()) {
+                self.area = Some(render::resize_box(orig, k, at_img(s)));
+            }
+            if resp.drag_stopped() {
+                self.area_resize = None;
+            }
+            return;
+        }
         if resp.drag_started() || resp.clicked() {
             if let Some(s) = resp.interact_pointer_pos() {
                 let q = at_img(s);
-                self.selected = self.doc.marks.iter().rposition(|m| m.hit(q, slack));
+                let hit = if alt && picking { None } else { self.doc.marks.iter().rposition(|m| m.hit(q, slack)) };
+                self.selected = hit;
+                if picking {
+                    self.area = None;
+                }
                 if resp.drag_started() {
-                    if let Some(i) = self.selected {
-                        self.moving = Some((i, q, self.doc.marks[i].clone()));
+                    match hit {
+                        Some(i) => self.moving = Some((i, q, self.doc.marks[i].clone())),
+                        None if picking => self.drag = Some((q, q)),
+                        None => {}
                     }
+                }
+            }
+        }
+        // an area being dragged out
+        if picking {
+            if let (Some((a, _)), Some(s)) = (self.drag, resp.interact_pointer_pos()) {
+                if resp.dragged() || resp.drag_stopped() {
+                    self.drag = Some((a, at_img(s)));
+                }
+            }
+            if resp.drag_stopped() {
+                if let Some((a, b)) = self.drag.take() {
+                    self.pick_area(a, b);
                 }
             }
         }
@@ -1185,6 +1536,23 @@ impl Editor {
         }
     }
 
+    /// Keep a dragged-out area unless it's a click-sized one.
+    fn pick_area(&mut self, a: Pos2, b: Pos2) {
+        let r = Rect::from_two_pos(a, b);
+        self.area = (r.width() >= 3.0 || r.height() >= 3.0).then_some(r);
+        self.selected = None;
+    }
+
+    /// Nudge the picked area by `d` points (image px × px_per_pt), inside the picture.
+    fn nudge_area(&mut self, d: Vec2) {
+        let Some(a) = self.area else { return };
+        let full = Rect::from_min_size(Pos2::ZERO, Vec2::new(self.base.width() as f32, self.base.height() as f32));
+        let mut d = d * self.px_per_pt;
+        d.x = d.x.clamp(full.left() - a.left(), full.right() - a.right());
+        d.y = d.y.clamp(full.top() - a.top(), full.bottom() - a.bottom());
+        self.area = Some(a.translate(d));
+    }
+
     fn commit_text(&mut self) {
         if let Some((at, s)) = self.text.take() {
             let s = s.trim().to_string();
@@ -1204,21 +1572,31 @@ impl Editor {
         }
         let (cmd, shift) = ui.input(|i| (i.modifiers.command, i.modifiers.shift));
         let pressed = |k: Key| ui.input(|i| i.key_pressed(k));
+        let copy_event = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)));
+        let ctx = ui.ctx().clone();
+        let picked = self.area.is_some() && self.tool == Tool::Select;
+        let area_key = [(Key::Enter, AreaAct::Crop), (Key::O, AreaAct::CopyText), (Key::B, AreaAct::Blur), (Key::Delete, AreaAct::Erase), (Key::Backspace, AreaAct::Erase)].into_iter().find(|(k, _)| picked && !cmd && pressed(*k)).map(|(_, a)| a);
+        let nudge = [(Key::ArrowLeft, Vec2::new(-1.0, 0.0)), (Key::ArrowRight, Vec2::new(1.0, 0.0)), (Key::ArrowUp, Vec2::new(0.0, -1.0)), (Key::ArrowDown, Vec2::new(0.0, 1.0))].into_iter().find(|(k, _)| picked && pressed(*k)).map(|(_, d)| d);
         if cmd && pressed(Key::Z) {
             if shift {
                 self.redo();
             } else {
                 self.undo();
             }
-        } else if cmd && pressed(Key::C) || ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy))) {
+        } else if picked && (cmd && pressed(Key::C) || copy_event) {
+            self.area_act(AreaAct::Copy, &ctx);
+        } else if cmd && pressed(Key::C) || copy_event {
             self.requests.push(Request::Copy);
         } else if cmd && pressed(Key::S) {
             self.requests.push(Request::Save);
-        } else if pressed(Key::Enter) && self.crop_pending.is_some() {
-            self.apply_crop();
+        } else if let Some(a) = area_key {
+            self.area_act(a, &ctx);
+        } else if let Some(d) = nudge {
+            self.nudge_area(d * if shift { 10.0 } else { 1.0 });
         } else if pressed(Key::Escape) {
-            if self.crop_pending.is_some() {
-                self.crop_pending = None;
+            if self.area.is_some() {
+                self.area = None;
+                self.area_resize = None;
             } else if self.drag.is_some() || self.selected.is_some() {
                 self.drag = None;
                 self.selected = None;
@@ -1226,9 +1604,7 @@ impl Editor {
                 self.requests.push(Request::Close);
             }
         } else if (pressed(Key::Delete) || pressed(Key::Backspace)) && self.selected.is_some() {
-            let i = self.selected.take().unwrap();
-            self.push_undo();
-            self.doc.marks.remove(i);
+            self.delete_selected();
         } else if !cmd {
             for t in Tool::DRAW.iter().chain(Tool::MEASURE.iter()).chain(Tool::LOOK.iter()) {
                 if pressed(t.key()) {
@@ -1237,6 +1613,26 @@ impl Editor {
                 }
             }
         }
+    }
+}
+
+/// The sub bar's defaults for a drawing tool.
+fn tool_pieces(t: Tool) -> &'static [Piece] {
+    match t {
+        Tool::Arrow => &[Piece::Colors, Piece::Sep, Piece::Sizes, Piece::Sep, Piece::Heads],
+        Tool::Highlight => &[Piece::Colors],
+        _ => &[Piece::Colors, Piece::Sep, Piece::Sizes],
+    }
+}
+
+/// The bar on a selected mark.
+fn mark_pieces(m: &Mark) -> &'static [Piece] {
+    match m {
+        Mark::Arrow { .. } => &[Piece::Colors, Piece::Sep, Piece::Sizes, Piece::Sep, Piece::Heads, Piece::Sep, Piece::Delete],
+        Mark::Rect { .. } | Mark::Ellipse { .. } | Mark::Pen { .. } | Mark::Text { .. } | Mark::Step { .. } => &[Piece::Colors, Piece::Sep, Piece::Sizes, Piece::Sep, Piece::Delete],
+        Mark::Highlight { .. } => &[Piece::Colors, Piece::Sep, Piece::Delete],
+        Mark::Blur { .. } => &[Piece::BlurStyle, Piece::Sep, Piece::Delete],
+        Mark::Erase { .. } => &[Piece::Delete],
     }
 }
 
@@ -1249,13 +1645,24 @@ fn c32(c: Rgba8) -> Color32 {
 /// The editor's live view of a shape (the export uses `render`).
 fn draw_mark(p: &egui::Painter, m: &Mark, to_screen: &dyn Fn(Pos2) -> Pos2, scale: f32) {
     match m {
-        Mark::Arrow { a, b, color, width } => {
+        Mark::Arrow { a, b, color, width, heads } => {
             let w = width * scale;
-            let end = render::shaft_end(*a, *b, *width);
-            p.line_segment([to_screen(*a), to_screen(end)], Stroke::new(w, c32(*color)));
-            p.circle_filled(to_screen(*a), w / 2.0, c32(*color));
-            let head: Vec<Pos2> = render::arrow_head(*a, *b, *width).iter().map(|q| to_screen(*q)).collect();
-            p.add(egui::Shape::convex_polygon(head, c32(*color), Stroke::new(w * 0.6, c32(*color))));
+            let end = if *heads == Heads::None { *b } else { render::shaft_end(*a, *b, *width) };
+            let start = if *heads == Heads::Both { render::shaft_end(*b, *a, *width) } else { *a };
+            p.line_segment([to_screen(start), to_screen(end)], Stroke::new(w, c32(*color)));
+            // round caps, as in the export
+            for q in [start, end] {
+                p.circle_filled(to_screen(q), w / 2.0, c32(*color));
+            }
+            let tips: &[(Pos2, Pos2)] = match heads {
+                Heads::End => &[(*a, *b)],
+                Heads::Both => &[(*a, *b), (*b, *a)],
+                Heads::None => &[],
+            };
+            for (from, to) in tips {
+                let head: Vec<Pos2> = render::arrow_head(*from, *to, *width).iter().map(|q| to_screen(*q)).collect();
+                p.add(egui::Shape::convex_polygon(head, c32(*color), Stroke::new(w * 0.6, c32(*color))));
+            }
         }
         Mark::Rect { r, color, width } => {
             let sr = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
@@ -1453,12 +1860,6 @@ mod tests {
         e.tool = Tool::Blur;
         e.finish_drag(Pos2::new(10.0, 10.0), Pos2::new(1.0, 1.0), &ctx);
         assert!(matches!(&e.doc.marks[1], Mark::Blur { boxes, .. } if boxes.is_empty()));
-        e.tool = Tool::Crop;
-        e.finish_drag(Pos2::new(150.0, 80.0), Pos2::new(50.0, 20.0), &ctx);
-        assert_eq!(e.doc.crop, None, "a crop drag only picks the area");
-        e.apply_crop();
-        assert_eq!(e.doc.crop, Some(Rect::from_min_max(Pos2::new(50.0, 20.0), Pos2::new(150.0, 80.0))));
-        assert_eq!(e.rendered().dimensions(), (100, 60));
         // a click without a drag adds nothing
         let n = e.doc.marks.len();
         e.tool = Tool::Rect;
@@ -1515,5 +1916,77 @@ mod tests {
         e.resizing = Some((0, 4, e.doc.marks[0].clone()));
         e.undo();
         assert!(e.resizing.is_none() && e.doc.marks.is_empty());
+    }
+
+    #[test]
+    fn a_new_shape_is_selected_and_its_bar_edits_it() {
+        let mut e = ed();
+        let ctx = egui::Context::default();
+        e.tool = Tool::Arrow;
+        e.finish_drag(Pos2::new(10.0, 10.0), Pos2::new(100.0, 50.0), &ctx);
+        assert_eq!(e.selected, Some(0), "selected right away, still in Arrow");
+        assert_eq!(e.tool, Tool::Arrow);
+        assert_eq!(mark_pieces(&e.doc.marks[0]), &[Piece::Colors, Piece::Sep, Piece::Sizes, Piece::Sep, Piece::Heads, Piece::Sep, Piece::Delete]);
+        e.stroke = 3;
+        e.resize_selected();
+        e.edit_selected(|m| {
+            if let Mark::Arrow { heads, .. } = m {
+                *heads = Heads::Both;
+            }
+        });
+        assert!(matches!(e.doc.marks[0], Mark::Arrow { width, heads: Heads::Both, .. } if width == STROKES[3] * 2.0));
+        assert_eq!(e.size_of(&e.doc.marks[0]), Some(3));
+        e.undo();
+        assert!(matches!(e.doc.marks[0], Mark::Arrow { heads: Heads::End, .. }), "each change is one undo step");
+        // the bar's delete
+        e.selected = Some(0);
+        e.delete_selected();
+        assert!(e.doc.marks.is_empty() && e.selected.is_none());
+    }
+
+    #[test]
+    fn new_arrows_take_the_last_heads() {
+        let mut e = ed();
+        let ctx = egui::Context::default();
+        e.tool = Tool::Arrow;
+        e.heads = Heads::None;
+        e.finish_drag(Pos2::new(10.0, 10.0), Pos2::new(100.0, 50.0), &ctx);
+        assert!(matches!(e.doc.marks[0], Mark::Arrow { heads: Heads::None, .. }));
+    }
+
+    #[test]
+    fn an_area_crops_copies_and_covers() {
+        let mut e = ed();
+        let ctx = egui::Context::default();
+        assert_eq!(e.tool, Tool::Select, "opens in Select");
+        e.pick_area(Pos2::new(5.0, 5.0), Pos2::new(6.0, 6.0));
+        assert_eq!(e.area, None, "a click picks nothing");
+        e.pick_area(Pos2::new(150.0, 80.0), Pos2::new(50.0, 20.0));
+        e.area_act(AreaAct::Copy, &ctx);
+        assert!(matches!(e.requests.last(), Some(Request::CopyPart(img)) if img.dimensions() == (100, 60)));
+        assert_eq!(e.area, None, "acting clears the area");
+        assert_eq!(e.doc.crop, None, "copying the area doesn't crop");
+        e.pick_area(Pos2::new(10.0, 10.0), Pos2::new(40.0, 30.0));
+        e.area_act(AreaAct::Blur, &ctx);
+        assert!(matches!(&e.doc.marks[0], Mark::Blur { r, boxes, .. } if boxes.is_empty() && r.width() == 30.0));
+        assert_eq!(e.selected, Some(0), "the blur stays editable");
+        e.pick_area(Pos2::new(150.0, 80.0), Pos2::new(50.0, 20.0));
+        e.area_act(AreaAct::Crop, &ctx);
+        assert_eq!(e.doc.crop, Some(Rect::from_min_max(Pos2::new(50.0, 20.0), Pos2::new(150.0, 80.0))));
+        assert_eq!(e.rendered().dimensions(), (100, 60));
+        e.undo();
+        assert_eq!(e.doc.crop, None);
+    }
+
+    #[test]
+    fn nudging_keeps_the_area_on_the_picture() {
+        let mut e = ed();
+        e.pick_area(Pos2::new(10.0, 10.0), Pos2::new(40.0, 30.0));
+        e.nudge_area(Vec2::new(1.0, 0.0));
+        assert_eq!(e.area.unwrap().min, Pos2::new(12.0, 10.0), "1 pt = 2 px here");
+        e.nudge_area(Vec2::new(-100.0, -100.0));
+        assert_eq!(e.area.unwrap().min, Pos2::ZERO);
+        e.set_tool(Tool::Rect);
+        assert_eq!(e.area, None, "another tool drops the area");
     }
 }
