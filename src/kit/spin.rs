@@ -246,7 +246,7 @@ mod native {
         hub: Retained<AnyObject>,
         /// What was set last, to touch only what changed.
         frame: Option<(Rect, Pos2, f32)>,
-        colors: Option<(Color32, Color32, Color32)>,
+        colors: Option<(Color32, Color32, Color32, *const AnyObject)>,
         turn: Option<Turn>,
         hidden: bool,
     }
@@ -259,10 +259,32 @@ mod native {
         NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))
     }
 
-    fn cg_color(c: Color32) -> *const c_void {
+    /// `c` as egui shows it. egui's surface is untagged, so its bytes land on
+    /// the display as they are: tag them with the window's own colour space
+    /// (Display P3 when unknown), not sRGB, or the native blades look paler.
+    fn ns_color(c: Color32, space: Option<&AnyObject>) -> Retained<AnyObject> {
         let [r, g, b, a] = c.to_srgba_unmultiplied();
-        let ns = objc2_app_kit::NSColor::colorWithSRGBRed_green_blue_alpha(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0, a as f64 / 255.0);
-        unsafe { msg_send![&*ns, CGColor] }
+        let comps = [r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0, a as f64 / 255.0];
+        unsafe {
+            match space {
+                Some(s) => msg_send![class!(NSColor), colorWithColorSpace: s, components: comps.as_ptr(), count: 4isize],
+                None => msg_send![class!(NSColor), colorWithDisplayP3Red: comps[0], green: comps[1], blue: comps[2], alpha: comps[3]],
+            }
+        }
+    }
+
+    /// Set `layer`'s colour `sel` (fill or stroke) to `c`.
+    fn set_color(layer: &AnyObject, stroke: bool, c: Color32, space: Option<&AnyObject>) {
+        // the NSColor owns the CGColor: keep it alive across the set
+        let ns = ns_color(c, space);
+        unsafe {
+            let cg: *const c_void = msg_send![&*ns, CGColor];
+            if stroke {
+                let _: () = msg_send![layer, setStrokeColor: cg];
+            } else {
+                let _: () = msg_send![layer, setFillColor: cg];
+            }
+        }
     }
 
     fn set_path(layer: &AnyObject, path: *mut c_void) {
@@ -311,8 +333,8 @@ mod native {
         l
     }
 
-    /// The view's root layer for viewport `id`, and its window's scale.
-    fn root_of(id: egui::ViewportId) -> Option<(Retained<AnyObject>, f64)> {
+    /// The view's root layer for viewport `id`, its window's scale and colour space.
+    fn root_of(id: egui::ViewportId) -> Option<(Retained<AnyObject>, f64, Option<Retained<AnyObject>>)> {
         let view = eframe::viewport_ns_view(id)? as *const AnyObject;
         unsafe {
             let view: &AnyObject = view.as_ref()?;
@@ -322,7 +344,11 @@ mod native {
                 Some(w) => msg_send![&**w, backingScaleFactor],
                 None => 2.0,
             };
-            Some((layer?, scale))
+            let space: Option<Retained<AnyObject>> = match &window {
+                Some(w) => msg_send![&**w, colorSpace],
+                None => None,
+            };
+            Some((layer?, scale, space))
         }
     }
 
@@ -351,7 +377,8 @@ mod native {
     /// layer waits a pass, None if the window can't be reached.
     #[allow(clippy::too_many_arguments)]
     pub fn show(id: egui::ViewportId, key: &str, clip: Rect, c: Pos2, r: f32, color: Color32, hub: Color32, turn: Turn) -> Option<bool> {
-        let (root, scale) = root_of(id)?;
+        let (root, scale, space) = root_of(id)?;
+        let space_ptr: *const AnyObject = space.as_deref().map_or(std::ptr::null(), |s| s as *const AnyObject);
         let root_ptr: *const AnyObject = &*root;
         LAYERS.with(|all| {
             let mut all = all.borrow_mut();
@@ -398,9 +425,13 @@ mod native {
                     const MAX_Y: u32 = 1 << 5;
                     let _: () = msg_send![&*b.container, setAutoresizingMask: MIN_X | if flipped { MAX_Y } else { MIN_Y }];
                     let _: () = msg_send![&*b.container, setFrame: ns_rect(clip.min.x as f64, y, clip.width() as f64, clip.height() as f64)];
-                    let local = ns_rect((c.x - r - clip.min.x) as f64, (c.y - r - clip.min.y) as f64, (r * 2.0) as f64, (r * 2.0) as f64);
+                    // bounds + position, never frame: frame on a turned layer
+                    // is its rotated bounding box and drifts off the dial
+                    let side = (r * 2.0) as f64;
+                    let mid = NSPoint::new((c.x - clip.min.x) as f64, (c.y - clip.min.y) as f64);
                     for l in [&b.blades, &b.hub] {
-                        let _: () = msg_send![&**l, setFrame: local];
+                        let _: () = msg_send![&**l, setBounds: ns_rect(0.0, 0.0, side, side)];
+                        let _: () = msg_send![&**l, setPosition: mid];
                     }
                     if fresh_path {
                         set_path(&b.blades, blades_path(r));
@@ -409,11 +440,13 @@ mod native {
                     b.frame = Some(frame);
                 }
                 let edge = crate::kit::glass::white(46);
-                if b.colors != Some((color, hub, edge)) {
-                    let _: () = msg_send![&*b.blades, setFillColor: cg_color(color)];
-                    let _: () = msg_send![&*b.hub, setFillColor: cg_color(hub)];
-                    let _: () = msg_send![&*b.hub, setStrokeColor: cg_color(edge)];
-                    b.colors = Some((color, hub, edge));
+                // a window moved to another screen gets new colours too
+                if b.colors != Some((color, hub, edge, space_ptr)) {
+                    let sp = space.as_deref();
+                    set_color(&b.blades, false, color, sp);
+                    set_color(&b.hub, false, hub, sp);
+                    set_color(&b.hub, true, edge, sp);
+                    b.colors = Some((color, hub, edge, space_ptr));
                 }
                 if b.turn != Some(turn) {
                     set_turn(&b.blades, turn);
