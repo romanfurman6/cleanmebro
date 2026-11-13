@@ -1042,8 +1042,12 @@ fn install_fonts(ctx: &egui::Context) {
     ctx.all_styles_mut(|s| {
         s.visuals.panel_fill = Color32::TRANSPARENT;
         s.visuals.window_fill = glass::BG();
-        s.spacing.scroll.bar_width = 6.0;
+        // one scroll bar everywhere: slim, floating, in a gutter the content
+        // leaves free, so even hovered it never sits on a row or button
+        s.spacing.scroll.bar_width = glass::sp::SCROLL_BAR_W;
         s.spacing.scroll.floating = true;
+        s.spacing.scroll.floating_allocated_width = glass::sp::SCROLL_GUTTER;
+        s.spacing.scroll.bar_outer_margin = (glass::sp::SCROLL_GUTTER - glass::sp::SCROLL_BAR_W) / 2.0;
         s.visuals.widgets.noninteractive.fg_stroke.color = TEXT();
     });
 }

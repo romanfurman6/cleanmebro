@@ -100,7 +100,7 @@ pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendati
         let h = super::devices_ui::settings_height(&s);
         let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-settings-page"));
         ScrollArea::vertical().id_salt("health-set-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
-            let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h + 2.0 * sp::L), Sense::hover());
+            let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 2.0 * sp::L), Sense::hover());
             let sr = Rect::from_min_size(Pos2::new(area.left() + sp::PAGE_EDGE, area.top() + sp::L), Vec2::new(w, h));
             let mut sui = ui.new_child(UiBuilder::new().max_rect(sr).id_salt("health-set-sec"));
             dev_action = super::devices_ui::settings(&mut sui, sr, &s);
@@ -111,7 +111,7 @@ pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendati
         let total_h = if fits { (body.height() - 2.0 * sp::L).max(BENTO_MIN_H) } else { 6.0 * 250.0 + 5.0 * sp::L };
         let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt("health-page"));
         ScrollArea::vertical().id_salt("health-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
-            let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), total_h + 2.0 * sp::L), Sense::hover());
+            let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), total_h + 2.0 * sp::L), Sense::hover());
             let g = Rect::from_min_size(Pos2::new(inner.left(), area.top() + sp::L), Vec2::new(inner.width(), total_h));
             let rects: [Rect; 6] = if fits {
                 let unit = (g.width() - 2.0 * sp::L) / 3.4;

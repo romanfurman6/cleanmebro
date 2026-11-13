@@ -309,7 +309,7 @@ fn settings_page(d: &mut Dictation, ui: &mut Ui, body: Rect, cx: &mut Cx) {
         let colw = (body.width() - 48.0 - gap) / 2.0;
         // the Speaking card, then Words, which grows with the list
         let left_h = 16.0 + 28.0 + 4.0 * ROW_H + 8.0 + 28.0 + 28.0 + words_card_h(ui.painter(), &d.settings.words, colw) + 24.0;
-        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), left_h.max(520.0)), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), left_h.max(520.0)), Sense::hover());
         let p = ui.painter().clone();
         let x0 = area.left() + 24.0;
         let mut changed = left_col(d, ui, &p, Rect::from_min_size(Pos2::new(x0, area.top() + 16.0), Vec2::new(colw, area.height())));
