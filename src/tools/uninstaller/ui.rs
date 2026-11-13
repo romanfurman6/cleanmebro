@@ -186,7 +186,12 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         (_, Phase::Sizing { done, total: t }) => format!("{n_apps} apps · measuring {done} of {t}…"),
         _ => format!("{n_apps} apps · {} · drop any app on this window to remove it", human_bytes(total)),
     };
-    let btns = page_header(&p, r, "Uninstaller", &sub, TEXT_DIM());
+    // AI Check: a chip after the title, on Leftovers
+    let ai_data = u.tab == Tab::Leftovers && orphan_bytes > 0;
+    let cw = if u.tab == Tab::Leftovers { aicheck::ui::chip_width(&u.ai, ui, ai_data) } else { 0.0 };
+    // the status ends before "Startup items" and the tabs
+    let sub_right = r.right() - sp::PAGE_EDGE - 260.0 - 16.0 - 100.0;
+    let (btns, chip_at) = page_header_room(&p, r, "Uninstaller", &sub, TEXT_DIM(), cw, sub_right);
     let labels_owned = [
         "Apps".to_string(),
         if orphan_bytes > 0 { format!("Leftovers · {}", human_bytes(orphan_bytes)) } else { "Leftovers".into() },
@@ -208,7 +213,7 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     match u.tab {
         Tab::Apps => apps_tab(u, ui, body),
-        Tab::Leftovers => leftovers_tab(u, ui, body),
+        Tab::Leftovers => leftovers_tab(u, ui, body, chip_at),
     }
 
     // a drop on the window
@@ -784,26 +789,21 @@ fn short_path(s: &str) -> String {
 
 // ---------------------------------------------------------------- Leftovers
 
-fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect) {
+fn leftovers_tab(u: &mut Uninstaller, ui: &mut Ui, body: Rect, chip_at: Pos2) {
     let p = ui.painter().clone();
     let (orphans, phase) = {
         let g = u.st.lock_ok();
         (g.orphans.clone(), g.phase)
     };
-    // AI Check: a strip on top
     let x1 = body.right() - 24.0;
     let mut y = body.top() + 16.0;
     {
-        let strip_at = Rect::from_min_max(Pos2::new(body.left() + 24.0, y), Pos2::new(x1, body.bottom() - 20.0));
-        let offer = format!("Leftovers of {}", plural_n(orphans.len(), "removed app"));
         if !orphans.is_empty() {
             let scan = format!("{}:{}", orphans.len(), orphans.iter().map(|o| o.bytes()).sum::<u64>());
             let now = u.now();
             u.ai.auto(ui.ctx(), &scan, || leftovers_ask(now, &orphans));
         }
-        let (aih, aiev) = aicheck::ui::strip(&mut u.ai, ui, strip_at, &offer, !orphans.is_empty());
-        y += aih;
-        match aiev {
+        match aicheck::ui::chip(&mut u.ai, ui, chip_at, !orphans.is_empty()) {
             Some(Event::Start) => {
                 let ask = leftovers_ask(u.now(), &orphans);
                 u.ai.start(ui.ctx(), ask);
@@ -1357,7 +1357,6 @@ pub mod demo {
                 let t = u.st.lock_ok().apps.iter().find(|a| a.name == "Docker").unwrap().target(true);
                 u.review = Some(Review { targets: vec![t], open: [0].into() });
             }
-            "uninstaller-leftovers" => u.tab = Tab::Leftovers,
             _ => return None,
         }
         Some(View::Page)

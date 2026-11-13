@@ -395,7 +395,6 @@ impl App {
                     self.detail = None;
                     self.reshape(ctx);
                 }
-                Action::OpenSettings { tools } => self.open_settings(ctx, tools),
                 Action::HidePanel => {
                     if self.mode == Mode::Panel && self.visible && self.screenshot.is_none() {
                         self.hide(ctx);

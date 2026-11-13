@@ -1,15 +1,18 @@
-//! The AI Check strip: one row across the top of a tool's page (sparkle,
-//! "AI Check", what's going on, one button), and under it, once checked,
-//! one row per recommendation. No card; a hairline closes it. It shows only
-//! when the tool has found something and the main agent can be used.
+//! AI Check as a chip in the page header, after the title: "Check with
+//! Claude" before a check, "Checking… Stop" while it runs, "3 tips" (or "All
+//! good") after. Clicking the tips chip opens a popover with one row per
+//! recommendation. The page itself never moves. The chip shows only when the
+//! tool has found something, the main agent can run and the page isn't locked.
 
 use super::{Check, Phase, Rec};
 use crate::kit::agent::Agent;
 use crate::kit::glass::*;
-use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 
-const HEAD_H: f32 = 40.0;
-const ROW_H: f32 = 44.0;
+const CHIP_H: f32 = 26.0;
+const POP_W: f32 = 560.0;
+const POP_HEAD_H: f32 = 44.0;
+const POP_ROW_H: f32 = 58.0;
 
 /// What the person pressed.
 #[derive(Clone, Debug, PartialEq)]
@@ -20,99 +23,155 @@ pub enum Event {
     Act(Rec),
 }
 
-/// Whether the strip shows: the tool found something to look at and the
-/// main agent can be used (screenshots: always).
 /// Not on a locked page (a missing permission disables it), and only once the
-/// tool has something to check and the main agent can run.
+/// tool has something to check and the main agent can run (screenshots: always).
 pub fn shown(c: &Check, ui: &Ui, has_data: bool) -> bool {
     ui.is_enabled() && (c.demo || (has_data && crate::kit::agent::main().ready()))
 }
 
-/// Draw the strip at the top of `body` when it shows. Returns the height it
-/// took (0 when hidden), the gap under it included, and what was pressed.
-/// `offer` says what there is to check ("12 removed apps").
-pub fn strip(c: &mut Check, ui: &mut Ui, body: Rect, offer: &str, has_data: bool) -> (f32, Option<Event>) {
+fn agent_of(c: &Check) -> Agent {
+    if c.demo { Agent::Claude } else { crate::kit::agent::main() }
+}
+
+/// The chip's text for the current phase.
+fn chip_label(c: &Check) -> String {
+    match c.phase() {
+        Phase::Idle => format!("Check with {}", agent_of(c).name()),
+        Phase::Running => "Checking…".into(),
+        Phase::Failed(_) => "Check failed".into(),
+        Phase::Done => match c.recs().len() {
+            0 => "All good".into(),
+            1 => "1 tip".into(),
+            n => format!("{n} tips"),
+        },
+    }
+}
+
+/// Width the chip takes in the header (0 when it doesn't show): pass it to
+/// [`page_header_room`], then draw it with [`chip`] at the point that returns.
+pub fn chip_width(c: &Check, ui: &Ui, has_data: bool) -> f32 {
+    if !shown(c, ui, has_data) {
+        return 0.0;
+    }
+    let p = ui.painter();
+    let mut w = 10.0 + 14.0 + 6.0 + p.layout_no_wrap(chip_label(c), bold(12.0), TEXT()).size().x + 12.0;
+    if c.phase() == Phase::Running {
+        w += 8.0 + p.layout_no_wrap("Stop".into(), font(12.0), TEXT()).size().x;
+    }
+    w
+}
+
+/// The chip, its left edge centred on `at`, and its popover when open.
+pub fn chip(c: &mut Check, ui: &mut Ui, at: Pos2, has_data: bool) -> Option<Event> {
     if !shown(c, ui, has_data) {
         c.hovered = None;
-        return (0.0, None);
+        c.open = false;
+        return None;
     }
+    let ctx = ui.ctx().clone();
     let p = ui.painter().clone();
     let ai = tint::HEALTH();
-    let agent = if c.demo { Agent::Claude } else { crate::kit::agent::main() };
     let phase = c.phase();
-    let recs = if phase == Phase::Done { c.recs() } else { vec![] };
-    let (x0, x1) = (body.left(), body.right());
-    let head = Rect::from_min_size(body.min, Vec2::new(body.width(), HEAD_H));
-    let cy = head.center().y;
+    let w = chip_width(c, ui, has_data);
+    let r = Rect::from_min_size(Pos2::new(at.x, at.y - CHIP_H / 2.0), Vec2::new(w, CHIP_H));
+    let id = ui.scope_id().with(("ai-chip", c.tool));
+    let resp = ui.interact(r, id, Sense::click());
+    let h = ctx.animate_bool(id.with("h"), resp.hovered());
+    let filled = matches!(phase, Phase::Done) && !c.recs().is_empty() || c.open;
+    let fill = if filled { with_alpha(ai, 0.12 + 0.06 * h) } else { white((8.0 * h) as u8) };
+    p.rect_filled(r, CHIP_H / 2.0, fill);
+    p.rect_stroke(r, CHIP_H / 2.0, Stroke::new(1.0, with_alpha(ai, if filled { 0.45 } else { 0.3 })), StrokeKind::Inside);
+    let gx = r.left() + 10.0 + 7.0;
+    if phase == Phase::Running {
+        spinner(&p, Pos2::new(gx, r.center().y), 5.5, ui.input(|i| i.time), ai);
+        animate(&ctx);
+    } else if phase == Phase::Idle {
+        agent_mark(&p, Rect::from_center_size(Pos2::new(gx, r.center().y), Vec2::splat(12.0)), agent_of(c), None);
+    } else {
+        sparkle(&p, Pos2::new(gx, r.center().y), 14.0, if matches!(phase, Phase::Failed(_)) { AMBER() } else { ai });
+    }
+    let t = p.text(Pos2::new(gx + 7.0 + 6.0, r.center().y), Align2::LEFT_CENTER, chip_label(c), bold(12.0), TEXT());
+    if phase == Phase::Running {
+        p.text(Pos2::new(t.right() + 8.0, r.center().y), Align2::LEFT_CENTER, "Stop", font(12.0), if resp.hovered() { TEXT() } else { TEXT_DIM() });
+    }
+    if resp.hovered() {
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
     let mut ev = None;
-
-    sparkle(&p, Pos2::new(x0 + 7.0, cy), 14.0, ai);
-    let t = p.text(Pos2::new(x0 + 22.0, cy), Align2::LEFT_CENTER, "AI Check", ty::title(), TEXT());
-
-    // the one control on the right
-    let right;
-    match &phase {
-        Phase::Idle | Phase::Failed(_) => {
-            let label = format!("Check with {}", agent.name());
-            let bw = button_width(&p, &label, BTN_SECONDARY) + 18.0;
-            let r = Rect::from_min_size(Pos2::new(x1 - bw, cy - sp::CONTROL_H / 2.0), Vec2::new(bw, sp::CONTROL_H));
-            if pill_button(ui, r, &format!("     {label}"), BTN_SECONDARY, true).clicked() {
-                ev = Some(Event::Start);
-            }
-            let tw = p.layout_no_wrap(label, bold(13.0), TEXT()).size().x;
-            agent_mark(&p, Rect::from_center_size(Pos2::new(r.center().x - tw / 2.0 - 4.0, cy), Vec2::splat(12.0)), agent, None);
-            right = r.left();
-        }
-        Phase::Running => {
-            let w = p.layout_no_wrap("Stop".into(), ty::body(), TEXT()).size().x;
-            let r = Rect::from_min_size(Pos2::new(x1 - w, cy - 10.0), Vec2::new(w, 20.0));
-            if ghost(ui, r, "Stop") {
-                c.stop();
-            }
-            right = r.left();
-        }
-        Phase::Done => {
-            let w = p.layout_no_wrap("Check again".into(), ty::body(), TEXT()).size().x;
-            let r = Rect::from_min_size(Pos2::new(x1 - w, cy - 10.0), Vec2::new(w, 20.0));
-            if ghost(ui, r, "Check again") {
-                ev = Some(Event::Start);
-            }
-            right = r.left();
+    if resp.clicked() {
+        match phase {
+            Phase::Idle => ev = Some(Event::Start),
+            Phase::Running => c.stop(),
+            Phase::Done | Phase::Failed(_) => c.open = !c.open,
         }
     }
-
-    // what's going on, between the title and the control
-    let mut mx = t.right() + sp::M;
-    let (line, col) = match &phase {
-        Phase::Idle => (offer.to_string(), TEXT_DIM()),
-        Phase::Running => {
-            spinner(&p, Pos2::new(mx + 6.0, cy), 6.0, ui.input(|i| i.time), ai);
-            mx += 20.0;
-            animate(ui.ctx());
-            (format!("{} is checking…", agent.name()), TEXT_DIM())
-        }
-        Phase::Failed(e) => (e.clone(), AMBER()),
-        Phase::Done => {
-            let h = c.headline();
-            (if recs.is_empty() && h.is_empty() { "All good here".to_string() } else { h }, TEXT_DIM())
-        }
-    };
-    if !line.is_empty() && right - sp::M > mx {
-        text_fit(&p, Pos2::new(mx, cy), Align2::LEFT_CENTER, &line, ty::body(), col, right - sp::M - mx);
-    }
-
-    // recommendations, one row each
-    c.hovered = None;
-    let mut y = head.bottom();
-    for r in &recs {
-        let rr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(body.width(), ROW_H));
-        if let Some(e) = rec_row(c, ui, rr, r) {
+    if c.open && matches!(phase, Phase::Done | Phase::Failed(_)) {
+        if let Some(e) = popover(c, ui, r) {
             ev = Some(e);
         }
-        y += ROW_H;
+    } else {
+        c.open = false;
+        c.hovered = None;
     }
-    hairline(&p, Pos2::new(x0, y), Pos2::new(x1, y));
-    (y - body.top() + sp::L, ev)
+    ev
+}
+
+/// The recommendations under the chip, above the page. Closes on a click
+/// outside it or Escape.
+fn popover(c: &mut Check, ui: &mut Ui, chip: Rect) -> Option<Event> {
+    let ctx = ui.ctx().clone();
+    let screen = ctx.content_rect();
+    let phase = c.phase();
+    let recs = if phase == Phase::Done { c.recs() } else { vec![] };
+    let w = POP_W.min(screen.width() - 2.0 * sp::L);
+    let h = POP_HEAD_H + recs.len().max(if recs.is_empty() { 0 } else { 1 }) as f32 * POP_ROW_H;
+    let x = chip.left().min(screen.right() - sp::L - w).max(screen.left() + sp::L);
+    let rect = Rect::from_min_size(Pos2::new(x, chip.bottom() + 6.0), Vec2::new(w, h));
+    let mut ev = None;
+    let area = egui::Area::new(ui.scope_id().with(("ai-pop", c.tool))).order(egui::Order::Foreground).fixed_pos(rect.min).show(&ctx, |ui| {
+        let (rr, _) = ui.allocate_exact_size(rect.size(), Sense::click());
+        let p = ui.painter().clone();
+        p.rect_filled(rr.translate(Vec2::new(0.0, 8.0)).expand(6.0), 16.0, Color32::from_black_alpha(70));
+        p.rect_filled(rr, 12.0, POPOVER());
+        p.rect_stroke(rr, 12.0, Stroke::new(1.0, white(30)), StrokeKind::Inside);
+        // header: sparkle, AI Check, the headline (or the error), Check again
+        let cy = rr.top() + POP_HEAD_H / 2.0;
+        sparkle(&p, Pos2::new(rr.left() + 14.0 + 7.0, cy), 14.0, tint::HEALTH());
+        let t = p.text(Pos2::new(rr.left() + 14.0 + 20.0, cy), Align2::LEFT_CENTER, "AI Check", ty::title(), TEXT());
+        let again = if matches!(phase, Phase::Failed(_)) { "Try again" } else { "Check again" };
+        let aw = p.layout_no_wrap(again.into(), ty::body(), TEXT()).size().x;
+        let ar = Rect::from_min_size(Pos2::new(rr.right() - 14.0 - aw, cy - 10.0), Vec2::new(aw, 20.0));
+        if ghost(ui, ar, again) {
+            ev = Some(Event::Start);
+        }
+        let (line, col) = match &phase {
+            Phase::Failed(e) => (e.clone(), AMBER()),
+            _ => {
+                let hl = c.headline();
+                (if recs.is_empty() && hl.is_empty() { "Nothing to do here".to_string() } else { hl }, TEXT_DIM())
+            }
+        };
+        text_fit(&p, Pos2::new(t.right() + sp::M, cy), Align2::LEFT_CENTER, &line, ty::body(), col, ar.left() - sp::M - t.right() - sp::M);
+        c.hovered = None;
+        let mut y = rr.top() + POP_HEAD_H;
+        for r in &recs {
+            let row = Rect::from_min_size(Pos2::new(rr.left(), y), Vec2::new(rr.width(), POP_ROW_H));
+            if let Some(e) = rec_row(c, ui, row, r) {
+                ev = Some(e);
+            }
+            y += POP_ROW_H;
+        }
+    });
+    // close on a click elsewhere (the chip toggles itself) or Escape
+    let clicked_out = ctx.input(|i| i.pointer.any_pressed()) && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|pos| !area.response.rect.contains(pos) && !chip.contains(pos));
+    if clicked_out || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        c.open = false;
+        c.hovered = None;
+    }
+    if let Some(Event::Act(_)) = ev {
+        c.open = false;
+    }
+    ev
 }
 
 /// The agent's mark: Claude's orange burst, Codex's prompt square.
@@ -151,21 +210,21 @@ fn ghost(ui: &mut Ui, r: Rect, label: &str) -> bool {
     resp.clicked()
 }
 
-/// One recommendation on one line under a hairline: icon, title, why
-/// (dim), value, its button and Skip.
+/// One recommendation under a hairline: icon, title and value on the first
+/// line, why under it, then its button and Skip.
 fn rec_row(c: &mut Check, ui: &mut Ui, rr: Rect, r: &Rec) -> Option<Event> {
     let p = ui.painter().clone();
     let cy = rr.center().y;
     hairline(&p, rr.left_top(), rr.right_top());
     if ui.rect_contains_pointer(rr) {
         c.hovered = Some(r.key.clone());
-        p.rect_filled(rr.shrink2(Vec2::new(0.0, 1.0)), R_SMALL, white(6));
+        p.rect_filled(rr.shrink2(Vec2::new(4.0, 2.0)), R_SMALL, white(7));
     }
-    let ic = Rect::from_center_size(Pos2::new(rr.left() + 12.0 + 4.0, cy), Vec2::splat(24.0));
+    let ic = Rect::from_center_size(Pos2::new(rr.left() + 14.0 + 12.0, cy), Vec2::splat(24.0));
     rec_icon(c, ui.ctx(), &p, ic, r);
-    // right to left: Skip, the button, the value
+    // right to left: Skip, the button
     let sw = p.layout_no_wrap("Skip".into(), ty::body(), TEXT()).size().x;
-    let sr = Rect::from_min_size(Pos2::new(rr.right() - sp::S - sw, cy - 10.0), Vec2::new(sw, 20.0));
+    let sr = Rect::from_min_size(Pos2::new(rr.right() - 14.0 - sw, cy - 10.0), Vec2::new(sw, 20.0));
     if ghost(ui, sr, "Skip") {
         c.skip(r);
     }
@@ -175,18 +234,17 @@ fn rec_row(c: &mut Check, ui: &mut Ui, rr: Rect, r: &Rec) -> Option<Event> {
     if pill_button(ui, br, &r.label, BTN_PRIMARY, true).clicked() {
         ev = Some(Event::Act(r.clone()));
     }
-    let mut right = br.left() - sp::L;
-    if !r.value.is_empty() {
-        let v = p.text(Pos2::new(right, cy), Align2::RIGHT_CENTER, &r.value, ty::body(), TEXT());
-        right = v.left() - sp::L;
-    }
     let tx = ic.right() + sp::M;
-    let t = text_fit(&p, Pos2::new(tx, cy), Align2::LEFT_CENTER, &r.title, ty::title(), TEXT(), (right - tx).min(260.0));
-    if right > t.right() + sp::M + 40.0 {
-        let wr = text_fit(&p, Pos2::new(t.right() + sp::M, cy), Align2::LEFT_CENTER, &r.why, ty::label(), TEXT_DIM(), right - t.right() - sp::M);
-        if p.layout_no_wrap(r.why.clone(), ty::label(), TEXT_DIM()).size().x > right - t.right() - sp::M {
-            let _ = ui.interact(wr, ui.scope_id().with(("ai-why", &r.key)), Sense::hover()).on_hover_text(&r.why);
-        }
+    let right = br.left() - sp::L;
+    let mut tr = right;
+    if !r.value.is_empty() {
+        let v = p.text(Pos2::new(right, cy - 9.0), Align2::RIGHT_CENTER, &r.value, ty::title(), tint::HEALTH());
+        tr = v.left() - sp::M;
+    }
+    text_fit(&p, Pos2::new(tx, cy - 9.0), Align2::LEFT_CENTER, &r.title, ty::title(), TEXT(), tr - tx);
+    let wr = text_fit(&p, Pos2::new(tx, cy + 10.0), Align2::LEFT_CENTER, &r.why, ty::label(), TEXT_DIM(), right - tx);
+    if p.layout_no_wrap(r.why.clone(), ty::label(), TEXT_DIM()).size().x > right - tx {
+        let _ = ui.interact(wr, ui.scope_id().with(("ai-why", &r.key)), Sense::hover()).on_hover_text(&r.why);
     }
     ev
 }

@@ -50,7 +50,11 @@ pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendati
         Some(rec) => (rec.title.clone(), AMBER()),
         None => { let _ = sub; (String::new(), TEXT_DIM()) }
     };
-    let btns = page_header(&p, r, "Mac Health", &sub, sub_col);
+    // AI Check: a chip after the title, on the overview
+    let cw = if show_settings { 0.0 } else { aicheck::ui::chip_width(ai, ui, s.ready) };
+    let rec_w = recs.first().map(|rec| button_width(&p, &rec.action, BTN_PRIMARY) + sp::M).unwrap_or(0.0);
+    let sub_right = r.right() - sp::PAGE_EDGE - 180.0 - sp::M - rec_w - sp::M;
+    let (btns, chip_at) = page_header_room(&p, r, "Mac Health", &sub, sub_col, cw, sub_right);
     let mut right = btns.right();
     let tr = Rect::from_min_max(Pos2::new(right - 180.0, btns.top()), Pos2::new(right, btns.bottom()));
     if let Some(i) = segmented(ui, tr, ui.scope_id().with("health-tab"), &["Overview", "Settings"], show_settings as usize) {
@@ -65,20 +69,11 @@ pub fn page(mon: &monitor::Shared, ai: &mut aicheck::Check, recs: &[Recommendati
         }
     }
 
-    let mut body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
+    let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
     let inner = body.shrink2(Vec2::new(sp::PAGE_EDGE, 0.0));
 
-    // AI Check: a strip on top of the overview
     if !show_settings {
-        let top = body.top() + sp::L;
-        let at = Rect::from_min_max(Pos2::new(inner.left(), top), Pos2::new(inner.right(), inner.bottom()));
-        let n = s.procs.iter().filter(|p| p.cpu >= 20.0).count();
-        let offer = if n > 0 { format!("{n} busy app{}", if n == 1 { "" } else { "s" }) } else { String::new() };
-        let (aih, aiev) = aicheck::ui::strip(ai, ui, at, &offer, s.ready);
-        if aih > 0.0 {
-            body.min.y = top + aih - sp::L;
-        }
-        match aiev {
+        match aicheck::ui::chip(ai, ui, chip_at, s.ready) {
             Some(Event::Start) => ai.start(ui.ctx(), health_ask(&s)),
             Some(Event::Act(rec)) => {
                 match rec.action.as_str() {
