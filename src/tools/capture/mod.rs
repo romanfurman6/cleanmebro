@@ -1118,9 +1118,13 @@ impl Tool for Capture {
                 ed.tool = match std::env::var("CMB_DEMO_EDITOR_TOOL").unwrap_or_default().as_str() {
                     "arrow" => editor::Tool::Arrow,
                     "blur" => editor::Tool::Blur,
-                    "crop" => editor::Tool::Crop,
                     _ => ed.tool,
                 };
+                match std::env::var("CMB_DEMO_EDITOR_TOOL").unwrap_or_default().as_str() {
+                    "area" | "crop" => ed.demo_area(),
+                    "selected" => ed.demo_selected(),
+                    _ => {}
+                }
                 self.demo_editor = Some(ed);
                 Some(View::Page)
             }
