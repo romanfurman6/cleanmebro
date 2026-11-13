@@ -147,7 +147,7 @@ impl Tool for Claude {
             }
             "claude-missing" => {
                 let error = Some(format!("Claude Code isn't installed on this Mac. {}", crate::kit::claude_code::Availability::NotInstalled.how()));
-                *self.all[0].lock_ok() = UsageInfo { provider: ai::claude::NAME, loading: false, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
+                *self.all[0].lock_ok() = UsageInfo { provider: ai::claude::NAME, loading: false, scanned: true, installed: false, fetched: Some(chrono::Local::now()), error, ..Default::default() };
                 Some(View::Page)
             }
             _ => None,
