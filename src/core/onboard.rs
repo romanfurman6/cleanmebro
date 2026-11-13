@@ -371,11 +371,16 @@ pub fn setup_ui(app: &mut App, ui: &mut Ui, full: Rect) -> Finish {
     if next {
         go(app, step + 1);
     }
-    let animating = t < 2.5 || app.perm_watch.busy(now);
+    // setup is an immediate window drawn in the (hidden) root's pass: ask
+    // the root for the frames too, or after a click the window kept showing
+    // the old step until it was resized (first launch, M1)
+    let animating = t < 2.5 || app.perm_watch.busy(now) || next;
     if animating {
         ctx.request_repaint();
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
     } else {
         ctx.request_repaint_after(std::time::Duration::from_millis(1000));
+        ctx.request_repaint_after_for(std::time::Duration::from_millis(1000), egui::ViewportId::ROOT);
     }
     finish
 }

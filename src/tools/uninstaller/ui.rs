@@ -173,7 +173,9 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
         g.page_seen = true;
         g.phase == Phase::Idle
     };
-    if idle {
+    // the scan reads other apps' data: never before Full Disk Access
+    // (the page shows its lock till then, and macOS would ask on its own)
+    if idle && crate::kit::perms::Perm::FullDisk.status() == crate::kit::perms::Status::Allowed {
         u.rescan();
     }
     let (n_apps, total, phase, orphan_bytes) = {
