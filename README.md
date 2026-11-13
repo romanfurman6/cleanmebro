@@ -125,8 +125,10 @@ Info.plist gets it as `CFBundleShortVersionString`, the commit count as
 scripts/release.sh patch   # or minor, major, or an exact 0.2.0
 ```
 
-On a clean, up-to-date `main` this bumps the version, commits, tags `vX.Y.Z`
-and pushes. Then:
+On a clean, up-to-date `main` (needs `gh`, signed in) this bumps the version
+on a `release/vX.Y.Z` branch, merges it through a PR (`main` only takes PRs:
+no direct pushes, force pushes or deletion), tags the merged commit `vX.Y.Z`
+and pushes the tag. Then:
 
 1. The tag starts `.github/workflows/release.yml` on the M1 runner. The job
    runs in the protected **`release`** environment and waits.
