@@ -721,7 +721,7 @@ fn cost(app: &App) -> Cost {
     let rows = rows(app);
     let must = rows.iter().filter(|r| !r.optional).map(|r| r.perm).collect();
     let may = rows.iter().filter(|r| r.optional).map(|r| r.perm).collect();
-    let download = models(app).iter().filter(|(_, m)| !matches!(m.state, ModelState::Ready)).map(|(_, m)| m.bytes).sum();
+    let download = models(app).iter().filter(|r| !matches!(r.model.state, ModelState::Ready | ModelState::OnFirstUse)).map(|r| r.model.bytes).sum();
     let mut keys: Vec<String> = Vec::new();
     for i in (0..app.tools.len()).filter(|&i| app.tool_on(i)) {
         for (_, k) in app.tools[i].setup_shortcuts() {
