@@ -303,6 +303,21 @@ pub fn demo_info() -> UsageInfo {
         l.resets_at = Some(now + left);
         l.resets = super::codex::reset_text(now + left);
     }
+    // CMDMEOW_DEMO_LONG=1: the longest texts the widgets meet, for checking
+    // nothing gets cut ("Resets tomorrow 23:40", "Out tomorrow 23:40")
+    if std::env::var_os("CMDMEOW_DEMO_LONG").is_some() {
+        let late = (Local::now() + chrono::Duration::days(1)).date_naive().and_hms_opt(23, 40, 0).and_then(|t| t.and_local_timezone(Local).single()).map(|t| t.timestamp()).unwrap_or(now);
+        if let Some(s) = limits.first_mut() {
+            (s.pct, s.window_secs, s.resets_at, s.resets) = (2.0, late - now + 3600, Some(late), super::codex::reset_text(late));
+        }
+        // week: ahead of pace, runs out tomorrow 23:40, resets two days later
+        let end = late + 2 * 86_400;
+        let start = end - 7 * 86_400;
+        let pct = (100.0 * (now - start) as f64 / (late - start) as f64) as f32;
+        for l in limits.iter_mut().skip(1) {
+            (l.pct, l.resets_at, l.resets) = (pct.min(99.0), Some(end), super::codex::reset_text(end));
+        }
+    }
     UsageInfo {
         provider: NAME,
         loading: false,
