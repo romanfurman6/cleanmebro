@@ -208,8 +208,9 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     // AI Check: a chip after the title, on Leftovers
     let ai_data = u.tab == Tab::Leftovers && orphan_bytes > 0;
     let cw = if u.tab == Tab::Leftovers { aicheck::ui::chip_width(&u.ai, ui, ai_data) } else { 0.0 };
-    // the status ends before "Startup items" and the tabs
-    let sub_right = r.right() - sp::PAGE_EDGE - 260.0 - 16.0 - 100.0;
+    // the status ends before Rescan (once a scan is done) and the tabs
+    let rescan_room = if phase == Phase::Ready { 60.0 } else { 0.0 };
+    let sub_right = r.right() - sp::PAGE_EDGE - 260.0 - 16.0 - rescan_room;
     let (btns, chip_at) = page_header_room(&p, r, "Uninstaller", &sub, TEXT_DIM(), cw, sub_right);
     let labels_owned = [
         "Apps".to_string(),
@@ -225,13 +226,8 @@ pub fn page(u: &mut Uninstaller, ui: &mut Ui, r: Rect, cx: &mut Cx) {
     if let Some(i) = segmented(ui, tr, ui.scope_id().with("un-tab"), &labels, cur) {
         u.tab = [Tab::Apps, Tab::Leftovers][i];
     }
-    // what starts with the Mac moved to its own tool
-    let startup = link(ui, Pos2::new(tr.left() - 16.0, tr.center().y), Align2::RIGHT_CENTER, "Startup items", 12.0).on_hover_text("Turn off what starts with your Mac");
-    if startup.clicked() {
-        cx.open_page("startup", "");
-    }
     // scan again (apps and leftovers), once the last scan is done
-    if phase == Phase::Ready && link(ui, Pos2::new(startup.rect.left() - 16.0, tr.center().y), Align2::RIGHT_CENTER, "Rescan", 12.0).on_hover_text("Look for apps and leftovers again").clicked() {
+    if phase == Phase::Ready && link(ui, Pos2::new(tr.left() - 16.0, tr.center().y), Align2::RIGHT_CENTER, "Rescan", 12.0).on_hover_text("Look for apps and leftovers again").clicked() {
         u.rescan();
     }
     let body = Rect::from_min_max(Pos2::new(r.left(), r.top() + PAGE_HEADER_H + 1.0), r.max);
