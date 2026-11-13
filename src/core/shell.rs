@@ -22,7 +22,7 @@ pub enum Mode {
     /// First-run setup drawn in the root window (screenshots only; the real
     /// app shows setup in its own window).
     Setup,
-    /// The Full Disk Access helper card alone (screenshots only).
+    /// The System Settings helper card alone (screenshots only).
     FdaHelp,
 }
 
@@ -737,7 +737,7 @@ impl eframe::App for App {
             }
             Mode::FdaHelp => {
                 let now = ctx.input(|i| i.time);
-                super::onboard::help_card(ui, full, now + 0.9);
+                super::onboard::help_card(ui, full, now + 0.9, crate::kit::perms::Perm::FullDisk);
             }
             Mode::Setup => {
                 glass::backdrop(ui.painter(), full, 14.0, opaque, t);
@@ -780,7 +780,7 @@ impl eframe::App for App {
             self.prewarm_app(&ctx);
         }
         if self.screenshot.is_none() {
-            super::onboard::fda_helper(self, &ctx);
+            super::onboard::perm_helper(self, &ctx);
         }
         if (&self.tools_off, crate::kit::sound::on()) != (&off_before.0, off_before.1) {
             if let Some(s) = frame.storage_mut() {
