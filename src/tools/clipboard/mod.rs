@@ -6,6 +6,7 @@
 
 mod mac;
 mod privacy;
+mod secret_apps;
 mod search;
 mod settings;
 mod store;
@@ -97,8 +98,17 @@ pub struct Clipboard {
     thumb_rx: Receiver<(u64, Option<egui::ColorImage>)>,
     hud: Option<(String, Instant)>,
     /// Apps picked in "Add app…" (None: cancelled).
-    app_tx: Sender<Option<settings::Ignored>>,
-    app_rx: Receiver<Option<settings::Ignored>>,
+    app_tx: Sender<Option<secret_apps::Found>>,
+    app_rx: Receiver<Option<secret_apps::Found>>,
+    /// The installed apps, once the startup scan is done.
+    installed_rx: Receiver<Vec<secret_apps::Found>>,
+    /// The startup scan has landed: until then every catalog password
+    /// manager is skipped, so a fresh install has no unguarded window.
+    scanned: bool,
+    /// Where each installed app is (lowercase bundle id), for icons.
+    app_paths: HashMap<String, PathBuf>,
+    /// Icons of excluded apps, by lowercase bundle id (None: none found).
+    icons: HashMap<String, Option<egui::TextureHandle>>,
     confirm_clear: Option<Instant>,
     /// The last [`Clipboard::visible`] answer, keyed by its question and the
     /// history's version: it's asked several times every frame.
@@ -116,9 +126,15 @@ impl Clipboard {
         let (clips_tx, clips) = channel();
         let (thumb_tx, thumb_rx) = channel();
         let (app_tx, app_rx) = channel();
+        let (installed_tx, installed_rx) = channel();
         let (settings, dir, store) = if env.demo {
-            (Settings::default(), None, demo_store())
+            (demo_settings(), None, demo_store())
         } else {
+            let ctx = env.ctx.clone();
+            std::thread::spawn(move || {
+                let _ = installed_tx.send(secret_apps::scan());
+                ctx.request_repaint();
+            });
             let dir = settings::data_dir();
             (settings::load(&dir), Some(dir.clone()), Store::open(dir.join("history")))
         };
@@ -141,6 +157,10 @@ impl Clipboard {
             hud: None,
             app_tx,
             app_rx,
+            installed_rx,
+            scanned: env.demo,
+            app_paths: HashMap::new(),
+            icons: HashMap::new(),
             confirm_clear: None,
             visible_memo: Default::default(),
             rows_memo: Default::default(),
@@ -214,7 +234,8 @@ impl Clipboard {
 
     /// A clip from the watcher: privacy rules, then history.
     fn take(&mut self, clip: Clip) {
-        if self.pause.is_some() || self.settings.ignores(&clip.bundle) || (clip.concealed && !self.settings.record_concealed) {
+        let unscanned_manager = !self.scanned && secret_apps::known(&clip.bundle, "").is_some();
+        if self.pause.is_some() || self.settings.ignores(&clip.bundle) || unscanned_manager || (clip.concealed && !self.settings.record_concealed) {
             return;
         }
         if clip.png.is_some() && !self.settings.keep_images {
@@ -324,6 +345,12 @@ fn now_ms() -> i64 {
     chrono::Local::now().timestamp_millis()
 }
 
+/// Settings for screenshots: a Mac with two password managers.
+fn demo_settings() -> Settings {
+    let ignore = [("com.1password.1password", "1Password"), ("com.apple.Passwords", "Passwords")];
+    Settings { ignore: ignore.iter().map(|(b, n)| settings::Ignored { bundle: (*b).into(), name: (*n).into() }).collect(), ..Default::default() }
+}
+
 /// Sample history for screenshots.
 fn demo_store() -> Store {
     let dir = std::env::temp_dir().join(format!("cmdmeow-clipboard-demo-{}", std::process::id()));
@@ -425,6 +452,13 @@ impl Tool for Clipboard {
         ui::page(self, ui, rect, cx);
     }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
+        while let Ok(installed) = self.installed_rx.try_recv() {
+            self.scanned = true;
+            self.app_paths.extend(installed.iter().map(|f| (f.bundle.to_lowercase(), f.path.clone())));
+            if self.settings.adopt_installed(&installed) {
+                self.save_settings();
+            }
+        }
         while let Ok(c) = self.clips.try_recv() {
             self.take(c);
         }
@@ -437,12 +471,14 @@ impl Tool for Clipboard {
         }
         while let Ok(app) = self.app_rx.try_recv() {
             if let Some(app) = app {
-                if !self.settings.ignore.iter().any(|i| i.bundle == app.bundle) {
-                    self.settings.ignore.push(app);
+                self.app_paths.insert(app.bundle.to_lowercase(), app.path.clone());
+                if !self.settings.ignores(&app.bundle) {
+                    self.settings.ignore.push(settings::Ignored { bundle: app.bundle, name: app.name });
                     self.save_settings();
                 }
             }
         }
+
         if let Some(Pause(Some(t))) = self.pause {
             if Instant::now() >= t {
                 self.pause = None;
@@ -521,6 +557,19 @@ mod tests {
         c.settings.record_remote = false;
         c.take(Clip { text: Some("another from iPhone".into()), ..remote });
         assert_eq!(c.store.entries.len(), n + 2);
+    }
+
+    #[test]
+    fn managers_skipped_until_scan_lands() {
+        let mut c = demo();
+        c.settings.ignore.clear();
+        c.scanned = false;
+        let n = c.store.entries.len();
+        c.take(Clip { text: Some("pw from bitwarden".into()), bundle: "com.bitwarden.desktop".into(), ..Default::default() });
+        assert_eq!(c.store.entries.len(), n, "catalog app skipped before the scan");
+        c.scanned = true;
+        c.take(Clip { text: Some("user removed bitwarden".into()), bundle: "com.bitwarden.desktop".into(), ..Default::default() });
+        assert_eq!(c.store.entries.len(), n + 1, "after the scan only the list counts");
     }
 
     #[test]

@@ -7,6 +7,7 @@ pub mod agent;
 pub mod ai;
 pub mod aicheck;
 pub mod brand;
+pub mod bundles;
 pub mod charge;
 pub mod claude_code;
 pub mod crash_report;
