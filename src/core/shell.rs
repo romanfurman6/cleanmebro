@@ -176,6 +176,15 @@ impl App {
             }
         }
         app.apply_view(&opts.view);
+        // screenshots: CMDMEOW_STOPPED=capture,clipboard shows those tools as stopped after an error
+        if let Some(v) = std::env::var_os("CMDMEOW_STOPPED") {
+            let v = v.to_string_lossy().into_owned();
+            for t in &app.tools {
+                if v.split(',').any(|x| x.trim() == t.id()) {
+                    super::tool::stop(t.id());
+                }
+            }
+        }
         // setup is the app window's first state: nothing else opens before it
         if app.setup.is_some() && app.mode != Mode::Setup && app.screenshot.is_none() {
             app.app_open = true;
@@ -389,7 +398,8 @@ impl App {
             match a {
                 Action::OpenPage { tool, route } => {
                     if let Some(i) = self.tool_index(&tool).filter(|&i| self.tools[i].has_page()) {
-                        self.tools[i].open_page(&route);
+                        let t = &mut self.tools[i];
+                        let _ = super::tool::guard(t.id(), || t.open_page(&route));
                         self.open_window(ctx, i);
                     }
                 }
@@ -576,10 +586,22 @@ impl App {
                 self.open_settings(ctx, route == "tools");
                 continue;
             }
+            // the app opened again while running (Finder, Spotlight, Dock):
+            // show the window, so it is reachable with the menu bar icon hidden
+            if tool == "window" {
+                if self.setup.is_some() {
+                    self.open_setup_window(ctx);
+                } else {
+                    let page = self.page;
+                    self.open_window(ctx, page);
+                }
+                continue;
+            }
             let found = (0..self.tools.len()).find(|&i| link_matches(self.tools[i].id(), self.tools[i].name(), &tool));
             match found.filter(|&i| self.tool_on(i) && self.tools[i].has_page()) {
                 Some(i) => {
-                    self.tools[i].open_page(&route);
+                    let t = &mut self.tools[i];
+                    let _ = super::tool::guard(t.id(), || t.open_page(&route));
                     self.open_window(ctx, i);
                 }
                 None => eprintln!("[url] no tool page \"{tool}\" to open"),
@@ -606,7 +628,17 @@ impl eframe::App for App {
         let mut tools_need_frames = false;
         for i in 0..self.tools.len() {
             if self.tool_on(i) {
-                tools_need_frames |= self.tools[i].tick(ctx);
+                let t = &mut self.tools[i];
+                tools_need_frames |= super::tool::guard(t.id(), || t.tick(ctx)).unwrap_or(false);
+            }
+        }
+        // a tool that stopped after an error lets go of what it holds system-wide
+        for id in super::tool::newly_broken() {
+            if let Some(t) = self.tools.iter_mut().find(|t| t.id() == id) {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| t.set_on(false)));
+            }
+            if self.detail.as_ref().is_some_and(|(d, _)| self.tools.get(*d).is_some_and(|t| t.id() == id)) {
+                self.detail = None;
             }
         }
         if (self.app_open || self.setup.is_some() || tools_need_frames) && !self.visible {
@@ -763,7 +795,8 @@ impl eframe::App for App {
         }
         for i in 0..self.tools.len() {
             if self.tool_on(i) {
-                self.tools[i].windows(&ctx, &mut cx);
+                let t = &mut self.tools[i];
+                let _ = super::tool::guard(t.id(), || t.windows(&ctx, &mut cx));
             }
         }
         self.run_actions(&ctx, &mut cx);

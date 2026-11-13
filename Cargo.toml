@@ -28,6 +28,8 @@ sha2 = "0.10"
 hmac = "0.12"
 md-5 = "0.10"
 getrandom = "0.3"
+# clipboard history at rest (XChaCha20-Poly1305, key in the Keychain)
+chacha20poly1305 = "0.10"
 # unpacking the dictation model (a .tar.bz2)
 bzip2 = "0.4"
 tar = "0.4"

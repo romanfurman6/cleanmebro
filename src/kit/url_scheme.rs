@@ -93,8 +93,12 @@ fn answer(host: &str, action: &str, f: &(impl Fn(&str) -> bool + ?Sized)) {
     }
 }
 
-/// Start listening for links. Call before the app's run loop starts, so the
-/// link that launched the app isn't missed.
+/// What opening the app again while it runs means: show its window.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const REOPEN_LINK: &str = "cmdmeow://open/window";
+
+/// Start listening for links (and for the app being opened again). Call
+/// before the app's run loop starts, so the link that launched it isn't missed.
 pub fn install() {
     #[cfg(target_os = "macos")]
     mac::install();
@@ -111,6 +115,11 @@ mod mac {
     const GURL: u32 = u32::from_be_bytes(*b"GURL");
     /// '----': the event's direct parameter, the URL itself.
     const DIRECT: u32 = u32::from_be_bytes(*b"----");
+    /// 'aevt' / 'rapp': the app was opened again while running (Finder,
+    /// Spotlight, Dock). A menu bar app has no window to show for it, and its
+    /// icon may be hidden (notch, full menu bar), so this opens the window.
+    const CORE: u32 = u32::from_be_bytes(*b"aevt");
+    const REOPEN: u32 = u32::from_be_bytes(*b"rapp");
 
     define_class!(
         #[unsafe(super(NSObject))]
@@ -130,6 +139,11 @@ mod mac {
                     super::open(&u.to_string());
                 }
             }
+
+            #[unsafe(method(handleReopen:withReply:))]
+            fn reopen(&self, _event: &AnyObject, _reply: &AnyObject) {
+                super::open(super::REOPEN_LINK);
+            }
         }
     );
 
@@ -138,6 +152,7 @@ mod mac {
         unsafe {
             let mgr: Retained<AnyObject> = msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
             let _: () = msg_send![&*mgr, setEventHandler: &*handler, andSelector: sel!(handleGetURL:withReply:), forEventClass: GURL, andEventID: GURL];
+            let _: () = msg_send![&*mgr, setEventHandler: &*handler, andSelector: sel!(handleReopen:withReply:), forEventClass: CORE, andEventID: REOPEN];
         }
         // the event manager doesn't keep it; it lives as long as the app
         std::mem::forget(handler);

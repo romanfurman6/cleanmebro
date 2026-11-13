@@ -26,6 +26,12 @@ pub fn tick() {
     mac::tick();
 }
 
+/// End a scan under way (Mac Health was turned off).
+pub fn stop() {
+    #[cfg(target_os = "macos")]
+    mac::stop();
+}
+
 /// AirPods adverts heard in the last minute, newest per model.
 pub fn adverts() -> Vec<PodsAdvert> {
     #[cfg(target_os = "macos")]
@@ -344,6 +350,18 @@ mod mac {
         let _ = CORE.set(Core { queue, manager: Keep(manager), delegate: Keep(delegate), held: Mutex::new(vec![]) });
         // game controllers report to a menu bar app only with this
         let _: () = unsafe { msg_send![class!(GCController), setShouldMonitorBackgroundEvents: true] };
+    }
+
+    pub fn stop() {
+        let Some(core) = CORE.get() else { return };
+        if state().lock_ok().scanning_since.is_none() {
+            return;
+        }
+        let m: Shared = Keep(core.manager.0.clone());
+        core.queue.exec_async(move || {
+            let m = m;
+            end_scan(&m.0);
+        });
     }
 
     pub fn tick() {

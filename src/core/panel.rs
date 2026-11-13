@@ -6,7 +6,7 @@
 
 use super::layout;
 use super::shell::App;
-use super::tool::{Cx, Size, GRID_COLUMNS};
+use super::tool::{self, Cx, Size, GRID_COLUMNS};
 use crate::kit::glass::*;
 use crate::kit::mechanics as m;
 use egui::{Align2, Id, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2};
@@ -100,13 +100,28 @@ pub fn draw_at(app: &mut App, ui: &mut Ui, owner: Option<usize>, id: &'static st
             }
             // screenshots only: CMB_DEMO_LOADING shows every tool that can load as loading
             let demo = std::env::var_os("CMB_DEMO_LOADING").is_some() && matches!(app.tools[i].id(), "system" | "startup" | "fan");
-            if lock.is_none() && (demo || app.tools[i].widget_loading(id)) {
+            let tid = app.tools[i].id();
+            let drawn = if tool::is_broken(tid) {
+                false
+            } else if lock.is_none() && (demo || app.tools[i].widget_loading(id)) {
                 let b = app.tools[i].badge();
                 let title = app.tools[i].widgets().into_iter().find(|w| w.id == id).map(|w| w.title).unwrap_or_else(|| app.tools[i].name());
                 let lid = child.scope_id().with("loading");
                 crate::kit::tile::loading(&mut child, r, lid, b.icon, b.color, title);
+                true
             } else {
-                app.tools[i].widget_ui(id, size, &mut child, r, cx);
+                let t = &mut app.tools[i];
+                tool::guard(tid, || t.widget_ui(id, size, &mut child, r, cx)).is_some()
+            };
+            if !drawn {
+                // the tool stopped after an error: say so where its widget was
+                let mut over = ui.new_child(UiBuilder::new().max_rect(r).id_salt((salt, "stopped")));
+                let title = app.tools[i].widgets().into_iter().find(|w| w.id == id).map(|w| w.title).unwrap_or_else(|| app.tools[i].name());
+                let sid = over.scope_id();
+                if crate::kit::tile::stopped(&mut over, r, sid, app.tools[i].badge().icon, title).clicked() {
+                    crate::kit::perms::relaunch();
+                    cx.quit();
+                }
             }
             if let Some(perm) = lock {
                 super::gate::widget_cover(app, ui, r, perm, ui.scope_id().with(salt));
@@ -318,6 +333,10 @@ fn footer(app: &mut App, ui: &mut Ui, rect: Rect) {
 /// The sheet beside the panel; the tool draws all of it, header included.
 pub fn detail(app: &mut App, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let Some((i, d)) = app.detail.clone() else { return };
-    let mut child = ui.new_child(UiBuilder::new().max_rect(rect).id_salt(("detail", app.tools[i].id(), &d)));
-    app.tools[i].detail_ui(&d, &mut child, rect, cx);
+    let tid = app.tools[i].id();
+    let mut child = ui.new_child(UiBuilder::new().max_rect(rect).id_salt(("detail", tid, &d)));
+    let t = &mut app.tools[i];
+    if tool::guard(tid, || t.detail_ui(&d, &mut child, rect, cx)).is_none() {
+        app.detail = None;
+    }
 }

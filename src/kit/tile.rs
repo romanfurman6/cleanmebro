@@ -30,6 +30,23 @@ pub fn paint_card(p: &egui::Painter, rect: Rect, hover: f32, selected: bool) {
     }
 }
 
+/// A widget whose tool stopped after an error: its glyph and name, dimmed,
+/// and "Stopped". A click restarts the app (the caller does it).
+pub fn stopped(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, title: &str) -> Response {
+    let resp = card(ui, rect, id, false).on_hover_text("Restart Cmd+Meow");
+    let p = ui.painter();
+    let inner = rect.shrink(PAD);
+    icon(p, glyph, Rect::from_min_size(inner.min, Vec2::splat(18.0)), TEXT_FAINT());
+    if rect.height() <= 130.0 && rect.width() <= 130.0 {
+        small_text(p, rect, title, "Stopped", AMBER());
+    } else {
+        text_fit(p, Pos2::new(inner.left() + 26.0, inner.top() + 9.0), Align2::LEFT_CENTER, title, ty::title(), TEXT_DIM(), inner.width() - 26.0);
+        let st = p.text(Pos2::new(inner.left(), inner.bottom()), Align2::LEFT_BOTTOM, "Stopped", ty::label(), AMBER());
+        p.text(Pos2::new(st.right() + 8.0, inner.bottom()), Align2::LEFT_BOTTOM, "Restart", ty::label(), BLUE());
+    }
+    resp
+}
+
 /// Small (1:1): the glyph on top, a bold line and a dim line at the bottom.
 #[allow(clippy::too_many_arguments)]
 pub fn small(ui: &mut Ui, rect: Rect, id: egui::Id, glyph: Icon, color: Color32, title: &str, sub: &str, selected: bool) -> Response {

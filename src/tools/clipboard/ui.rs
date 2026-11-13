@@ -414,7 +414,12 @@ fn history(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     }
     glass_card(&p, list, R_CARD, 0.0, false);
     if ids.is_empty() {
-        let msg = if c.store.entries.is_empty() { "Nothing copied yet" } else { "Nothing matches" };
+        let msg = match (c.store.entries.is_empty(), c.store.saves()) {
+            (false, _) => "Nothing matches",
+            (true, true) => "Nothing copied yet",
+            // the Keychain gave no key: this run's history isn't written down
+            (true, false) => "Keychain locked · history not saved",
+        };
         p.text(list.center(), Align2::CENTER_CENTER, msg, bold(15.0), TEXT_SOFT());
     } else {
         list_rows(c, ui, list, &ids);

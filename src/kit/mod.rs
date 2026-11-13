@@ -26,6 +26,7 @@ pub mod parakeet;
 pub mod notify;
 pub mod perms;
 pub mod plist;
+pub mod remove;
 pub mod settings_window;
 pub mod smc;
 pub mod sync;
@@ -33,6 +34,7 @@ pub mod sound;
 pub mod tile;
 pub mod update;
 pub mod url_scheme;
+pub mod vault;
 pub mod viewport;
 pub mod whisper;
 

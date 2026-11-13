@@ -67,6 +67,9 @@ impl Tool for System {
         use crate::kit::perms::{Need, Perm};
         vec![Need::may(Perm::FullDisk), Need::may(Perm::Bluetooth), Need::may(Perm::Notifications)]
     }
+    fn set_on(&mut self, on: bool) {
+        monitor::set_paused(!on);
+    }
 
     fn section(&self) -> &'static str {
         "Monitor"

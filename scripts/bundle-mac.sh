@@ -65,7 +65,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$BUILD</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
-  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
   <!-- Menu bar app: no Dock icon until the full window opens. -->
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>

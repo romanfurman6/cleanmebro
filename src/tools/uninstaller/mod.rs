@@ -273,6 +273,7 @@ pub struct Uninstaller {
     /// The drop zone keeps showing the result until then.
     pub done_until: Option<Instant>,
     on: bool,
+    drag_watch: Option<DragWatch>,
     /// AI Check beside the leftovers.
     pub ai: crate::kit::aicheck::Check,
 }
@@ -312,6 +313,7 @@ impl Uninstaller {
             done_until: None,
             on: true,
             ai: crate::kit::aicheck::Check::new(ID, env.demo),
+            drag_watch: None,
         };
         if env.demo {
             ui::demo::fill(&mut u, "uninstaller");
@@ -319,8 +321,29 @@ impl Uninstaller {
         }
         u.st.lock_ok().settings = Settings::load();
         watch(u.st.clone(), u.app_roots.clone(), u.roots.clone(), env.ctx.clone());
-        watch_drag(u.st.clone(), u.app_roots.clone(), env.ctx.clone());
+        u.drag_watch = watch_drag(u.st.clone(), u.app_roots.clone(), env.ctx.clone());
+        u.sync_drag_hook();
         u
+    }
+
+    /// Have the global mouse monitor only while it is needed: the tool on
+    /// and the drop zone wanted. Main thread (set_on, tick).
+    pub fn sync_drag_hook(&mut self) {
+        let want = self.on && self.st.lock_ok().settings.drop_zone;
+        let Some(w) = self.drag_watch.as_mut() else { return };
+        if want == w.hook.is_some() {
+            return;
+        }
+        w.hook = if want {
+            let tx = w.tx.clone();
+            mac::on_mouse_drag(move || {
+                let _ = tx.try_send(());
+            })
+        } else {
+            None
+        };
+        w.hooked.store(w.hook.is_some(), std::sync::atomic::Ordering::Relaxed);
+        w.wake();
     }
 
     pub fn now(&self) -> i64 {
@@ -805,19 +828,34 @@ fn watch(st: Shared, app_roots: Vec<PathBuf>, roots: Roots, ctx: egui::Context) 
         .ok();
 }
 
+/// The drag watcher's wake-up line and the global mouse monitor that pulls
+/// it. The monitor exists only while the tool is on and the drop zone is
+/// wanted ([`Uninstaller::sync_drag_hook`]); otherwise nothing watches the mouse.
+pub struct DragWatch {
+    tx: std::sync::mpsc::SyncSender<()>,
+    hook: Option<mac::DragHook>,
+    hooked: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl DragWatch {
+    fn wake(&self) {
+        // a full queue already holds a wake-up
+        let _ = self.tx.try_send(());
+    }
+}
+
 /// Notice an app being dragged out of an app folder (any drag, anywhere) by
 /// watching the drag pasteboard, so the drop zone can appear. A global mouse
-/// monitor wakes the watcher only while the mouse is dragging; between drags
-/// it sleeps. Without the monitor it falls back to polling.
-fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) {
+/// monitor wakes the watcher only while the mouse is dragging; between drags,
+/// and while the zone is off, it sleeps. Without the monitor it falls back
+/// to polling while the zone is on.
+fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) -> Option<DragWatch> {
     if !cfg!(target_os = "macos") {
-        return;
+        return None;
     }
     let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
-    let hooked = mac::on_mouse_drag(move || {
-        // a full queue already holds a wake-up
-        let _ = tx.try_send(());
-    });
+    let hooked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let watch = DragWatch { tx, hook: None, hooked: hooked.clone() };
     std::thread::Builder::new()
         .name("uninstaller-drag".into())
         .spawn(move || {
@@ -830,14 +868,15 @@ fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) {
                 // keep looking while the button is held: the drag pasteboard
                 // can fill a moment after the first drag event
                 let busy = !st.lock_ok().drag.apps.is_empty() || mac::mouse_down();
-                if hooked && !busy {
-                    // nothing dragged: sleep until the mouse drags somewhere
+                if !busy && (!on || hooked.load(std::sync::atomic::Ordering::Relaxed)) {
+                    // nothing dragged (or the zone is off): sleep until the
+                    // mouse drags somewhere or the zone is turned back on
                     if rx.recv().is_err() {
                         return;
                     }
                 } else {
-                    // a drag lasts long enough for a relaxed look when the zone is off
-                    std::thread::sleep(Duration::from_millis(if on { 150 } else { 1000 }));
+                    // a drag in progress, or no monitor: look again shortly
+                    std::thread::sleep(Duration::from_millis(150));
                     while rx.try_recv().is_ok() {}
                 }
                 let n = mac::drag_change_count();
@@ -866,7 +905,8 @@ fn watch_drag(st: Shared, app_roots: Vec<PathBuf>, ctx: egui::Context) {
                 }
             }
         })
-        .ok();
+        .ok()?;
+    Some(watch)
 }
 
 impl Tool for Uninstaller {
@@ -931,8 +971,11 @@ impl Tool for Uninstaller {
             g.drag = Drag::default();
             g.notice = None;
         }
+        self.sync_drag_hook();
     }
     fn tick(&mut self, ctx: &egui::Context) -> bool {
+        // the drop zone switch may have changed in Settings
+        self.sync_drag_hook();
         let g = self.st.lock_ok();
         let busy = g.working.is_some() || matches!(g.phase, Phase::Listing | Phase::Sizing { .. });
         // our own floating windows need frames while the shell is hidden
