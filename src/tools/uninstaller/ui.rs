@@ -773,9 +773,10 @@ fn result_bar(u: &mut Uninstaller, ui: &mut Ui, r: Rect) {
         right = rr.left() - 8.0;
     }
     let two = o.detail.is_some();
-    let tr = text_fit(&p, Pos2::new(c.x + 20.0, bar.center().y - if two { 8.0 } else { 0.0 }), Align2::LEFT_CENTER, &o.title, font(13.0), TEXT(), right - c.x - 28.0);
+    let (ly1, ly2) = if two { two_lines_y(&p, bar.center().y, &font(13.0), &font(11.0)) } else { (bar.center().y, 0.0) };
+    let tr = text_fit(&p, Pos2::new(c.x + 20.0, ly1), Align2::LEFT_CENTER, &o.title, font(13.0), TEXT(), right - c.x - 28.0);
     if let Some(d) = &o.detail {
-        let fr = text_fit(&p, Pos2::new(c.x + 20.0, bar.center().y + 9.0), Align2::LEFT_CENTER, d, font(11.0), if failed > 0 { AMBER() } else { TEXT_DIM() }, right - c.x - 28.0);
+        let fr = text_fit(&p, Pos2::new(c.x + 20.0, ly2), Align2::LEFT_CENTER, d, font(11.0), if failed > 0 { AMBER() } else { TEXT_DIM() }, right - c.x - 28.0);
         if failed > 0 {
             let why: String = u.st.lock_ok().last.as_ref().map(|(r, _)| r.failed.iter().take(6).map(|(a, b)| format!("{}: {b}", short_path(a))).collect::<Vec<_>>().join("\n")).unwrap_or_default();
             ui.interact(fr.union(tr), ui.scope_id().with("un-fail-tip"), Sense::hover()).on_hover_text(why);

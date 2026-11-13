@@ -814,6 +814,7 @@ pub fn line_h(p: &Painter, font: &FontId) -> f32 {
 
 /// A title with a detail line under it, the pair centred on `cy` with
 /// [`sp::LINE_GAP`] between them; both cut to `max_w`. Returns both rects.
+#[allow(clippy::too_many_arguments)]
 #[track_caller]
 pub fn two_lines(p: &Painter, x: f32, cy: f32, title: &str, title_font: FontId, title_col: Color32, detail: &str, detail_font: FontId, detail_col: Color32, max_w: f32) -> (Rect, Rect) {
     let (t, d) = two_lines_y(p, cy, &title_font, &detail_font);
@@ -851,6 +852,7 @@ pub fn two_lines_y(p: &Painter, cy: f32, title_font: &FontId, detail_font: &Font
 /// `right` are its two ends, `align` picks top / centre / bottom). The value
 /// the app writes (a time, a count) keeps its full width; the name gets
 /// what is left and is cut if it must. Returns (name, value) rects.
+#[allow(clippy::too_many_arguments)]
 #[track_caller]
 pub fn split_line(p: &Painter, left: Pos2, right: Pos2, v: egui::Align, name: &str, name_font: FontId, name_col: Color32, value: &str, value_font: FontId, value_col: Color32) -> (Rect, Rect) {
     let vr = p.text(right, Align2([egui::Align::Max, v]), value, value_font, value_col);
@@ -861,6 +863,7 @@ pub fn split_line(p: &Painter, left: Pos2, right: Pos2, v: egui::Align, name: &s
 
 /// Text that wraps onto up to `max_rows` lines at word breaks instead of
 /// being cut (status lines like "Out tomorrow 23:40" in a narrow card).
+#[allow(clippy::too_many_arguments)]
 #[track_caller]
 pub fn text_wrap(p: &Painter, pos: Pos2, align: Align2, text: &str, font: FontId, color: Color32, max_w: f32, max_rows: usize) -> Rect {
     let caller = std::panic::Location::caller();

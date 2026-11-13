@@ -323,7 +323,7 @@ fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str, t: f64) {
     let (ly1, ly2) = two_lines_y(&p, r.center().y, &font(11.0), &bold(15.0));
     p.text(Pos2::new(x, ly1), Align2::LEFT_CENTER, name, font(11.0), TEXT_DIM());
     let g = p.text(Pos2::new(x, ly2), Align2::LEFT_CENTER, rpm_text(f.rpm), bold(15.0), TEXT());
-    p.text(Pos2::new(g.right() + 4.0, r.center().y + 9.0), Align2::LEFT_CENTER, "rpm", font(11.0), TEXT_FAINT());
+    p.text(Pos2::new(g.right() + 4.0, g.bottom() - 2.0), Align2::LEFT_BOTTOM, "rpm", font(11.0), TEXT_FAINT());
 }
 
 // ---------------------------------------------------------------- sheet
