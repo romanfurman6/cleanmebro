@@ -39,6 +39,11 @@ fn chip_label(c: &Check) -> String {
         Phase::Idle => format!("Check with {}", agent_of(c).name()),
         Phase::Running => "Checking…".into(),
         Phase::Failed(_) => "Check failed".into(),
+        Phase::Done if c.inline => match c.tips().len() {
+            0 => format!("Checked by {}", agent_of(c).name()),
+            1 => format!("Checked by {} · 1 tip", agent_of(c).name()),
+            n => format!("Checked by {} · {n} tips", agent_of(c).name()),
+        },
         Phase::Done => {
             let recs = c.recs();
             let a = recs.iter().filter(|r| c.is_answer(r)).count();
@@ -85,7 +90,7 @@ pub fn chip(c: &mut Check, ui: &mut Ui, at: Pos2, has_data: bool) -> Option<Even
     let id = ui.scope_id().with(("ai-chip", c.tool));
     let resp = ui.interact(r, id, Sense::click());
     let h = ctx.animate_bool(id.with("h"), resp.hovered());
-    let filled = matches!(phase, Phase::Done) && !c.recs().is_empty() || c.open;
+    let filled = matches!(phase, Phase::Done) && !(if c.inline { c.tips() } else { c.recs() }).is_empty() || c.open;
     let fill = if filled { with_alpha(ai, 0.12 + 0.06 * h) } else { white((8.0 * h) as u8) };
     p.rect_filled(r, CHIP_H / 2.0, fill);
     p.rect_stroke(r, CHIP_H / 2.0, Stroke::new(1.0, with_alpha(ai, if filled { 0.45 } else { 0.3 })), StrokeKind::Inside);
@@ -130,7 +135,8 @@ fn popover(c: &mut Check, ui: &mut Ui, chip: Rect) -> Option<Event> {
     let ctx = ui.ctx().clone();
     let screen = ctx.content_rect();
     let phase = c.phase();
-    let recs = if phase == Phase::Done { c.recs() } else { vec![] };
+    // inline: the page shows the answers and tips, the popover only the headline
+    let recs = if phase == Phase::Done && !c.inline { c.recs() } else { vec![] };
     let w = POP_W.min(screen.width() - 2.0 * sp::L);
     let answers: Vec<Rec> = recs.iter().filter(|r| c.is_answer(r)).cloned().collect();
     let others: Vec<Rec> = recs.iter().filter(|r| !c.is_answer(r)).cloned().collect();
