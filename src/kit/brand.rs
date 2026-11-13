@@ -87,6 +87,120 @@ pub fn glyph_rgba(px: u32) -> Vec<u8> {
     pm.take()
 }
 
+// ---------------------------------------------------------------- the mascot
+
+/// The keycap without its ears (the mark's outline, ears cut off along
+/// their base lines), so the ears can move on their own.
+fn body() -> Option<tiny_skia::Path> {
+    let mut pb = PathBuilder::new();
+    pb.move_to(330.0, 200.0);
+    pb.line_to(692.0, 200.0);
+    pb.line_to(940.0, 300.0);
+    pb.cubic_to(955.0, 350.0, 958.0, 400.0, 958.0, 450.0);
+    pb.line_to(958.0, 840.0);
+    pb.cubic_to(958.0, 930.0, 895.0, 992.0, 805.0, 992.0);
+    pb.line_to(218.0, 992.0);
+    pb.cubic_to(128.0, 992.0, 65.0, 930.0, 65.0, 840.0);
+    pb.line_to(65.0, 450.0);
+    pb.cubic_to(65.0, 400.0, 68.0, 350.0, 84.0, 300.0);
+    pb.close();
+    pb.finish()
+}
+
+/// One ear, the same curves as [`outline`]. It reaches a little into the
+/// keycap below its base line, so no seam shows where the two meet.
+fn ear(right: bool) -> Option<tiny_skia::Path> {
+    let mut pb = PathBuilder::new();
+    if right {
+        pb.move_to(692.0, 200.0);
+        pb.cubic_to(760.0, 110.0, 830.0, 44.0, 862.0, 44.0);
+        pb.cubic_to(905.0, 44.0, 940.0, 200.0, 940.0, 300.0);
+        pb.line_to(915.0, 330.0);
+        pb.line_to(692.0, 250.0);
+    } else {
+        pb.move_to(84.0, 300.0);
+        pb.cubic_to(84.0, 200.0, 118.0, 44.0, 161.0, 44.0);
+        pb.cubic_to(193.0, 44.0, 263.0, 110.0, 330.0, 200.0);
+        pb.line_to(330.0, 250.0);
+        pb.line_to(110.0, 330.0);
+    }
+    pb.close();
+    pb.finish()
+}
+
+/// Where each ear turns: the middle of its base line (1024 box).
+const EAR_PIVOT: [(f32, f32); 2] = [(207.0, 250.0), (816.0, 250.0)];
+
+/// The mascot in three white layers (alpha = coverage) in a `px` square:
+/// the keycap with the ⌘ cut out, the left ear, the right ear. Drawn on top
+/// of each other they make the mark.
+pub fn mascot_rgba(px: u32) -> [Vec<u8>; 3] {
+    let scale = px as f32 / 1024.0;
+    let t = Transform::from_scale(scale, scale).pre_translate(512.0 - 511.5, 512.0 - 518.0);
+    let mut ink = Paint::default();
+    ink.set_color_rgba8(255, 255, 255, 255);
+    ink.anti_alias = true;
+    let layer = |path: Option<tiny_skia::Path>, cut: bool| -> Vec<u8> {
+        let Some(mut pm) = Pixmap::new(px, px) else { return vec![0; (px * px * 4) as usize] };
+        if let Some(p) = path {
+            pm.fill_path(&p, &ink, FillRule::Winding, t, None);
+        }
+        if cut {
+            let mut clear = Paint::default();
+            clear.blend_mode = BlendMode::Clear;
+            clear.anti_alias = true;
+            let stroke = Stroke { width: 59.0, line_cap: LineCap::Butt, ..Stroke::default() };
+            if let Some(p) = command() {
+                pm.stroke_path(&p, &clear, &stroke, t, None);
+            }
+        }
+        // premultiplied white → straight white with the coverage as alpha
+        let mut v = pm.take();
+        for c in v.chunks_exact_mut(4) {
+            if c[3] > 0 {
+                c[..3].fill(255);
+            }
+        }
+        v
+    };
+    [layer(body(), true), layer(ear(false), false), layer(ear(true), false)]
+}
+
+/// The mascot's three layers as textures, made once per context.
+fn mascot_textures(ctx: &egui::Context) -> [egui::TextureHandle; 3] {
+    let id = egui::Id::NULL.with("cmdmeow-mascot");
+    if let Some(t) = ctx.data(|d| d.get_temp::<[egui::TextureHandle; 3]>(id)) {
+        return t;
+    }
+    let n = 256;
+    let [b, l, r] = mascot_rgba(n);
+    let load = |name: &str, px: &[u8]| ctx.load_texture(name, egui::ColorImage::from_rgba_unmultiplied([n as usize, n as usize], px), egui::TextureOptions::LINEAR);
+    let t = [load("cmdmeow-mascot-body", &b), load("cmdmeow-mascot-ear-l", &l), load("cmdmeow-mascot-ear-r", &r)];
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    t
+}
+
+/// The mascot (the mark, ears that move) filling `rect`, tinted `col`.
+/// `ears` tilt the left and right ear outward by that many radians (negative
+/// folds them in). A squashed `rect` squashes the whole cat.
+pub fn draw_mascot(p: &egui::Painter, rect: egui::Rect, col: egui::Color32, ears: (f32, f32)) {
+    let [body, ear_l, ear_r] = mascot_textures(p.ctx());
+    let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0));
+    // the layers are drawn with the mark's own small offset (see glyph_rgba)
+    let at = |(x, y): (f32, f32)| rect.min + egui::Vec2::new((x + 0.5) / 1024.0 * rect.width(), (y - 6.0) / 1024.0 * rect.height());
+    for (tex, pivot, turn) in [(&ear_l, EAR_PIVOT[0], -ears.0), (&ear_r, EAR_PIVOT[1], ears.1)] {
+        let mut m = egui::Mesh::with_texture(tex.id());
+        m.add_rect_with_uv(rect, uv, col);
+        if turn != 0.0 {
+            m.rotate(egui::emath::Rot2::from_angle(turn), at(pivot));
+        }
+        p.add(m);
+    }
+    let mut m = egui::Mesh::with_texture(body.id());
+    m.add_rect_with_uv(rect, uv, col);
+    p.add(m);
+}
+
 /// The app icon at 64 px, for the window sidebar.
 const APP_ICON_64: &[u8] = include_bytes!("../../assets/icon/AppIcon-64.png");
 
@@ -144,6 +258,30 @@ mod tests {
         assert_eq!(alpha(&px, n, 512.0, 600.0), 255, "the ⌘'s middle square stays filled");
         assert_eq!(alpha(&px, n, 348.0, 434.0), 255, "inside a loop stays filled");
         assert_eq!(alpha(&px, n, 10.0, 10.0), 0, "corner is clear");
+    }
+
+    #[test]
+    fn mascot_layers_add_up_to_the_mark() {
+        let n = 256;
+        let mark = glyph_rgba(n);
+        let [body, ear_l, ear_r] = mascot_rgba(n);
+        // over-compositing the three layers gives the mark's coverage
+        let mut worst = 0i32;
+        for i in 0..(n * n) as usize {
+            let a = |v: &[u8]| v[i * 4 + 3] as f32 / 255.0;
+            let mut cov = a(&ear_l);
+            cov += a(&ear_r) * (1.0 - cov);
+            cov += a(&body) * (1.0 - cov);
+            worst = worst.max(((cov * 255.0).round() as i32 - mark[i * 4 + 3] as i32).abs());
+        }
+        assert!(worst <= 40, "layers differ from the mark by {worst}/255 somewhere");
+        assert_eq!(alpha(&body, n, 150.0, 600.0), 255, "keycap body");
+        assert_eq!(alpha(&body, n, 165.0, 90.0), 0, "no ears on the body layer");
+        assert_eq!(alpha(&ear_l, n, 165.0, 90.0), 255, "left ear");
+        assert_eq!(alpha(&ear_r, n, 850.0, 90.0), 255, "right ear");
+        assert_eq!(alpha(&ear_l, n, 850.0, 90.0), 0, "left layer has only the left ear");
+        assert_eq!(alpha(&body, n, 435.0, 600.0), 0, "⌘ cut out of the body");
+        assert_eq!(body[(128 * n as usize + 40) * 4], 255, "white ink");
     }
 
     #[test]
