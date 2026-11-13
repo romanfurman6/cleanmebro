@@ -19,6 +19,7 @@ jobs:
       !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login == 'romanfurman6' &&
+      !startsWith(github.event.pull_request.head.ref, 'release/') &&
       (github.event.action != 'labeled' || github.event.label.name == 'claude-review')
     runs-on: ubuntu-latest
     # Job-level, so an unrelated label (job skipped) never cancels a running review.

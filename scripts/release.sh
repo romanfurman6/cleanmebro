@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Cut a release: bump the version in Cargo.toml, commit, tag vX.Y.Z and push.
-# The tag starts .github/workflows/release.yml, which builds the app and
-# publishes the GitHub Release.
+# Cut a release: bump the version in Cargo.toml on a release/vX.Y.Z branch,
+# merge it into main through a pull request (main only takes PRs), then tag
+# the merged commit vX.Y.Z and push the tag. The tag starts
+# .github/workflows/release.yml, which waits for approval in the "release"
+# environment, builds the app and publishes the GitHub Release.
+# Needs the GitHub CLI (gh), signed in.
 #
 #   scripts/release.sh 0.2.0      # exact version
 #   scripts/release.sh patch      # 0.1.0 -> 0.1.1   (also: minor, major)
-#   NO_PUSH=1 scripts/release.sh minor   # commit + tag only
+#   NO_PUSH=1 scripts/release.sh minor   # bump commit on the branch only
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -28,19 +31,31 @@ branch="$(git rev-parse --abbrev-ref HEAD)"
 git fetch -q origin main
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || { echo "main is not in sync with origin/main" >&2; exit 1; }
 git rev-parse -q --verify "refs/tags/v$new" >/dev/null && { echo "tag v$new already exists" >&2; exit 1; }
+[[ "${NO_PUSH:-0}" == "1" ]] || command -v gh >/dev/null || { echo "needs the GitHub CLI: brew install gh && gh auth login" >&2; exit 1; }
 
 echo "Release $cur -> $new"
 # Only the [package] version (first match), not dependency versions.
 perl -0pi -e "s/^version *= *\"\Q$cur\E\"/version = \"$new\"/m" Cargo.toml
 cargo update -p cmdmeow --offline >/dev/null 2>&1 || cargo metadata --format-version 1 >/dev/null
 
+rb="release/v$new"
+git switch -c "$rb"
 git add Cargo.toml Cargo.lock
 git commit -m "Release v$new"
-git tag -a "v$new" -m "Cmd+Meow $new"
 
 if [[ "${NO_PUSH:-0}" == "1" ]]; then
-  echo "Tagged v$new. Push with: git push origin main v$new"
-else
-  git push origin main "v$new"
-  echo "Pushed v$new. Release build: https://github.com/romanfurman6/cmdmeow/actions/workflows/release.yml"
+  echo "Bump committed on $rb. Push and merge it, then tag main: git tag -a v$new -m 'Cmd+Meow $new' && git push origin v$new"
+  exit 0
 fi
+
+git push -u origin "$rb"
+gh pr create --base main --head "$rb" --title "Release v$new" --body "Version bump for v$new (scripts/release.sh)."
+gh pr merge "$rb" --squash --delete-branch
+git switch main
+git pull -q --ff-only origin main
+merged="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
+[[ "$merged" == "$new" ]] || { echo "main has version $merged, expected $new: tag it by hand" >&2; exit 1; }
+git branch -D "$rb" 2>/dev/null || true
+git tag -a "v$new" -m "Cmd+Meow $new"
+git push origin "v$new"
+echo "Pushed v$new. Approve the release: https://github.com/romanfurman6/cmdmeow/actions/workflows/release.yml"
