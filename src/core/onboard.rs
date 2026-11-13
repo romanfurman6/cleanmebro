@@ -54,11 +54,13 @@ pub struct Setup {
     from: usize,
     /// The Tools step shows every tool with a switch, not the goals.
     pub all_tools: bool,
+    /// Screenshots: the goal card the pointer "is on" (its preview shows).
+    pub demo_hover: Option<usize>,
 }
 
 impl Setup {
     pub fn new(step: usize) -> Self {
-        Setup { step, since: f64::NEG_INFINITY, from: step, all_tools: false }
+        Setup { step, since: f64::NEG_INFINITY, from: step, all_tools: false, demo_hover: None }
     }
 }
 
@@ -770,21 +772,23 @@ fn tools(app: &mut App, ui: &mut Ui, body: Rect, t: f32) {
     }
     let top = g.bottom() + 20.0;
     let area = Rect::from_min_max(Pos2::new(left.left(), top), left.max);
-    if all {
-        all_tools(app, ui, area, t);
-    } else {
-        goal_cards(app, ui, area, t);
-    }
-    mini_panel(app, ui, Rect::from_min_max(Pos2::new(body.right() - PANEL_W, body.top() + 6.0), body.max), t);
+    // what the pointer is on: its tools' widgets show on the right
+    let hot = if all { all_tools(app, ui, area, t) } else { goal_cards(app, ui, area, t) };
+    let demo_hover = app.setup.as_ref().and_then(|s| s.demo_hover).filter(|_| app.demo);
+    let hot = hot.or_else(|| demo_hover.map(|k| goal_tools(app, &GOALS[k])));
+    mini_panel(app, ui, Rect::from_min_max(Pos2::new(body.right() - PANEL_W, body.top() + 6.0), body.max), t, hot);
 }
 
-fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) {
+/// The goal cards. Returns the tools of the card under the pointer.
+fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) -> Option<Vec<usize>> {
     let p = ui.painter().clone();
     let gap = sp::M;
     let cw = (area.width() - gap) / 2.0;
     // three rows fill the step
     let ch = ((area.height() - sp::L - gap * 2.0) / 3.0).clamp(96.0, 116.0);
+    let now = ui.ctx().input(|i| i.time);
     let mut flip = None;
+    let mut hot = None;
     for (k, goal) in GOALS.iter().enumerate() {
         let idx = goal_tools(app, goal);
         if idx.is_empty() {
@@ -806,10 +810,22 @@ fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) {
         let inner = r.shrink(14.0);
         let jolt = ui.ctx().animate_bool_with_time(id.with("jolt"), picked, 0.32);
         let bump = 4.0 * jolt * (1.0 - jolt) * if picked { 0.12 } else { -0.08 };
+        let mut chips = Rect::NOTHING;
         for (j, &i) in idx.iter().enumerate() {
             let c = Pos2::new(inner.left() + 15.0 + j as f32 * 36.0, inner.top() + 15.0);
             let b = app.tools[i].badge();
-            tool_chip(&p, Rect::from_center_size(c, Vec2::splat(30.0 * (1.0 + bump))), b.icon, b.color);
+            let cr = Rect::from_center_size(c, Vec2::splat(30.0 * (1.0 + bump)));
+            tool_chip(&p, cr, b.icon, b.color);
+            chips = chips.union(cr);
+        }
+        // a short wordless loop while the pointer is on the card
+        let live = ui.ctx().animate_bool_with_time(id.with("live"), resp.hovered() && !app.demo, 0.2);
+        if live > 0.0 {
+            card_loop(&p.with_clip_rect(r), k, r, chips, now as f32, live);
+            ui.ctx().request_repaint();
+        }
+        if resp.hovered() {
+            hot = Some(idx.clone());
         }
         // check, top right
         let cc = Pos2::new(inner.right() - 9.0, inner.top() + 15.0);
@@ -849,16 +865,101 @@ fn goal_cards(app: &mut App, ui: &mut Ui, area: Rect, t: f32) {
             app.set_tool_on(i, o);
         }
     }
+    hot
 }
 
-/// Every tool with a switch, by section in two columns.
-fn all_tools(app: &mut App, ui: &mut Ui, area: Rect, t: f32) {
+/// Goal card `k`'s loop, `k` in [`GOALS`] order, drawn round its tool
+/// `chips` at `now` seconds, faded by `a`.
+fn card_loop(p: &egui::Painter, k: usize, card: Rect, chips: Rect, now: f32, a: f32) {
+    use std::f32::consts::TAU;
+    let tail = |ph: f32, rise: f32| if ph < rise { ph / rise } else { 1.0 - (ph - rise) / (1.0 - rise) };
+    let right = Pos2::new(chips.right() + 12.0, chips.center().y);
+    match GOALS[k].tools.first().copied() {
+        // Clean: dust blown off the chips
+        Some(crate::tools::cleanup::ID) => {
+            for (j, dy) in [0.0f32, 6.0, -5.0, 2.0].into_iter().enumerate() {
+                let ph = (now / 1.8 + j as f32 * 0.25).fract();
+                let c = Pos2::new(chips.right() + 2.0 + 46.0 * ph, chips.center().y + dy - 14.0 * ph);
+                p.circle_filled(c, 2.0 * (0.6 + 0.6 * ph), with_alpha(tint::CLEANUP(), 0.9 * tail(ph, 0.15) * a));
+            }
+        }
+        // Screenshots: crop corners close in, then a flash
+        Some(crate::tools::capture::ID) => {
+            let ph = (now / 2.2).fract();
+            let z = if ph < 0.3 { 1.5 - 0.5 * ease(ph / 0.3) } else { 1.0 };
+            let al = if ph < 0.3 { ph / 0.3 } else if ph < 0.7 { 1.0 } else { 1.0 - (ph - 0.7) / 0.3 };
+            let b = Rect::from_center_size(chips.center(), (chips.size() + Vec2::splat(12.0)) * z);
+            let st = Stroke::new(2.0, with_alpha(tint::CAPTURE(), al * a));
+            let l = 10.0;
+            for (c, dx, dy) in [(b.left_top(), 1.0, 1.0), (b.right_top(), -1.0, 1.0), (b.left_bottom(), 1.0, -1.0), (b.right_bottom(), -1.0, -1.0)] {
+                p.line_segment([c, c + Vec2::new(l * dx, 0.0)], st);
+                p.line_segment([c, c + Vec2::new(0.0, l * dy)], st);
+            }
+            if (0.32..0.5).contains(&ph) {
+                let f = if ph < 0.36 { (ph - 0.32) / 0.04 } else { 1.0 - (ph - 0.36) / 0.14 };
+                p.rect_filled(card, 12.0, Color32::from_white_alpha((46.0 * f * a) as u8));
+            }
+        }
+        // Clipboard: a copy slides off the chip
+        Some(crate::tools::clipboard::ID) => {
+            for j in 0..2 {
+                let ph = (now / 1.8 + j as f32 * 0.5).fract();
+                let r = chips.translate(Vec2::new(22.0 * ph, -10.0 * ph));
+                p.rect_stroke(r, 8.0, Stroke::new(1.5, with_alpha(tint::CAPTURE(), 0.9 * tail(ph, 0.2) * a)), StrokeKind::Inside);
+            }
+        }
+        // Voice typing: a sound wave by the mic
+        Some(crate::tools::dictation::ID) => {
+            for j in 0..5 {
+                let v = 0.5 - 0.5 * (TAU * (now / 0.9 - j as f32 * 0.133)).cos();
+                let h = 20.0 * (0.2 + 0.8 * v);
+                let x = right.x - 2.0 + j as f32 * 6.0;
+                p.rect_filled(Rect::from_center_size(Pos2::new(x, right.y), Vec2::new(3.0, h)), 1.5, with_alpha(tint::CAPTURE(), a));
+            }
+        }
+        // Watch my Mac: a pulse runs across
+        Some(crate::tools::system::ID) => {
+            let ph = (now / 2.0).fract();
+            let shown = (ph / 0.7).min(1.0);
+            let al = if ph < 0.7 { 1.0 } else { 1.0 - (ph - 0.7) / 0.3 };
+            let pts = [(0.0, 0.0), (22.0, 0.0), (28.0, -9.0), (36.0, 9.0), (42.0, 0.0), (90.0, 0.0)].map(|(x, y)| right + Vec2::new(x, y));
+            let total: f32 = pts.windows(2).map(|w| w[0].distance(w[1])).sum();
+            let mut left = total * shown;
+            let mut line = vec![pts[0]];
+            for w in pts.windows(2) {
+                let d = w[0].distance(w[1]);
+                if left >= d {
+                    line.push(w[1]);
+                    left -= d;
+                } else {
+                    line.push(w[0] + (w[1] - w[0]) * (left / d));
+                    break;
+                }
+            }
+            p.add(egui::Shape::line(line, Stroke::new(2.0, with_alpha(tint::HEALTH(), al * a))));
+        }
+        // For developers: a gauge needle swings
+        Some(crate::tools::claude::ID) => {
+            let c = Pos2::new(right.x + 14.0, right.y + 7.0);
+            p.add(egui::Shape::line(arc_points(c, 13.0, std::f32::consts::PI, TAU, 24), Stroke::new(2.0, with_alpha(tint::HEALTH(), 0.45 * a))));
+            let v = 0.5 - 0.5 * (TAU * now / 2.0).cos();
+            let ang = (-60.0 + 110.0 * v).to_radians() - std::f32::consts::FRAC_PI_2;
+            p.line_segment([c, c + Vec2::new(ang.cos(), ang.sin()) * 10.0], Stroke::new(2.0, with_alpha(tint::HEALTH(), a)));
+        }
+        _ => {}
+    }
+}
+
+/// Every tool with a switch, by section in two columns. Returns the tool
+/// under the pointer.
+fn all_tools(app: &mut App, ui: &mut Ui, area: Rect, t: f32) -> Option<Vec<usize>> {
     let p = ui.painter().clone();
     let secs = sections(app);
     let gap = 18.0;
     let cw = (area.width() - gap) / 2.0;
     let mut ys = [area.top(); 2];
     let mut flip = None;
+    let mut hot = None;
     let mut k = 0;
     for (si, sec) in secs.iter().enumerate() {
         let c = si % 2;
@@ -876,9 +977,10 @@ fn all_tools(app: &mut App, ui: &mut Ui, area: Rect, t: f32) {
             let id = ui.scope_id().with(("setup-tool", app.tools[i].id()));
             let resp = ui.interact(r, id, Sense::click());
             let o = app.tool_on(i);
-            if resp.hovered() {
+            if ui.rect_contains_pointer(r) {
                 p.rect_filled(r, 9.0, CARD());
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                hot = Some(vec![i]);
             }
             let b = app.tools[i].badge();
             let chip = Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(24.0));
@@ -902,11 +1004,13 @@ fn all_tools(app: &mut App, ui: &mut Ui, area: Rect, t: f32) {
     if let Some((i, o)) = flip {
         app.set_tool_on(i, o);
     }
+    hot
 }
 
 /// The menu bar panel as it will look: a tile per switched-on tool, which
-/// drops in when the tool is turned on.
-fn mini_panel(app: &App, ui: &mut Ui, area: Rect, t: f32) {
+/// drops in when the tool is turned on. With `hot` tools (under the
+/// pointer), their widgets instead.
+fn mini_panel(app: &mut App, ui: &mut Ui, area: Rect, t: f32, hot: Option<Vec<usize>>) {
     let p = ui.painter().clone();
     let ctx = ui.ctx().clone();
     let now = ctx.input(|i| i.time);
@@ -922,6 +1026,10 @@ fn mini_panel(app: &App, ui: &mut Ui, area: Rect, t: f32) {
         let r = Rect::from_min_size(Pos2::new(sx - 14.0, mb.center().y - 7.0), Vec2::splat(14.0));
         symbol(&p, name, r, TEXT_DIM().gamma_multiply(a));
         sx -= 24.0;
+    }
+    if let Some(list) = hot {
+        preview(app, ui, Rect::from_min_max(Pos2::new(area.left(), mb.bottom() + 8.0), area.max), &list);
+        return;
     }
     // the panel under it
     let on: Vec<usize> = (0..app.tools.len()).filter(|&i| app.tool_on(i)).collect();
@@ -963,6 +1071,47 @@ fn mini_panel(app: &App, ui: &mut Ui, area: Rect, t: f32) {
         } else {
             two_lines(&clip, tx, r.center().y, app.tools[i].name(), font(10.5), TEXT_FAINT().gamma_multiply(d), &meta, bold(13.0), TEXT().gamma_multiply(d), room);
         }
+    }
+}
+
+/// The real panel widgets of `list` (each at its biggest size up to Medium),
+/// scaled to fit `area`'s width, stacked from the top.
+fn preview(app: &mut App, ui: &mut Ui, area: Rect, list: &[usize]) {
+    use crate::core::panel;
+    use crate::core::tool::Size;
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let native_w = panel::inner_width();
+    let scale = (area.width() / native_w).min(1.0);
+    let mut y = area.top();
+    for &i in list {
+        let Some(spec) = app.tools[i].widgets().into_iter().next() else { continue };
+        let size = [Size::S24, Size::S14, Size::S12, Size::S11].into_iter().find(|s| spec.sizes.contains(s)).unwrap_or(spec.size);
+        let native = panel::size_px(size, native_w);
+        let h = native.y * scale;
+        if y + h > area.bottom() {
+            break;
+        }
+        let id = ui.scope_id().with(("setup-preview", app.tools[i].id()));
+        let d = appear(&ctx, id.with("in"), now, 0.25, app.demo);
+        let target = Pos2::new(area.left() + (1.0 - d) * 10.0, y);
+        let mut cx = app.cx();
+        // drawn at the panel's own size on a layer of its own, then scaled down
+        let layer = egui::Area::new(id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(Pos2::ZERO)
+            .constrain(false)
+            .interactable(false)
+            .show(&ctx, |ui| {
+                ui.multiply_opacity(d);
+                let r = Rect::from_min_size(Pos2::ZERO, native);
+                ui.set_clip_rect(r.expand(2.0));
+                panel::draw_at(app, ui, Some(i), spec.id, size, r, None, &mut cx);
+            })
+            .response
+            .layer_id;
+        ctx.set_transform_layer(layer, egui::emath::TSTransform::new(target.to_vec2(), scale));
+        y += h + sp::S;
     }
 }
 

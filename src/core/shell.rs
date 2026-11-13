@@ -313,7 +313,7 @@ impl App {
                 return;
             }
             // first-run setup, one step each
-            "setup" | "setup-tools" | "setup-tools-all" | "setup-ai" | "setup-models" | "setup-perms" | "setup-crash" | "setup-ready" => {
+            "setup" | "setup-tools" | "setup-tools-all" | "setup-tools-preview" | "setup-ai" | "setup-models" | "setup-perms" | "setup-crash" | "setup-ready" => {
                 self.mode = Mode::Setup;
                 let step = ["setup", "setup-tools", "setup-ai", "setup-models", "setup-perms", "setup-crash", "setup-ready"].iter().position(|v| *v == view).unwrap_or(0);
                 self.setup = Some(super::onboard::Setup::new(step));
@@ -328,9 +328,11 @@ impl App {
                     let on = super::onboard::ON_AT_FIRST.contains(&id) || (all && more.contains(&id)) || (view == "setup-models" && id == crate::tools::dictation::ID);
                     self.set_tool_on(i, on);
                 }
-                if all {
+                if all || view == "setup-tools-preview" {
                     let mut s = super::onboard::Setup::new(1);
-                    s.all_tools = true;
+                    s.all_tools = all;
+                    // the pointer on "Screenshots & recording"
+                    s.demo_hover = (!all).then_some(1);
                     self.setup = Some(s);
                 }
                 return;
