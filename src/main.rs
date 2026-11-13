@@ -27,6 +27,8 @@ mod tools;
 
 fn main() -> eframe::Result {
     kit::sync::install_panic_log();
+    // official release builds only (DSN baked in by release.yml); off everywhere else
+    let _crash_report = kit::crash_report::start();
     if std::env::args().any(|a| a == "--fan-report") {
         tools::fan::probe::report();
         return Ok(());
