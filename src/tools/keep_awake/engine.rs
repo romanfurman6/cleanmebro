@@ -70,6 +70,16 @@ pub struct Span {
     /// Kept awake for an agent (else by hand). Saved as "claude".
     #[serde(rename = "claude")]
     pub agent: bool,
+    /// Which agent; spans saved before there was a choice were Claude's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<Source>,
+}
+
+impl Span {
+    /// The agent it was kept awake for, None when by hand.
+    pub fn who(&self) -> Option<Source> {
+        self.agent.then(|| self.by.unwrap_or(Source::Claude))
+    }
 }
 
 pub struct Engine {
@@ -84,7 +94,8 @@ pub struct Engine {
     pub awake_since: Option<i64>,
     /// Closed spans of today (and the open one is `open`).
     pub log: Vec<Span>,
-    open: Option<(i64, bool)>,
+    /// The span under way: its start and who it's for (None: by hand).
+    open: Option<(i64, Option<Source>)>,
     /// When the agent was last seen working, while its streak lasts.
     agent_last: Option<i64>,
     /// The tool is turned on in Settings.
@@ -121,6 +132,9 @@ impl Engine {
         if agent != self.agent {
             self.agent = agent;
             self.sessions.clear();
+            // the old agent's streak ends with it: no wind-down for an
+            // agent that isn't watched any more
+            self.agent_last = None;
             self.step(now);
         }
     }
@@ -180,7 +194,7 @@ impl Engine {
             (false, Some(_)) => self.awake_since = None,
             _ => {}
         }
-        let kind = st.awake().then_some(st != State::Manual);
+        let kind = st.awake().then(|| if st == State::Manual { None } else { self.agent });
         if self.open.map(|o| o.1) != kind {
             self.close_span(now);
             self.open = kind.map(|k| (now, k));
@@ -245,8 +259,8 @@ impl Engine {
     pub fn today(&self, now: i64) -> Vec<Span> {
         let day = today_start(now);
         let mut v: Vec<Span> = self.log.iter().filter(|s| s.end > day).copied().collect();
-        if let Some((start, agent)) = self.open {
-            v.push(Span { start, end: now, agent });
+        if let Some((start, by)) = self.open {
+            v.push(Span { start, end: now, agent: by.is_some(), by });
         }
         for s in &mut v {
             s.start = s.start.max(day);
@@ -258,8 +272,8 @@ impl Engine {
     pub fn week(&self, now: i64) -> Vec<(i64, i64, i64)> {
         let today = today_start(now);
         let mut spans = self.log.clone();
-        if let Some((start, agent)) = self.open {
-            spans.push(Span { start, end: now, agent });
+        if let Some((start, by)) = self.open {
+            spans.push(Span { start, end: now, agent: by.is_some(), by });
         }
         (0..7)
             .map(|k| {
@@ -275,15 +289,23 @@ impl Engine {
             .collect()
     }
 
+    /// Agents that kept the Mac up in the last 7 days, in a fixed order.
+    pub fn week_agents(&self, now: i64) -> Vec<Source> {
+        let since = today_start(now) - 6 * 86_400;
+        let mut spans: Vec<Span> = self.log.iter().filter(|s| s.end > since).copied().collect();
+        spans.extend(self.today(now));
+        Source::ALL.into_iter().filter(|a| spans.iter().any(|s| s.who() == Some(*a))).collect()
+    }
+
     fn close_span(&mut self, now: i64) {
-        let Some((start, agent)) = self.open.take() else { return };
+        let Some((start, by)) = self.open.take() else { return };
         if now - start < 30 {
             return;
         }
         // a week is kept, for the page's last 7 days
         let day = today_start(now) - 6 * 86_400;
         self.log.retain(|s| s.end > day);
-        self.log.push(Span { start, end: now, agent });
+        self.log.push(Span { start, end: now, agent: by.is_some(), by });
         if let Some(d) = &self.dir {
             save_json(d, "today.json", &self.log);
         }
@@ -298,6 +320,15 @@ impl Drop for Engine {
 
 pub fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// Seconds per agent in `spans`, in a fixed order, agents with none left out.
+pub fn agent_time(spans: &[Span]) -> Vec<(Source, i64)> {
+    Source::ALL
+        .into_iter()
+        .map(|a| (a, spans.iter().filter(|s| s.who() == Some(a)).map(|s| s.end - s.start).sum::<i64>()))
+        .filter(|(_, t)| *t > 0)
+        .collect()
 }
 
 /// Unix seconds of local midnight before `t`.
@@ -477,13 +508,41 @@ mod tests {
     }
 
     #[test]
+    fn switching_agents_keeps_who_did_what() {
+        let mut e = Engine::new(None);
+        let day = today_start(now());
+        let t = day + 3600;
+        e.sessions = vec![session(t)];
+        e.step(t);
+        assert_eq!(e.state(t), State::Agent);
+        // Claude is still busy when the main agent becomes Codex: no
+        // leftover wind-down from Claude (was 6:54 instead of off/5:00)
+        e.set_agent(Some(Source::Codex), t + 60);
+        assert_eq!(e.state(t + 60), State::Off);
+        // Codex works, then goes quiet: the wait is the full 5 minutes
+        e.sessions = vec![session(t + 100)];
+        e.step(t + 100);
+        assert_eq!(e.state(t + 100), State::Agent);
+        e.sessions = vec![session(t + 100)];
+        let quiet = t + 100 + WORKING_SECS + 1;
+        e.step(quiet);
+        assert_eq!(e.state(quiet), State::WindDown { left: 299 });
+        let spans = e.today(t + 200);
+        let times = agent_time(&spans);
+        assert_eq!(times, vec![(Source::Claude, 60), (Source::Codex, 100)], "{spans:?}");
+        assert_eq!(e.week_agents(t + 200), vec![Source::Claude, Source::Codex]);
+    }
+
+    #[test]
     fn old_settings_files_still_read() {
         let s: Settings = serde_json::from_str(r#"{"claude": false, "claude_screen": true}"#).unwrap();
         assert!(!s.agent && s.agent_screen);
         let back = serde_json::to_string(&s).unwrap();
         assert!(back.contains("\"claude\":false"), "{back}");
-        let v: Vec<Span> = serde_json::from_str(r#"[{"start":1,"end":2,"claude":true}]"#).unwrap();
-        assert!(v[0].agent);
+        let v: Vec<Span> = serde_json::from_str(r#"[{"start":1,"end":2,"claude":true},{"start":3,"end":4,"claude":true,"by":"codex"},{"start":5,"end":6,"claude":false}]"#).unwrap();
+        let who: Vec<_> = v.iter().map(Span::who).collect();
+        assert_eq!(who, vec![Some(Source::Claude), Some(Source::Codex), None]);
+        assert!(!serde_json::to_string(&v[2]).unwrap().contains("by"));
     }
 
     #[test]

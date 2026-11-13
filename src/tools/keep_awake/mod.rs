@@ -208,18 +208,18 @@ fn demo_engine_for(state: State, agent: Option<sessions::Source>) -> (Engine, i6
     e.agent = agent;
     let h = |x: f64| t - ((13.0 + 7.0 / 60.0 - x) * 3600.0) as i64;
     e.log = vec![
-        engine::Span { start: h(9.2), end: h(9.9), agent: false },
-        engine::Span { start: h(10.7), end: h(11.3), agent: agent.is_some() },
-        engine::Span { start: h(11.3), end: h(11.9), agent: false },
+        engine::Span { start: h(9.2), end: h(9.9), agent: false, by: None },
+        engine::Span { start: h(10.7), end: h(11.3), agent: agent.is_some(), by: agent },
+        engine::Span { start: h(11.3), end: h(11.9), agent: false, by: None },
     ];
     // earlier days of the week
     for (d, c, m) in [(6, 2.5, 0.5), (5, 4.0, 1.0), (4, 1.0, 0.0), (3, 5.5, 0.8), (2, 0.0, 1.5), (1, 3.2, 0.4)] {
         let base = t - d * 86_400;
         if agent.is_some() {
-            e.log.insert(0, engine::Span { start: base - ((c + m) * 3600.0) as i64, end: base - (m * 3600.0) as i64, agent: true });
+            e.log.insert(0, engine::Span { start: base - ((c + m) * 3600.0) as i64, end: base - (m * 3600.0) as i64, agent: true, by: agent });
         }
         if m > 0.0 {
-            e.log.push(engine::Span { start: base - (m * 3600.0) as i64, end: base, agent: false });
+            e.log.push(engine::Span { start: base - (m * 3600.0) as i64, end: base, agent: false, by: None });
         }
     }
     e.log.sort_by_key(|s| s.start);

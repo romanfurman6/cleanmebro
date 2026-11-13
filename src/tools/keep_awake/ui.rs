@@ -461,18 +461,12 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     // today
     let spans = e.today(now);
     let total: i64 = spans.iter().map(|s| s.end - s.start).sum();
-    let for_agent: i64 = spans.iter().filter(|s| s.agent).map(|s| s.end - s.start).sum();
-    // past agent time stays on the strip after the agent is gone
-    let agent = match e.agent_name() {
-        "" => "AI agent",
-        a => a,
-    };
     p.text(Pos2::new(x0, y), Align2::LEFT_TOP, "Today", bold(15.0), TEXT());
-    let summary = match (total, for_agent) {
-        (0, _) => "Not kept awake yet".to_string(),
-        (t, 0) => format!("{} awake", span_text(t)),
-        (t, a) => format!("{} awake · {} for {agent}", span_text(t), span_text(a)),
-    };
+    // each agent's own time, also after the main agent changed
+    let mut summary = if total == 0 { "Not kept awake yet".to_string() } else { format!("{} awake", span_text(total)) };
+    for (a, secs) in super::engine::agent_time(&spans) {
+        summary += &format!(" · {} for {}", span_text(secs), a.name());
+    }
     p.text(Pos2::new(x1, y + 2.0), Align2::RIGHT_TOP, summary, font(12.0), TEXT_DIM());
     y += 26.0;
     let strip = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 28.0));
@@ -489,8 +483,14 @@ pub fn page(k: &mut KeepAwake, ui: &mut Ui, r: Rect) {
     }
     y += 20.0;
     let mut lx = x0;
-    let has_agent = e.agent.is_some() || e.week(now).iter().any(|d| d.1 > 0);
-    for (label, c) in [("You", HAND), (agent, AGENT_TINT())].into_iter().take(if has_agent { 2 } else { 1 }) {
+    // one tint for agent time, named after every agent in it (and the
+    // watched one, before it has any)
+    let mut agents = e.week_agents(now);
+    if let Some(a) = e.agent.filter(|a| !agents.contains(a)) {
+        agents.push(a);
+    }
+    let names = agents.iter().map(|a| a.name()).collect::<Vec<_>>().join(", ");
+    for (label, c) in [("You", HAND), (names.as_str(), AGENT_TINT())].into_iter().take(if agents.is_empty() { 1 } else { 2 }) {
         p.rect_filled(Rect::from_min_size(Pos2::new(lx, y + 1.0), Vec2::splat(10.0)), 3.0, c);
         let tr = p.text(Pos2::new(lx + 16.0, y + 6.0), Align2::LEFT_CENTER, label, font(12.0), TEXT_DIM());
         lx = tr.right() + 16.0;
