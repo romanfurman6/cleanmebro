@@ -94,6 +94,7 @@ Every action has a link for scripts, Raycast or Shortcuts: `open cmdmeow://…`
 - Cleanup never reads file contents. If you turn on the AI review, only paths, sizes and ages go to Claude.
 - Documents, Desktop, Projects, Keychains, `.ssh` and any folder with `.git` are always kept.
 - Removed items go to the Trash unless you choose "Delete right away".
+- Settings › General › **Remove Cmd+Meow** removes the app and everything it keeps on your Mac (data, Keychain items, permissions, the fan helper, Open at login). Screenshots and recordings saved to your own folders stay.
 
 ## Development
 
