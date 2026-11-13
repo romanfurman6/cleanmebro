@@ -1864,69 +1864,6 @@ pub fn demo_live(app: &mut App) {
     app.lens_selected.clear();
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn n(path: &str, bytes: u64, items: u64, other: u64, children: Vec<Node>) -> Node {
-        Node { name: path.rsplit('/').next().unwrap().into(), path: PathBuf::from(path), bytes, items, children, other }
-    }
-
-    #[test]
-    fn ai_check_never_trashes_essential_folders() {
-        assert_eq!(ai_action("trash", Path::new("/Applications")), "open");
-        assert_eq!(ai_action("trash", Path::new("/System/Library")), "open");
-        assert_eq!(ai_action("trash", Path::new("/Applications/Foo.app")), "trash");
-        assert_eq!(ai_action("reveal", Path::new("/Applications")), "reveal");
-        // the agent is told which folders are open/reveal only
-        let root = n("/", 400_000_000_000, 10, 0, vec![n("/Applications", 50_000_000_000, 5, 0, vec![n("/Applications/Foo.app", 1, 1, 0, vec![])])]);
-        let ask = map_ask(&root);
-        let apps = ask.items.iter().find(|i| i.key == "/Applications").unwrap();
-        assert!(apps.line.contains("never trash"));
-    }
-
-    #[test]
-    fn biggest_files_come_from_every_level() {
-        let t = n(
-            "/r",
-            0,
-            9,
-            0,
-            vec![
-                n("/r/a", 0, 5, 1, vec![n("/r/a/big.iso", 900, 1, 0, vec![]), n("/r/a/sub", 0, 2, 0, vec![n("/r/a/sub/mid.mov", 500, 1, 0, vec![])])]),
-                n("/r/top.zip", 700, 1, 0, vec![]),
-                // a folder holding one small file: not a file itself
-                n("/r/tiny", 10, 1, 10, vec![]),
-            ],
-        );
-        let got: Vec<&str> = biggest_files(&t, 10).iter().map(|x| x.name.as_str()).collect();
-        assert_eq!(got, vec!["big.iso", "top.zip", "mid.mov"]);
-        assert_eq!(biggest_files(&t, 2).len(), 2);
-    }
-
-    #[test]
-    fn app_data_needs_a_second_look() {
-        let h = home();
-        assert!(is_app_data(&h.join("Library/Application Support/Slack")));
-        assert!(is_app_data(&h.join("Library/Containers/com.apple.mail/Data")));
-        assert!(!is_app_data(&h.join("Library/Application Support")));
-        assert!(!is_app_data(&h.join("Downloads/x.dmg")));
-        assert!(!is_app_data(&h.join("Library/Caches/foo")));
-    }
-
-    #[test]
-    fn picking_a_folder_replaces_what_is_inside() {
-        let mut app = App::new(&crate::core::tool::ToolEnv { ctx: egui::Context::default(), demo: true });
-        pick(&mut app, (PathBuf::from("/r/a/x"), 1));
-        pick(&mut app, (PathBuf::from("/r/a"), 5));
-        assert_eq!(app.lens_selected, vec![(PathBuf::from("/r/a"), 5)]);
-        pick(&mut app, (PathBuf::from("/r/a/y"), 1));
-        assert_eq!(app.lens_selected.len(), 1);
-        pick(&mut app, (PathBuf::from("/r/a"), 5));
-        assert!(app.lens_selected.is_empty());
-    }
-}
-
 /// Folders worth a look: big ones up to four levels down.
 fn big_folders(root: &Node) -> Vec<&Node> {
     fn walk<'a>(n: &'a Node, depth: usize, min: u64, out: &mut Vec<&'a Node>) {
@@ -1992,5 +1929,68 @@ fn map_ask(root: &Node) -> aicheck::Ask {
         ],
         items,
         facts,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn n(path: &str, bytes: u64, items: u64, other: u64, children: Vec<Node>) -> Node {
+        Node { name: path.rsplit('/').next().unwrap().into(), path: PathBuf::from(path), bytes, items, children, other }
+    }
+
+    #[test]
+    fn ai_check_never_trashes_essential_folders() {
+        assert_eq!(ai_action("trash", Path::new("/Applications")), "open");
+        assert_eq!(ai_action("trash", Path::new("/System/Library")), "open");
+        assert_eq!(ai_action("trash", Path::new("/Applications/Foo.app")), "trash");
+        assert_eq!(ai_action("reveal", Path::new("/Applications")), "reveal");
+        // the agent is told which folders are open/reveal only
+        let root = n("/", 400_000_000_000, 10, 0, vec![n("/Applications", 50_000_000_000, 5, 0, vec![n("/Applications/Foo.app", 1, 1, 0, vec![])])]);
+        let ask = map_ask(&root);
+        let apps = ask.items.iter().find(|i| i.key == "/Applications").unwrap();
+        assert!(apps.line.contains("never trash"));
+    }
+
+    #[test]
+    fn biggest_files_come_from_every_level() {
+        let t = n(
+            "/r",
+            0,
+            9,
+            0,
+            vec![
+                n("/r/a", 0, 5, 1, vec![n("/r/a/big.iso", 900, 1, 0, vec![]), n("/r/a/sub", 0, 2, 0, vec![n("/r/a/sub/mid.mov", 500, 1, 0, vec![])])]),
+                n("/r/top.zip", 700, 1, 0, vec![]),
+                // a folder holding one small file: not a file itself
+                n("/r/tiny", 10, 1, 10, vec![]),
+            ],
+        );
+        let got: Vec<&str> = biggest_files(&t, 10).iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(got, vec!["big.iso", "top.zip", "mid.mov"]);
+        assert_eq!(biggest_files(&t, 2).len(), 2);
+    }
+
+    #[test]
+    fn app_data_needs_a_second_look() {
+        let h = home();
+        assert!(is_app_data(&h.join("Library/Application Support/Slack")));
+        assert!(is_app_data(&h.join("Library/Containers/com.apple.mail/Data")));
+        assert!(!is_app_data(&h.join("Library/Application Support")));
+        assert!(!is_app_data(&h.join("Downloads/x.dmg")));
+        assert!(!is_app_data(&h.join("Library/Caches/foo")));
+    }
+
+    #[test]
+    fn picking_a_folder_replaces_what_is_inside() {
+        let mut app = App::new(&crate::core::tool::ToolEnv { ctx: egui::Context::default(), demo: true });
+        pick(&mut app, (PathBuf::from("/r/a/x"), 1));
+        pick(&mut app, (PathBuf::from("/r/a"), 5));
+        assert_eq!(app.lens_selected, vec![(PathBuf::from("/r/a"), 5)]);
+        pick(&mut app, (PathBuf::from("/r/a/y"), 1));
+        assert_eq!(app.lens_selected.len(), 1);
+        pick(&mut app, (PathBuf::from("/r/a"), 5));
+        assert!(app.lens_selected.is_empty());
     }
 }
