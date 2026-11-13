@@ -138,8 +138,8 @@ pub struct Dictation {
     tab: Tab,
     on: bool,
     target: mac::Target,
-    /// Where the pill goes: the caret, the mouse, the screen they're on.
-    place: (Option<Rect>, Option<Pos2>, Option<Rect>),
+    /// Where the pill goes: the caret and field, the mouse, the screen they're on.
+    place: (mac::Spot, Option<Pos2>, Option<Rect>),
     /// Loudness, newest last, for the pill's bars.
     levels: Vec<f32>,
     /// When the last bar was added.
@@ -195,7 +195,7 @@ impl Dictation {
             tab: Tab::History,
             on: false,
             target: mac::Target::default(),
-            place: (None, None, None),
+            place: (mac::Spot::default(), None, None),
             levels: Vec::new(),
             level_at: None,
             keys: None,
@@ -316,11 +316,12 @@ impl Dictation {
     /// caret, start the mic.
     pub fn start(&mut self) {
         self.target = mac::front_app().unwrap_or_default();
-        let caret = mac::caret(&self.target);
+        let spot = mac::spot(&self.target);
         self.around = mac::around(&self.target);
         let mouse = mac::mouse();
-        let at = caret.map(|c| c.center()).or(mouse).unwrap_or(Pos2::new(600.0, 400.0));
-        self.place = (caret, mouse, mac::screen_at(at));
+        let at = spot.center().or(mouse).unwrap_or(Pos2::new(600.0, 400.0));
+        self.place = (spot, mouse, mac::screen_at(at));
+        eprintln!("[dictation] spot {:?}", self.place);
         self.levels.clear();
         match Perm::Microphone.status() {
             Status::Allowed => {}

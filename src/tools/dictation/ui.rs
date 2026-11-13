@@ -72,8 +72,8 @@ pub fn pill(d: &mut Dictation, ctx: &egui::Context) {
         None => PILL_W,
     };
     let size = Vec2::new(w, PILL_H);
-    let (caret, mouse, screen) = d.place;
-    let pos = mac::pill_pos(caret, mouse, screen, size);
+    let (spot, mouse, screen) = d.place;
+    let pos = mac::pill_pos(spot, mouse, screen, size);
     let builder = ViewportBuilder::default()
         .with_title(PILL_TITLE)
         .with_decorations(false)
