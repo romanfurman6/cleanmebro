@@ -536,9 +536,13 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                             trash = Some(j.clone());
                         }
                         right_btn = rb.left() - sp::COL_GAP;
-                        // the button takes the state column's place
+                        // the button pushes the state and schedule columns left;
+                        // the schedule goes when the name would get too little
                         if cols.state + STATE_W > right_btn {
-                            cols.name_max = cols.name_max.min(right_btn - cols.text_x - sp::COL_GAP);
+                            cols.state = right_btn - STATE_W;
+                            let when = cols.state - sp::COL_GAP - WHEN_W;
+                            cols.when = (when - sp::COL_GAP - cols.text_x >= 160.0).then_some(when);
+                            cols.name_max = cols.when.unwrap_or(cols.state) - sp::COL_GAP - cols.text_x;
                         }
                     }
                     let mut tags: Vec<(&str, Color32)> = fl.iter().map(|f| (f.label(), flag_color(*f))).collect();
@@ -567,10 +571,8 @@ pub fn page(s: &mut Startup, ui: &mut Ui, r: Rect, cx: &mut Cx) {
                         None => j.plist.display().to_string(),
                     };
                     ui.interact(dr, ui.scope_id().with(("su-tip", &j.label, j.scope as u8)), Sense::hover()).on_hover_text(tip);
-                    if cols.state + STATE_W <= right_btn {
-                        when_cell(&p, &cols, r.center().y, when_icon(j), &j.when.label(j.scope));
-                        state_cell(&p, cols.state, r.center().y, if !j.on { Some("off") } else if j.pid.is_some() { None } else { Some("idle") }, j.on && j.pid.is_some());
-                    }
+                    when_cell(&p, &cols, r.center().y, when_icon(j), &j.when.label(j.scope));
+                    state_cell(&p, cols.state, r.center().y, if !j.on { Some("off") } else if j.pid.is_some() { None } else { Some("idle") }, j.on && j.pid.is_some());
                     let mr = icon_dots(ui, more, ui.scope_id().with(("su-more", &j.label, j.scope as u8)));
                     egui::Popup::menu(&mr).show(|ui| {
                         ui.set_min_width(260.0);
