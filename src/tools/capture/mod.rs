@@ -1103,6 +1103,11 @@ impl Tool for Capture {
                 self.tab = Tab::History;
                 Some(View::Page)
             }
+            "capture-empty" => {
+                self.tab = Tab::History;
+                self.store.shots.retain(|s| s.kind == store::Kind::Recording);
+                Some(View::Page)
+            }
             "capture-folder" => {
                 self.tab = Tab::Folder;
                 Some(View::Page)

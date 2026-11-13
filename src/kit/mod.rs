@@ -10,6 +10,7 @@ pub mod brand;
 pub mod charge;
 pub mod claude_code;
 pub mod crash_report;
+pub mod empty;
 pub mod fs;
 pub mod fswatch;
 pub mod glass;

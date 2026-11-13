@@ -190,6 +190,11 @@ impl Tool for Video {
                 c.vtab = VTab::Settings;
                 Some(View::Page)
             }
+            "video-empty" => {
+                c.vtab = VTab::Recordings;
+                c.store.shots.retain(|s| s.kind != super::store::Kind::Recording);
+                Some(View::Page)
+            }
             _ => None,
         }
     }
