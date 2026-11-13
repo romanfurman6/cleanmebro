@@ -1,4 +1,7 @@
-//! Which AI agent checks the scan's paths: Claude Code, Codex or Gemini CLI.
+//! Which AI agent checks the scan's paths: Claude Code or Codex CLI.
+//! Scanned file names are untrusted text in the prompt, so an agent is only
+//! offered when it runs without tools (Claude) or in a read-only sandbox
+//! (Codex).
 //! Each one gets the same system rules and numbered path lines, and answers
 //! with the same JSON verdicts, so the judge doesn't care which one ran.
 
@@ -16,17 +19,15 @@ pub enum Agent {
     #[default]
     Claude,
     Codex,
-    Gemini,
 }
 
 impl Agent {
-    pub const ALL: [Agent; 3] = [Agent::Claude, Agent::Codex, Agent::Gemini];
+    pub const ALL: [Agent; 2] = [Agent::Claude, Agent::Codex];
 
     pub fn name(self) -> &'static str {
         match self {
             Agent::Claude => "Claude",
             Agent::Codex => "Codex",
-            Agent::Gemini => "Gemini",
         }
     }
 
@@ -34,7 +35,6 @@ impl Agent {
         match self {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
-            Agent::Gemini => "gemini",
         }
     }
 
@@ -84,9 +84,6 @@ impl Agent {
                 let _ = std::fs::remove_file(&last);
                 cmd.args(["exec", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "--output-last-message"]).arg(&last).arg(&both);
             }
-            Agent::Gemini => {
-                cmd.args(["-p", &both]);
-            }
         }
         let out = run(cmd, cancel)?;
         if !out.status.success() {
@@ -100,7 +97,6 @@ impl Agent {
                 let _ = std::fs::remove_file(&last);
                 s
             }
-            Agent::Gemini => String::from_utf8_lossy(&out.stdout).into_owned(),
         })
     }
 }

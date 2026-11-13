@@ -475,12 +475,7 @@ const CHROMIUM_CACHES: [&str; 9] = [
 /// going is stopped first.
 pub fn start_scan(shared: Shared, ctx: egui::Context, agent: Option<super::agent::Agent>) {
     let use_ai = agent.is_some();
-    let cancel = {
-        let mut g = shared.lock_ok();
-        g.cancel.store(true, Ordering::SeqCst);
-        *g = State { phase: Phase::Scanning, with_ai: use_ai, agent, ..Default::default() };
-        g.cancel.clone()
-    };
+    let cancel = begin_run(&shared, agent);
     std::thread::spawn(move || {
         let (running_ids, running_names) = running_apps();
         let mut c = Ctx { items: Vec::new(), kept: kept().into_iter().collect(), hidden_kept: 0, running_ids, running_names, brew: false, shared: shared.clone(), egui: ctx.clone(), cancel: cancel.clone() };
@@ -542,13 +537,24 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, agent: Option<super::agent
     });
 }
 
+/// Stop any run still going and set up a fresh scan; returns its token.
+fn begin_run(shared: &Shared, agent: Option<super::agent::Agent>) -> Arc<AtomicBool> {
+    let mut g = shared.lock_ok();
+    g.cancel.store(true, Ordering::SeqCst);
+    *g = State { phase: Phase::Scanning, with_ai: agent.is_some(), agent, ..Default::default() };
+    g.cancel.clone()
+}
+
 /// Show the results as they stand: select what's safe, remember the scan.
 fn finish_results(g: &mut State) {
     for it in g.items.iter_mut() {
         it.selected = it.verdict == Verdict::Safe && !it.permanent;
     }
     g.phase = Phase::Results;
-    record_scan(g);
+    // tests don't touch the person's saved scan
+    if !cfg!(test) {
+        record_scan(g);
+    }
 }
 
 /// Stop a scan: back to the start screen at once (the scan thread notices
@@ -1451,6 +1457,63 @@ mod tests {
             app_running: false,
             action: Action::Files,
         }
+    }
+
+    #[test]
+    fn stop_scan_goes_back_to_the_start_and_cancels_the_run() {
+        let shared: Shared = Default::default();
+        let token = begin_run(&shared, None);
+        shared.lock_ok().items.push(it(Group::Logs, "/tmp/a", "Logs", Verdict::Safe, Who::Rule));
+        stop_scan(&shared);
+        assert!(token.load(Ordering::SeqCst));
+        let g = shared.lock_ok();
+        assert_eq!(g.phase, Phase::Intro);
+        assert!(g.items.is_empty());
+        // the start screen's own token is fresh
+        assert!(!g.cancel.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_new_scan_cancels_the_one_before() {
+        let shared: Shared = Default::default();
+        let first = begin_run(&shared, None);
+        let second = begin_run(&shared, Some(super::super::agent::Agent::Claude));
+        assert!(first.load(Ordering::SeqCst));
+        assert!(!second.load(Ordering::SeqCst));
+        let g = shared.lock_ok();
+        assert_eq!(g.phase, Phase::Scanning);
+        assert!(g.with_ai);
+    }
+
+    #[test]
+    fn skip_ai_shows_results_by_the_rules() {
+        let shared: Shared = Default::default();
+        let token = begin_run(&shared, Some(super::super::agent::Agent::Claude));
+        {
+            let mut g = shared.lock_ok();
+            g.phase = Phase::Judging;
+            let mut a = it(Group::Logs, "/tmp/a", "Logs", Verdict::Safe, Who::Rule);
+            a.selected = false;
+            let mut b = it(Group::Logs, "/tmp/b", "Logs", Verdict::Ask, Who::Rule);
+            b.selected = false;
+            g.items = vec![a, b];
+        }
+        skip_ai(&shared);
+        assert!(token.load(Ordering::SeqCst));
+        let g = shared.lock_ok();
+        assert_eq!(g.phase, Phase::Results);
+        assert!(g.ai_error.as_deref().is_some_and(|e| e.contains("skipped")));
+        assert!(g.items[0].selected);
+        assert!(!g.items[1].selected);
+    }
+
+    #[test]
+    fn skip_ai_does_nothing_outside_the_ai_check() {
+        let shared: Shared = Default::default();
+        let token = begin_run(&shared, None);
+        skip_ai(&shared);
+        assert!(!token.load(Ordering::SeqCst));
+        assert_eq!(shared.lock_ok().phase, Phase::Scanning);
     }
 
     #[test]

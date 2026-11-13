@@ -190,6 +190,8 @@ pub fn update(shared: Shared, ctx: egui::Context, quiet: bool) {
     }
     // the map stays on screen while it's brought up to date
     shared.quiet.store(quiet, Ordering::SeqCst);
+    // cleared once, now: a Stop while the history is read still counts
+    shared.stop.store(false, Ordering::SeqCst);
     shared.updating.store(true, Ordering::SeqCst);
     std::thread::spawn(move || {
         below_ui();
@@ -206,6 +208,12 @@ pub fn update(shared: Shared, ctx: egui::Context, quiet: bool) {
             }
             _ => None,
         };
+        if shared.stop.load(Ordering::SeqCst) {
+            shared.updating.store(false, Ordering::SeqCst);
+            shared.running.store(false, Ordering::SeqCst);
+            ctx.request_repaint();
+            return;
+        }
         let Some((old, changes, now_event)) = plan else {
             shared.updating.store(false, Ordering::SeqCst);
             // Update clicked while this ran quietly: it turned `quiet` off
@@ -227,7 +235,6 @@ pub fn update(shared: Shared, ctx: egui::Context, quiet: bool) {
             ctx.request_repaint();
             return;
         }
-        shared.stop.store(false, Ordering::SeqCst);
         if !quiet {
             shared.files.store(0, Ordering::SeqCst);
             shared.bytes.store(0, Ordering::SeqCst);

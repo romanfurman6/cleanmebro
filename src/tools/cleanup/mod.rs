@@ -26,7 +26,7 @@ pub struct Cleanup {
     pub(crate) clean: engine::Shared,
     pub(crate) demo: bool,
     pub(crate) use_ai: bool,
-    /// The agent that checks the paths (Claude, Codex, Gemini).
+    /// The agent that checks the paths (Claude, Codex).
     pub(crate) agent: agent::Agent,
     /// Agents installed on this Mac (looked up once).
     pub(crate) agents: Option<Vec<agent::Agent>>,
