@@ -1,6 +1,7 @@
 //! Keep Awake: keeps the Mac from sleeping, by hand with one switch, or by
-//! itself while Claude Code is working (and a few minutes after, so a pause
-//! between prompts doesn't put the Mac to sleep). Uses macOS power
+//! itself while the main AI agent (Claude Code, Codex, Gemini CLI or
+//! OpenCode, picked in Settings › AI Usage) is working, and a few minutes
+//! after, so a pause between prompts doesn't put the Mac to sleep. Uses macOS power
 //! assertions, the same thing `caffeinate` uses, without a helper process.
 //!
 //! Page routes: "" only.
@@ -22,7 +23,7 @@ use std::time::{Duration, Instant};
 pub const ID: ToolId = "keep_awake";
 const CARD: &str = "card";
 
-/// How often Claude Code's logs are checked and the state is brought up to date.
+/// How often the agent's logs are checked and the state is brought up to date.
 const POLL: Duration = Duration::from_secs(5);
 /// With folder events on, the full read that catches anything they missed.
 const RESCAN: Duration = Duration::from_secs(60);
@@ -89,7 +90,7 @@ impl KeyRec {
 impl KeepAwake {
     pub fn new(env: &ToolEnv) -> Self {
         if env.demo {
-            let (engine, t) = demo_engine(State::Claude);
+            let (engine, t) = demo_engine(State::Agent);
             return KeepAwake { engine: Arc::new(Mutex::new(engine)), demo_now: Some(t), keys: KeyRec::default() };
         }
         let engine: Shared = Arc::new(Mutex::new(Engine::new(Some(engine::data_dir()))));
@@ -138,31 +139,41 @@ fn url_routes(engine: &Shared, ctx: &egui::Context) {
     });
 }
 
-/// The background loop: read Claude Code's logs and keep the assertions in
-/// line, also while every window is hidden.
+/// The background loop: follow the main agent, read its logs and keep the
+/// assertions in line, also while every window is hidden.
 fn watch(engine: Shared, ctx: egui::Context) {
     crate::kit::activity::low_priority();
     let mut scanner = sessions::Scanner::default();
-    let root = crate::kit::claude_code::projects_dir();
-    // Claude's logs are read again only when macOS says they changed (and
-    // once a minute in case an event was missed); the cheap state step still
-    // runs every POLL so timers and the switch stay prompt
+    // logs are read again only when macOS says they changed (and once a
+    // minute in case an event was missed); the cheap state step still runs
+    // every POLL so timers and the switch stay prompt. Every agent's folder
+    // is watched, so switching the main one needs no new stream
     static CHANGED: crate::kit::activity::Kick = crate::kit::activity::Kick::new();
-    let hooked = crate::kit::fswatch::watch(std::slice::from_ref(&root), 1.0, &CHANGED);
+    let roots: Vec<_> = sessions::Source::ALL.iter().map(|s| s.root()).collect();
+    let hooked = crate::kit::fswatch::watch(&roots, 1.0, &CHANGED);
     let mut rescan = crate::kit::activity::Every::default();
-    let mut was_watching = false;
+    let mut was_watching = None;
     loop {
         let t = now();
-        let watch_claude = engine.lock_ok().settings.claude;
-        let fresh = !hooked || CHANGED.take() || !was_watching || rescan.due(RESCAN);
-        was_watching = watch_claude;
-        let found = match (watch_claude, fresh) {
-            (false, _) => Some(Vec::new()),
-            (true, true) => {
-                rescan.mark();
-                Some(scanner.scan(&root, t))
+        let source = sessions::Source::main();
+        let watching = {
+            let mut e = engine.lock_ok();
+            if e.agent != source {
+                e.set_agent(source, t);
+                scanner = sessions::Scanner::default();
+                crate::kit::activity::repaint(&ctx);
             }
-            (true, false) => None,
+            e.settings.agent.then_some(source).flatten()
+        };
+        let fresh = !hooked || CHANGED.take() || was_watching != watching || rescan.due(RESCAN);
+        was_watching = watching;
+        let found = match (watching, fresh) {
+            (None, _) => Some(Vec::new()),
+            (Some(src), true) => {
+                rescan.mark();
+                Some(scanner.scan(src, t))
+            }
+            (Some(_), false) => None,
         };
         {
             let mut e = engine.lock_ok();
@@ -185,21 +196,29 @@ fn badge() -> Badge {
 
 /// Sample data for screenshots, showing `state`.
 fn demo_engine(state: State) -> (Engine, i64) {
+    demo_engine_for(state, Some(sessions::Source::Claude))
+}
+
+/// The same, watching `agent` (None: no agent on this Mac).
+fn demo_engine_for(state: State, agent: Option<sessions::Source>) -> (Engine, i64) {
     use sessions::Session;
     let t = engine::today_start(now()) + 13 * 3600 + 7 * 60;
     let mut e = Engine::new(None);
+    e.agent = agent;
     let h = |x: f64| t - ((13.0 + 7.0 / 60.0 - x) * 3600.0) as i64;
     e.log = vec![
-        engine::Span { start: h(9.2), end: h(9.9), claude: false },
-        engine::Span { start: h(10.7), end: h(11.3), claude: true },
-        engine::Span { start: h(11.3), end: h(11.9), claude: false },
+        engine::Span { start: h(9.2), end: h(9.9), agent: false, by: None },
+        engine::Span { start: h(10.7), end: h(11.3), agent: agent.is_some(), by: agent },
+        engine::Span { start: h(11.3), end: h(11.9), agent: false, by: None },
     ];
     // earlier days of the week
     for (d, c, m) in [(6, 2.5, 0.5), (5, 4.0, 1.0), (4, 1.0, 0.0), (3, 5.5, 0.8), (2, 0.0, 1.5), (1, 3.2, 0.4)] {
         let base = t - d * 86_400;
-        e.log.insert(0, engine::Span { start: base - ((c + m) * 3600.0) as i64, end: base - (m * 3600.0) as i64, claude: true });
+        if agent.is_some() {
+            e.log.insert(0, engine::Span { start: base - ((c + m) * 3600.0) as i64, end: base - (m * 3600.0) as i64, agent: true, by: agent });
+        }
         if m > 0.0 {
-            e.log.insert(1, engine::Span { start: base - (m * 3600.0) as i64, end: base, claude: false });
+            e.log.push(engine::Span { start: base - (m * 3600.0) as i64, end: base, agent: false, by: None });
         }
     }
     e.log.sort_by_key(|s| s.start);
@@ -213,7 +232,7 @@ fn demo_engine(state: State) -> (Engine, i64) {
             e.sessions = vec![idle];
             e.set_manual(true, t - 25 * 60);
         }
-        State::Claude => {
+        State::Agent => {
             e.sessions = vec![
                 Session { project: "cmdmeow".into(), last_write: h(11.9), tool_running: false },
                 Session { project: "api-server".into(), last_write: h(11.9), tool_running: false },
@@ -227,6 +246,9 @@ fn demo_engine(state: State) -> (Engine, i64) {
             e.sessions = vec![Session { project: "cmdmeow".into(), last_write: t - 300, tool_running: false }, idle];
             e.step(t - 300);
         }
+    }
+    if agent.is_none() {
+        e.sessions.clear();
     }
     e.step(t);
     (e, t)
@@ -246,10 +268,11 @@ impl Tool for KeepAwake {
         "Utilities"
     }
     fn about(&self) -> &'static str {
-        "Keep the Mac awake, or only while Claude Code works"
+        "Keep the Mac awake, or only while your AI agent works"
     }
     fn sidebar_meta(&self) -> String {
-        ui::short_state(self.state()).into()
+        let e = self.engine.lock_ok();
+        ui::short_state(e.state(self.now()), e.agent_name())
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
         vec![WidgetSpec { id: CARD, title: "Keep Awake", about: "The switch, and what keeps your Mac up.", sizes: UP_TO_MEDIUM, size: Size::S12, default_on: true }]
@@ -287,14 +310,18 @@ impl Tool for KeepAwake {
         false
     }
     fn demo_view(&mut self, view: &str) -> Option<View> {
-        let state = match view {
-            "awake" | "awake-claude" => State::Claude,
-            "awake-off" => State::Off,
-            "awake-manual" => State::Manual,
-            "awake-winddown" => State::WindDown { left: 0 },
+        use sessions::Source;
+        let (state, agent) = match view {
+            "awake" | "awake-claude" => (State::Agent, Some(Source::Claude)),
+            "awake-codex" => (State::Agent, Some(Source::Codex)),
+            "awake-off" => (State::Off, Some(Source::Claude)),
+            // the main agent isn't on this Mac: no trigger, no sessions
+            "awake-no-agent" => (State::Off, None),
+            "awake-manual" => (State::Manual, Some(Source::Claude)),
+            "awake-winddown" => (State::WindDown { left: 0 }, Some(Source::Claude)),
             _ => return None,
         };
-        let (e, t) = demo_engine(state);
+        let (e, t) = demo_engine_for(state, agent);
         *self.engine.lock_ok() = e;
         self.demo_now = Some(t);
         Some(View::Page)
@@ -310,7 +337,7 @@ mod tests {
         for (want, matches) in [
             (State::Off, (|s: State| s == State::Off) as fn(State) -> bool),
             (State::Manual, |s| s == State::Manual),
-            (State::Claude, |s| s == State::Claude),
+            (State::Agent, |s| s == State::Agent),
             (State::WindDown { left: 0 }, |s| matches!(s, State::WindDown { .. })),
         ] {
             let (e, t) = demo_engine(want);
