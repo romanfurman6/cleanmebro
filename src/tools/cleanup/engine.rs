@@ -164,6 +164,8 @@ pub struct State {
     pub log: Vec<String>,
     /// Set to stop this run (Stop, Skip, a new scan); each run has its own.
     pub cancel: Arc<AtomicBool>,
+    /// Which scan this is (counts up per run): AI Check checks once per scan.
+    pub run: u64,
     /// The agent checking this scan's paths, if any.
     pub agent: Option<super::agent::Agent>,
     /// Found, but hidden: the person chose to keep them before.
@@ -348,9 +350,9 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
     items.retain(|it| !it.path.ancestors().skip(1).any(|a| all.contains(a)));
     let n = items.len();
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let done = std::sync::atomic::AtomicUsize::new(0);
     let sizes: Vec<std::sync::atomic::AtomicU64> = (0..n).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
     let gi = |g: Group| Group::ALL.iter().position(|x| *x == g).unwrap_or(0);
+    let weights = group_weights(last_scan().map(|l| l.groups).as_deref());
     {
         let mut g = shared.lock_ok();
         g.live = Default::default();
@@ -373,7 +375,6 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
                     // a tool's item came with its size
                     let size = if items[k].action == Action::Files { dir_size(&items[k].path) } else { items[k].bytes };
                     sizes[k].store(size, std::sync::atomic::Ordering::Relaxed);
-                    let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     let mut g = shared.lock_ok();
                     // a stopped run no longer owns the shared state
                     if cancel.load(Ordering::SeqCst) {
@@ -386,7 +387,8 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
                         l.items += 1;
                     }
                     g.current = items[k].path.display().to_string();
-                    g.progress = from + (1.0 - from) * d as f32 / n as f32;
+                    let p = from + (1.0 - from) * live_progress(&g.live, &weights);
+                    g.progress = g.progress.max(p);
                     drop(g);
                     ctx.request_repaint();
                 }
@@ -397,6 +399,37 @@ fn measure(items: &mut Vec<Item>, shared: &Shared, ctx: &egui::Context, from: f3
         it.bytes = s.load(std::sync::atomic::Ordering::Relaxed);
     }
     items.retain(|it| it.bytes >= m::MIN_ITEM_BYTES);
+}
+
+/// How much each group weighs in the progress: what the last scan found in
+/// it (a big group takes longer to measure), at least 1 GB; equal without one.
+fn group_weights(last: Option<&[u64]>) -> [f32; Group::COUNT] {
+    let mut w = [1.0; Group::COUNT];
+    if let Some(l) = last.filter(|l| l.len() == Group::COUNT) {
+        for (x, b) in w.iter_mut().zip(l) {
+            *x = (*b).max(1_000_000_000) as f32 / 1e9;
+        }
+    }
+    w
+}
+
+/// Measuring progress, 0..1, as the group rows show it. A count of places
+/// alone runs ahead: the small ones finish in seconds while a few big folders
+/// take minutes, so a group counts half until its last place is measured.
+fn live_progress(live: &[GroupLive], weights: &[f32; Group::COUNT]) -> f32 {
+    let (mut got, mut all) = (0.0, 0.0);
+    for (l, w) in live.iter().zip(weights) {
+        if l.total == 0 {
+            continue;
+        }
+        all += w;
+        got += w * if l.done >= l.total { 1.0 } else { 0.5 * l.done as f32 / l.total as f32 };
+    }
+    if all > 0.0 {
+        got / all
+    } else {
+        0.0
+    }
 }
 
 fn age_days(p: &Path) -> f64 {
@@ -541,7 +574,9 @@ pub fn start_scan(shared: Shared, ctx: egui::Context, agent: Option<super::agent
 fn begin_run(shared: &Shared, agent: Option<super::agent::Agent>) -> Arc<AtomicBool> {
     let mut g = shared.lock_ok();
     g.cancel.store(true, Ordering::SeqCst);
-    *g = State { phase: Phase::Scanning, with_ai: agent.is_some(), agent, ..Default::default() };
+    static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let run = RUNS.fetch_add(1, Ordering::SeqCst) + 1;
+    *g = State { phase: Phase::Scanning, with_ai: agent.is_some(), agent, run, ..Default::default() };
     g.cancel.clone()
 }
 
@@ -1025,6 +1060,13 @@ pub fn remember_kept(paths: impl IntoIterator<Item = PathBuf>) {
     crate::kit::fs::save_json(&kept_file(), &all, true);
 }
 
+/// Offer `path` again (Undo on a Keep).
+pub fn forget_kept_one(path: &std::path::Path) {
+    let mut all = kept();
+    all.retain(|p| p != path);
+    crate::kit::fs::save_json(&kept_file(), &all, true);
+}
+
 /// Offer everything again.
 pub fn forget_kept() {
     crate::kit::fs::save_json(&kept_file(), &Vec::<PathBuf>::new(), true);
@@ -1380,6 +1422,31 @@ fn empty_trash(p: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn progress_waits_for_the_last_place_of_each_group() {
+        use super::{group_weights, live_progress, GroupLive, Group};
+        let w = group_weights(None);
+        let mut live = [GroupLive::default(); Group::COUNT];
+        // three groups done, four with one big folder left out of 30
+        for l in live.iter_mut().take(3) {
+            *l = GroupLive { total: 10, done: 10, ..Default::default() };
+        }
+        for l in live.iter_mut().skip(3) {
+            *l = GroupLive { total: 30, done: 29, ..Default::default() };
+        }
+        let p = live_progress(&live, &w);
+        assert!(p < 0.75, "{p}");
+        for l in live.iter_mut() {
+            l.done = l.total;
+        }
+        assert_eq!(live_progress(&live, &w), 1.0);
+        // a group that was big last time weighs more
+        let w = group_weights(Some(&[50_000_000_000, 0, 0, 0, 0, 0, 0]));
+        let mut live = [GroupLive { total: 1, done: 1, ..Default::default() }; Group::COUNT];
+        live[0] = GroupLive { total: 2, done: 1, ..Default::default() };
+        assert!(live_progress(&live, &w) < 0.4);
+    }
+
     use super::*;
 
     #[test]

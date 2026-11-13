@@ -81,9 +81,9 @@ fn providers(p: &egui::Painter, r: Rect, all: &[UsageInfo]) {
 }
 
 fn status(cl: &UsageInfo) -> String {
-    if cl.loading && cl.limits.is_empty() {
+    if (cl.loading || !cl.scanned) && cl.limits.is_empty() {
         "Checking…".to_string()
-    } else if !cl.installed && !cl.loading {
+    } else if !cl.installed {
         "Not installed".to_string()
     } else if cl.signed_out && cl.limits.is_empty() {
         "Signed out".to_string()
@@ -104,23 +104,36 @@ pub fn card(p: &egui::Painter, r: Rect, cl: &UsageInfo, t: f64) {
     let (status, scol) = if cl.limits.is_empty() || fresh.is_empty() { (status, white(166)) } else { (fresh, fc) };
     let sw = text_fit(p, Pos2::new(x1, hy), Align2::RIGHT_CENTER, &status, ty::label(), scol, 170.0).width();
     text_fit(p, Pos2::new(x0, hy), Align2::LEFT_CENTER, "AI Usage", ty::title(), TEXT(), (x1 - sw - 12.0) - x0);
-    if cl.limits.is_empty() && cl.loading {
+    if cl.limits.is_empty() && (cl.loading || !cl.scanned) {
         spinner(p, Pos2::new(x1 - 8.0, r.top() + 56.0), 7.0, t, TEXT_DIM());
     }
+    // columns sized by what they hold this frame: the forecast keeps its
+    // full width ("Out tomorrow 23:40"), the bar takes what is left
     let rows = [("Session", cl.session().cloned()), ("Week", cl.weekly().cloned())];
+    let w = |s: &str| p.layout_no_wrap(s.to_string(), font(12.0), TEXT()).size().x;
+    let fc: Vec<String> = rows.iter().map(|(_, l)| l.as_ref().map(|l| super::parts::forecast(l).trim_start_matches("Resets ").to_string()).unwrap_or_default()).collect();
+    let fw = fc.iter().map(|f| w(f)).fold(0.0, f32::max);
+    let pw = w("100%");
+    let lw = rows.iter().map(|(k, _)| w(k)).fold(0.0, f32::max);
+    let pct_r = x1 - fw - if fw > 0.0 { sp::M } else { 0.0 };
+    let bar_l = x0 + lw + sp::M;
+    let bar_r = pct_r - pw - sp::M;
     for (k, (label, l)) in rows.iter().enumerate() {
         let yy = r.top() + 42.0 + k as f32 * 22.0;
         p.text(Pos2::new(x0, yy), Align2::LEFT_CENTER, *label, font(12.0), TEXT_DIM());
-        let bar_r = Rect::from_min_max(Pos2::new(x0 + 64.0, yy - 2.0), Pos2::new(x1 - 92.0 - 36.0 - 16.0, yy + 2.0));
+        let br = Rect::from_min_max(Pos2::new(bar_l, yy - 2.0), Pos2::new(bar_r.max(bar_l), yy + 2.0));
+        let show_bar = br.width() >= 32.0;
         match l {
             Some(l) => {
-                super::parts::pace_bar(p, bar_r, l);
-                p.text(Pos2::new(x1 - 92.0 - 8.0, yy), Align2::RIGHT_CENTER, format!("{:.0}%", l.pct), font(12.0), TEXT());
-                let f = super::parts::forecast(l);
-                let col = if f.starts_with("Out") { RED() } else { TEXT_FAINT() };
-                text_fit(p, Pos2::new(x1, yy), Align2::RIGHT_CENTER, f.trim_start_matches("Resets "), font(12.0), col, 92.0);
+                if show_bar {
+                    super::parts::pace_bar(p, br, l);
+                }
+                p.text(Pos2::new(pct_r, yy), Align2::RIGHT_CENTER, format!("{:.0}%", l.pct), font(12.0), TEXT());
+                let col = if super::parts::forecast(l).starts_with("Out") { RED() } else { TEXT_FAINT() };
+                p.text(Pos2::new(x1, yy), Align2::RIGHT_CENTER, &fc[k], font(12.0), col);
             }
-            None => bar(p, bar_r, 0.0, TEXT_DIM()),
+            None if show_bar => bar(p, br, 0.0, TEXT_DIM()),
+            None => {}
         }
     }
 }
@@ -140,12 +153,13 @@ pub fn detail(all: &backend::All, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
     let cl = backend::current(all).lock_ok().clone();
     let p = ui.painter().clone();
     let t = ctx.input(|i| i.time);
-    let sub = if cl.loading { "Updating…".to_string() } else { super::parts::fresh(&cl).0 };
+    let busy = cl.loading || !cl.scanned || backend::refreshing();
+    let sub = if busy { "Updating…".to_string() } else { super::parts::fresh(&cl).0 };
     if sheet_header(ui, rect, Icon::Gauge, tint::CLAUDE(), "AI Usage", &sub) {
         cx.close_detail();
     }
     let rb = Rect::from_center_size(Pos2::new(rect.right() - 27.0 - 34.0, rect.top() + 29.0), Vec2::splat(26.0));
-    if cl.loading {
+    if busy {
         spinner(&p, rb.center(), 6.0, t, TEXT_DIM());
         crate::kit::glass::animate(&ctx);
     } else if round_button(ui, rb, Icon::Refresh, "Refresh limits").clicked() {

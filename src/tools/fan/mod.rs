@@ -250,7 +250,7 @@ impl Tool for FanControl {
         "Fan Control"
     }
     fn about(&self) -> &'static str {
-        "Fan speed and chip temperatures"
+        "Chip temperatures and manual fan speed"
     }
     fn badge(&self) -> Badge {
         badge()
@@ -286,13 +286,9 @@ impl Tool for FanControl {
     fn section(&self) -> &'static str {
         "Monitor"
     }
+    // no live number in the sidebar (Roman 2026-11-13): the page shows it
     fn sidebar_meta(&self) -> String {
-        let s = self.snap.lock_ok();
-        match (s.avg_rpm(), s.hottest()) {
-            (Some(r), _) => data::rpm_text(r),
-            (None, Some((_, c))) => format!("{c:.0}°"),
-            _ => String::new(),
-        }
+        String::new()
     }
     fn widgets(&self) -> Vec<WidgetSpec> {
         vec![WidgetSpec { id: CARD, title: "Fans", about: "Fan speed and the hottest part, live.", sizes: UP_TO_MEDIUM, size: Size::S14, default_on: true }]

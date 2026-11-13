@@ -470,7 +470,7 @@ fn list_rows(c: &mut Clipboard, ui: &mut Ui, list: Rect, ids: &[u64]) {
     let h: f32 = rows.iter().map(|r| if matches!(r, Row::Head(_)) { 28.0 } else { ROW_H }).sum::<f32>() + 8.0;
     let mut child = ui.new_child(UiBuilder::new().max_rect(list.shrink2(Vec2::new(0.0, 4.0))));
     ScrollArea::vertical().id_salt("clip-list").auto_shrink([false, false]).show(&mut child, |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(list.width(), h), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
         let p = ui.painter().clone();
         let mut y = area.top();
         for row in rows.iter() {
@@ -747,7 +747,7 @@ fn settings_page(c: &mut Clipboard, ui: &mut Ui, body: Rect) {
     ScrollArea::vertical().id_salt("clip-settings").auto_shrink([false, false]).show(&mut child, |ui| {
         let rows = c.settings.ignore.len().max(1);
         let h = (500.0f32).max(330.0 + (rows + 2) as f32 * ROW_H + 120.0);
-        let (area, _) = ui.allocate_exact_size(Vec2::new(body.width(), h), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
         let p = ui.painter().clone();
         let gap = 20.0;
         let x0 = area.left() + 24.0;
@@ -903,13 +903,15 @@ fn right_col(c: &mut Clipboard, ui: &mut Ui, p: &egui::Painter, col: Rect) -> bo
         p.text(Pos2::new(card.left() + 12.0, row_y(card, 0)), Align2::LEFT_CENTER, "No apps excluded", font(13.0), TEXT_FAINT());
     }
     let mut remove = None;
-    for (k, ig) in c.settings.ignore.iter().enumerate() {
+    let mut budget = 4;
+    for k in 0..n {
         let ry = row_y(card, k);
-        p.rect_filled(Rect::from_center_size(Pos2::new(card.left() + 21.0, ry), Vec2::splat(18.0)), 5.0, app_color(&ig.name));
-        p.text(Pos2::new(card.left() + 38.0, ry), Align2::LEFT_CENTER, &ig.name, font(13.0), TEXT());
-        let clear = Rect::from_center_size(Pos2::new(card.right() - 22.0, ry), Vec2::splat(20.0));
-        let why = if super::settings::default_ignored().contains(ig) { "password manager" } else { "added by you" };
-        p.text(Pos2::new(clear.left() - 8.0, ry), Align2::RIGHT_CENTER, why, font(11.0), TEXT_FAINT());
+        let ig = c.settings.ignore[k].clone();
+        let ir = Rect::from_center_size(Pos2::new(card.left() + sp::M + 10.0, ry), Vec2::splat(20.0));
+        c.ignored_icon(ui.ctx(), p, ir, &ig, &mut budget);
+        let clear = Rect::from_center_size(Pos2::new(card.right() - sp::M - 10.0, ry), Vec2::splat(20.0));
+        let name_w = clear.left() - sp::S - (ir.right() + sp::S);
+        text_fit(p, Pos2::new(ir.right() + sp::S, ry), Align2::LEFT_CENTER, &ig.name, font(13.0), TEXT(), name_w);
         let cr = ui.interact(clear, id.with(("rm", k)), Sense::click());
         if cr.hovered() {
             p.circle_filled(clear.center(), 10.0, white(26));
@@ -932,13 +934,38 @@ impl Clipboard {
         let tx = self.app_tx.clone();
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
-            let script = "set a to choose application with prompt \"Never record copies from\"\nreturn (id of a) & \"|\" & (name of a)";
+            let script = "set a to choose application with prompt \"Never record copies from\" as alias\nreturn POSIX path of a";
             let out = std::process::Command::new("osascript").args(["-e", script]).output();
-            let got = out.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-            let app = got.and_then(|s| s.split_once('|').map(|(b, n)| Ignored { bundle: b.to_string(), name: n.to_string() })).filter(|i| !i.bundle.is_empty());
+            let got = out.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().trim_end_matches('/').to_string());
+            let app = got.filter(|p| !p.is_empty()).and_then(|p| {
+                let path = std::path::PathBuf::from(p);
+                let info = crate::kit::bundles::read_info(&path)?;
+                Some(super::secret_apps::Found { bundle: info.id, name: info.name, path })
+            });
             let _ = tx.send(app);
             ctx.request_repaint();
         });
+    }
+
+    /// An excluded app's own icon, else a colored square. Icons load a few
+    /// per frame (`budget`).
+    fn ignored_icon(&mut self, ctx: &egui::Context, p: &egui::Painter, r: Rect, ig: &Ignored, budget: &mut usize) {
+        let key = ig.bundle.to_lowercase();
+        if !self.icons.contains_key(&key) && *budget > 0 && !self.demo {
+            if let Some(path) = self.app_paths.get(&key) {
+                *budget -= 1;
+                let tex = crate::kit::macos::app_icon(path, 64).map(|(n, rgba)| ctx.load_texture(format!("clip-ignore-icon:{key}"), egui::ColorImage::from_rgba_unmultiplied([n, n], &rgba), egui::TextureOptions::LINEAR));
+                self.icons.insert(key.clone(), tex);
+                ctx.request_repaint();
+            }
+        }
+        if let Some(Some(t)) = self.icons.get(&key) {
+            p.image(t.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        } else {
+            p.rect_filled(r.shrink(1.0), 5.0, app_color(&ig.name));
+            let l: String = ig.name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
+            p.text(r.center(), Align2::CENTER_CENTER, l, bold(11.0), Color32::WHITE);
+        }
     }
 }
 

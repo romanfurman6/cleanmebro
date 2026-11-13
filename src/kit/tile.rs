@@ -242,12 +242,14 @@ pub fn spark_to(p: &egui::Painter, r: Rect, values: &[f32], color: Color32, top:
 
 /// A list line inside a Medium or Large widget: label, bar, value.
 pub fn bar_line(p: &egui::Painter, r: Rect, label: &str, frac: Option<(f32, Color32)>, value: &str) {
-    let vw = p.layout_no_wrap(value.to_string(), font(12.0), TEXT()).size().x.clamp(40.0, r.width() * 0.45);
+    // the value keeps its full width ("62% · tomorrow 23:40"): app text, never cut
     let lw = p.layout_no_wrap(label.to_string(), font(12.0), TEXT()).size().x;
+    let vw = p.layout_no_wrap(value.to_string(), font(12.0), TEXT()).size().x.max(40.0);
     // the label keeps its full width when it can; the bar takes what's left
-    let bw = if frac.is_some() { (r.width() - vw - lw - 22.0).clamp(24.0, (r.width() * 0.3).min(110.0)) } else { 0.0 };
-    text_fit(p, Pos2::new(r.right(), r.center().y), Align2::RIGHT_CENTER, value, font(12.0), TEXT(), vw);
-    if let Some((f, c)) = frac {
+    let room = r.width() - vw - lw - 22.0;
+    let bw = if frac.is_some() && room >= 24.0 { room.min((r.width() * 0.3).min(110.0)) } else { 0.0 };
+    p.text(Pos2::new(r.right(), r.center().y), Align2::RIGHT_CENTER, value, font(12.0), TEXT());
+    if let (Some((f, c)), true) = (frac, bw > 0.0) {
         bar(p, Rect::from_min_max(Pos2::new(r.right() - vw - 10.0 - bw, r.center().y - 2.0), Pos2::new(r.right() - vw - 10.0, r.center().y + 2.0)), f, c);
     }
     text_fit(p, Pos2::new(r.left(), r.center().y), Align2::LEFT_CENTER, label, font(12.0), white(166), r.width() - vw - bw - 22.0);

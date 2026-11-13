@@ -22,7 +22,7 @@ pub enum Mode {
     /// First-run setup drawn in the root window (screenshots only; the real
     /// app shows setup in its own window).
     Setup,
-    /// The Full Disk Access helper card alone (screenshots only).
+    /// The System Settings helper card alone (screenshots only).
     FdaHelp,
 }
 
@@ -64,7 +64,6 @@ pub struct App {
     visible: bool,
     had_focus: bool,
     last_hide: Instant,
-    pub gear_open: bool,
     pub app_open: bool,
     /// When the window was asked for (dev log: how long the first frame took).
     pub app_asked: Option<Instant>,
@@ -155,7 +154,6 @@ impl App {
             visible: true,
             had_focus: false,
             last_hide: Instant::now(),
-            gear_open: false,
             app_open: false,
             app_asked: None,
             app_focus: false,
@@ -489,7 +487,6 @@ impl App {
 
     pub fn hide(&mut self, ctx: &egui::Context) {
         self.visible = false;
-        self.gear_open = false;
         self.last_hide = Instant::now();
         ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Visible(false));
     }
@@ -499,7 +496,6 @@ impl App {
     pub fn open_window(&mut self, ctx: &egui::Context, page: usize) {
         self.page = page;
         self.settings_open = false;
-        self.gear_open = false;
         if self.screenshot.is_some() {
             return;
         }
@@ -769,7 +765,7 @@ impl eframe::App for App {
             }
             Mode::FdaHelp => {
                 let now = ctx.input(|i| i.time);
-                super::onboard::help_card(ui, full, now + 0.9);
+                super::onboard::help_card(ui, full, now + 0.9, crate::kit::perms::Perm::FullDisk);
             }
             Mode::Setup => {
                 glass::backdrop(ui.painter(), full, 14.0, opaque, t);
@@ -813,7 +809,7 @@ impl eframe::App for App {
             self.prewarm_app(&ctx);
         }
         if self.screenshot.is_none() {
-            super::onboard::fda_helper(self, &ctx);
+            super::onboard::perm_helper(self, &ctx);
         }
         if (&self.tools_off, crate::kit::sound::on()) != (&off_before.0, off_before.1) {
             if let Some(s) = frame.storage_mut() {
@@ -1079,8 +1075,12 @@ fn install_fonts(ctx: &egui::Context) {
     ctx.all_styles_mut(|s| {
         s.visuals.panel_fill = Color32::TRANSPARENT;
         s.visuals.window_fill = glass::BG();
-        s.spacing.scroll.bar_width = 6.0;
+        // one scroll bar everywhere: slim, floating, in a gutter the content
+        // leaves free, so even hovered it never sits on a row or button
+        s.spacing.scroll.bar_width = glass::sp::SCROLL_BAR_W;
         s.spacing.scroll.floating = true;
+        s.spacing.scroll.floating_allocated_width = glass::sp::SCROLL_GUTTER;
+        s.spacing.scroll.bar_outer_margin = (glass::sp::SCROLL_GUTTER - glass::sp::SCROLL_BAR_W) / 2.0;
         s.visuals.widgets.noninteractive.fg_stroke.color = TEXT();
     });
 }

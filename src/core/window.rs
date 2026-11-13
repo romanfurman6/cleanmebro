@@ -83,7 +83,7 @@ pub fn window_ui(app: &mut App, outer: &mut Ui, full: Rect, draw_lights: bool, c
         }
         let t = &app.tools[i];
         let busy = t.busy();
-        let (label, badge, meta, id) = (t.name(), t.badge(), if busy { String::new() } else { t.sidebar_meta() }, t.id());
+        let (label, badge, meta, id) = (t.name(), t.badge(), if busy { String::new() } else { no_zero(t.sidebar_meta()) }, t.id());
         let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, SIDEBAR_ROW_H));
         if sidebar_item(ui, r, ui.scope_id().with(("nav", id)), badge.icon, badge.color, label, &meta, app.page == i && !app.settings_open, false).clicked() {
             app.page = i;
@@ -214,5 +214,27 @@ fn traffic_lights(ui: &mut Ui, p: &egui::Painter, full: Rect) {
                 _ => {}
             }
         }
+    }
+}
+
+/// A count of nothing says nothing: "0" (or "0 B") isn't shown in the sidebar.
+fn no_zero(meta: String) -> String {
+    let first = meta.split_whitespace().next().unwrap_or("");
+    if !first.is_empty() && first.chars().all(|c| c == '0' || c == '.' || c == ',') && meta.split_whitespace().count() <= 2 {
+        String::new()
+    } else {
+        meta
+    }
+}
+
+#[cfg(test)]
+mod meta_tests {
+    #[test]
+    fn zero_counts_are_hidden() {
+        assert_eq!(super::no_zero("0".into()), "");
+        assert_eq!(super::no_zero("0 B".into()), "");
+        assert_eq!(super::no_zero("11".into()), "11");
+        assert_eq!(super::no_zero("Set up".into()), "Set up");
+        assert_eq!(super::no_zero("10.5 GB".into()), "10.5 GB");
     }
 }

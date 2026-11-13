@@ -54,6 +54,11 @@ pub fn app_icon(path: &std::path::Path, px: usize) -> Option<(usize, Vec<u8>)> {
     use objc2_app_kit::{NSBitmapImageRep, NSCompositingOperation, NSDeviceRGBColorSpace, NSGraphicsContext};
     use objc2_foundation::{NSPoint, NSRect, NSSize};
     MainThreadMarker::new()?;
+    // an app in Downloads/Desktop/Documents: reading it makes macOS ask
+    // about the folder (the row shows its letter instead)
+    if crate::kit::fs::behind_folder_prompt(path) {
+        return None;
+    }
     let img = NSWorkspace::sharedWorkspace().iconForFile(&NSString::from_str(&path.to_string_lossy()));
     let n = px as isize;
     let rep = unsafe {

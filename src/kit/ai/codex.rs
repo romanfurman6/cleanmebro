@@ -45,14 +45,28 @@ impl Provider for Codex {
         let home = home();
         let installed = bin().is_some() || home.join("sessions").is_dir();
         let logged_in = home.join("auth.json").is_file();
-        let billing = billing(&std::fs::read(home.join("auth.json")).unwrap_or_default());
-        let latest = if installed { latest_limits(&home.join("sessions")) } else { None };
+        let auth = std::fs::read(home.join("auth.json")).unwrap_or_default();
+        let billing = billing(&auth);
+        // the account's own limits first: fresh, not only as of the last request
+        let live = if installed && billing == Billing::Subscription { super::account::codex_usage(&auth).map_err(|e| eprintln!("[ai] codex usage: {e:?}")).ok() } else { None };
+        let latest = if installed && live.is_none() { latest_limits(&home.join("sessions")) } else { None };
         let mut g = s.lock_ok();
         g.installed = installed;
         g.logged_in = logged_in;
         g.signed_out = installed && !logged_in;
         g.billing = billing;
-        g.source = "Local";
+        g.source = if live.is_some() { "API" } else { "Local" };
+        if let Some((plan, limits)) = live {
+            g.error = None;
+            g.stale = false;
+            if !plan.is_empty() {
+                g.plan = plan;
+            }
+            g.limits = limits;
+            g.note.clear();
+            g.fetched = Some(Local::now());
+            return;
+        }
         if !installed {
             g.limits.clear();
             // checked: keeps the setup screen up while the next check runs
@@ -78,7 +92,12 @@ impl Provider for Codex {
         }
     }
     fn local_tokens(&mut self) -> LocalTokens {
-        self.cache.update(recent_jsonl(&home().join("sessions"), 3), usage_entry)
+        // archived chats move to `archived_sessions/`; a rollout found in
+        // both places counts once (`LogCache::entries`)
+        let home = home();
+        let mut files = recent_jsonl(&home.join("sessions"), 3);
+        files.extend(recent_jsonl(&home.join("archived_sessions"), 1));
+        self.cache.update(files, usage_entry)
     }
     fn data_dir(&self) -> Option<PathBuf> {
         Some(home())
@@ -135,12 +154,7 @@ fn limits_in(log: &[u8]) -> Option<Latest> {
 fn window(w: &Value, at: DateTime<Local>) -> Option<Limit> {
     let pct = w["used_percent"].as_f64()? as f32;
     let minutes = w["window_minutes"].as_i64().unwrap_or(0);
-    let label = match minutes {
-        m if (240..=360).contains(&m) => "Current session".to_string(),
-        m if (9_000..=11_000).contains(&m) => "Current week (all models)".to_string(),
-        m if m >= 60 => format!("Last {}h", m / 60),
-        _ => "Limit".to_string(),
-    };
+    let label = window_label(minutes);
     // newer logs say when it resets, older ones how long until then
     let resets = w["resets_at"].as_i64().or_else(|| w["resets_in_seconds"].as_i64().map(|s| at.timestamp() + s));
     let now = Local::now().timestamp();
@@ -149,6 +163,17 @@ fn window(w: &Value, at: DateTime<Local>) -> Option<Limit> {
         Some(r) if r <= now => Some(Limit { label, pct: 0.0, resets: String::new(), resets_at: None, window_secs: minutes * 60 }),
         Some(r) => Some(Limit { label, pct, resets: reset_text(r), resets_at: Some(r), window_secs: minutes * 60 }),
         None => Some(Limit { label, pct, resets: String::new(), resets_at: None, window_secs: minutes * 60 }),
+    }
+}
+
+/// The name of a limit window `minutes` long, the way the UI expects it.
+pub fn window_label(minutes: i64) -> String {
+    match minutes {
+        m if (240..=360).contains(&m) => "Current session".to_string(),
+        m if (9_000..=11_000).contains(&m) => "Current week (all models)".to_string(),
+        m if (40_000..=46_000).contains(&m) => "Current month".to_string(),
+        m if m >= 60 => format!("Last {}h", m / 60),
+        _ => "Limit".to_string(),
     }
 }
 
@@ -220,14 +245,13 @@ pub fn demo_info() -> UsageInfo {
         logged_in: true,
         plan: "plus".into(),
         limits,
-        note: "Codex reports its limits with each request, so these are as of your last one.".into(),
         fetched: Some(now),
         local: {
             let home = dirs::home_dir().unwrap_or_default();
             super::demo_local(&[("gpt-5.1-codex", 4), ("gpt-5-mini", 1)], &[&home.join("Projects/cmdmeow").display().to_string(), &home.join("work/api-gateway").display().to_string()], 1.6)
         },
         billing: Billing::Subscription,
-        source: "Local",
+        source: "API",
         data_bytes: 1_300_000_000,
         ..Default::default()
     }

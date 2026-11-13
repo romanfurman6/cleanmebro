@@ -133,12 +133,6 @@ pub struct Recommendation {
     pub go: Action,
 }
 
-/// An entry a tool adds to the panel's gear menu.
-pub struct MenuItem {
-    pub id: &'static str,
-    pub label: String,
-}
-
 /// Requests from a tool to the shell.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
@@ -288,10 +282,6 @@ pub trait Tool {
     fn tray_title(&self) -> Option<String> {
         None
     }
-    fn menu_items(&self) -> Vec<MenuItem> {
-        Vec::new()
-    }
-    fn menu_action(&mut self, _item: &str, _cx: &mut Cx) {}
 
     // ---- background
     /// Called on every frame, and also while every shell window is hidden
@@ -416,7 +406,7 @@ mod tests {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetupModel {
     pub id: &'static str,
-    /// What it is for ("Speech model").
+    /// What the tool uses it for ("Speech to text").
     pub what: &'static str,
     /// Which one ("Parakeet v3").
     pub name: &'static str,
@@ -433,4 +423,6 @@ pub enum ModelState {
     Unpacking,
     Ready,
     Failed(String),
+    /// Not needed yet: the tool downloads it the first time it's used.
+    OnFirstUse,
 }

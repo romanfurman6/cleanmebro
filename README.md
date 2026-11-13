@@ -222,8 +222,7 @@ cargo run --release -- --screenshot out.png --view panel
 The app is a small **core** (the shell) plus independent **tools**. Each tool
 is one folder under `src/tools/` and implements the `Tool` trait
 (`src/core/tool.rs`). A tool can offer any of: panel widgets, detail sheets,
-a page in the full window, recommendations, gear-menu entries and the
-menu-bar title.
+a page in the full window, recommendations and the menu-bar title.
 
 - Tools never import each other (a test enforces it). To link to another tool
   they ask the core by id, e.g. `cx.open_page("cleanup", "claude")`; if that
@@ -256,7 +255,7 @@ cmdmeow/
 │   ├── core/                the shell; knows tools only through the trait
 │   │   ├── tool.rs          Tool trait, widget specs, actions, Cx
 │   │   ├── shell.rs         tray icon, panel ⇄ full window, actions, screenshots
-│   │   ├── panel.rs         widget grid, recommendation, footer, gear menu, detail sheet
+│   │   ├── panel.rs         widget grid, recommendation, footer, Open button, detail sheet
 │   │   ├── editor.rs        Settings: drag-and-drop widget editor, tools on/off
 │   │   ├── window.rs        full window: sidebar of tool pages and Settings
 │   │   ├── layout.rs        4-column widget packing
