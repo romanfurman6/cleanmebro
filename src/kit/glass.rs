@@ -785,7 +785,9 @@ pub fn legend_row(p: &Painter, r: Rect, color: Color32, label: &str, value: &str
 }
 
 /// Text that is cut with an ellipsis to fit `max_w`.
+#[track_caller]
 pub fn text_fit(painter: &Painter, pos: Pos2, align: Align2, text: &str, font: FontId, color: Color32, max_w: f32) -> Rect {
+    let caller = std::panic::Location::caller();
     // No glyph is narrower than about a quarter of the font size, so more
     // characters than this can never fit: don't lay out a whole long clip.
     let cap = ((max_w.max(0.0) / (font.size * 0.25).max(1.0)) as usize).saturating_add(2);
@@ -809,10 +811,23 @@ pub fn text_fit(painter: &Painter, pos: Pos2, align: Align2, text: &str, font: F
             }
         }
         g = cut(lo);
+        fit_log(caller, text, max_w);
     }
     let rect = align.anchor_size(pos, g.size());
     painter.galley(rect.min, g, color);
     rect
+}
+
+/// `CMDMEOW_FIT_LOG=1`: print each text `text_fit` had to cut, once per
+/// place and text, to find labels that don't fit (screenshot runs).
+fn fit_log(at: &std::panic::Location, text: &str, max_w: f32) {
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Option<Mutex<std::collections::HashSet<String>>>> = OnceLock::new();
+    let Some(seen) = SEEN.get_or_init(|| std::env::var_os("CMDMEOW_FIT_LOG").map(|_| Mutex::new(Default::default()))) else { return };
+    let key = format!("{}:{} {text:?} (max {max_w:.0})", at.file(), at.line());
+    if seen.lock().is_ok_and(|mut s| s.insert(key.clone())) {
+        eprintln!("[fit] {key}");
+    }
 }
 
 /// At most `max_chars` characters of `s` (a prefix, no copy).
