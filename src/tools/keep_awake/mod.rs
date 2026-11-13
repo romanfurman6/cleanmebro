@@ -11,7 +11,7 @@ mod power;
 mod sessions;
 mod ui;
 
-use crate::core::tool::{Badge, Cx, MenuItem, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
+use crate::core::tool::{Badge, Cx, Size, Tool, ToolEnv, ToolId, View, WidgetSpec, UP_TO_MEDIUM};
 use crate::kit::glass::{tint, Icon};
 use egui::{Rect, Ui};
 use engine::{now, Engine, State};
@@ -21,7 +21,6 @@ use std::time::{Duration, Instant};
 
 pub const ID: ToolId = "keep_awake";
 const CARD: &str = "card";
-const MENU_TOGGLE: &str = "toggle";
 
 /// How often Claude Code's logs are checked and the state is brought up to date.
 const POLL: Duration = Duration::from_secs(5);
@@ -263,15 +262,6 @@ impl Tool for KeepAwake {
     }
     fn page_ui(&mut self, ui: &mut Ui, rect: Rect, _cx: &mut Cx) {
         ui::page(self, ui, rect);
-    }
-    fn menu_items(&self) -> Vec<MenuItem> {
-        let on = self.engine.lock_ok().manual_since.is_some();
-        vec![MenuItem { id: MENU_TOGGLE, label: if on { "Let the Mac sleep" } else { "Keep the Mac awake" }.into() }]
-    }
-    fn menu_action(&mut self, item: &str, _cx: &mut Cx) {
-        if item == MENU_TOGGLE {
-            self.toggle();
-        }
     }
     fn set_on(&mut self, on: bool) {
         let t = self.now();
