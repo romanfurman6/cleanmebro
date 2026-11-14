@@ -26,7 +26,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-export SIGN_ID="${SIGN_ID:-$(scripts/dev-signing.sh)}"
+if [[ -z "${SIGN_ID:-}" ]]; then SIGN_ID="$(scripts/dev-signing.sh)"; fi
+export SIGN_ID
 export APP_NAME="CmdMeow Dev"
 export DISPLAY_NAME="Cmd+Meow Dev"
 export BUNDLE_ID="com.romanfurman6.cmdmeow.dev"
