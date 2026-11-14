@@ -21,7 +21,7 @@ pub fn watch(app: &mut App, ctx: &egui::Context) {
     w.poll(tools, &list, now);
     // statuses land off the ui thread; look again in a second
     if list.iter().any(|r| w.known(r.perm) != Some(Status::Allowed)) {
-        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        ctx.request_repaint_after(crate::kit::glass::next_second());
     }
 }
 

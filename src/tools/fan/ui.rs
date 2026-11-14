@@ -22,49 +22,9 @@ pub fn LINE() -> Color32 { crate::kit::glass::tint::FAN() }
 #[allow(non_snake_case)]
 pub fn HOT_LINE() -> Color32 { crate::kit::glass::AMBER() }
 
-/// Blade angle of the fan drawn as `key` at time `t`: one turn takes
-/// 2400 / rpm seconds, slow enough to read while still following the real
-/// speed. The angle is carried forward frame by frame, so a new speed
-/// reading (every 2 s) changes how fast the blades turn, not where they are.
-pub fn spin(key: &str, t: f64, rpm: f32) -> f32 {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-    static TURNS: Mutex<Option<HashMap<String, (f64, f64)>>> = Mutex::new(None);
-    let mut g = TURNS.lock().unwrap_or_else(|e| e.into_inner());
-    let map = g.get_or_insert_with(HashMap::new);
-    let (last, turns) = map.entry(key.to_string()).or_insert((t, 0.0));
-    // a long gap (panel was hidden): carry on from where it stopped
-    let dt = (t - *last).clamp(0.0, 0.1);
-    *turns = (*turns + dt * rpm as f64 / 2400.0).fract();
-    *last = t;
-    (*turns as f32) * TAU
-}
-
-/// Ask for the next frame while any blade is turning (decorative pace,
-/// resting when nobody touches the window: see `glass::ambient`).
-pub fn keep_spinning(ui: &Ui, s: &Snapshot) {
-    if s.fans.iter().any(|f| f.rpm > 0.0) {
-        crate::kit::glass::ambient(ui.ctx());
-    }
-}
-
-/// Five blades around a hub, turned by `angle`.
+/// Still blades at `angle` (turning ones go through `kit::spin::blades`).
 pub fn blades(p: &egui::Painter, c: Pos2, r: f32, angle: f32, color: Color32, hub: Color32) {
-    for k in 0..5 {
-        let a = angle + k as f32 * TAU / 5.0;
-        let dir = Vec2::angled(a);
-        let center = c + dir * r * 0.52;
-        // an ellipse along the blade, leaned back a little like a real blade
-        let lean = a + 0.35;
-        let (ax, ay) = (Vec2::angled(lean) * r * 0.46, Vec2::angled(lean + PI / 2.0) * r * 0.19);
-        let pts: Vec<Pos2> = (0..16).map(|i| {
-            let u = i as f32 / 16.0 * TAU;
-            center + ax * u.cos() + ay * u.sin()
-        }).collect();
-        p.add(Shape::convex_polygon(pts, color, Stroke::NONE));
-    }
-    p.circle_filled(c, r * 0.24, hub);
-    crate::kit::glass::stroke_circle(&p, c, r * 0.24, Stroke::new(1.0, white(46)));
+    crate::kit::spin::draw(p, c, r, angle, color, hub);
 }
 
 /// A 270° dial: track plus the filled part for `frac`.
@@ -184,7 +144,6 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         }
         return;
     }
-    let t = crate::kit::glass::ambient_clock(ui.ctx());
     let id = ui.scope_id().with("w-fans");
     let sel = cx.is_detail_open(ID, SHEET);
     let rpm = s.avg_rpm();
@@ -206,7 +165,7 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
             let (c, rr) = tile::small_ring_at(rect);
             let w = (rr * 0.2).clamp(4.0, 6.0);
             ring(p, c, rr - w / 2.0, w, frac, LINE());
-            blades(p, c, rr * 0.7, spin("fan-avg", t, rpm.unwrap_or(0.0)), BLADE(), BG());
+            crate::kit::spin::blades(p, "fan-avg", c, rr * 0.7, rpm.unwrap_or(0.0), BLADE(), BG());
             text_fit(p, Pos2::new(rect.center().x, rect.bottom() - 9.0), Align2::CENTER_BOTTOM, &value, font(11.0), TEXT_SOFT(), rect.width() - 10.0);
             resp
         }
@@ -238,10 +197,9 @@ pub fn widget(s: &Snapshot, size: Size, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         };
         if let Some((c, cover, br, hub)) = spot {
             p.circle_filled(c, cover, hub);
-            blades(p, c, br, spin("fan-avg", t, r), BLADE(), hub);
+            crate::kit::spin::blades(p, "fan-avg", c, br, r, BLADE(), hub);
         }
     }
-    keep_spinning(ui, s);
     if resp.clicked() {
         cx.toggle_detail(ID, SHEET);
     }
@@ -280,9 +238,8 @@ pub fn card(s: &Snapshot, ui: &mut Ui, rect: Rect, cx: &mut Cx) {
         let bw = (x1 - x0 - gap * (n as f32 - 1.0)) / n as f32;
         for (i, f) in s.fans.iter().take(n).enumerate() {
             let r = Rect::from_min_size(Pos2::new(x0 + i as f32 * (bw + gap), fy), Vec2::new(bw, fh));
-            mini_fan(&p, r, f, &fan_name(i, s.fans.len()), crate::kit::glass::ambient_clock(ui.ctx()));
+            mini_fan(&p, r, f, &fan_name(i, s.fans.len()));
         }
-        keep_spinning(ui, s);
     }
 
     // hottest part
@@ -315,11 +272,11 @@ fn card_resp(ui: &mut Ui, rect: Rect, selected: bool) -> egui::Response {
 }
 
 /// One fan in the panel card: ring with blades, name and speed.
-fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str, clock: f64) {
+fn mini_fan(p: &egui::Painter, r: Rect, f: &Fan, name: &str) {
     p.rect_filled(r, 8.0, white(8));
     let c = Pos2::new(r.left() + 8.0 + 18.0, r.center().y);
     ring(p, c, 17.0, 3.0, f.frac(), LINE());
-    blades(p, c, 12.0, spin(name, clock, f.rpm), BLADE(), CARD());
+    crate::kit::spin::blades(p, &format!("fan-card-{name}"), c, 12.0, f.rpm, BLADE(), CARD());
     let x = c.x + 26.0;
     let (ly1, ly2) = two_lines_y(&p, r.center().y, &font(11.0), &bold(15.0));
     p.text(Pos2::new(x, ly1), Align2::LEFT_CENTER, name, font(11.0), TEXT_DIM());
@@ -425,7 +382,6 @@ pub fn sheet(s: &Snapshot, l: &Live, ui: &mut Ui, rect: Rect, cx: &mut Cx) -> Ve
     if pill_button(ui, Rect::from_min_size(Pos2::new(rect.right() - 16.0 - bw, by), Vec2::new(bw, 30.0)), label, BTN_PRIMARY, true).clicked() {
         cx.open_page(ID, "");
     }
-    keep_spinning(ui, s);
     cmds
 }
 

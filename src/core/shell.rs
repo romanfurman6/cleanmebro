@@ -704,6 +704,8 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.frame += 1;
+        // screenshots and demo views render egui alone: no native layers
+        crate::kit::spin::set_allowed(self.screenshot.is_none() && !self.demo);
         if self.frame <= 3 || self.frame.is_multiple_of(30) {
             sync_theme(&ctx, self.screenshot.is_none());
             let r = if self.mode == Mode::Panel { m::CARD_RADIUS as f64 + 6.0 } else { 16.0 };
@@ -829,15 +831,19 @@ impl eframe::App for App {
                 self.save_widgets(s);
             }
         }
-        // keep animations and live numbers moving; with nothing on screen the
-        // hidden heartbeat above is the only wake-up (a shorter one here would
-        // win, since egui keeps the earliest)
+        // keep clocks and live numbers moving, once a second on the wall
+        // clock's beat (background work asks for its own frames when its
+        // numbers change); with nothing on screen the hidden heartbeat above
+        // is the only wake-up (a shorter one here would win, since egui keeps
+        // the earliest)
         if self.visible {
-            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            ctx.request_repaint_after(glass::next_second());
         } else if self.app_open || self.setup.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(2000));
         }
         self.screenshot_step(&ctx);
+        crate::kit::spin::flush(&ctx);
+        crate::kit::spin::drop_unflushed();
         crate::kit::viewport::end_pass();
         crate::kit::repaint_log::end();
     }
@@ -942,7 +948,7 @@ impl App {
             let mut cx = self.cx();
             super::window::window_ui(self, ui, full, false, &mut cx);
             self.run_actions(&vctx, &mut cx);
-            vctx.request_repaint_after(std::time::Duration::from_millis(500));
+            vctx.request_repaint_after(glass::next_second());
         });
         if finish != Finish::No {
             crate::kit::login::default_on();

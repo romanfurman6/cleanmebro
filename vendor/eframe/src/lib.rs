@@ -217,6 +217,21 @@ pub fn skip_hidden_sleep(on: bool) {
     native::winit_integration::SKIP_HIDDEN_SLEEP.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Cmd+Meow patch: the `NSView` of a viewport's window (macOS), while the
+/// window exists. Call on the main thread; don't keep the pointer.
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
+pub fn viewport_ns_view(id: egui::ViewportId) -> Option<*mut core::ffi::c_void> {
+    use raw_window_handle::HasWindowHandle as _;
+    let w = native::winit_integration::WINDOWS.lock().unwrap_or_else(|e| e.into_inner());
+    let win = w.iter().find(|(v, _)| *v == id)?.1.upgrade()?;
+    match win.window_handle().ok()?.as_raw() {
+        #[cfg(target_os = "macos")]
+        raw_window_handle::RawWindowHandle::AppKit(h) => Some(h.ns_view.as_ptr()),
+        _ => None,
+    }
+}
+
 // ----------------------------------------------------------------------------
 
 /// Attach an [`egui_inspection::InspectionPlugin`] to `ctx` when enabled via the environment.

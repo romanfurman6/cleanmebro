@@ -30,6 +30,7 @@ pub mod remove;
 pub mod repaint_log;
 pub mod settings_window;
 pub mod smc;
+pub mod spin;
 pub mod sync;
 pub mod sound;
 pub mod tile;

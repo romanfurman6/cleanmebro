@@ -17,6 +17,16 @@ pub fn is_invisible_or_minimized(window: &Window) -> bool {
     window.is_visible() == Some(false) || window.is_minimized() == Some(true)
 }
 
+/// Cmd+Meow patch: each viewport's winit window, so the app can reach its
+/// native view (Core Animation layers over the egui surface).
+pub static WINDOWS: std::sync::Mutex<Vec<(egui::ViewportId, std::sync::Weak<winit::window::Window>)>> = std::sync::Mutex::new(Vec::new());
+
+pub fn remember_window(id: egui::ViewportId, window: &std::sync::Arc<winit::window::Window>) {
+    let mut w = WINDOWS.lock().unwrap_or_else(|e| e.into_inner());
+    w.retain(|(v, win)| *v != id && win.strong_count() > 0);
+    w.push((id, std::sync::Arc::downgrade(window)));
+}
+
 /// On Mac, a minimized window uses up all CPU:
 /// <https://github.com/emilk/egui/issues/325>
 ///

@@ -26,10 +26,15 @@ pub fn end_pass() {
 /// deferred viewport with an empty ui: eframe creates those at the start of
 /// its next pass, with the event loop. Once the window is there, it is drawn
 /// as an immediate viewport as before.
-pub fn show<T>(ctx: &Context, id: ViewportId, builder: ViewportBuilder, ui: impl FnMut(&mut Ui, ViewportClass) -> T) -> Option<T> {
+pub fn show<T>(ctx: &Context, id: ViewportId, builder: ViewportBuilder, mut ui: impl FnMut(&mut Ui, ViewportClass) -> T) -> Option<T> {
     SHOWN.store(true, Ordering::Relaxed);
     if ctx.embed_viewports() || has_window(ctx, id) {
-        return Some(ctx.show_viewport_immediate(id, builder, ui));
+        return Some(ctx.show_viewport_immediate(id, builder, |u, class| {
+            let out = ui(u, class);
+            // turning fan blades drawn in this window
+            crate::kit::spin::flush(u.ctx());
+            out
+        }));
     }
     ctx.show_viewport_deferred(id, builder, |_, _| {});
     ctx.request_repaint();

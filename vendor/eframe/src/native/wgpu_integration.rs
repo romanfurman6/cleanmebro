@@ -347,6 +347,7 @@ impl<'app> WgpuWinitApp<'app> {
 
         let mut viewport_from_window = HashMap::default();
         viewport_from_window.insert(window.id(), ViewportId::ROOT);
+        winit_integration::remember_window(ViewportId::ROOT, &window);
 
         let mut viewports = Viewports::default();
         viewports.insert(
@@ -1131,6 +1132,7 @@ impl Viewport {
                 windows_id.insert(window.id(), viewport_id);
 
                 let window = Arc::new(window);
+                winit_integration::remember_window(viewport_id, &window);
 
                 if let Err(err) =
                     pollster::block_on(painter.set_window(viewport_id, Some(Arc::clone(&window))))
